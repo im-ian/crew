@@ -70,7 +70,7 @@ function Shape({ shape, color }: { shape: AvatarShape; color: string }) {
         </g>
       );
     case "pill":
-      return <rect x="3" y="12" width="58" height="40" rx="20" fill={color} />;
+      return <rect x="2" y="9" width="60" height="46" rx="23" fill={color} />;
     case "diamond":
       return (
         <path
@@ -139,6 +139,31 @@ function liveMood(status?: AgentStatus | null): "idle" | "working" | "blocked" |
 
 const GAZE_X = 4.6;
 const GAZE_Y = 3.2;
+const FACE_SPAN = 60;
+
+type ShapeBox = { x: number; y: number; w: number; h: number; optical?: number };
+
+const SHAPE_BOX: Record<AvatarShape, ShapeBox> = {
+  circle: { x: 2, y: 2, w: 60, h: 60 },
+  teardrop: { x: 8, y: 6, w: 48, h: 51 },
+  "rounded-square": { x: 3, y: 3, w: 58, h: 58 },
+  hexagon: { x: 5.61, y: 3, w: 52.78, h: 58 },
+  triangle: { x: 2.99, y: 3.13, w: 58.02, h: 57.74, optical: 1.04 },
+  cloud: { x: 0, y: 5, w: 64, h: 53 },
+  pill: { x: 2, y: 9, w: 60, h: 46 },
+  diamond: { x: 3, y: 3, w: 58, h: 58 },
+  pentagon: { x: 3, y: 3.96, w: 58, h: 56.08 },
+  star: { x: 3, y: 4.39, w: 58, h: 55.23, optical: 1.14 },
+  heart: { x: 3.2, y: 3.2, w: 57.6, h: 55.6, optical: 1.12 },
+};
+
+function shapeFit(shape: AvatarShape): string {
+  const b = SHAPE_BOX[shape];
+  const s = (FACE_SPAN / Math.max(b.w, b.h)) * (b.optical ?? 1);
+  const cx = b.x + b.w / 2;
+  const cy = b.y + b.h / 2;
+  return `translate(32 32) scale(${s}) translate(${-cx} ${-cy})`;
+}
 
 function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -224,8 +249,10 @@ export function BotFace({ shape, color, className, title, status, id }: Props) {
       onPointerLeave={onPointerLeave}
     >
       {title ? <title>{title}</title> : null}
-      <Shape shape={shape} color={color} />
-      <Eyes cx={eyes.x} cy={eyes.y} />
+      <g transform={shapeFit(shape)}>
+        <Shape shape={shape} color={color} />
+        <Eyes cx={eyes.x} cy={eyes.y} />
+      </g>
     </svg>
   );
 }

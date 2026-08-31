@@ -54,35 +54,41 @@ export function ChatHeader({
     avatarStatus = currentAgent.status;
   }
 
+  const identity = (
+    <>
+      {showAvatar ? (
+        <Avatar
+          className="head-avatar"
+          id={avatarId}
+          name={avatarName}
+          src={avatarSrc}
+          shape={avatarShape}
+          color={avatarColor}
+          letter={avatarLetter}
+          status={avatarStatus}
+        />
+      ) : null}
+      <div className="head">
+        <div className="head-title">{title}</div>
+        {meta ? <div className="head-meta">{meta}</div> : null}
+      </div>
+    </>
+  );
+
   return (
     <header>
-      <div className="head-identity">
-        {showAvatar ? (
-          <Avatar
-            className="head-avatar"
-            id={avatarId}
-            name={avatarName}
-            src={avatarSrc}
-            shape={avatarShape}
-            color={avatarColor}
-            letter={avatarLetter}
-            status={avatarStatus}
-          />
-        ) : null}
-        <div className="head">
-          <button
-            type="button"
-            className={"head-title" + (clickable ? "" : " static")}
-            title={clickable ? "봇 정보" : undefined}
-            onClick={() => {
-              if (clickable) onOpenInfo();
-            }}
-          >
-            {title}
-          </button>
-          {meta ? <div className="head-meta">{meta}</div> : null}
-        </div>
-      </div>
+      {clickable ? (
+        <button
+          type="button"
+          className="head-identity"
+          title="봇 정보"
+          onClick={onOpenInfo}
+        >
+          {identity}
+        </button>
+      ) : (
+        <div className="head-identity">{identity}</div>
+      )}
       {currentAgent ? (
         <button
           type="button"

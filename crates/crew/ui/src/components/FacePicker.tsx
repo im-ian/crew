@@ -1,4 +1,9 @@
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   AVATAR_SHAPES,
   AVATAR_SWATCHES,
@@ -130,5 +135,67 @@ export function FacePicker({
         </div>
       </Field>
     </>
+  );
+}
+
+type FacePopProps = Props & {
+  active?: boolean;
+  children: ReactNode;
+};
+
+export function FacePop({
+  active = true,
+  children,
+  ...picker
+}: FacePopProps) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!active) setOpen(false);
+  }, [active]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    function onPointer(e: PointerEvent) {
+      const el = rootRef.current;
+      if (el && !el.contains(e.target as Node)) setOpen(false);
+    }
+    const id = window.setTimeout(() => {
+      document.addEventListener("keydown", onKey);
+      document.addEventListener("pointerdown", onPointer);
+    }, 0);
+    return () => {
+      window.clearTimeout(id);
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointer);
+    };
+  }, [open]);
+
+  return (
+    <div className={"face-pop" + (open ? " open" : "")} ref={rootRef}>
+      <button
+        type="button"
+        className="face-pop-hit"
+        aria-label="아바타 설정"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+      >
+        {children}
+      </button>
+      {open ? (
+        <div className="face-pop-card" role="dialog" aria-label="아바타 설정">
+          <FacePicker {...picker} />
+        </div>
+      ) : null}
+    </div>
   );
 }

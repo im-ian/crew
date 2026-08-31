@@ -3,7 +3,7 @@ import { hashedFace, type AvatarShape } from "../avatar";
 import { CLIS, EFFORTS } from "../options";
 import type { CliKind } from "../types";
 import { Avatar } from "./Avatar";
-import { FacePicker } from "./FacePicker";
+import { FacePop } from "./FacePicker";
 import { Field } from "./Field";
 import { Modal } from "./Modal";
 import { ModelSelect } from "./ModelSelect";
@@ -87,8 +87,19 @@ export function NewBotModal({
   return (
     <Modal open={open} title="새 봇" onClose={onClose}>
       <div className="form-stack">
-        <Field label="아바타">
-          <div className="avatar-row">
+        <div className="info-hero">
+          <FacePop
+            active={open}
+            id="new"
+            shape={shape || null}
+            color={color || null}
+            onShape={setShape}
+            onColor={setColor}
+            onFace={(nextShape, nextColor) => {
+              setShape(nextShape);
+              setColor(nextColor);
+            }}
+          >
             <Avatar
               className="new-avatar"
               id="new"
@@ -96,19 +107,8 @@ export function NewBotModal({
               shape={shape || null}
               color={color || null}
             />
-          </div>
-        </Field>
-        <FacePicker
-          id="new"
-          shape={shape || null}
-          color={color || null}
-          onShape={setShape}
-          onColor={setColor}
-          onFace={(nextShape, nextColor) => {
-            setShape(nextShape);
-            setColor(nextColor);
-          }}
-        />
+          </FacePop>
+        </div>
         <Field label="이름" htmlFor="new-name">
           <input
             id="new-name"

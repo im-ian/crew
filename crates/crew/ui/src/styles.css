@@ -409,6 +409,8 @@ main {
   display: grid;
   grid-template-rows: var(--titlebar) auto minmax(0, 1fr) auto;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background: var(--bg);
   position: relative;
 }
@@ -431,6 +433,20 @@ header {
   min-width: 0;
   flex: 1;
 }
+button.head-identity {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  border-radius: var(--radius-md);
+}
+button.head-identity .avatar-face {
+  pointer-events: none;
+}
+button.head-identity:hover .head-title { opacity: 0.72; }
 .head {
   min-width: 0;
   flex: 1;
@@ -473,7 +489,6 @@ header {
   color: inherit;
   font-size: 14px;
   font-weight: 600;
-  cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -481,9 +496,6 @@ header {
   width: 100%;
   line-height: 1.2;
 }
-.head-title:hover { opacity: 0.72; }
-.head-title.static { cursor: default; }
-.head-title.static:hover { opacity: 1; }
 .head-meta {
   font-size: 12px;
   color: var(--muted);
@@ -881,31 +893,49 @@ button.mention-chip:hover {
 }
 .info-hero {
   margin: 0;
-}
-.info-name {
-  font-size: 16px;
-  font-weight: 650;
-  line-height: 1.3;
-}
-.avatar-row {
   display: flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
+  justify-content: center;
+  position: relative;
+  z-index: 2;
 }
-.avatar-row-meta {
-  min-width: 0;
+.face-pop {
+  position: relative;
+  width: max-content;
+}
+.face-pop-hit {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  line-height: 0;
+  width: max-content;
+}
+.face-pop-hit .avatar-face {
+  pointer-events: none;
+}
+.face-pop-hit:hover { filter: brightness(1.08); }
+.face-pop-card {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  translate: -50% 0;
+  width: min(300px, calc(100vw - 72px));
+  background: var(--menu);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  padding: 14px;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
+  gap: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  z-index: 5;
 }
-.avatar-row-meta h3,
-.info-name { margin: 0; }
 .info-avatar {
-  width: 88px;
-  height: 88px;
-  font-size: 32px;
+  width: 72px;
+  height: 72px;
+  font-size: 26px;
 }
 .info-avatar-overlay {
   display: none;

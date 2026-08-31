@@ -30,6 +30,13 @@ function faceStatus(
   return null;
 }
 
+function statusDot(badge?: string | null) {
+  if (badge === "working" || badge === "blocked" || badge === "exited") {
+    return <span className={`badge ${badge}`} />;
+  }
+  return null;
+}
+
 export function Avatar({
   id,
   name,
@@ -75,7 +82,7 @@ export function Avatar({
       {!showFace ? (
         <span className="avatar-letter">{letter || initialOf(name)}</span>
       ) : null}
-      {badge ? <span className={`badge ${badge}`} /> : null}
+      {statusDot(badge)}
       {overlay}
     </>
   );

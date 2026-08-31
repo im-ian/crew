@@ -3,7 +3,7 @@ import type { AvatarShape } from "../avatar";
 import { cliFromCmd, EFFORTS } from "../options";
 import type { AgentInfo } from "../types";
 import { Avatar } from "./Avatar";
-import { FacePicker } from "./FacePicker";
+import { FacePop } from "./FacePicker";
 import { Field } from "./Field";
 import { ModelSelect } from "./ModelSelect";
 import { Seg } from "./Seg";
@@ -69,7 +69,22 @@ export function InfoPane({
   return (
     <div className="form-stack">
       <div className="info-hero">
-        <div className="avatar-row">
+        <FacePop
+          key={agent?.id || "face"}
+          active={open}
+          id={agent?.id}
+          shape={agent?.avatar_shape}
+          color={agent?.avatar_color}
+          onShape={(next: AvatarShape) => {
+            void onSetFace(next, undefined);
+          }}
+          onColor={(next) => {
+            void onSetFace(undefined, next);
+          }}
+          onFace={(nextShape, nextColor) => {
+            void onSetFace(nextShape, nextColor);
+          }}
+        >
           <Avatar
             className="info-avatar"
             id={agent?.id}
@@ -79,32 +94,13 @@ export function InfoPane({
             color={agent?.avatar_color}
             status={agent?.status}
           />
-          <div className="avatar-row-meta">
-            <strong className="info-name">
-              {agent?.name || agent?.id || "봇"}
-            </strong>
-          </div>
-        </div>
+        </FacePop>
       </div>
-      <FacePicker
-        id={agent?.id}
-        shape={agent?.avatar_shape}
-        color={agent?.avatar_color}
-        onShape={(next: AvatarShape) => {
-          void onSetFace(next, undefined);
-        }}
-        onColor={(next) => {
-          void onSetFace(undefined, next);
-        }}
-        onFace={(nextShape, nextColor) => {
-          void onSetFace(nextShape, nextColor);
-        }}
-      />
-      <Field label="직함" htmlFor="info-title">
+      <Field label="이름" htmlFor="info-title">
         <input
           id="info-title"
           className="textin"
-          placeholder="예: 프로덕트 매니저"
+          placeholder="예: 기획 도우미"
           value={title}
           onChange={(e) => {
             setTitle(e.target.value);
