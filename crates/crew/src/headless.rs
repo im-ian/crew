@@ -210,7 +210,17 @@ fn run_turn(
 
     match result {
         Ok(outcome) => {
-            if let Some(id) = outcome
+            let dead = session_is_dead(
+                outcome.got_text,
+                outcome.error.as_deref(),
+                created_id.is_some(),
+            );
+            if dead {
+                if let Ok(mut inner) = session.inner.lock() {
+                    inner.session_id = None;
+                }
+                clear_session(&session.id);
+            } else if let Some(id) = outcome
                 .session_id
                 .as_deref()
                 .or(created_id.as_deref())
@@ -256,6 +266,17 @@ fn run_turn(
         inner.seq += 1;
     }
     crate::daemon::emit_agent_frame(&session.id);
+}
+
+/// A turn that died without a reply left no CLI conversation behind, so its id
+/// must not be reused: `--resume` would point at a session the CLI never wrote.
+fn session_is_dead(got_text: bool, error: Option<&str>, fresh_id: bool) -> bool {
+    match error {
+        Some(err) if !got_text => {
+            fresh_id || err.to_lowercase().contains("no conversation found")
+        }
+        _ => false,
+    }
 }
 
 struct TurnOutcome {
@@ -326,7 +347,9 @@ fn spawn_and_stream(
                 inner.last_output = Instant::now();
                 inner.seq += 1;
             }
-        } else if !line.trim().is_empty() && !looks_json(&line) {
+        } else if cli == CliKind::Other && !line.trim().is_empty() && !looks_json(&line) {
+            // grok/claude/codex stream every reply as JSON, so a bare line there is
+            // CLI chatter (MCP warnings, banners) and must never become the answer.
             if !plain.is_empty() {
                 plain.push('\n');
             }
@@ -693,6 +716,23 @@ mod tests {
         let mut st = ParseState::default();
         let chunk = ingest_line(CliKind::Grok, line, &mut st);
         (chunk, st)
+    }
+
+    #[test]
+    fn dead_session_ids_are_dropped() {
+        // fresh id + failed turn -> the CLI never wrote that session
+        assert!(session_is_dead(false, Some("CLI exited with status 1"), true));
+        // stale stored id the CLI no longer knows -> start over
+        assert!(session_is_dead(
+            false,
+            Some("No conversation found with session ID: abc"),
+            false
+        ));
+        // resumed session that failed for another reason -> keep the history
+        assert!(!session_is_dead(false, Some("overloaded_error"), false));
+        // got a reply -> always keep
+        assert!(!session_is_dead(true, Some("warning"), true));
+        assert!(!session_is_dead(false, None, true));
     }
 
     #[test]
