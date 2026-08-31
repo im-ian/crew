@@ -10,7 +10,7 @@ type Props = {
 function eyesAt(shape: AvatarShape): { x: number; y: number } {
   switch (shape) {
     case "teardrop":
-      return { x: 32, y: 26 };
+      return { x: 32, y: 27 };
     case "triangle":
       return { x: 32, y: 38 };
     case "cloud":
@@ -30,29 +30,23 @@ function Shape({ shape, color }: { shape: AvatarShape; color: string }) {
       return (
         <path
           fill={color}
-          d="M32 6c14 0 22 11 22 23 0 12-10 22-22 33C20 51 10 41 10 29 10 17 18 6 32 6z"
+          d="M32 7c13 0 21 10.2 21 22.5 0 11.2-8.8 21-21 27.5C19.8 50.7 11 40.7 11 29.5 11 17.2 19 7 32 7z"
         />
       );
     case "rounded-square":
-      return <rect x="5" y="5" width="54" height="54" rx="16" fill={color} />;
+      return <rect x="5" y="5" width="54" height="54" rx="22" fill={color} />;
     case "hexagon":
       return (
         <path
           fill={color}
-          stroke={color}
-          strokeWidth="3"
-          strokeLinejoin="round"
-          d="M32 6.5 55.5 19.5v25L32 57.5 8.5 44.5v-25z"
+          d="M27 8.89Q32 6 37 8.89L49.52 16.11Q54.52 19 54.52 24.77V39.23Q54.52 45 49.52 47.89L37 55.11Q32 58 27 55.11L14.48 47.89Q9.48 45 9.48 39.23V24.77Q9.48 19 14.48 16.11Z"
         />
       );
     case "triangle":
       return (
         <path
           fill={color}
-          stroke={color}
-          strokeWidth="5.5"
-          strokeLinejoin="round"
-          d="M32 11 55 53H9z"
+          d="M23.18 25.54Q32 9 40.82 25.54L48.16 39.29Q56 54 39.33 54H24.67Q8 54 15.84 39.29Z"
         />
       );
     case "cloud":
@@ -68,28 +62,13 @@ function Shape({ shape, color }: { shape: AvatarShape; color: string }) {
 }
 
 function Eyes({ cx, cy }: { cx: number; cy: number }) {
-  const dx = 7.6;
-  const w = 5.4;
-  const h = 13.2;
-  const tilt = 17;
+  const dx = 7.2;
+  const w = 6;
+  const h = 10.5;
   return (
     <g fill="#fff">
-      <rect
-        x={cx - dx - w / 2}
-        y={cy - h / 2}
-        width={w}
-        height={h}
-        rx={w / 2}
-        transform={`rotate(${tilt} ${cx - dx} ${cy})`}
-      />
-      <rect
-        x={cx + dx - w / 2}
-        y={cy - h / 2}
-        width={w}
-        height={h}
-        rx={w / 2}
-        transform={`rotate(${-tilt} ${cx + dx} ${cy})`}
-      />
+      <rect x={cx - dx - w / 2} y={cy - h / 2} width={w} height={h} rx={w / 2} />
+      <rect x={cx + dx - w / 2} y={cy - h / 2} width={w} height={h} rx={w / 2} />
     </g>
   );
 }
