@@ -281,6 +281,10 @@ button.avatar {
   animation-name: avatar-gaze-busy;
   animation-duration: 2.4s;
 }
+.avatar-face.is-tracking .avatar-gaze {
+  animation: none;
+  transform: translate(var(--gaze-x, 0px), var(--gaze-y, 0px));
+}
 .avatar-face.is-idle .avatar-blink,
 .avatar-face.is-working .avatar-blink,
 .avatar-face.is-blocked .avatar-blink {
@@ -344,7 +348,8 @@ button.avatar {
   .avatar-face.is-idle .avatar-blink,
   .avatar-face.is-working .avatar-blink,
   .avatar-face.is-blocked .avatar-blink,
-  .avatar-face.is-blocked .avatar-eye {
+  .avatar-face.is-blocked .avatar-eye,
+  .avatar-face.is-tracking .avatar-gaze {
     animation: none;
   }
 }

@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties, type PointerEvent } from "react";
 import { avatarPhase, type AvatarShape } from "../avatar";
 import type { AgentStatus } from "../types";
 
@@ -137,15 +137,54 @@ function liveMood(status?: AgentStatus | null): "idle" | "working" | "blocked" |
   return null;
 }
 
+const GAZE_X = 4.6;
+const GAZE_Y = 3.2;
+
+function prefersReducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function gazeFromPointer(
+  e: PointerEvent<SVGSVGElement>,
+  eyes: { x: number; y: number },
+): { x: number; y: number } {
+  const rect = e.currentTarget.getBoundingClientRect();
+  const x = ((e.clientX - rect.left) / Math.max(rect.width, 1)) * 64;
+  const y = ((e.clientY - rect.top) / Math.max(rect.height, 1)) * 64;
+  const nx = Math.max(-1, Math.min(1, (x - eyes.x) / 28));
+  const ny = Math.max(-1, Math.min(1, (y - eyes.y) / 20));
+  return { x: nx * GAZE_X, y: ny * GAZE_Y };
+}
+
 export function BotFace({ shape, color, className, title, status, id }: Props) {
   const eyes = eyesAt(shape);
   const live = liveMood(status);
-  const cls = ["avatar-face", live ? `is-${live}` : "", className]
+  const [gaze, setGaze] = useState<{ x: number; y: number } | null>(null);
+
+  function onPointerMove(e: PointerEvent<SVGSVGElement>) {
+    if (prefersReducedMotion()) return;
+    setGaze(gazeFromPointer(e, eyes));
+  }
+
+  function onPointerLeave() {
+    setGaze(null);
+  }
+
+  const tracking = gaze !== null;
+  const cls = [
+    "avatar-face",
+    live ? `is-${live}` : "",
+    tracking ? "is-tracking" : "",
+    className,
+  ]
     .filter(Boolean)
     .join(" ");
-  const style = live
-    ? ({ ["--avatar-phase"]: avatarPhase(id) } as CSSProperties)
-    : undefined;
+  const style = {
+    ...(live ? { ["--avatar-phase"]: avatarPhase(id) } : {}),
+    ...(tracking
+      ? { ["--gaze-x"]: `${gaze.x}px`, ["--gaze-y"]: `${gaze.y}px` }
+      : {}),
+  } as CSSProperties;
   return (
     <svg
       className={cls}
@@ -156,6 +195,9 @@ export function BotFace({ shape, color, className, title, status, id }: Props) {
       aria-hidden={title ? undefined : true}
       role={title ? "img" : undefined}
       overflow="visible"
+      onPointerEnter={onPointerMove}
+      onPointerMove={onPointerMove}
+      onPointerLeave={onPointerLeave}
     >
       {title ? <title>{title}</title> : null}
       <Shape shape={shape} color={color} />
