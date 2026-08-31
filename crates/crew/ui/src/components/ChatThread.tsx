@@ -1,7 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AgentInfo, ChannelInfo, ChatMessage, Kind } from "../types";
 import { Avatar } from "./Avatar";
 import { MdBody } from "./MdBody";
+
+const STICK_PX = 24;
 
 type Props = {
   messages: ChatMessage[];
@@ -29,6 +31,7 @@ export function ChatThread({
   onSelectAgent,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const [away, setAway] = useState(false);
   const visible = visibleMessages(messages);
   const openAgent =
     onSelectAgent &&
@@ -37,58 +40,81 @@ export function ChatThread({
       onSelectAgent(id);
     });
 
+  function syncStick() {
+    const el = ref.current;
+    if (!el) return;
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const overflow = el.scrollHeight - el.clientHeight > 8;
+    onStick(gap < STICK_PX);
+    setAway(overflow && gap >= STICK_PX);
+  }
+
+  function jumpBottom() {
+    const el = ref.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    onStick(true);
+    setAway(false);
+  }
+
   useEffect(() => {
     const el = ref.current;
     if (el && stick) el.scrollTop = el.scrollHeight;
+    syncStick();
   }, [messages, stick, selected, selectedKind, streaming]);
 
   return (
-    <div
-      className="thread"
-      ref={ref}
-      onScroll={() => {
-        const el = ref.current;
-        if (!el) return;
-        onStick(el.scrollHeight - el.scrollTop - el.clientHeight < 48);
-      }}
-    >
-      {!messages.length ? (
-        <EmptyChat agent={currentAgent} channel={currentChannel} />
-      ) : (
-        visible.map((m, i, list) => {
-          const caret =
-            streaming &&
-            m.role === "assistant" &&
-            i === list.length - 1;
-          if (m.role === "system") {
+    <div className="thread-wrap">
+      <div className="thread" ref={ref} onScroll={syncStick}>
+        {!messages.length ? (
+          <EmptyChat agent={currentAgent} channel={currentChannel} />
+        ) : (
+          visible.map((m, i, list) => {
+            const caret =
+              streaming &&
+              m.role === "assistant" &&
+              i === list.length - 1;
+            if (m.role === "system") {
+              return (
+                <SystemOrIncoming
+                  key={m.id}
+                  message={m}
+                  agents={agents}
+                  selectedKind={selectedKind}
+                  onSelectAgent={openAgent}
+                />
+              );
+            }
             return (
-              <SystemOrIncoming
+              <Bubble
                 key={m.id}
                 message={m}
                 agents={agents}
                 selectedKind={selectedKind}
+                caret={caret}
                 onSelectAgent={openAgent}
               />
             );
-          }
-          return (
-            <Bubble
-              key={m.id}
-              message={m}
-              agents={agents}
-              selectedKind={selectedKind}
-              caret={caret}
-              onSelectAgent={openAgent}
-            />
-          );
-        })
-      )}
-      {streaming &&
-      visible.length > 0 &&
-      visible[visible.length - 1]?.role !== "assistant" ? (
-        <div className="row them">
-          <div className="bubble md streaming" />
-        </div>
+          })
+        )}
+        {streaming &&
+        visible.length > 0 &&
+        visible[visible.length - 1]?.role !== "assistant" ? (
+          <div className="row them">
+            <div className="bubble md streaming" />
+          </div>
+        ) : null}
+      </div>
+      {away ? (
+        <button
+          type="button"
+          className="jump-bottom"
+          title="맨 아래로"
+          aria-label="맨 아래로"
+          onClick={jumpBottom}
+        >
+          ↓
+        </button>
       ) : null}
     </div>
   );
