@@ -795,12 +795,22 @@ fn apply_grok_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSe
 }
 
 fn apply_claude_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSession>) {
-    remove_switch(args, &["-p", "--print", "--include-partial-messages"]);
+    remove_switch(
+        args,
+        &[
+            "-p",
+            "--print",
+            "--include-partial-messages",
+            "--verbose",
+        ],
+    );
     remove_flag_with_value(args, &["--output-format", "--resume", "-r", "--session-id"]);
     args.push("-p".into());
     args.push("--output-format".into());
     args.push("stream-json".into());
     args.push("--include-partial-messages".into());
+    // Claude CLI 2.x: `-p --output-format=stream-json` exits unless `--verbose`.
+    args.push("--verbose".into());
     apply_session_flags(args, session, "--resume", "--session-id");
     args.push(prompt.to_string());
 }
@@ -1124,6 +1134,7 @@ mod tests {
         assert!(argv.contains(&"--output-format".to_string()));
         assert!(argv.contains(&"stream-json".to_string()));
         assert!(argv.contains(&"--include-partial-messages".to_string()));
+        assert!(argv.contains(&"--verbose".to_string()));
         assert_eq!(argv.last().map(|s| s.as_str()), Some("hello"));
         let resume = TurnSession {
             id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee".into(),
