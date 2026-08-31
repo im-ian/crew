@@ -1127,6 +1127,16 @@ fn tell_agent(from: &str, to: &str, text: &str) -> anyhow::Result<()> {
     let msg = crate::transcript::push_system(to, &from, text);
     let envelope = crate::protocol::envelope(&from, text);
     submit_delivery(to, &envelope, true, Some(msg.id))?;
+    if from != "user" && from != to {
+        let known = agents()
+            .lock()
+            .ok()
+            .map(|map| map.contains_key(&from))
+            .unwrap_or(false);
+        if known {
+            crate::transcript::push_notice(&from, &format!("to:{to}"), text);
+        }
+    }
     let _ = events().send(Event::Told {
         from: from.clone(),
         to: to.to_string(),

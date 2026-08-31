@@ -199,18 +199,29 @@ function SystemOrIncoming({
     );
   }
   const from = String(m.from || "");
+  const sentId = sentTarget(from);
+  if (sentId) {
+    return (
+      <TransferNote
+        kind="sent"
+        otherId={sentId}
+        message={m}
+        agents={agents}
+        channels={channels}
+        onSelectAgent={onSelectAgent}
+      />
+    );
+  }
   const agent = agents.find((a) => a.id === m.from) ?? null;
   const fromChannel = from.startsWith("#");
   if (agent || fromChannel) {
     return (
-      <Incoming
+      <TransferNote
+        kind="received"
+        otherId={from}
         message={m}
-        agent={agent}
-        who={
-          fromChannel ? `#${channelDisplayName(from, channels)}` : displayWho(m, agent)
-        }
         agents={agents}
-        quiet
+        channels={channels}
         onSelectAgent={onSelectAgent}
       />
     );
@@ -224,13 +235,85 @@ function SystemOrIncoming({
   );
 }
 
+function TransferNote({
+  kind,
+  otherId,
+  message: m,
+  agents,
+  channels,
+  onSelectAgent,
+}: {
+  kind: "sent" | "received";
+  otherId: string;
+  message: ChatMessage;
+  agents: AgentInfo[];
+  channels: ChannelInfo[];
+  onSelectAgent?: (id: string) => void;
+}) {
+  const fromChannel = otherId.startsWith("#");
+  const agent = agents.find((a) => a.id === otherId) ?? null;
+  const who = fromChannel
+    ? `#${channelDisplayName(otherId, channels)}`
+    : displayWho({ ...m, from: otherId }, agent);
+  const color = agent
+    ? whoColor(resolveFace(agent.id, agent.avatar_shape, agent.avatar_color).color)
+    : undefined;
+  const open =
+    onSelectAgent && agent ? () => onSelectAgent(agent.id) : undefined;
+  const label = kind === "sent" ? "보낸 메시지" : "받은 메시지";
+  return (
+    <div className={"xfer" + (m.queued ? " queued" : "")}>
+      <div className="xfer-chip">
+        <span className="xfer-label">{label}</span>
+        {agent || fromChannel ? (
+          <Avatar
+            as={open ? "button" : "div"}
+            className="xfer-avatar"
+            id={agent?.id || otherId}
+            name={who}
+            src={agent?.avatar}
+            shape={agent?.avatar_shape}
+            color={agent?.avatar_color}
+            letter={fromChannel ? "#" : undefined}
+            status={agent?.status}
+            title={who}
+            onClick={open}
+          />
+        ) : null}
+        {open ? (
+          <button
+            type="button"
+            className="xfer-who"
+            style={color ? { color } : undefined}
+            onClick={open}
+          >
+            {who}
+          </button>
+        ) : (
+          <span className="xfer-who" style={color ? { color } : undefined}>
+            {who}
+          </span>
+        )}
+      </div>
+      {m.text ? (
+        <MdBody
+          className="xfer-text md"
+          text={m.text}
+          agents={agents}
+          onMention={onSelectAgent}
+        />
+      ) : null}
+      {m.queued ? <QueueWait /> : null}
+    </div>
+  );
+}
+
 function Incoming({
   message: m,
   agent,
   who,
   agents,
   caret = false,
-  quiet = false,
   openName = true,
   onSelectAgent,
 }: {
@@ -239,7 +322,6 @@ function Incoming({
   who: string;
   agents: AgentInfo[];
   caret?: boolean;
-  quiet?: boolean;
   openName?: boolean;
   onSelectAgent?: (id: string) => void;
 }) {
@@ -254,16 +336,9 @@ function Incoming({
   const cls =
     "bubble md incoming" +
     (caret ? " streaming" : "") +
-    (quiet ? " quiet" : "") +
     (queued ? " queued" : "");
   return (
-    <div
-      className={
-        "row them incoming" +
-        (quiet ? " quiet" : "") +
-        (queued ? " queued" : "")
-      }
-    >
+    <div className={"row them incoming" + (queued ? " queued" : "")}>
       {agent ? (
         <Avatar
           as={open ? "button" : "div"}
@@ -377,6 +452,10 @@ function QueueWait() {
 function displayWho(m: ChatMessage, agent: AgentInfo | null): string {
   if (agent) return agent.name || agent.id;
   return m.from || "";
+}
+
+function sentTarget(from: string): string | null {
+  return from.startsWith("to:") ? from.slice(3) : null;
 }
 
 function whoColor(hex: string): string {

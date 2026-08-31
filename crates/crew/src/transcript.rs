@@ -156,6 +156,11 @@ pub fn push_system(agent: &str, from: &str, text: &str) -> ChatMessage {
     push_role(agent, Role::System, from, text, true)
 }
 
+/// System row that must not open a turn, e.g. a "sent to other session" receipt.
+pub fn push_notice(agent: &str, from: &str, text: &str) -> ChatMessage {
+    push_role(agent, Role::System, from, text, false)
+}
+
 /// Record injected PTY/prompt text so local echo is not stored as assistant output.
 pub fn expect_echo(agent: &str, text: &str) {
     let mut t = normalize_text(text);
@@ -804,6 +809,28 @@ mod tests {
         assert_eq!(back.from, "alpha");
         assert_eq!(back.role, Role::System);
         assert!(!back.queued);
+    }
+
+    #[test]
+    fn push_notice_does_not_expect_a_turn() {
+        let agent = format!(
+            "notice-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        let msg = push_notice(&agent, "to:pm", "hello");
+        assert_eq!(msg.role, Role::System);
+        assert_eq!(msg.from, "to:pm");
+        assert_eq!(msg.text, "hello");
+        {
+            let map = chats().lock().unwrap();
+            let chat = map.get(&agent).unwrap();
+            assert!(!chat.expecting);
+        }
+        drop_agent(&agent);
     }
 
     #[test]

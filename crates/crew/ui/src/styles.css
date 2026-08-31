@@ -791,33 +791,69 @@ button.channel-who:hover {
 @media (prefers-reduced-motion: reduce) {
   .queue-dots i { animation: none; opacity: 0.55; }
 }
-.row.them.incoming.quiet {
+.xfer {
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 8px;
-  padding-left: 14px;
+  padding: 12px 20px 10px;
+  max-width: min(36em, 92%);
 }
-.row.them.incoming.quiet .msg-avatar {
-  width: 22px;
-  height: 22px;
+.xfer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.xfer-label {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.xfer-avatar {
+  width: 18px;
+  height: 18px;
   font-size: 8px;
-  margin-top: 2px;
-  opacity: 0.78;
+  flex-shrink: 0;
 }
-.row.them.incoming.quiet .channel-who {
-  font-size: 12px;
-  font-weight: 500;
-  opacity: 0.72;
+button.xfer-avatar {
+  cursor: pointer;
 }
-.row.them.incoming.quiet .bubble.incoming {
-  padding: 7px 11px;
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--menu) 52%, transparent);
-  color: color-mix(in srgb, var(--ink) 58%, var(--muted));
-  font-size: 13.5px;
-  line-height: 1.45;
-}
-.row.them.incoming.quiet .bubble.incoming.queued {
+.xfer-who {
+  margin: 0;
+  border: 0;
+  padding: 0;
   background: transparent;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--muted) 34%, transparent);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 16em;
+}
+button.xfer-who {
+  cursor: pointer;
+}
+button.xfer-who:hover {
+  text-decoration: underline;
+}
+.xfer-text {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+  max-width: 28em;
+}
+.xfer-text p { margin: 0 0 0.4em; }
+.xfer-text p:last-child { margin-bottom: 0; }
+.xfer .queue-wait {
+  margin-top: 0;
 }
 .composer {
   display: flex;
