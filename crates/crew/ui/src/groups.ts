@@ -1,5 +1,12 @@
 import type { AgentInfo, ChannelInfo, Group, Kind } from "./types";
 
+export const UNGROUPED_ID = "__ungrouped";
+
+export type RailLayout = {
+  groups: Group[];
+  ungrouped: string[];
+};
+
 export function itemKey(kind: Kind, id: string): string {
   return `${kind}:${id}`;
 }
@@ -13,20 +20,25 @@ export function parseItemKey(key: string): { kind: Kind; id: string } | null {
   return { kind, id };
 }
 
-export function normalizeGroups(raw: unknown): Group[] {
-  if (!Array.isArray(raw)) return [];
+export function normalizeGroups(raw: unknown): RailLayout {
+  if (!Array.isArray(raw)) return { groups: [], ungrouped: [] };
   const out: Group[] = [];
   const seen = new Set<string>();
+  let ungrouped: string[] = [];
   for (const row of raw) {
     if (!row || typeof row !== "object") continue;
     const g = row as Partial<Group>;
     const id = typeof g.id === "string" ? g.id.trim() : "";
-    const name = typeof g.name === "string" ? g.name.trim() : "";
-    if (!id || !name || seen.has(id)) continue;
-    seen.add(id);
     const items = Array.isArray(g.items)
       ? g.items.filter((k): k is string => typeof k === "string" && !!parseItemKey(k))
       : [];
+    if (id === UNGROUPED_ID) {
+      ungrouped = uniqueKeys(items);
+      continue;
+    }
+    const name = typeof g.name === "string" ? g.name.trim() : "";
+    if (!id || !name || seen.has(id)) continue;
+    seen.add(id);
     out.push({
       id,
       name,
@@ -34,7 +46,21 @@ export function normalizeGroups(raw: unknown): Group[] {
       items: uniqueKeys(items),
     });
   }
-  return out;
+  return { groups: out, ungrouped };
+}
+
+export function toPersist(layout: RailLayout): Group[] {
+  const groups = layout.groups.filter((g) => g.id !== UNGROUPED_ID);
+  if (!layout.ungrouped.length) return groups;
+  return [
+    ...groups,
+    {
+      id: UNGROUPED_ID,
+      name: "",
+      collapsed: false,
+      items: uniqueKeys(layout.ungrouped),
+    },
+  ];
 }
 
 export function uniqueGroupName(groups: Group[], base = "새 그룹"): string {
@@ -59,43 +85,91 @@ export function groupIdOf(groups: Group[], kind: Kind, id: string): string | nul
   return found ? found.id : null;
 }
 
-export function pruneGroups(
-  groups: Group[],
+export function pruneLayout(
+  layout: RailLayout,
   agents: AgentInfo[],
   channels: ChannelInfo[],
-): Group[] {
+): RailLayout {
   const valid = validKeys(agents, channels);
-  return groups.map((g) => ({
-    ...g,
-    items: g.items.filter((k) => valid.has(k)),
-  }));
+  return {
+    groups: layout.groups
+      .filter((g) => g.id !== UNGROUPED_ID)
+      .map((g) => ({
+        ...g,
+        items: g.items.filter((k) => valid.has(k)),
+      })),
+    ungrouped: layout.ungrouped.filter((k) => valid.has(k)),
+  };
 }
 
-export function groupsChanged(a: Group[], b: Group[]): boolean {
+export function layoutChanged(a: RailLayout, b: RailLayout): boolean {
   return JSON.stringify(a) !== JSON.stringify(b);
 }
 
-export function moveItem(
+export function visibleUngroupedKeys(
   groups: Group[],
+  ungrouped: string[],
+  agents: AgentInfo[],
+  channels: ChannelInfo[],
+): string[] {
+  const grouped = new Set(groups.flatMap((g) => g.items));
+  const present: { key: string; name: string }[] = [];
+  for (const a of agents) {
+    const key = itemKey("agent", a.id);
+    if (!grouped.has(key)) present.push({ key, name: a.name || a.id });
+  }
+  for (const c of channels) {
+    const key = itemKey("channel", c.id);
+    if (!grouped.has(key)) present.push({ key, name: c.name || c.id });
+  }
+  const byKey = new Map(present.map((p) => [p.key, p]));
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const k of ungrouped) {
+    if (!byKey.has(k) || seen.has(k)) continue;
+    out.push(k);
+    seen.add(k);
+  }
+  const rest = present.filter((p) => !seen.has(p.key));
+  rest.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  for (const p of rest) out.push(p.key);
+  return out;
+}
+
+export function moveItem(
+  layout: RailLayout,
   key: string,
   destGroupId: string | null,
-  beforeKey?: string | null,
-): Group[] {
+  beforeKey: string | null | undefined,
+  ungroupedVisual: string[],
+): RailLayout {
   const parsed = parseItemKey(key);
-  if (!parsed) return groups;
-  const next = groups.map((g) => ({
-    ...g,
-    items: g.items.filter((k) => k !== key),
-  }));
-  if (!destGroupId) return next;
-  return next.map((g) => {
-    if (g.id !== destGroupId) return g;
-    const items = [...g.items];
-    const idx = beforeKey ? items.indexOf(beforeKey) : -1;
-    if (idx < 0) items.push(key);
-    else items.splice(idx, 0, key);
-    return { ...g, items };
-  });
+  if (!parsed) return layout;
+  const groups = layout.groups
+    .filter((g) => g.id !== UNGROUPED_ID)
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((k) => k !== key),
+    }));
+  if (!destGroupId) {
+    const list = ungroupedVisual.filter((k) => k !== key);
+    const idx = beforeKey ? list.indexOf(beforeKey) : -1;
+    if (idx < 0) list.push(key);
+    else list.splice(idx, 0, key);
+    return { groups, ungrouped: uniqueKeys(list) };
+  }
+  const ungrouped = layout.ungrouped.filter((k) => k !== key);
+  return {
+    groups: groups.map((g) => {
+      if (g.id !== destGroupId) return g;
+      const items = [...g.items];
+      const idx = beforeKey ? items.indexOf(beforeKey) : -1;
+      if (idx < 0) items.push(key);
+      else items.splice(idx, 0, key);
+      return { ...g, items };
+    }),
+    ungrouped,
+  };
 }
 
 export function validKeys(
@@ -108,7 +182,7 @@ export function validKeys(
   return keys;
 }
 
-function uniqueKeys(items: string[]): string[] {
+export function uniqueKeys(items: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const k of items) {

@@ -9,13 +9,17 @@ import {
 import { api, errMsg } from "./api";
 import {
   groupIdOf,
-  groupsChanged,
   itemKey,
+  layoutChanged,
   moveItem,
   newGroupId,
   normalizeGroups,
-  pruneGroups,
+  pruneLayout,
+  toPersist,
   uniqueGroupName,
+  uniqueKeys,
+  visibleUngroupedKeys,
+  type RailLayout,
 } from "./groups";
 import type {
   AgentInfo,
@@ -64,6 +68,7 @@ export function useCrew() {
     kind: "agent",
   });
   const [groups, setGroups] = useState<Group[]>([]);
+  const [ungrouped, setUngrouped] = useState<string[]>([]);
   const [pendingRenameId, setPendingRenameId] = useState<string | null>(null);
 
   const selectedRef = useRef({ id: selected, kind: selectedKind });
@@ -72,8 +77,10 @@ export function useCrew() {
   paneOpenRef.current = paneOpen;
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
-  const groupsRef = useRef(groups);
-  groupsRef.current = groups;
+  const channelsRef = useRef(channels);
+  channelsRef.current = channels;
+  const groupsRef = useRef<RailLayout>({ groups, ungrouped });
+  groupsRef.current = { groups, ungrouped };
   const groupsLoaded = useRef(false);
   const toastTimer = useRef<number | null>(null);
 
@@ -188,41 +195,68 @@ export function useCrew() {
     });
   }
 
-  function persistGroups(next: Group[]) {
+  function persistLayout(next: RailLayout) {
+    const layout = {
+      groups: next.groups.filter((g) => g.id !== "__ungrouped"),
+      ungrouped: next.ungrouped,
+    };
     groupsLoaded.current = true;
-    groupsRef.current = next;
-    setGroups(next);
-    void api.setGroups(next).catch((err) => showError(err));
+    groupsRef.current = layout;
+    setGroups(layout.groups);
+    setUngrouped(layout.ungrouped);
+    void api.setGroups(toPersist(layout)).catch((err) => showError(err));
   }
 
   function createGroup(withItem?: { kind: Kind; id: string } | null) {
     const current = groupsRef.current;
-    const id = newGroupId(current.map((g) => g.id));
-    const name = uniqueGroupName(current);
+    const id = newGroupId(current.groups.map((g) => g.id));
+    const name = uniqueGroupName(current.groups);
     const key = withItem ? itemKey(withItem.kind, withItem.id) : null;
-    const next = key
-      ? moveItem(current, key, null)
-      : current.map((g) => ({ ...g, items: [...g.items] }));
-    next.push({
-      id,
-      name,
-      collapsed: false,
-      items: key ? [key] : [],
-    });
-    persistGroups(next);
+    if (!key) {
+      persistLayout({
+        groups: [
+          ...current.groups,
+          { id, name, collapsed: false, items: [] },
+        ],
+        ungrouped: current.ungrouped,
+      });
+    } else {
+      const visual = visibleUngroupedKeys(
+        current.groups,
+        current.ungrouped,
+        agentsRef.current,
+        channelsRef.current,
+      );
+      const stripped = moveItem(current, key, null, null, visual);
+      persistLayout({
+        groups: [
+          ...stripped.groups,
+          { id, name, collapsed: false, items: [key] },
+        ],
+        ungrouped: stripped.ungrouped.filter((k) => k !== key),
+      });
+    }
     setPendingRenameId(id);
   }
 
   function renameGroup(id: string, name: string) {
     const trimmed = name.trim();
     if (!trimmed) return;
-    persistGroups(
-      groupsRef.current.map((g) => (g.id === id ? { ...g, name: trimmed } : g)),
-    );
+    persistLayout({
+      groups: groupsRef.current.groups.map((g) =>
+        g.id === id ? { ...g, name: trimmed } : g,
+      ),
+      ungrouped: groupsRef.current.ungrouped,
+    });
   }
 
   function removeGroup(id: string) {
-    persistGroups(groupsRef.current.filter((g) => g.id !== id));
+    const current = groupsRef.current;
+    const gone = current.groups.find((g) => g.id === id);
+    persistLayout({
+      groups: current.groups.filter((g) => g.id !== id),
+      ungrouped: uniqueKeys([...(gone?.items || []), ...current.ungrouped]),
+    });
   }
 
   function moveToGroup(
@@ -231,15 +265,23 @@ export function useCrew() {
     groupId: string | null,
     beforeKey?: string | null,
   ) {
-    persistGroups(moveItem(groupsRef.current, itemKey(kind, id), groupId, beforeKey));
+    const current = groupsRef.current;
+    const visual = visibleUngroupedKeys(
+      current.groups,
+      current.ungrouped,
+      agentsRef.current,
+      channelsRef.current,
+    );
+    persistLayout(moveItem(current, itemKey(kind, id), groupId, beforeKey, visual));
   }
 
   function toggleGroup(id: string) {
-    persistGroups(
-      groupsRef.current.map((g) =>
+    persistLayout({
+      groups: groupsRef.current.groups.map((g) =>
         g.id === id ? { ...g, collapsed: !g.collapsed } : g,
       ),
-    );
+      ungrouped: groupsRef.current.ungrouped,
+    });
   }
 
   function itemGroupId(kind: Kind, id: string): string | null {
@@ -287,8 +329,8 @@ export function useCrew() {
     setAgents(list);
     setChannels(chans || []);
     if (groupsLoaded.current) {
-      const pruned = pruneGroups(groupsRef.current, list, chans || []);
-      if (groupsChanged(pruned, groupsRef.current)) persistGroups(pruned);
+      const pruned = pruneLayout(groupsRef.current, list, chans || []);
+      if (layoutChanged(pruned, groupsRef.current)) persistLayout(pruned);
     }
     setSelected(sel);
     setSelectedKind(kind);
@@ -600,12 +642,14 @@ export function useCrew() {
         const next = normalizeGroups(raw);
         groupsLoaded.current = true;
         groupsRef.current = next;
-        setGroups(next);
+        setGroups(next.groups);
+        setUngrouped(next.ungrouped);
       })
       .catch(() => {
         if (cancelled || groupsLoaded.current) return;
         groupsLoaded.current = true;
         setGroups([]);
+        setUngrouped([]);
       });
     return () => {
       cancelled = true;
@@ -693,6 +737,7 @@ export function useCrew() {
     toast,
     ctx,
     groups,
+    ungrouped,
     pendingRenameId,
     clearPendingRename: () => setPendingRenameId(null),
     currentAgent,

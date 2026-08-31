@@ -17,6 +17,7 @@ type Props = {
   agents: AgentInfo[];
   channels: ChannelInfo[];
   groups: Group[];
+  ungrouped: string[];
   selected: string | null;
   selectedKind: Kind;
   query: string;
@@ -65,10 +66,26 @@ function toItems(agents: AgentInfo[], channels: ChannelInfo[]): RailItem[] {
   return items;
 }
 
+function orderItems(items: RailItem[], order: string[]): RailItem[] {
+  const byKey = new Map(items.map((item) => [item.key, item]));
+  const out: RailItem[] = [];
+  const seen = new Set<string>();
+  for (const key of order) {
+    const item = byKey.get(key);
+    if (!item || seen.has(key)) continue;
+    out.push(item);
+    seen.add(key);
+  }
+  const rest = items.filter((item) => !seen.has(item.key));
+  rest.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  return out.concat(rest);
+}
+
 export function Sidebar({
   agents,
   channels,
   groups,
+  ungrouped,
   selected,
   selectedKind,
   query,
@@ -107,9 +124,10 @@ export function Sidebar({
     }
     return { group, items };
   });
-  const ungrouped = all
-    .filter((item) => !used.has(item.key))
-    .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  const ungroupedItems = orderItems(
+    all.filter((item) => !used.has(item.key)),
+    ungrouped,
+  );
   const searching = !!query.trim();
   const empty = !all.length;
 
@@ -239,6 +257,7 @@ export function Sidebar({
                         dropBefore={
                           drop?.groupId === group.id && drop.beforeKey === item.key
                         }
+                        draggable={!searching}
                         onSelect={() => select(item)}
                         onContextMenu={(e) => ctx(e, item)}
                         onDragStart={(e) => onDragStart(e, item)}
@@ -251,7 +270,7 @@ export function Sidebar({
                 </section>
               );
             })}
-            {ungrouped.length || dragKey ? (
+            {ungroupedItems.length || dragKey ? (
               <section
                 className={
                   "rail-section" +
@@ -260,13 +279,14 @@ export function Sidebar({
                 onDragOver={(e) => markDrop(e, null, null)}
                 onDrop={(e) => applyDrop(e, null, null)}
               >
-                {ungrouped.map((item) => (
+                {ungroupedItems.map((item) => (
                   <ItemRow
                     key={item.key}
                     item={item}
                     active={selectedKind === item.kind && selected === item.id}
                     dragging={dragKey === item.key}
                     dropBefore={drop?.groupId === null && drop.beforeKey === item.key}
+                    draggable={!searching}
                     onSelect={() => select(item)}
                     onContextMenu={(e) => ctx(e, item)}
                     onDragStart={(e) => onDragStart(e, item)}
@@ -275,7 +295,7 @@ export function Sidebar({
                     onDrop={(e) => applyDrop(e, null, item.key)}
                   />
                 ))}
-                {!ungrouped.length && dragKey ? (
+                {!ungroupedItems.length && dragKey ? (
                   <div className="empty-rail">그룹에서 빼기</div>
                 ) : null}
               </section>
@@ -382,6 +402,7 @@ function ItemRow({
   active,
   dragging,
   dropBefore,
+  draggable = true,
   onSelect,
   onContextMenu,
   onDragStart,
@@ -393,6 +414,7 @@ function ItemRow({
   active: boolean;
   dragging: boolean;
   dropBefore: boolean;
+  draggable?: boolean;
   onSelect: () => void;
   onContextMenu: (e: MouseEvent) => void;
   onDragStart: (e: DragEvent) => void;
@@ -410,7 +432,7 @@ function ItemRow({
         (dragging ? " dragging" : "") +
         (dropBefore ? " drop-before" : "")
       }
-      draggable
+      draggable={draggable}
       onClick={onSelect}
       onContextMenu={(e) => {
         e.preventDefault();

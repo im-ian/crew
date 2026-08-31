@@ -28,6 +28,7 @@ export function App() {
         agents={crew.agents}
         channels={crew.channels}
         groups={crew.groups}
+        ungrouped={crew.ungrouped}
         selected={crew.selected}
         selectedKind={crew.selectedKind}
         query={crew.query}
