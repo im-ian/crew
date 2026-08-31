@@ -94,7 +94,9 @@ export function ChatThread({
                 key={m.id}
                 message={m}
                 agents={agents}
+                selected={selected}
                 selectedKind={selectedKind}
+                currentAgent={currentAgent}
                 caret={caret}
                 onSelectAgent={openAgent}
               />
@@ -104,9 +106,21 @@ export function ChatThread({
         {streaming &&
         visible.length > 0 &&
         visible[visible.length - 1]?.role !== "assistant" ? (
-          <div className="row them">
-            <div className="bubble md streaming" />
-          </div>
+          <Incoming
+            message={{
+              id: "streaming",
+              role: "assistant",
+              from: currentAgent?.id || "",
+              text: "",
+              ts: 0,
+            }}
+            agent={currentAgent}
+            who={currentAgent?.name || currentAgent?.id || ""}
+            agents={agents}
+            caret
+            openName={false}
+            onSelectAgent={openAgent}
+          />
         ) : null}
       </div>
       {away ? (
@@ -177,7 +191,9 @@ function SystemOrIncoming({
       <Bubble
         message={{ ...m, role: "user" }}
         agents={agents}
+        selected={null}
         selectedKind={selectedKind}
+        currentAgent={null}
         onSelectAgent={onSelectAgent}
       />
     );
@@ -212,6 +228,7 @@ function Incoming({
   who,
   agents,
   caret = false,
+  openName = true,
   onSelectAgent,
 }: {
   message: ChatMessage;
@@ -219,12 +236,16 @@ function Incoming({
   who: string;
   agents: AgentInfo[];
   caret?: boolean;
+  openName?: boolean;
   onSelectAgent?: (id: string) => void;
 }) {
   const color = agent
     ? whoColor(resolveFace(agent.id, agent.avatar_shape, agent.avatar_color).color)
     : undefined;
-  const open = onSelectAgent && agent ? () => onSelectAgent(agent.id) : undefined;
+  const open =
+    openName && onSelectAgent && agent
+      ? () => onSelectAgent(agent.id)
+      : undefined;
   const cls = "bubble md incoming" + (caret ? " streaming" : "");
   return (
     <div className="row them incoming">
@@ -274,20 +295,26 @@ function Incoming({
 function Bubble({
   message: m,
   agents,
+  selected,
   selectedKind,
+  currentAgent,
   caret = false,
   onSelectAgent,
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
+  selected: string | null;
   selectedKind: Kind;
+  currentAgent: AgentInfo | null;
   caret?: boolean;
   onSelectAgent?: (id: string) => void;
 }) {
   const text =
     m.role === "assistant" ? stripCrewMarkers(m.text || "") : m.text || "";
-  if (selectedKind === "channel" && m.role !== "user") {
-    const agent = agents.find((a) => a.id === m.from) ?? null;
+  if (m.role !== "user") {
+    const agent =
+      agents.find((a) => a.id === m.from) ?? currentAgent ?? null;
+    const self = selectedKind === "agent" && !!agent && agent.id === selected;
     return (
       <Incoming
         message={{ ...m, text }}
@@ -295,13 +322,14 @@ function Bubble({
         who={displayWho(m, agent)}
         agents={agents}
         caret={caret}
+        openName={!self}
         onSelectAgent={onSelectAgent}
       />
     );
   }
   const cls = "bubble md" + (caret ? " streaming" : "");
   return (
-    <div className={"row " + (m.role === "user" ? "me" : "them")}>
+    <div className="row me">
       <MdBody
         className={cls}
         text={text}
