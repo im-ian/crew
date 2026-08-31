@@ -73,13 +73,13 @@ aside {
   padding: 0 var(--rail-pad) 12px;
 }
 .icon-btn {
-  width: 22px;
-  height: 22px;
+  width: var(--control-h);
+  height: var(--control-h);
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: var(--field);
   color: var(--ink);
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
   flex-shrink: 0;
