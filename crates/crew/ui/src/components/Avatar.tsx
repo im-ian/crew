@@ -15,7 +15,7 @@ type Props = {
   status?: AgentStatus | null;
   title?: string;
   overlay?: ReactNode;
-  as?: "div" | "button";
+  as?: "div" | "button" | "span";
   onClick?: (e: MouseEvent) => void;
 };
 
@@ -93,9 +93,10 @@ export function Avatar({
       </button>
     );
   }
+  const Tag = as === "span" ? "span" : "div";
   return (
-    <div className={cls} style={style} title={title} onClick={onClick}>
+    <Tag className={cls} style={style} title={title} onClick={onClick}>
       {body}
-    </div>
+    </Tag>
   );
 }

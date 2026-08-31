@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { flushSync } from "react-dom";
 import type { AgentInfo, Kind } from "../types";
+import { resolveMention, trimMentionPunct } from "../mentions";
 import { Avatar } from "./Avatar";
+import { MentionChip } from "./MentionChip";
 
 type Props = {
   agents: AgentInfo[];
@@ -19,9 +23,11 @@ export function Composer({
   placeholder,
   onSend,
 }: Props) {
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useRef<HTMLDivElement>(null);
+  const composing = useRef(false);
   const [mention, setMention] = useState<Mention | null>(null);
   const [mentionIdx, setMentionIdx] = useState(0);
+  const [empty, setEmpty] = useState(true);
 
   const matches = useMemo(() => {
     if (!mention) return [];
@@ -45,11 +51,19 @@ export function Composer({
     el.style.height = Math.min(el.scrollHeight, 120) + "px";
   }
 
-  function scanMention() {
+  function refreshEmpty() {
     const el = inputRef.current;
-    if (!el) return;
-    const caret = el.selectionStart ?? el.value.length;
-    const before = el.value.slice(0, caret);
+    setEmpty(!el || isEditorEmpty(el));
+  }
+
+  function scanMention() {
+    if (composing.current) return;
+    const ctx = caretTextContext(inputRef.current);
+    if (!ctx) {
+      setMention(null);
+      return;
+    }
+    const before = ctx.node.textContent?.slice(0, ctx.offset) ?? "";
     const m = before.match(/(^|[\s])@(\S*)$/);
     if (!m) {
       setMention(null);
@@ -64,18 +78,9 @@ export function Composer({
   }
 
   function pickMention(agent: AgentInfo) {
-    const el = inputRef.current;
-    if (!el || !mention) return;
-    const caret = el.selectionStart ?? el.value.length;
-    const label =
-      agent.name && !/\s/.test(agent.name) ? agent.name : agent.id;
-    const next =
-      el.value.slice(0, mention.start) + "@" + label + " " + el.value.slice(caret);
-    el.value = next;
-    const pos = mention.start + label.length + 2;
-    el.focus();
-    el.setSelectionRange(pos, pos);
+    if (!insertChip(inputRef.current, agent)) return;
     setMention(null);
+    refreshEmpty();
     fit();
   }
 
@@ -100,10 +105,11 @@ export function Composer({
         e.preventDefault();
         const el = inputRef.current;
         if (!el) return;
-        const raw = el.value;
+        const raw = serializeEditor(el);
         if (!raw.trim()) return;
-        el.value = "";
+        el.innerHTML = "";
         setMention(null);
+        setEmpty(true);
         fit();
         await onSend(raw);
       }}
@@ -141,17 +147,32 @@ export function Composer({
             ))}
           </div>
         ) : null}
-        <textarea
+        <div
           ref={inputRef}
-          rows={1}
-          autoComplete="off"
-          placeholder={placeholder}
+          className={"composer-input" + (empty ? " is-empty" : "")}
+          contentEditable
+          role="textbox"
+          aria-multiline="true"
+          data-placeholder={placeholder}
           onInput={() => {
+            refreshEmpty();
             fit();
             scanMention();
           }}
           onClick={scanMention}
           onKeyUp={scanMention}
+          onCompositionStart={() => {
+            composing.current = true;
+          }}
+          onCompositionEnd={() => {
+            composing.current = false;
+            scanMention();
+          }}
+          onPaste={(e) => {
+            e.preventDefault();
+            const text = e.clipboardData?.getData("text/plain") ?? "";
+            document.execCommand("insertText", false, text);
+          }}
           onKeyDown={(e) => {
             if (mentionOpen) {
               if (e.key === "ArrowDown") {
@@ -176,9 +197,29 @@ export function Composer({
                 return;
               }
             }
+            if (e.key === "Enter" && e.shiftKey) {
+              e.preventDefault();
+              document.execCommand("insertLineBreak");
+              refreshEmpty();
+              fit();
+              return;
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              (e.currentTarget.form as HTMLFormElement | null)?.requestSubmit();
+              (e.currentTarget.closest("form") as HTMLFormElement | null)?.requestSubmit();
+            }
+            if (e.key === " " && !composing.current) {
+              const ctx = caretTextContext(inputRef.current);
+              const before = ctx?.node.textContent?.slice(0, ctx.offset) ?? "";
+              const m = before.match(/(^|[\s])@(\S+)$/);
+              const token = m ? trimMentionPunct(m[2]) : "";
+              const agent = token ? resolveMention(token, agents) : undefined;
+              if (agent && insertChip(inputRef.current, agent)) {
+                e.preventDefault();
+                setMention(null);
+                refreshEmpty();
+                fit();
+              }
             }
           }}
         />
@@ -188,4 +229,100 @@ export function Composer({
       </div>
     </form>
   );
+}
+
+function insertChip(editor: HTMLElement | null, agent: AgentInfo): boolean {
+  const ctx = caretTextContext(editor);
+  if (!ctx) return false;
+  const prefix = ctx.node.textContent?.slice(0, ctx.offset) ?? "";
+  const m = prefix.match(/(^|[\s])@(\S*)$/);
+  if (!m) return false;
+  const start = prefix.length - m[2].length - 1;
+  const range = document.createRange();
+  range.setStart(ctx.node, start);
+  range.setEnd(ctx.node, ctx.offset);
+  range.deleteContents();
+  const chip = renderChip(agent);
+  range.insertNode(chip);
+  const space = document.createTextNode("\u00a0");
+  chip.after(space);
+  const sel = window.getSelection();
+  if (sel) {
+    sel.removeAllRanges();
+    const after = document.createRange();
+    after.setStart(space, 1);
+    after.collapse(true);
+    sel.addRange(after);
+  }
+  return true;
+}
+
+function renderChip(agent: AgentInfo): HTMLElement {
+  const box = document.createElement("div");
+  const root = createRoot(box);
+  flushSync(() => {
+    root.render(<MentionChip agent={agent} />);
+  });
+  const html = box.innerHTML;
+  root.unmount();
+  box.innerHTML = html;
+  return box.firstElementChild as HTMLElement;
+}
+
+function isEditorEmpty(el: HTMLElement): boolean {
+  if (el.querySelector("[data-mention]")) return false;
+  return !el.innerText.replace(/\u00a0/g, " ").trim();
+}
+
+function serializeEditor(root: HTMLElement): string {
+  let s = "";
+  function walk(node: Node): void {
+    if (node.nodeType === Node.TEXT_NODE) {
+      s += (node.textContent || "").replace(/\u00a0/g, " ");
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const el = node as HTMLElement;
+    if (el.dataset.mention) {
+      s += "@" + el.dataset.mention;
+      return;
+    }
+    if (el.tagName === "BR") {
+      s += "\n";
+      return;
+    }
+    const block = el !== root && (el.tagName === "DIV" || el.tagName === "P");
+    if (block && s.length > 0 && !s.endsWith("\n")) s += "\n";
+    Array.from(el.childNodes).forEach(walk);
+  }
+  walk(root);
+  return s.replace(/\n+$/, "");
+}
+
+function caretTextContext(
+  editor: HTMLElement | null,
+): { node: Text; offset: number } | null {
+  if (!editor) return null;
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return null;
+  const r = sel.getRangeAt(0);
+  if (!editor.contains(r.startContainer) && editor !== r.startContainer) {
+    return null;
+  }
+  let node: Node | null = r.startContainer;
+  let offset = r.startOffset;
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    const children = node.childNodes;
+    if (offset > 0 && children[offset - 1]?.nodeType === Node.TEXT_NODE) {
+      node = children[offset - 1];
+      offset = node.textContent?.length ?? 0;
+    } else if (children[offset]?.nodeType === Node.TEXT_NODE) {
+      node = children[offset];
+      offset = 0;
+    } else {
+      return null;
+    }
+  }
+  if (!node || node.nodeType !== Node.TEXT_NODE) return null;
+  return { node: node as Text, offset };
 }

@@ -705,8 +705,42 @@ textarea.textin.memory {
   color: var(--faint);
   font-size: 12px;
 }
+.mention-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(100%, 18em);
+  height: 26px;
+  padding: 2px 10px 2px 3px;
+  margin: 0 1px;
+  border-radius: 999px;
+  background: var(--btn);
+  color: var(--ink);
+  vertical-align: middle;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+  overflow: hidden;
+}
+.row.me .mention-chip {
+  background: rgba(0, 0, 0, 0.32);
+}
+.mention-chip-avatar {
+  width: 22px;
+  height: 22px;
+  font-size: 9px;
+  display: inline-grid;
+}
+.mention-chip-name {
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .composer-box:focus-within { background: var(--line); }
-.composer-box textarea {
+.composer-input {
   flex: 1;
   min-width: 0;
   background: transparent;
@@ -716,11 +750,17 @@ textarea.textin.memory {
   font-size: 15px;
   line-height: 1.4;
   outline: none;
-  resize: none;
   max-height: 120px;
   min-height: var(--control-h);
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
-.composer-box textarea::placeholder { color: var(--faint); }
+.composer-input.is-empty::before {
+  content: attr(data-placeholder);
+  color: var(--faint);
+  pointer-events: none;
+}
 .composer-box button[type="submit"] {
   width: var(--control-h);
   height: var(--control-h);

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { AgentInfo, ChannelInfo, ChatMessage, Kind } from "../types";
-import { renderMarkdown } from "../markdown";
 import { Avatar } from "./Avatar";
+import { MdBody } from "./MdBody";
 
 type Props = {
   messages: ChatMessage[];
@@ -139,7 +139,14 @@ function SystemOrIncoming({
   }
   const agent = agents.find((a) => a.id === m.from) ?? null;
   if (agent || String(m.from || "").startsWith("#")) {
-    return <Incoming message={m} agent={agent} who={displayWho(m, agent)} />;
+    return (
+      <Incoming
+        message={m}
+        agent={agent}
+        who={displayWho(m, agent)}
+        agents={agents}
+      />
+    );
   }
   return (
     <div className="sys">
@@ -153,14 +160,15 @@ function Incoming({
   message: m,
   agent,
   who,
+  agents,
   caret = false,
 }: {
   message: ChatMessage;
   agent: AgentInfo | null;
   who: string;
+  agents: AgentInfo[];
   caret?: boolean;
 }) {
-  const html = renderMarkdown(m.text || "");
   const cls = "bubble md" + (caret ? " streaming" : "");
   return (
     <div className="row them">
@@ -177,7 +185,7 @@ function Incoming({
       ) : null}
       <div className="channel-msg">
         <div className="sys-from channel-who">{who}</div>
-        <div className={cls} dangerouslySetInnerHTML={{ __html: html }} />
+        <MdBody className={cls} text={m.text || ""} agents={agents} />
       </div>
     </div>
   );
@@ -203,15 +211,15 @@ function Bubble({
         message={{ ...m, text }}
         agent={agent}
         who={displayWho(m, agent)}
+        agents={agents}
         caret={caret}
       />
     );
   }
-  const html = renderMarkdown(text);
   const cls = "bubble md" + (caret ? " streaming" : "");
   return (
     <div className={"row " + (m.role === "user" ? "me" : "them")}>
-      <div className={cls} dangerouslySetInnerHTML={{ __html: html }} />
+      <MdBody className={cls} text={text} agents={agents} />
     </div>
   );
 }
@@ -248,11 +256,24 @@ function isEnvelopeEcho(raw: string, prev: ChatMessage | undefined): boolean {
     .every((line) => line === src);
 }
 
+function isPlainEcho(raw: string, messages: ChatMessage[], index: number): boolean {
+  const text = stripCrewMarkers(raw);
+  if (!text) return false;
+  for (let i = index - 1; i >= 0; i--) {
+    const prev = messages[i];
+    if (prev.role === "user" || prev.role === "system") {
+      return text === (prev.text || "").trim();
+    }
+  }
+  return false;
+}
+
 function visibleMessages(messages: ChatMessage[]): ChatMessage[] {
   return messages.filter((m, i) => {
     if (m.role !== "assistant") return true;
     const raw = m.text || "";
     if (isEnvelopeEcho(raw, messages[i - 1])) return false;
+    if (isPlainEcho(raw, messages, i)) return false;
     return stripCrewMarkers(raw).length > 0;
   });
 }
