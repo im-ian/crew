@@ -210,14 +210,16 @@ function SystemOrIncoming({
           fromChannel ? `#${channelDisplayName(from, channels)}` : displayWho(m, agent)
         }
         agents={agents}
+        quiet
         onSelectAgent={onSelectAgent}
       />
     );
   }
   return (
-    <div className="sys">
+    <div className={"sys" + (m.queued ? " queued" : "")}>
       <div className="sys-from">{`루틴 · ${m.from || ""}`}</div>
       <div className="sys-text">{m.text || ""}</div>
+      {m.queued ? <QueueWait /> : null}
     </div>
   );
 }
@@ -228,6 +230,7 @@ function Incoming({
   who,
   agents,
   caret = false,
+  quiet = false,
   openName = true,
   onSelectAgent,
 }: {
@@ -236,6 +239,7 @@ function Incoming({
   who: string;
   agents: AgentInfo[];
   caret?: boolean;
+  quiet?: boolean;
   openName?: boolean;
   onSelectAgent?: (id: string) => void;
 }) {
@@ -246,9 +250,20 @@ function Incoming({
     openName && onSelectAgent && agent
       ? () => onSelectAgent(agent.id)
       : undefined;
-  const cls = "bubble md incoming" + (caret ? " streaming" : "");
+  const queued = !!m.queued;
+  const cls =
+    "bubble md incoming" +
+    (caret ? " streaming" : "") +
+    (quiet ? " quiet" : "") +
+    (queued ? " queued" : "");
   return (
-    <div className="row them incoming">
+    <div
+      className={
+        "row them incoming" +
+        (quiet ? " quiet" : "") +
+        (queued ? " queued" : "")
+      }
+    >
       {agent ? (
         <Avatar
           as={open ? "button" : "div"}
@@ -287,6 +302,7 @@ function Incoming({
           agents={agents}
           onMention={onSelectAgent}
         />
+        {queued ? <QueueWait /> : null}
       </div>
     </div>
   );
@@ -327,15 +343,33 @@ function Bubble({
       />
     );
   }
-  const cls = "bubble md" + (caret ? " streaming" : "");
+  const queued = !!m.queued;
+  const cls =
+    "bubble md" + (caret ? " streaming" : "") + (queued ? " queued" : "");
   return (
-    <div className="row me">
-      <MdBody
-        className={cls}
-        text={text}
-        agents={agents}
-        onMention={onSelectAgent}
-      />
+    <div className={"row me" + (queued ? " queued" : "")}>
+      <div className="me-msg">
+        <MdBody
+          className={cls}
+          text={text}
+          agents={agents}
+          onMention={onSelectAgent}
+        />
+        {queued ? <QueueWait /> : null}
+      </div>
+    </div>
+  );
+}
+
+function QueueWait() {
+  return (
+    <div className="queue-wait" aria-label="줄 서는 중">
+      <span className="queue-wait-text">줄 서는 중</span>
+      <span className="queue-dots" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+      </span>
     </div>
   );
 }

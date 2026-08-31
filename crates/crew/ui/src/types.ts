@@ -64,6 +64,7 @@ export type ChatMessage = {
   from: string;
   text: string;
   ts: number;
+  queued?: boolean;
 };
 
 export type PendingAvatar = {
