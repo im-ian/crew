@@ -1,0 +1,24 @@
+[package]
+name = "crew"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Local multi-agent desktop for grok/claude/codex CLIs"
+
+[[bin]]
+name = "crew"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+libc = "0.2"
+portable-pty = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tokio = { version = "1", features = ["full"] }
+vt100 = "0.15"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

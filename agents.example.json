@@ -1,0 +1,38 @@
+{
+  "channels": [],
+  "agents": [
+    {
+      "id": "grok",
+      "name": "Grok",
+      "cmd": ["grok", "--always-approve"],
+      "cwd": "/tmp/crew-demo/grok",
+      "routines": []
+    },
+    {
+      "id": "shell",
+      "name": "Shell",
+      "cmd": ["cat"],
+      "cwd": "/tmp/crew-demo/shell",
+      "routines": []
+    }
+  ],
+  "examples": [
+    {
+      "id": "claude",
+      "name": "Claude",
+      "cmd": ["claude", "--dangerously-skip-permissions"],
+      "cwd": "/tmp/crew-demo/claude",
+      "title": "Code reviewer",
+      "role": "Senior reviewer",
+      "description": "Read the diff, then comment.",
+      "routines": []
+    },
+    {
+      "id": "codex",
+      "name": "Codex",
+      "cmd": ["codex", "--yolo"],
+      "cwd": "/tmp/crew-demo/codex",
+      "routines": []
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+/target
+.DS_Store
+*.rs.bk
+crew.log
+/*.md
+node_modules/
+/crates/crew/ui/dist

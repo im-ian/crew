@@ -1,0 +1,51 @@
+export type AgentStatus = "working" | "idle" | "blocked" | "exited";
+export type Effort = "low" | "medium" | "high";
+export type Role = "user" | "assistant" | "system";
+export type Kind = "agent" | "channel";
+export type ConfirmKind = "reset" | "remove" | "leave-channel" | "remove-channel";
+export type CliKind = "grok" | "claude" | "codex";
+
+export type Routine = {
+  id: string;
+  name: string;
+  prompt: string;
+  schedule: string;
+  enabled: boolean;
+  last_run?: string | null;
+};
+
+export type AgentInfo = {
+  id: string;
+  name: string;
+  status: AgentStatus;
+  cmd: string[];
+  cwd: string;
+  model?: string | null;
+  effort?: Effort | null;
+  avatar?: string | null;
+  title?: string | null;
+  description?: string | null;
+  role?: string | null;
+  routines: Routine[];
+  preview?: string | null;
+};
+
+export type ChannelInfo = {
+  id: string;
+  name: string;
+  members: string[];
+  preview?: string | null;
+};
+
+export type ChatMessage = {
+  id: string;
+  role: Role;
+  from: string;
+  text: string;
+  ts: number;
+};
+
+export type PendingAvatar = {
+  data: string;
+  name: string;
+};
