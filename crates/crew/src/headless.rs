@@ -214,6 +214,10 @@ fn run_turn(
                 outcome.got_text,
                 outcome.error.as_deref(),
                 created_id.is_some(),
+                turn_session
+                    .as_ref()
+                    .filter(|s| s.resume)
+                    .map(|s| s.id.as_str()),
             );
             if dead {
                 if let Ok(mut inner) = session.inner.lock() {
@@ -269,11 +273,19 @@ fn run_turn(
 }
 
 /// A turn that died without a reply left no CLI conversation behind, so its id
-/// must not be reused: `--resume` would point at a session the CLI never wrote.
-fn session_is_dead(got_text: bool, error: Option<&str>, fresh_id: bool) -> bool {
+/// must not be reused: resuming would point at a session the CLI never wrote.
+/// Every CLI words a missing session differently ("No conversation found with
+/// session ID", "no rollout found for thread id", "Session ... not found
+/// locally"), but all of them quote the id, so look for that instead.
+fn session_is_dead(
+    got_text: bool,
+    error: Option<&str>,
+    fresh_id: bool,
+    resumed_id: Option<&str>,
+) -> bool {
     match error {
         Some(err) if !got_text => {
-            fresh_id || err.to_lowercase().contains("no conversation found")
+            fresh_id || resumed_id.map(|id| err.contains(id)).unwrap_or(false)
         }
         _ => false,
     }
@@ -720,19 +732,34 @@ mod tests {
 
     #[test]
     fn dead_session_ids_are_dropped() {
+        let id = "00000000-0000-4000-8000-000000000000";
         // fresh id + failed turn -> the CLI never wrote that session
-        assert!(session_is_dead(false, Some("CLI exited with status 1"), true));
-        // stale stored id the CLI no longer knows -> start over
         assert!(session_is_dead(
             false,
-            Some("No conversation found with session ID: abc"),
-            false
+            Some("CLI exited with status 1"),
+            true,
+            None
         ));
+        // stale stored id, in each CLI's own wording -> start over
+        for err in [
+            "No conversation found with session ID: 00000000-0000-4000-8000-000000000000",
+            "Error: thread/resume failed: no rollout found for thread id \
+             00000000-0000-4000-8000-000000000000 (code -32600)",
+            "Session \"00000000-0000-4000-8000-000000000000\" not found locally, \
+             restoring conversation from remote...",
+        ] {
+            assert!(session_is_dead(false, Some(err), false, Some(id)), "{err}");
+        }
         // resumed session that failed for another reason -> keep the history
-        assert!(!session_is_dead(false, Some("overloaded_error"), false));
+        assert!(!session_is_dead(
+            false,
+            Some("overloaded_error"),
+            false,
+            Some(id)
+        ));
         // got a reply -> always keep
-        assert!(!session_is_dead(true, Some("warning"), true));
-        assert!(!session_is_dead(false, None, true));
+        assert!(!session_is_dead(true, Some("warning"), true, Some(id)));
+        assert!(!session_is_dead(false, None, true, None));
     }
 
     #[test]
