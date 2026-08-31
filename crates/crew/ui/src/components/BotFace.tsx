@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type PointerEvent } from "react";
+import { useLayoutEffect, useRef, useState, type PointerEvent } from "react";
 import { avatarPhase, type AvatarShape } from "../avatar";
 import type { AgentStatus } from "../types";
 
@@ -156,21 +156,51 @@ function gazeFromPointer(
   return { x: nx * GAZE_X, y: ny * GAZE_Y };
 }
 
+function applyGaze(
+  svg: SVGSVGElement | null,
+  g: { x: number; y: number } | null,
+) {
+  if (!svg) return;
+  if (g) {
+    svg.style.setProperty("--gaze-x", `${g.x}px`);
+    svg.style.setProperty("--gaze-y", `${g.y}px`);
+    svg.classList.add("is-tracking");
+  } else {
+    svg.style.removeProperty("--gaze-x");
+    svg.style.removeProperty("--gaze-y");
+    svg.classList.remove("is-tracking");
+  }
+}
+
 export function BotFace({ shape, color, className, title, status, id }: Props) {
   const eyes = eyesAt(shape);
   const live = liveMood(status);
-  const [gaze, setGaze] = useState<{ x: number; y: number } | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const gazeRef = useRef<{ x: number; y: number } | null>(null);
+  const [tracking, setTracking] = useState(false);
+
+  useLayoutEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    if (live) svg.style.setProperty("--avatar-phase", String(avatarPhase(id)));
+    else svg.style.removeProperty("--avatar-phase");
+    applyGaze(svg, gazeRef.current);
+  });
 
   function onPointerMove(e: PointerEvent<SVGSVGElement>) {
     if (prefersReducedMotion()) return;
-    setGaze(gazeFromPointer(e, eyes));
+    const g = gazeFromPointer(e, eyes);
+    gazeRef.current = g;
+    applyGaze(e.currentTarget, g);
+    setTracking(true);
   }
 
-  function onPointerLeave() {
-    setGaze(null);
+  function onPointerLeave(e: PointerEvent<SVGSVGElement>) {
+    gazeRef.current = null;
+    applyGaze(e.currentTarget, null);
+    setTracking(false);
   }
 
-  const tracking = gaze !== null;
   const cls = [
     "avatar-face",
     live ? `is-${live}` : "",
@@ -179,16 +209,10 @@ export function BotFace({ shape, color, className, title, status, id }: Props) {
   ]
     .filter(Boolean)
     .join(" ");
-  const style = {
-    ...(live ? { ["--avatar-phase"]: avatarPhase(id) } : {}),
-    ...(tracking
-      ? { ["--gaze-x"]: `${gaze.x}px`, ["--gaze-y"]: `${gaze.y}px` }
-      : {}),
-  } as CSSProperties;
   return (
     <svg
+      ref={svgRef}
       className={cls}
-      style={style}
       viewBox="0 0 64 64"
       width="100%"
       height="100%"

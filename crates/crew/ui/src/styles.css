@@ -283,6 +283,7 @@ button.avatar {
 }
 .avatar-face.is-tracking .avatar-gaze {
   animation: none;
+  transition: none;
   transform: translate(var(--gaze-x, 0px), var(--gaze-y, 0px));
 }
 .avatar-face.is-idle .avatar-blink,
@@ -351,6 +352,7 @@ button.avatar {
   .avatar-face.is-blocked .avatar-eye,
   .avatar-face.is-tracking .avatar-gaze {
     animation: none;
+    transition: none;
   }
 }
 .avatar-letter { z-index: 0; }
