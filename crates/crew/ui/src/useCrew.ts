@@ -94,7 +94,7 @@ export function useCrew() {
   const placeholder = currentChannel
     ? `+ ${currentChannel.name || currentChannel.id}에 메시지`
     : currentAgent
-      ? `+ ${currentAgent.name || currentAgent.id}에게 메시지 (@다른 봇)`
+      ? `+ ${currentAgent.name || currentAgent.id}에게 메시지 (@팀원 멘션)`
       : "+ 메시지";
 
   function showToast(text: string) {
@@ -314,40 +314,13 @@ export function useCrew() {
 
   async function onSend(raw: string) {
     const { id: sel, kind } = selectedRef.current;
-    if (kind === "channel") {
-      if (!sel) return;
-      try {
-        await api.channelSend(sel, raw);
-        await refreshMessages();
-      } catch (err) {
-        showError(err);
-      }
-      return;
-    }
-    const parsed = parseOutgoing(raw, agentsRef.current, sel);
-    if (parsed.mention && !parsed.to) {
-      showError("알 수 없는 봇 @" + parsed.mention);
-      return;
-    }
-    if (parsed.mention && parsed.to) {
-      if (!parsed.text) {
-        if (parsed.to !== sel) selectAgent(parsed.to);
-        return;
-      }
-      if (parsed.to !== sel) {
-        try {
-          await api.tellMessage(parsed.to, parsed.text);
-          selectAgent(parsed.to);
-        } catch (err) {
-          showError(err);
-        }
-        return;
-      }
-    }
-    const to = parsed.to || sel;
-    if (!to) return;
+    if (!sel) return;
     try {
-      await api.sendMessage(to, parsed.text);
+      if (kind === "channel") {
+        await api.channelSend(sel, raw);
+      } else {
+        await api.sendMessage(sel, raw);
+      }
       await refreshMessages();
     } catch (err) {
       showError(err);
@@ -797,27 +770,6 @@ export function useCrew() {
     saveMemory,
     showError,
   };
-}
-
-function parseOutgoing(
-  raw: string,
-  agents: AgentInfo[],
-  fallback: string | null,
-): { to: string | null; text: string; mention: string | null } {
-  const m = raw.match(/^@(\S+)(?:\s+([\s\S]*))?$/);
-  if (m) {
-    const key = m[1];
-    const text = (m[2] || "").trim();
-    const lower = key.toLowerCase();
-    const agent =
-      agents.find((a) => a.id === key || a.name === key) ||
-      agents.find(
-        (a) =>
-          a.id.toLowerCase() === lower || (a.name || "").toLowerCase() === lower,
-      );
-    return { to: agent ? agent.id : null, text, mention: key };
-  }
-  return { to: fallback, text: raw, mention: null };
 }
 
 function readFileDataUrl(file: File): Promise<string> {

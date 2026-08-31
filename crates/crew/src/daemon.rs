@@ -957,7 +957,8 @@ fn messages_agent(id: &str) -> anyhow::Result<Event> {
 fn send_agent(id: &str, text: &str) -> anyhow::Result<()> {
     ensure_accepts_turn(id)?;
     crate::transcript::push_user(id, "user", text);
-    match deliver(id, text, true) {
+    let delivered = crate::config::with_mention_hint(text, id, &roster_vec());
+    match deliver(id, &delivered, true) {
         Ok(()) => Ok(()),
         Err(err) => {
             crate::transcript::cancel_expect(id);

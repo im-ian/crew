@@ -632,7 +632,7 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         }
     }
     s.push_str(
-        "To message another agent, run: `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not pretend to message; actually run the command.\n",
+        "When the user writes @id or @display-name, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend.\n",
     );
     s.push_str(
         "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew channel:…]` / `[crew system]` are real messages.\n",
@@ -668,8 +668,73 @@ pub fn roster_update_text(agent: &AgentConfig, roster: &[AgentConfig]) -> String
         body.push_str(&parts.join("; "));
         body.push('.');
     }
-    body.push_str(" To message another agent, run: `crew tell <id> <text>`.");
+    body.push_str(" When the user writes @id or @display-name they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>`. Do not ask the user to switch chats. Do not pretend.");
     body
+}
+
+/// `@id` / `@display-name` tokens in `text` that name a teammate (not `self_id`).
+pub fn mentioned_teammate_ids(text: &str, self_id: &str, roster: &[AgentConfig]) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut seen = HashSet::new();
+    for token in mention_tokens(text) {
+        if let Some(id) = resolve_mention(&token, self_id, roster) {
+            if seen.insert(id.clone()) {
+                found.push(id);
+            }
+        }
+    }
+    found
+}
+
+/// Prompt for the CLI: raw user text, plus a short `[crew system]` hint when
+/// the user @mentioned teammates. Transcript should keep the raw message.
+pub fn with_mention_hint(text: &str, self_id: &str, roster: &[AgentConfig]) -> String {
+    let ids = mentioned_teammate_ids(text, self_id, roster);
+    if ids.is_empty() {
+        return text.to_string();
+    }
+    format!(
+        "{text}\n\n[crew system]\nUser @mentioned teammates: {}. They named them for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>`. Do not ask the user to switch chats. Do not pretend.",
+        ids.join(", ")
+    )
+}
+
+fn mention_tokens(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut prev_ws = true;
+    for (idx, ch) in text.char_indices() {
+        if ch == '@' && prev_ws {
+            let rest = &text[idx + ch.len_utf8()..];
+            let raw: String = rest.chars().take_while(|c| !c.is_whitespace()).collect();
+            let token = raw.trim_end_matches(is_mention_punct);
+            if !token.is_empty() {
+                out.push(token.to_string());
+            }
+        }
+        prev_ws = ch.is_whitespace();
+    }
+    out
+}
+
+fn is_mention_punct(c: char) -> bool {
+    matches!(
+        c,
+        ',' | '.' | '!' | '?' | ':' | ';' | ')' | ']' | '}' | '"' | '\''
+    )
+}
+
+fn resolve_mention(token: &str, self_id: &str, roster: &[AgentConfig]) -> Option<String> {
+    let lower = token.to_lowercase();
+    roster
+        .iter()
+        .find(|a| {
+            a.id != self_id
+                && (a.id == token
+                    || a.name == token
+                    || a.id.to_lowercase() == lower
+                    || a.display_name().to_lowercase() == lower)
+        })
+        .map(|a| a.id.clone())
 }
 
 fn inject_team_rules(
@@ -709,14 +774,8 @@ fn apply_grok_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSe
 }
 
 fn apply_claude_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSession>) {
-    remove_switch(
-        args,
-        &["-p", "--print", "--include-partial-messages"],
-    );
-    remove_flag_with_value(
-        args,
-        &["--output-format", "--resume", "-r", "--session-id"],
-    );
+    remove_switch(args, &["-p", "--print", "--include-partial-messages"]);
+    remove_flag_with_value(args, &["--output-format", "--resume", "-r", "--session-id"]);
     args.push("-p".into());
     args.push("--output-format".into());
     args.push("stream-json".into());
@@ -1006,7 +1065,11 @@ mod tests {
 
     #[test]
     fn grok_turn_uses_real_headless_flags() {
-        let c = cfg(&["grok", "--always-approve"], Some("grok-4"), Some(Effort::High));
+        let c = cfg(
+            &["grok", "--always-approve"],
+            Some("grok-4"),
+            Some(Effort::High),
+        );
         let argv = c.turn_cmd("hello", None, &[]);
         assert_eq!(argv[0], "grok");
         assert!(argv.contains(&"--always-approve".to_string()));
@@ -1164,6 +1227,7 @@ mod tests {
         assert!(rules.contains("beta — Beta — reviewer"));
         assert!(!rules.contains("alpha — Alpha"));
         assert!(rules.contains("crew tell"));
+        assert!(rules.contains("@id"));
     }
 
     #[test]
@@ -1333,8 +1397,55 @@ mod tests {
         assert!(text.contains("beta — Beta — reviewer"));
         assert!(!text.contains("alpha — Alpha"));
         assert!(text.contains("crew tell"));
+        assert!(text.contains("@id"));
         let solo = roster_update_text(&alpha, &[alpha.clone()]);
         assert!(solo.contains("Teammates: (none)"));
+    }
+
+    #[test]
+    fn mentioned_teammates_from_at_tokens() {
+        let alpha = AgentConfig::new("alpha".into(), "Alpha".into(), vec!["cat".into()], None);
+        let choon = AgentConfig::new("choonsik".into(), "춘식이".into(), vec!["cat".into()], None);
+        let beta = AgentConfig::new("beta".into(), "Beta".into(), vec!["cat".into()], None);
+        let roster = [alpha.clone(), choon, beta];
+
+        assert_eq!(
+            mentioned_teammate_ids("@춘식이 안녕", "alpha", &roster),
+            vec!["choonsik"]
+        );
+        assert_eq!(
+            mentioned_teammate_ids("ask @beta, then @춘식이.", "alpha", &roster),
+            vec!["beta", "choonsik"]
+        );
+        assert_eq!(
+            mentioned_teammate_ids("hello @nobody and @alpha", "alpha", &roster),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            mentioned_teammate_ids("email me@beta.com", "alpha", &roster),
+            Vec::<String>::new()
+        );
+
+        let hinted = with_mention_hint("ping @Beta please", "alpha", &roster);
+        assert!(hinted.starts_with("ping @Beta please"));
+        assert!(hinted.contains("[crew system]"));
+        assert!(hinted.contains("beta"));
+        assert!(hinted.contains("crew tell"));
+        assert_eq!(
+            with_mention_hint("no mentions", "alpha", &roster),
+            "no mentions"
+        );
+    }
+
+    #[test]
+    fn team_rules_explain_at_mentions() {
+        let alpha = AgentConfig::new("alpha".into(), "Alpha".into(), vec!["cat".into()], None);
+        let beta = AgentConfig::new("beta".into(), "Beta".into(), vec!["cat".into()], None);
+        let rules = team_rules(&alpha, &[alpha.clone(), beta]);
+        assert!(rules.contains("@id"));
+        assert!(rules.contains("naming a teammate for YOU"));
+        assert!(rules.contains("crew tell"));
+        assert!(rules.contains("Do not ask the user to switch chats"));
     }
 
     #[test]
