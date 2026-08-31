@@ -1,0 +1,200 @@
+import { useEffect, useRef, useState } from "react";
+import {
+  REPEAT_OPTIONS,
+  WEEKDAYS,
+  formatSchedule,
+  parseTimeValue,
+  toCron,
+  type Repeat,
+} from "../schedule";
+import type { AgentInfo, Routine } from "../types";
+import { Field } from "./Field";
+import { Modal } from "./Modal";
+import { Seg } from "./Seg";
+
+type Props = {
+  open: boolean;
+  agent: AgentInfo | null;
+  onClose: () => void;
+  onAdd: (name: string, schedule: string, prompt: string) => Promise<void>;
+  onToggle: (r: Routine) => Promise<void>;
+  onDelete: (r: Routine) => Promise<void>;
+};
+
+export function RoutinesModal({
+  open,
+  agent,
+  onClose,
+  onAdd,
+  onToggle,
+  onDelete,
+}: Props) {
+  const [name, setName] = useState("");
+  const [repeat, setRepeat] = useState<Repeat>("daily");
+  const [days, setDays] = useState<number[]>([1]);
+  const [time, setTime] = useState("09:00");
+  const [prompt, setPrompt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const routines = (agent && agent.routines) || [];
+
+  useEffect(() => {
+    if (!open) return;
+    setName("");
+    setRepeat("daily");
+    setDays([1]);
+    setTime("09:00");
+    setPrompt("");
+    setBusy(false);
+    const t = window.setTimeout(() => nameRef.current?.focus(), 0);
+    return () => window.clearTimeout(t);
+  }, [open, agent?.id]);
+
+  function toggleDay(day: number) {
+    setDays((cur) => {
+      if (cur.includes(day)) {
+        const next = cur.filter((d) => d !== day);
+        return next.length ? next : cur;
+      }
+      return [...cur, day].sort((a, b) => a - b);
+    });
+  }
+
+  async function submit() {
+    const n = name.trim();
+    const p = prompt.trim();
+    if (!n) {
+      nameRef.current?.focus();
+      return;
+    }
+    if (!p) {
+      promptRef.current?.focus();
+      return;
+    }
+    let schedule: string;
+    if (repeat === "hourly") {
+      schedule = toCron("hourly", days, 0, 0);
+    } else {
+      const clock = parseTimeValue(time);
+      if (!clock) return;
+      schedule = toCron(repeat, days, clock.hour, clock.minute);
+    }
+    setBusy(true);
+    try {
+      await onAdd(n, schedule, p);
+      setName("");
+      setPrompt("");
+      nameRef.current?.focus();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open={open} title="루틴" onClose={onClose}>
+      <p>원하는 시간에 봇이 알아서 하게 해 주세요.</p>
+      <div className="form-stack">
+        <div className="routine-list">
+          {!routines.length ? (
+            <div className="empty-routines">아직 예약된 일이 없습니다</div>
+          ) : (
+            routines.map((r) => (
+              <div className="routine" key={r.id || r.name}>
+                <div>
+                  <div className="routine-name">{r.name || r.id}</div>
+                  <div className="routine-meta">
+                    {formatSchedule(r.schedule || "")} ·{" "}
+                    {r.enabled === false ? "꺼짐" : "켜짐"}
+                  </div>
+                </div>
+                <div className="routine-actions">
+                  <button type="button" onClick={() => void onToggle(r)}>
+                    {r.enabled === false ? "켜기" : "끄기"}
+                  </button>
+                  <button type="button" onClick={() => void onDelete(r)}>
+                    삭제
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+        <Field label="이름" htmlFor="routine-name">
+          <input
+            id="routine-name"
+            ref={nameRef}
+            className="textin"
+            placeholder="아침 브리핑"
+            autoComplete="off"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void submit();
+              }
+            }}
+          />
+        </Field>
+        <Field label="언제">
+          <Seg value={repeat} options={REPEAT_OPTIONS} onChange={setRepeat} />
+        </Field>
+        {repeat === "weekly" ? (
+          <Field label="요일">
+            <div className="dow-row">
+              {WEEKDAYS.map((d) => (
+                <button
+                  key={d.value}
+                  type="button"
+                  className={"dow-pick" + (days.includes(d.value) ? " on" : "")}
+                  aria-pressed={days.includes(d.value)}
+                  aria-label={d.label}
+                  onClick={() => toggleDay(d.value)}
+                >
+                  {d.short}
+                </button>
+              ))}
+            </div>
+          </Field>
+        ) : null}
+        {repeat === "hourly" ? (
+          <p className="apply-note">한 시간마다 정각에 실행합니다.</p>
+        ) : (
+          <Field label="시각" htmlFor="routine-time">
+            <input
+              id="routine-time"
+              className="textin timein"
+              type="time"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+            />
+          </Field>
+        )}
+        <Field label="시킬 일" htmlFor="routine-prompt">
+          <textarea
+            id="routine-prompt"
+            ref={promptRef}
+            className="textin"
+            placeholder="오늘 할 일을 정리해서 알려줘"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+          />
+        </Field>
+      </div>
+      <div className="actions spread">
+        <button type="button" className="ghost" onClick={onClose}>
+          닫기
+        </button>
+        <button
+          type="button"
+          className="primary"
+          disabled={busy}
+          onClick={() => void submit()}
+        >
+          추가
+        </button>
+      </div>
+    </Modal>
+  );
+}

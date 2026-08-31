@@ -124,7 +124,7 @@ export function NewBotModal({
             id="new-name"
             ref={nameRef}
             className="textin"
-            placeholder="예: Frontend"
+            placeholder="예: 기획 도우미"
             autoComplete="off"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -145,20 +145,20 @@ export function NewBotModal({
             onChange={(e) => setPersona(e.target.value)}
           />
         </Field>
-        <Field label="CLI">
+        <Field label="AI">
           <Seg value={cli} options={CLIS} onChange={setCli} />
         </Field>
         <Field label="모델" htmlFor="new-model">
           <input
             id="new-model"
             className="textin"
-            placeholder="CLI 기본값"
+            placeholder="비워 두면 기본값"
             autoComplete="off"
             value={model}
             onChange={(e) => setModel(e.target.value)}
           />
         </Field>
-        <Field label="노력">
+        <Field label="꼼꼼함">
           <Seg value={effort} options={EFFORTS} onChange={setEffort} />
         </Field>
       </div>

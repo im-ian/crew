@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { AvatarShape } from "../avatar";
 import { EFFORTS } from "../options";
-import type { AgentInfo, Routine } from "../types";
+import type { AgentInfo } from "../types";
 import { Avatar } from "./Avatar";
 import { FacePicker } from "./FacePicker";
 import { Field } from "./Field";
+import { Modal } from "./Modal";
 import { Seg } from "./Seg";
 
 type Props = {
@@ -22,9 +23,6 @@ type Props = {
     model: string;
     effort: string;
   }) => Promise<void>;
-  onAddRoutine: (name: string, schedule: string, prompt: string) => Promise<void>;
-  onToggleRoutine: (r: Routine) => Promise<void>;
-  onDeleteRoutine: (r: Routine) => Promise<void>;
   onLoadMemory: (id: string) => Promise<string>;
   onSaveMemory: (text: string) => Promise<void>;
 };
@@ -38,9 +36,6 @@ export function InfoPane({
   onClearAvatar,
   onSetFace,
   onSave,
-  onAddRoutine,
-  onToggleRoutine,
-  onDeleteRoutine,
   onLoadMemory,
   onSaveMemory,
 }: Props) {
@@ -49,9 +44,6 @@ export function InfoPane({
   const [description, setDescription] = useState("");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
-  const [routineName, setRoutineName] = useState("");
-  const [routineCron, setRoutineCron] = useState("");
-  const [routinePrompt, setRoutinePrompt] = useState("");
   const [memory, setMemory] = useState("");
   const [memorySaved, setMemorySaved] = useState(false);
   const saveTimer = useRef<number | null>(null);
@@ -92,42 +84,36 @@ export function InfoPane({
     await onSave(merged);
   }
 
-  const routines = (agent && agent.routines) || [];
-
   return (
-    <div
-      className={"overlay" + (open ? " open" : "")}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="sheet">
-        <div className="info-hero">
-          <div className="avatar-row">
-            <Avatar
-              as="button"
-              className="info-avatar"
-              id={agent?.id}
-              name={agent?.name || agent?.id}
-              src={agent?.avatar}
-              shape={agent?.avatar_shape}
-              color={agent?.avatar_color}
-              status={agent?.status}
-              title="사진 변경"
-              onClick={onPickAvatar}
-              overlay={<span className="info-avatar-overlay">사진 변경</span>}
-            />
-            <div className="avatar-row-meta">
-              <h3>{agent?.name || agent?.id || "에이전트"}</h3>
-              {agent?.avatar ? (
-                <button type="button" className="ghost" onClick={onClearAvatar}>
-                  기본으로
-                </button>
-              ) : null}
-            </div>
+    <Modal open={open} title="봇 정보" onClose={onClose} wide>
+      <div className="info-hero">
+        <div className="avatar-row">
+          <Avatar
+            as="button"
+            className="info-avatar"
+            id={agent?.id}
+            name={agent?.name || agent?.id}
+            src={agent?.avatar}
+            shape={agent?.avatar_shape}
+            color={agent?.avatar_color}
+            status={agent?.status}
+            title="사진 변경"
+            onClick={onPickAvatar}
+            overlay={<span className="info-avatar-overlay">사진 변경</span>}
+          />
+          <div className="avatar-row-meta">
+            <strong className="info-name">
+              {agent?.name || agent?.id || "봇"}
+            </strong>
+            {agent?.avatar ? (
+              <button type="button" className="ghost" onClick={onClearAvatar}>
+                기본으로
+              </button>
+            ) : null}
           </div>
         </div>
-        <div className="form-stack">
+      </div>
+      <div className="form-stack">
           <FacePicker
             id={agent?.id}
             shape={agent?.avatar_shape}
@@ -169,7 +155,7 @@ export function InfoPane({
             <textarea
               id="info-description"
               className="textin"
-              placeholder="페르소나 / 설명"
+              placeholder="이 봇을 어떻게 쓸지"
               value={description}
               onChange={(e) => {
                 setDescription(e.target.value);
@@ -182,7 +168,7 @@ export function InfoPane({
             <input
               id="model"
               className="textin"
-              placeholder="CLI 기본값"
+              placeholder="비워 두면 기본값"
               value={model}
               onChange={(e) => {
                 setModel(e.target.value);
@@ -191,7 +177,7 @@ export function InfoPane({
               onBlur={() => void flushSave()}
             />
           </Field>
-          <Field label="노력">
+          <Field label="꼼꼼함">
             <Seg
               value={effort}
               options={EFFORTS}
@@ -202,7 +188,7 @@ export function InfoPane({
             />
           </Field>
           <p className="apply-note">
-            모델·노력·역할은 다음 세션부터 적용됩니다. 히스토리를 지우면 바로 새 설정으로
+            모델·꼼꼼함·역할은 다음 대화부터 적용됩니다. 대화를 지우면 바로 새 설정으로
             시작됩니다.
           </p>
           <Field label="기억" htmlFor="info-memory">
@@ -218,7 +204,7 @@ export function InfoPane({
             />
             <div className="actions spread">
               <span className="apply-note">
-                {memorySaved ? "저장됨" : "리셋 후에도 남습니다"}
+                {memorySaved ? "저장됨" : "대화를 지워도 남습니다"}
               </span>
               <button
                 type="button"
@@ -232,85 +218,15 @@ export function InfoPane({
               </button>
             </div>
           </Field>
-          <Field label="루틴">
-            <div className="routine-list">
-              {!routines.length ? (
-                <div className="empty-routines">등록된 루틴이 없습니다</div>
-              ) : (
-                routines.map((r) => (
-                  <div className="routine" key={r.id || r.name}>
-                    <div>
-                      <div className="routine-name">{r.name || r.id}</div>
-                      <div className="routine-meta">
-                        {r.schedule || ""} · {r.enabled === false ? "꺼짐" : "켜짐"}
-                      </div>
-                    </div>
-                    <div className="routine-actions">
-                      <button type="button" onClick={() => void onToggleRoutine(r)}>
-                        {r.enabled === false ? "재개" : "일시정지"}
-                      </button>
-                      <button type="button" onClick={() => void onDeleteRoutine(r)}>
-                        삭제
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </Field>
-          <div className="form-stack">
-            <Field label="이름" htmlFor="routine-name">
-              <input
-                id="routine-name"
-                className="textin"
-                placeholder="아침 브리핑"
-                value={routineName}
-                onChange={(e) => setRoutineName(e.target.value)}
-              />
-            </Field>
-            <Field label="cron" htmlFor="routine-cron">
-              <input
-                id="routine-cron"
-                className="textin"
-                placeholder="*/5 * * * *"
-                value={routineCron}
-                onChange={(e) => setRoutineCron(e.target.value)}
-              />
-            </Field>
-            <Field label="프롬프트" htmlFor="routine-prompt">
-              <textarea
-                id="routine-prompt"
-                className="textin"
-                placeholder="에이전트에 넣을 내용"
-                value={routinePrompt}
-                onChange={(e) => setRoutinePrompt(e.target.value)}
-              />
-            </Field>
-            <div className="actions">
-              <button
-                type="button"
-                className="primary"
-                onClick={async () => {
-                  await onAddRoutine(routineName, routineCron, routinePrompt);
-                  setRoutineName("");
-                  setRoutineCron("");
-                  setRoutinePrompt("");
-                }}
-              >
-                추가
-              </button>
-            </div>
-          </div>
         </div>
-        <div className="actions spread">
-          <button type="button" className="danger" onClick={onReset}>
-            히스토리 지우기
-          </button>
-          <button type="button" className="ghost" onClick={onClose}>
-            닫기
-          </button>
-        </div>
+      <div className="actions spread">
+        <button type="button" className="danger" onClick={onReset}>
+          대화 지우기
+        </button>
+        <button type="button" className="ghost" onClick={onClose}>
+          닫기
+        </button>
       </div>
-    </div>
+    </Modal>
   );
 }

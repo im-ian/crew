@@ -8,7 +8,7 @@ export const CLIS: { value: CliKind; label: string }[] = [
 
 export const EFFORTS: { value: string; label: string }[] = [
   { value: "", label: "기본" },
-  { value: "low", label: "낮음" },
+  { value: "low", label: "가볍게" },
   { value: "medium", label: "보통" },
-  { value: "high", label: "높음" },
+  { value: "high", label: "꼼꼼하게" },
 ];

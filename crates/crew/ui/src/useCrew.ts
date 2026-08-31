@@ -49,6 +49,7 @@ export function useCrew() {
   const [connected, setConnected] = useState<boolean | null>(null);
   const [connDetail, setConnDetail] = useState("데몬 확인 중…");
   const [infoOpen, setInfoOpen] = useState(false);
+  const [routineOpen, setRoutineOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmKind, setConfirmKind] = useState<ConfirmKind>("reset");
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -72,6 +73,8 @@ export function useCrew() {
   selectedRef.current = { id: selected, kind: selectedKind };
   const infoOpenRef = useRef(infoOpen);
   infoOpenRef.current = infoOpen;
+  const routineOpenRef = useRef(routineOpen);
+  routineOpenRef.current = routineOpen;
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
   const groupsRef = useRef(groups);
@@ -94,7 +97,7 @@ export function useCrew() {
   const placeholder = currentChannel
     ? `+ ${currentChannel.name || currentChannel.id}에 메시지`
     : currentAgent
-      ? `+ ${currentAgent.name || currentAgent.id}에게 메시지 (@팀원 멘션)`
+      ? `+ ${currentAgent.name || currentAgent.id}에게 메시지 (@이름으로 부르기)`
       : "+ 메시지";
 
   function showToast(text: string) {
@@ -120,6 +123,15 @@ export function useCrew() {
     setInfoOpen(false);
   }
 
+  function closeRoutines() {
+    setRoutineOpen(false);
+  }
+
+  function closePanes() {
+    closeInfo();
+    closeRoutines();
+  }
+
   function closeConfirm() {
     setConfirmOpen(false);
     setConfirmId(null);
@@ -140,7 +152,7 @@ export function useCrew() {
     setSelected(id);
     setSelectedKind("agent");
     setStick(true);
-    closeInfo();
+    closePanes();
     void refreshMessages();
   }
 
@@ -149,7 +161,7 @@ export function useCrew() {
     setSelected(id);
     setSelectedKind("channel");
     setStick(true);
-    closeInfo();
+    closePanes();
     void refreshMessages();
   }
 
@@ -159,7 +171,18 @@ export function useCrew() {
     selectedRef.current = { id, kind: "agent" };
     setSelected(id);
     setSelectedKind("agent");
+    closeRoutines();
     setInfoOpen(true);
+  }
+
+  function openRoutines(id: string) {
+    const a = agentsRef.current.find((x) => x.id === id);
+    if (!a) return;
+    selectedRef.current = { id, kind: "agent" };
+    setSelected(id);
+    setSelectedKind("agent");
+    closeInfo();
+    setRoutineOpen(true);
   }
 
   function openConfirm(id: string, kind: ConfirmKind = "reset") {
@@ -293,9 +316,12 @@ export function useCrew() {
     }
     setSelected(sel);
     setSelectedKind(kind);
-    if (infoOpenRef.current) {
+    if (infoOpenRef.current || routineOpenRef.current) {
       const a = kind === "agent" ? list.find((x) => x.id === sel) : null;
-      if (!a) setInfoOpen(false);
+      if (!a) {
+        setInfoOpen(false);
+        setRoutineOpen(false);
+      }
     }
   }, []);
 
@@ -394,7 +420,7 @@ export function useCrew() {
     const s = schedule.trim();
     const p = prompt.trim();
     if (!n || !s || !p) {
-      showError("루틴 이름, cron, 프롬프트를 모두 입력하세요");
+      showError("이름, 시각, 시킬 일을 모두 입력하세요");
       return;
     }
     try {
@@ -502,7 +528,7 @@ export function useCrew() {
       setSelectedKind("agent");
       setStick(true);
       setMessages([]);
-      closeInfo();
+      closePanes();
       await refreshList();
       await refreshMessages();
     } catch (err) {
@@ -562,7 +588,7 @@ export function useCrew() {
       setSelectedKind("agent");
       setStick(true);
       setMessages([]);
-      closeInfo();
+      closePanes();
       await refreshList();
       await refreshMessages();
     } catch (err) {
@@ -585,7 +611,7 @@ export function useCrew() {
       setSelectedKind("channel");
       setStick(true);
       setMessages([]);
-      closeInfo();
+      closePanes();
       await refreshList();
       await refreshMessages();
     } catch (err) {
@@ -690,7 +716,7 @@ export function useCrew() {
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
       closeConfirm();
-      closeInfo();
+      closePanes();
       closeNewBot();
       closeNewChannel();
       hideCtx();
@@ -719,6 +745,7 @@ export function useCrew() {
     connected,
     connDetail,
     infoOpen,
+    routineOpen,
     confirmOpen,
     confirmKind,
     newBotOpen,
@@ -737,6 +764,8 @@ export function useCrew() {
     selectChannel,
     openInfo,
     closeInfo,
+    openRoutines,
+    closeRoutines,
     openConfirm,
     closeConfirm,
     doConfirm,

@@ -6,6 +6,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ContextMenu, type MenuEntry } from "./components/ContextMenu";
 import { InfoPane } from "./components/InfoPane";
 import { NewBotModal } from "./components/NewBotModal";
+import { RoutinesModal } from "./components/RoutinesModal";
 import { NewChannelModal } from "./components/NewChannelModal";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
@@ -55,6 +56,9 @@ export function App() {
           onOpenInfo={() => {
             if (crew.selected) crew.openInfo(crew.selected);
           }}
+          onOpenRoutines={() => {
+            if (crew.selected) crew.openRoutines(crew.selected);
+          }}
           onPickAvatar={() => {
             if (crew.selected) crew.pickAvatar(crew.selected);
           }}
@@ -97,11 +101,16 @@ export function App() {
           }}
           onSetFace={crew.saveAgentFace}
           onSave={crew.saveAgentInfo}
-          onAddRoutine={crew.addRoutine}
-          onToggleRoutine={crew.toggleRoutine}
-          onDeleteRoutine={crew.deleteRoutine}
           onLoadMemory={crew.loadMemory}
           onSaveMemory={crew.saveMemory}
+        />
+        <RoutinesModal
+          open={crew.routineOpen}
+          agent={crew.currentAgent}
+          onClose={crew.closeRoutines}
+          onAdd={crew.addRoutine}
+          onToggle={crew.toggleRoutine}
+          onDelete={crew.deleteRoutine}
         />
       </main>
       <ConfirmDialog
@@ -229,7 +238,7 @@ function menuItems(
   if (!isCh) {
     items.push({
       type: "action",
-      label: "히스토리 지우기",
+      label: "대화 지우기",
       onClick: () => {
         crew.hideCtx();
         if (id) crew.openConfirm(id, "reset");

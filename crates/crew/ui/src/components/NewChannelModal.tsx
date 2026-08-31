@@ -70,7 +70,7 @@ export function NewChannelModal({ open, agents, onClose, onCreate }: Props) {
         <Field label="멤버">
           <div className="member-list">
             {!agents.length ? (
-              <div className="member-empty">에이전트가 없습니다</div>
+              <div className="member-empty">봇이 없습니다</div>
             ) : (
               agents.map((a) => (
                 <label key={a.id}>

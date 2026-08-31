@@ -16,16 +16,15 @@ export function ConfirmDialog({ open, kind, onCancel, onConfirm }: Props) {
     if (open) setDrop(false);
   }, [open]);
 
-  let title = "히스토리를 지울까요?";
-  let body =
-    "이름과 역할은 그대로이고, 대화 맥락만 빈 새 세션이 됩니다. 채널은 유지됩니다.";
+  let title = "대화를 지울까요?";
+  let body = "봇 설정은 그대로 두고, 지금까지의 대화만 지웁니다.";
   let ok = "지우기";
   let okClass = "primary";
   let showToggle = true;
 
   if (kind === "remove") {
     title = "봇을 삭제할까요?";
-    body = "에이전트와 실행 중인 세션이 제거됩니다.";
+    body = "이 봇과 대화가 삭제됩니다.";
     ok = "삭제";
     okClass = "danger";
     showToggle = false;
@@ -59,7 +58,7 @@ export function ConfirmDialog({ open, kind, onCancel, onConfirm }: Props) {
             checked={drop}
             onChange={(e) => setDrop(e.target.checked)}
           />
-          루틴도 함께 제거
+          예약된 일도 함께 지우기
         </label>
       ) : null}
       <div className="actions spread">
