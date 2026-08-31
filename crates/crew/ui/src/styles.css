@@ -727,10 +727,10 @@ textarea.textin.memory {
 .mention-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   max-width: min(100%, 18em);
-  height: 26px;
-  padding: 2px 10px 2px 3px;
+  height: 24px;
+  padding: 2px 8px 2px 4px;
   margin: 0 1px;
   border: 0;
   border-radius: 999px;
@@ -756,10 +756,13 @@ button.mention-chip:hover {
   background: rgba(0, 0, 0, 0.48);
 }
 .mention-chip-avatar {
-  width: 22px;
-  height: 22px;
-  font-size: 9px;
+  width: 16px;
+  height: 16px;
+  font-size: 8px;
   display: inline-grid;
+}
+.avatar.mention-chip-avatar.has-face {
+  overflow: hidden;
 }
 .mention-chip-name {
   min-width: 0;
