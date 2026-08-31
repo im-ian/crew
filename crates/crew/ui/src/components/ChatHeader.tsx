@@ -25,6 +25,8 @@ export function ChatHeader({
   let avatarId: string | undefined;
   let avatarName: string | undefined;
   let avatarSrc: string | null | undefined;
+  let avatarShape: string | null | undefined;
+  let avatarColor: string | null | undefined;
   let avatarLetter: string | undefined;
 
   if (currentChannel) {
@@ -48,6 +50,8 @@ export function ChatHeader({
     avatarId = currentAgent.id;
     avatarName = currentAgent.name || currentAgent.id;
     avatarSrc = currentAgent.avatar;
+    avatarShape = currentAgent.avatar_shape;
+    avatarColor = currentAgent.avatar_color;
   }
 
   return (
@@ -59,6 +63,8 @@ export function ChatHeader({
           id={avatarId}
           name={avatarName}
           src={avatarSrc}
+          shape={avatarShape}
+          color={avatarColor}
           letter={avatarLetter}
           title={selectedKind === "agent" ? "사진 변경" : undefined}
           onClick={(e) => {

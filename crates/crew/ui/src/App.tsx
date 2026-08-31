@@ -21,8 +21,6 @@ export function App() {
         selected={crew.selected}
         selectedKind={crew.selectedKind}
         query={crew.query}
-        connected={crew.connected}
-        connDetail={crew.connDetail}
         onQuery={crew.setQuery}
         onSelectAgent={crew.selectAgent}
         onSelectChannel={crew.selectChannel}
@@ -84,6 +82,7 @@ export function App() {
           onClearAvatar={() => {
             if (crew.selected) void crew.clearAvatar(crew.selected);
           }}
+          onSetFace={crew.saveAgentFace}
           onSave={crew.saveAgentInfo}
           onAddRoutine={crew.addRoutine}
           onToggleRoutine={crew.toggleRoutine}

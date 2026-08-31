@@ -8,8 +8,6 @@ type Props = {
   selected: string | null;
   selectedKind: Kind;
   query: string;
-  connected: boolean | null;
-  connDetail: string;
   onQuery: (q: string) => void;
   onSelectAgent: (id: string) => void;
   onSelectChannel: (id: string) => void;
@@ -32,8 +30,6 @@ export function Sidebar({
   selected,
   selectedKind,
   query,
-  connected,
-  connDetail,
   onQuery,
   onSelectAgent,
   onSelectChannel,
@@ -49,8 +45,6 @@ export function Sidebar({
   const shownChannels = channels.filter((c) =>
     matches([c.name, c.id, (c.members || []).join(" "), c.preview], query),
   );
-  const connBadge =
-    connected === null ? "exited" : connected ? "idle" : "blocked";
 
   return (
     <aside>
@@ -93,6 +87,8 @@ export function Sidebar({
                 preview={a.preview}
                 active={selectedKind === "agent" && a.id === selected}
                 src={a.avatar}
+                shape={a.avatar_shape}
+                color={a.avatar_color}
                 badge={a.status || ""}
                 onClick={() => onSelectAgent(a.id)}
                 onContextMenu={(e) => onAgentCtx(e, a.id)}
@@ -140,15 +136,6 @@ export function Sidebar({
           )}
         </section>
       </div>
-      <div className="foot">
-        <div className="account">
-          <div className="avatar">
-            C
-            <span className={"badge " + connBadge} title={connDetail} />
-          </div>
-          <div className="account-name">Crew</div>
-        </div>
-      </div>
     </aside>
   );
 }
@@ -160,6 +147,8 @@ function RailRow({
   active,
   letter,
   src,
+  shape,
+  color,
   badge,
   onClick,
   onContextMenu,
@@ -171,6 +160,8 @@ function RailRow({
   active: boolean;
   letter?: string;
   src?: string | null;
+  shape?: string | null;
+  color?: string | null;
   badge?: string | null;
   onClick: () => void;
   onContextMenu: (e: MouseEvent) => void;
@@ -195,6 +186,8 @@ function RailRow({
         id={id}
         name={name}
         src={src}
+        shape={shape}
+        color={color}
         letter={letter}
         badge={badge || undefined}
         title={onAvatarClick ? "사진 변경" : undefined}

@@ -1,10 +1,13 @@
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
-import { avatarColor, initialOf } from "../avatar";
+import { avatarColor, initialOf, resolveFace } from "../avatar";
+import { BotFace } from "./BotFace";
 
 type Props = {
   id?: string | null;
   name?: string | null;
   src?: string | null;
+  shape?: string | null;
+  color?: string | null;
   letter?: string;
   className?: string;
   badge?: string | null;
@@ -18,6 +21,8 @@ export function Avatar({
   id,
   name,
   src,
+  shape,
+  color,
   letter,
   className,
   badge,
@@ -31,8 +36,10 @@ export function Avatar({
     setBroken(false);
   }, [src]);
   const showImg = !!src && !broken;
-  const color = id ? avatarColor(id) : "#3a3a3c";
-  const cls = `avatar${showImg ? " has-img" : ""}${className ? ` ${className}` : ""}`;
+  const showFace = !showImg && !letter;
+  const face = showFace ? resolveFace(id, shape, color) : null;
+  const letterBg = id ? avatarColor(id) : "#3a3a3c";
+  const cls = `avatar${showImg ? " has-img" : ""}${showFace ? " has-face" : ""}${className ? ` ${className}` : ""}`;
   const body = (
     <>
       {showImg ? (
@@ -43,17 +50,21 @@ export function Avatar({
           onError={() => setBroken(true)}
         />
       ) : null}
-      <span className="avatar-letter">{letter || initialOf(name)}</span>
+      {face ? <BotFace shape={face.shape} color={face.color} /> : null}
+      {!showFace ? (
+        <span className="avatar-letter">{letter || initialOf(name)}</span>
+      ) : null}
       {badge ? <span className={`badge ${badge}`} /> : null}
       {overlay}
     </>
   );
+  const style = showFace ? undefined : { background: letterBg };
   if (as === "button") {
     return (
       <button
         type="button"
         className={cls}
-        style={{ background: color }}
+        style={style}
         title={title}
         onClick={onClick}
       >
@@ -62,7 +73,7 @@ export function Avatar({
     );
   }
   return (
-    <div className={cls} style={{ background: color }} title={title} onClick={onClick}>
+    <div className={cls} style={style} title={title} onClick={onClick}>
       {body}
     </div>
   );

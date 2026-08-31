@@ -2,5 +2,13 @@
   "identifier": "default",
   "description": "Main window talks to the local crew daemon",
   "windows": ["main"],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:1420",
+      "http://127.0.0.1:1420/*",
+      "http://localhost:1420",
+      "http://localhost:1420/*"
+    ]
+  },
   "permissions": ["core:default"]
 }

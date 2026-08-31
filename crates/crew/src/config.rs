@@ -87,6 +87,65 @@ impl Effort {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+#[value(rename_all = "kebab-case")]
+pub enum AvatarShape {
+    Circle,
+    Teardrop,
+    RoundedSquare,
+    Hexagon,
+    Triangle,
+    Cloud,
+    Pill,
+}
+
+impl AvatarShape {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AvatarShape::Circle => "circle",
+            AvatarShape::Teardrop => "teardrop",
+            AvatarShape::RoundedSquare => "rounded-square",
+            AvatarShape::Hexagon => "hexagon",
+            AvatarShape::Triangle => "triangle",
+            AvatarShape::Cloud => "cloud",
+            AvatarShape::Pill => "pill",
+        }
+    }
+
+    pub fn from_key(s: &str) -> anyhow::Result<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "circle" => Ok(Self::Circle),
+            "teardrop" => Ok(Self::Teardrop),
+            "rounded-square" | "rounded_square" | "roundedsquare" => Ok(Self::RoundedSquare),
+            "hexagon" => Ok(Self::Hexagon),
+            "triangle" => Ok(Self::Triangle),
+            "cloud" => Ok(Self::Cloud),
+            "pill" => Ok(Self::Pill),
+            other => anyhow::bail!(
+                "shape must be circle, teardrop, rounded-square, hexagon, triangle, cloud, or pill (got {other})"
+            ),
+        }
+    }
+}
+
+pub fn parse_hex_color(s: &str) -> anyhow::Result<String> {
+    let t = s.trim();
+    let hex = t.strip_prefix('#').unwrap_or(t);
+    let lower = hex.to_ascii_lowercase();
+    if lower.len() == 3 && lower.chars().all(|c| c.is_ascii_hexdigit()) {
+        let b = lower.as_bytes();
+        return Ok(format!(
+            "#{0}{0}{1}{1}{2}{2}",
+            b[0] as char, b[1] as char, b[2] as char
+        ));
+    }
+    if lower.len() == 6 && lower.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Ok(format!("#{lower}"));
+    }
+    anyhow::bail!("color must be a hex value like #ff6a00");
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "lowercase")]
 pub enum AgentCli {
@@ -290,6 +349,10 @@ pub struct AgentConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_shape: Option<AvatarShape>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -342,6 +405,8 @@ impl AgentConfig {
             cmd,
             cwd,
             avatar: None,
+            avatar_shape: None,
+            avatar_color: None,
             title: None,
             description: None,
             role: None,
@@ -360,7 +425,8 @@ impl AgentConfig {
     }
 
     /// Same bot, new session: fresh id / cwd / routine ids. Avatar path is
-    /// left empty — caller copies bytes via `avatar::copy_for`.
+    /// left empty — caller copies bytes via `avatar::copy_for`. Shape and
+    /// color copy with the rest of the identity.
     pub fn duplicate<S: AsRef<str>>(
         &self,
         given_name: Option<&str>,
@@ -374,6 +440,8 @@ impl AgentConfig {
             name,
             cmd: self.cmd.clone(),
             avatar: None,
+            avatar_shape: self.avatar_shape,
+            avatar_color: self.avatar_color.clone(),
             title: self.title.clone(),
             description: self.description.clone(),
             role: self.role.clone(),
@@ -1202,6 +1270,8 @@ mod tests {
         src.model = Some("grok-4".into());
         src.effort = Some(Effort::High);
         src.avatar = Some("/tmp/avatars/grok.png".into());
+        src.avatar_shape = Some(AvatarShape::Teardrop);
+        src.avatar_color = Some("#ff6a00".into());
         src.routines
             .push(Routine::new("ping".into(), "0 9 * * *".into(), "hi".into()).unwrap());
         let rid = src.routines[0].id.clone();
@@ -1220,9 +1290,31 @@ mod tests {
         assert_eq!(dup.routines[0].name, "ping");
         assert_eq!(dup.routines[0].prompt, "hi");
         assert!(dup.avatar.is_none());
+        assert_eq!(dup.avatar_shape, Some(AvatarShape::Teardrop));
+        assert_eq!(dup.avatar_color.as_deref(), Some("#ff6a00"));
         let named = src.duplicate(Some("Grok"), ["grok"]);
         assert_eq!(named.id, "grok-2");
         assert_eq!(named.name, "Grok");
+    }
+
+    #[test]
+    fn parse_hex_color_normalizes() {
+        assert_eq!(parse_hex_color("#ff6a00").unwrap(), "#ff6a00");
+        assert_eq!(parse_hex_color("FF6A00").unwrap(), "#ff6a00");
+        assert_eq!(parse_hex_color(" #f60 ").unwrap(), "#ff6600");
+        assert!(parse_hex_color("").is_err());
+        assert!(parse_hex_color("blue").is_err());
+        assert!(parse_hex_color("#gg0000").is_err());
+    }
+
+    #[test]
+    fn avatar_shape_roundtrip() {
+        let raw = serde_json::to_string(&AvatarShape::RoundedSquare).unwrap();
+        assert_eq!(raw, "\"rounded-square\"");
+        let back: AvatarShape = serde_json::from_str(&raw).unwrap();
+        assert_eq!(back, AvatarShape::RoundedSquare);
+        assert_eq!(AvatarShape::from_key("rounded_square").unwrap(), back);
+        assert!(AvatarShape::from_key("star").is_err());
     }
 
     #[test]

@@ -286,6 +286,33 @@ export function useCrew() {
         unsetTitle: !title,
         unsetRole: !role,
         unsetDescription: !description,
+        shape: null,
+        color: null,
+      });
+      await refreshList();
+    } catch (err) {
+      showError(err);
+    }
+  }
+
+  async function saveAgentFace(shape?: string | null, color?: string | null) {
+    const id = selectedRef.current.id;
+    if (!id || selectedRef.current.kind !== "agent") return;
+    try {
+      await api.setAgent({
+        id,
+        model: null,
+        effort: null,
+        unsetModel: false,
+        unsetEffort: false,
+        title: null,
+        role: null,
+        description: null,
+        unsetTitle: false,
+        unsetRole: false,
+        unsetDescription: false,
+        shape: shape || null,
+        color: color || null,
       });
       await refreshList();
     } catch (err) {
@@ -418,6 +445,8 @@ export function useCrew() {
     cli: CliKind;
     model: string;
     effort: string;
+    shape: string | null;
+    color: string | null;
   }) {
     const name = args.name.trim();
     if (!name) {
@@ -435,6 +464,23 @@ export function useCrew() {
         role: persona || null,
         description: persona || null,
       });
+      if (args.shape || args.color) {
+        await api.setAgent({
+          id,
+          model: null,
+          effort: null,
+          unsetModel: false,
+          unsetEffort: false,
+          title: null,
+          role: null,
+          description: null,
+          unsetTitle: false,
+          unsetRole: false,
+          unsetDescription: false,
+          shape: args.shape,
+          color: args.color,
+        });
+      }
       if (pendingNewAvatar) {
         await api.setAvatar(id, pendingNewAvatar.data, pendingNewAvatar.name);
       }
@@ -615,6 +661,7 @@ export function useCrew() {
     setPendingNewAvatar,
     onSend,
     saveAgentInfo,
+    saveAgentFace,
     addRoutine,
     toggleRoutine,
     deleteRoutine,

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::config::{Effort, Routine};
+use crate::config::{AvatarShape, Effort, Routine};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -79,6 +79,10 @@ pub enum Request {
         avatar: Option<String>,
         #[serde(default)]
         unset_avatar: bool,
+        #[serde(default)]
+        shape: Option<AvatarShape>,
+        #[serde(default)]
+        color: Option<String>,
     },
     Reset {
         agent: String,
@@ -203,6 +207,10 @@ pub struct AgentInfo {
     pub effort: Option<Effort>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_shape: Option<AvatarShape>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_color: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -480,20 +488,28 @@ mod tests {
             unset_role: false,
             avatar: Some("/tmp/a.png".into()),
             unset_avatar: false,
+            shape: Some(crate::config::AvatarShape::Circle),
+            color: Some("#ff6a00".into()),
         };
         let line = req.to_line().unwrap();
         assert!(line.contains("\"avatar\":\"/tmp/a.png\""));
+        assert!(line.contains("\"shape\":\"circle\""));
+        assert!(line.contains("\"color\":\"#ff6a00\""));
         let back: Request = serde_json::from_str(&line).unwrap();
         match back {
             Request::SetAgent {
                 id,
                 avatar,
                 unset_avatar,
+                shape,
+                color,
                 ..
             } => {
                 assert_eq!(id, "grok");
                 assert_eq!(avatar.as_deref(), Some("/tmp/a.png"));
                 assert!(!unset_avatar);
+                assert_eq!(shape, Some(crate::config::AvatarShape::Circle));
+                assert_eq!(color.as_deref(), Some("#ff6a00"));
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -503,10 +519,14 @@ mod tests {
             Request::SetAgent {
                 unset_avatar,
                 avatar,
+                shape,
+                color,
                 ..
             } => {
                 assert!(avatar.is_none());
                 assert!(!unset_avatar);
+                assert!(shape.is_none());
+                assert!(color.is_none());
             }
             other => panic!("unexpected {other:?}"),
         }

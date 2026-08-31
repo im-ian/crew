@@ -7,6 +7,8 @@ mod cron;
 mod daemon;
 mod desktop;
 mod headless;
+#[cfg(debug_assertions)]
+mod ui_dev;
 mod memory;
 mod paths;
 mod protocol;
@@ -14,8 +16,8 @@ mod pty_agent;
 mod transcript;
 
 use config::{
-    empty_to_none, resolve_add_cmd, unique_ids, write_roster, AgentCli, AgentConfig, Channel,
-    Config, Effort, Routine,
+    empty_to_none, parse_hex_color, resolve_add_cmd, unique_ids, write_roster, AgentCli,
+    AgentConfig, AvatarShape, Channel, Config, Effort, Routine,
 };
 use protocol::{Event, Request};
 
@@ -132,6 +134,10 @@ enum AgentCmd {
         avatar: Option<String>,
         #[arg(long)]
         unset_avatar: bool,
+        #[arg(long, value_enum)]
+        shape: Option<AvatarShape>,
+        #[arg(long)]
+        color: Option<String>,
     },
 }
 
@@ -344,6 +350,8 @@ fn run() -> anyhow::Result<()> {
             unset_role,
             avatar,
             unset_avatar,
+            shape,
+            color,
         })) => {
             if model.is_none()
                 && effort.is_none()
@@ -351,6 +359,8 @@ fn run() -> anyhow::Result<()> {
                 && description.is_none()
                 && role.is_none()
                 && avatar.is_none()
+                && shape.is_none()
+                && color.is_none()
                 && !unset_model
                 && !unset_effort
                 && !unset_title
@@ -359,7 +369,7 @@ fn run() -> anyhow::Result<()> {
                 && !unset_avatar
             {
                 anyhow::bail!(
-                    "nothing to set; pass --model, --effort, --title, --description, --role, --avatar, or an --unset-* flag"
+                    "nothing to set; pass --model, --effort, --title, --description, --role, --avatar, --shape, --color, or an --unset-* flag"
                 );
             }
             if paths::is_socket_live() {
@@ -377,6 +387,8 @@ fn run() -> anyhow::Result<()> {
                     unset_role,
                     avatar,
                     unset_avatar,
+                    shape,
+                    color,
                 })? {
                     Event::Error { message } => anyhow::bail!("{message}"),
                     ev => client::print_event(ev),
@@ -402,6 +414,8 @@ fn run() -> anyhow::Result<()> {
                     unset_role,
                     avatar,
                     unset_avatar,
+                    shape,
+                    color,
                 )?;
                 cfg.save()?;
                 write_roster(&cfg.agents, &cfg.channels)?;
@@ -728,6 +742,8 @@ fn apply_agent_set(
     unset_role: bool,
     avatar: Option<String>,
     unset_avatar: bool,
+    shape: Option<AvatarShape>,
+    color: Option<String>,
 ) -> anyhow::Result<()> {
     if unset_model {
         agent.model = None;
@@ -753,6 +769,12 @@ fn apply_agent_set(
         agent.role = None;
     } else if let Some(role) = role {
         agent.role = empty_to_none(role);
+    }
+    if let Some(shape) = shape {
+        agent.avatar_shape = Some(shape);
+    }
+    if let Some(color) = color {
+        agent.avatar_color = Some(parse_hex_color(&color)?);
     }
     crate::avatar::apply(agent, avatar, unset_avatar)?;
     Ok(())

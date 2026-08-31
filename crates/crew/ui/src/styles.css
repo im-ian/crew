@@ -188,6 +188,18 @@ button.avatar {
   border: 0;
   padding: 0;
   cursor: pointer;
+  background: transparent;
+}
+.avatar.has-face {
+  background: transparent;
+  border-radius: 0;
+  overflow: visible;
+}
+.avatar-face {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
 }
 .avatar-letter { z-index: 0; }
 .avatar-img {
@@ -200,6 +212,7 @@ button.avatar {
   z-index: 1;
 }
 .avatar.has-img .avatar-letter { visibility: hidden; }
+.avatar.has-face .avatar-letter { display: none; }
 .badge {
   position: absolute;
   right: -1px;
@@ -237,30 +250,6 @@ button.avatar {
   color: var(--faint);
   font-size: 13px;
   padding: 8px;
-}
-.foot {
-  padding: 8px var(--rail-pad) 12px;
-  flex-shrink: 0;
-}
-.account {
-  display: grid;
-  grid-template-columns: var(--avatar) minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-  padding: 8px;
-  border-radius: var(--radius-lg);
-  min-width: 0;
-}
-.account .avatar {
-  background: var(--btn);
-}
-.account-name {
-  font-size: 13px;
-  font-weight: 590;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 main {
   display: grid;
@@ -600,12 +589,65 @@ textarea.textin.memory {
   border-radius: 50%;
   z-index: 3;
 }
+.info-avatar.has-face .info-avatar-overlay { border-radius: 20px; }
 .info-avatar:hover .info-avatar-overlay { display: grid; }
 .new-avatar {
   width: 64px;
   height: 64px;
   font-size: 22px;
   background: var(--btn);
+}
+.new-avatar.has-face { background: transparent; }
+.shape-picker {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+.shape-pick {
+  aspect-ratio: 1;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: var(--radius-md);
+  padding: 4px;
+  cursor: pointer;
+  min-width: 0;
+}
+.shape-pick:hover { background: var(--hover); }
+.shape-pick.on {
+  border-color: #4a4a4c;
+  background: var(--active);
+}
+.color-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.color-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.color-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+.color-swatch.on {
+  box-shadow: 0 0 0 2px var(--ink);
+}
+.color-hex {
+  width: 108px;
+  flex: 0 0 108px;
+  font-variant-numeric: tabular-nums;
+  padding: 8px 10px;
 }
 .sheet h3, .dialog h3 {
   margin: 0;

@@ -99,7 +99,13 @@ function EmptyChat({
   if (agent) {
     return (
       <div className="empty-chat">
-        <Avatar id={agent.id} name={agent.name || agent.id} src={agent.avatar} />
+        <Avatar
+          id={agent.id}
+          name={agent.name || agent.id}
+          src={agent.avatar}
+          shape={agent.avatar_shape}
+          color={agent.avatar_color}
+        />
         <strong>{agent.name || agent.id}</strong>
         <span>메시지를 보내 대화를 시작하세요</span>
       </div>

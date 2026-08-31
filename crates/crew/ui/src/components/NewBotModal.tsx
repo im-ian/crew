@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import type { AvatarShape } from "../avatar";
 import { CLIS, EFFORTS } from "../options";
 import type { CliKind, PendingAvatar } from "../types";
 import { Avatar } from "./Avatar";
+import { FacePicker } from "./FacePicker";
 import { Field } from "./Field";
 import { Modal } from "./Modal";
 import { Seg } from "./Seg";
@@ -18,6 +20,8 @@ type Props = {
     cli: CliKind;
     model: string;
     effort: string;
+    shape: string | null;
+    color: string | null;
   }) => Promise<void>;
 };
 
@@ -34,6 +38,8 @@ export function NewBotModal({
   const [model, setModel] = useState("");
   const [cli, setCli] = useState<CliKind>("grok");
   const [effort, setEffort] = useState("");
+  const [shape, setShape] = useState<AvatarShape | "">("");
+  const [color, setColor] = useState("");
   const [busy, setBusy] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
@@ -44,6 +50,8 @@ export function NewBotModal({
     setModel("");
     setCli("grok");
     setEffort("");
+    setShape("");
+    setColor("");
     setBusy(false);
     const t = window.setTimeout(() => nameRef.current?.focus(), 0);
     return () => window.clearTimeout(t);
@@ -53,12 +61,28 @@ export function NewBotModal({
     const trimmed = name.trim();
     if (!trimmed) {
       nameRef.current?.focus();
-      await onCreate({ name: "", persona, cli, model, effort });
+      await onCreate({
+        name: "",
+        persona,
+        cli,
+        model,
+        effort,
+        shape: shape || null,
+        color: color || null,
+      });
       return;
     }
     setBusy(true);
     try {
-      await onCreate({ name: trimmed, persona, cli, model, effort });
+      await onCreate({
+        name: trimmed,
+        persona,
+        cli,
+        model,
+        effort,
+        shape: shape || null,
+        color: color || null,
+      });
     } finally {
       setBusy(false);
     }
@@ -72,10 +96,11 @@ export function NewBotModal({
             <Avatar
               as="button"
               className="new-avatar"
-              id="new"
-              name="+"
-              letter="+"
+              id={name.trim() || "new"}
+              name={name.trim() || "new"}
               src={pendingAvatar?.data}
+              shape={shape || null}
+              color={color || null}
               title="사진 선택"
               onClick={onPickAvatar}
             />
@@ -86,6 +111,13 @@ export function NewBotModal({
             ) : null}
           </div>
         </Field>
+        <FacePicker
+          id={name.trim() || "new"}
+          shape={shape || null}
+          color={color || null}
+          onShape={setShape}
+          onColor={setColor}
+        />
         <Field label="이름" htmlFor="new-name">
           <input
             id="new-name"

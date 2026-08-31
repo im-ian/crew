@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import type { AvatarShape } from "../avatar";
 import { EFFORTS } from "../options";
 import type { AgentInfo, Routine } from "../types";
 import { Avatar } from "./Avatar";
+import { FacePicker } from "./FacePicker";
 import { Field } from "./Field";
 import { Seg } from "./Seg";
 
@@ -12,6 +14,7 @@ type Props = {
   onReset: () => void;
   onPickAvatar: () => void;
   onClearAvatar: () => void;
+  onSetFace: (shape?: string | null, color?: string | null) => Promise<void>;
   onSave: (fields: {
     title: string;
     role: string;
@@ -33,6 +36,7 @@ export function InfoPane({
   onReset,
   onPickAvatar,
   onClearAvatar,
+  onSetFace,
   onSave,
   onAddRoutine,
   onToggleRoutine,
@@ -106,6 +110,8 @@ export function InfoPane({
               id={agent?.id}
               name={agent?.name || agent?.id}
               src={agent?.avatar}
+              shape={agent?.avatar_shape}
+              color={agent?.avatar_color}
               title="사진 변경"
               onClick={onPickAvatar}
               overlay={<span className="info-avatar-overlay">사진 변경</span>}
@@ -121,6 +127,17 @@ export function InfoPane({
           </div>
         </div>
         <div className="form-stack">
+          <FacePicker
+            id={agent?.id}
+            shape={agent?.avatar_shape}
+            color={agent?.avatar_color}
+            onShape={(next: AvatarShape) => {
+              void onSetFace(next, undefined);
+            }}
+            onColor={(next) => {
+              void onSetFace(undefined, next);
+            }}
+          />
           <Field label="직함" htmlFor="info-title">
             <input
               id="info-title"

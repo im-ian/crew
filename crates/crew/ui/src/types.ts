@@ -23,6 +23,8 @@ export type AgentInfo = {
   model?: string | null;
   effort?: Effort | null;
   avatar?: string | null;
+  avatar_shape?: string | null;
+  avatar_color?: string | null;
   title?: string | null;
   description?: string | null;
   role?: string | null;

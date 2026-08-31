@@ -1,6 +1,7 @@
 use crate::client;
 use crate::config::{
-    empty_to_none, resolve_add_cmd, unique_agent_id, unique_channel_id, AgentCli, Effort,
+    empty_to_none, resolve_add_cmd, unique_agent_id, unique_channel_id, AgentCli, AvatarShape,
+    Effort,
 };
 use crate::protocol::{AgentInfo, ChannelInfo, ChatMessage, Event, Request};
 
@@ -11,6 +12,13 @@ fn parse_effort(effort: Option<String>) -> Result<Option<Effort>, String> {
         Some("medium") => Ok(Some(Effort::Medium)),
         Some("high") => Ok(Some(Effort::High)),
         Some(other) => Err(format!("effort must be low, medium, or high (got {other})")),
+    }
+}
+
+fn parse_shape(shape: Option<String>) -> Result<Option<AvatarShape>, String> {
+    match shape.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        None => Ok(None),
+        Some(s) => AvatarShape::from_key(s).map(Some).map_err(|e| e.to_string()),
     }
 }
 
@@ -240,8 +248,12 @@ fn set_agent(
     unset_title: bool,
     unset_description: bool,
     unset_role: bool,
+    shape: Option<String>,
+    color: Option<String>,
 ) -> Result<(), String> {
     let effort = parse_effort(effort)?;
+    let shape = parse_shape(shape)?;
+    let color = color.and_then(empty_to_none);
     match client::rpc(Request::SetAgent {
         id,
         model,
@@ -256,6 +268,8 @@ fn set_agent(
         unset_role,
         avatar: None,
         unset_avatar: false,
+        shape,
+        color,
     }) {
         Ok(Event::Ok) | Ok(Event::Agents { .. }) => Ok(()),
         Ok(Event::Error { message }) => Err(message),
@@ -314,6 +328,8 @@ fn add_agent(
             unset_role: false,
             avatar: None,
             unset_avatar: false,
+            shape: None,
+            color: None,
         }) {
             Ok(Event::Ok) | Ok(Event::Agents { .. }) => {}
             Ok(Event::Error { message }) => return Err(message),
@@ -367,6 +383,8 @@ fn rpc_set_avatar(id: String, avatar: Option<String>, unset_avatar: bool) -> Res
         unset_role: false,
         avatar,
         unset_avatar,
+        shape: None,
+        color: None,
     }) {
         Ok(Event::Ok) | Ok(Event::Agents { .. }) => Ok(()),
         Ok(Event::Error { message }) => Err(message),
@@ -444,7 +462,15 @@ fn set_routine_enabled(agent: String, key: String, enabled: bool) -> Result<(), 
 
 pub fn run() -> anyhow::Result<()> {
     client::ensure_daemon()?;
+    #[cfg(debug_assertions)]
+    crate::ui_dev::ensure_vite()?;
     tauri::Builder::default()
+        .setup(|app| {
+            #[cfg(debug_assertions)]
+            crate::ui_dev::attach(app)?;
+            let _ = app;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             list_agents,
             list_channels,

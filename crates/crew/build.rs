@@ -8,18 +8,28 @@ fn main() {
 
 fn build_frontend() {
     let ui = Path::new("ui");
-    println!("cargo:rerun-if-changed=ui/src");
-    println!("cargo:rerun-if-changed=ui/index.html");
+    let debug = std::env::var("PROFILE").ok().as_deref() == Some("debug");
     println!("cargo:rerun-if-changed=ui/package.json");
     println!("cargo:rerun-if-changed=ui/package-lock.json");
     println!("cargo:rerun-if-changed=ui/vite.config.ts");
     println!("cargo:rerun-if-changed=ui/tsconfig.json");
+    if debug {
+        // UI edits are served by Vite HMR; do not rebuild dist on every src change.
+        println!("cargo:rerun-if-changed=ui/dist/index.html");
+    } else {
+        println!("cargo:rerun-if-changed=ui/src");
+        println!("cargo:rerun-if-changed=ui/index.html");
+    }
 
     if std::env::var_os("SKIP_UI_BUILD").is_some() {
         let dist = ui.join("dist/index.html");
         if !dist.exists() {
             panic!("SKIP_UI_BUILD set but {} is missing", dist.display());
         }
+        return;
+    }
+
+    if debug && ui.join("dist/index.html").exists() {
         return;
     }
 

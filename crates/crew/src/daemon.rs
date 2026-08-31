@@ -11,8 +11,8 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::broadcast;
 
 use crate::config::{
-    empty_to_none, find_routine_index, roster_update_text, unique_ids, write_roster, AgentConfig,
-    Channel, Config, Effort, Routine,
+    empty_to_none, find_routine_index, parse_hex_color, roster_update_text, unique_ids, write_roster,
+    AgentConfig, AvatarShape, Channel, Config, Effort, Routine,
 };
 use crate::cron;
 use crate::headless::{self, HeadlessSession};
@@ -756,6 +756,8 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             unset_role,
             avatar,
             unset_avatar,
+            shape,
+            color,
         } => match set_agent(
             &id,
             model,
@@ -770,6 +772,8 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             unset_role,
             avatar,
             unset_avatar,
+            shape,
+            color,
         ) {
             Ok(()) => vec![Event::Ok, snapshot_event()],
             Err(err) => vec![Event::Error {
@@ -908,6 +912,8 @@ fn list_agents() -> Vec<AgentInfo> {
                 model: cfg.and_then(|c| c.model.clone()),
                 effort: cfg.and_then(|c| c.effort),
                 avatar: cfg.and_then(|c| c.avatar.clone()),
+                avatar_shape: cfg.and_then(|c| c.avatar_shape),
+                avatar_color: cfg.and_then(|c| c.avatar_color.clone()),
                 title: cfg.and_then(|c| c.title.clone()),
                 description: cfg.and_then(|c| c.description.clone()),
                 role: cfg.and_then(|c| c.role.clone()),
@@ -1246,6 +1252,8 @@ fn set_agent(
     unset_role: bool,
     avatar: Option<String>,
     unset_avatar: bool,
+    shape: Option<AvatarShape>,
+    color: Option<String>,
 ) -> anyhow::Result<()> {
     let mut cfg = {
         let cfgs = configs().lock().expect("configs mutex");
@@ -1277,6 +1285,12 @@ fn set_agent(
         cfg.role = None;
     } else if let Some(role) = role {
         cfg.role = empty_to_none(role);
+    }
+    if let Some(shape) = shape {
+        cfg.avatar_shape = Some(shape);
+    }
+    if let Some(color) = color {
+        cfg.avatar_color = Some(parse_hex_color(&color)?);
     }
     crate::avatar::apply(&mut cfg, avatar, unset_avatar)?;
     persist_config(&cfg)?;
