@@ -266,6 +266,88 @@ button.avatar {
   display: block;
   overflow: visible;
 }
+.avatar-face .avatar-gaze,
+.avatar-face .avatar-blink,
+.avatar-face .avatar-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.avatar-face.is-idle .avatar-gaze,
+.avatar-face.is-working .avatar-gaze {
+  animation: avatar-gaze 7.2s ease-in-out infinite;
+  animation-delay: calc(var(--avatar-phase, 0) * -1s);
+}
+.avatar-face.is-working .avatar-gaze {
+  animation-name: avatar-gaze-busy;
+  animation-duration: 2.4s;
+}
+.avatar-face.is-idle .avatar-blink,
+.avatar-face.is-working .avatar-blink,
+.avatar-face.is-blocked .avatar-blink {
+  animation: avatar-blink 5.6s ease-in-out infinite;
+  animation-delay: calc(var(--avatar-phase, 0) * -1.3s);
+}
+.avatar-face.is-working {
+  animation: avatar-bob 1.7s ease-in-out infinite;
+  animation-delay: calc(var(--avatar-phase, 0) * -1s);
+}
+.avatar-face.is-blocked {
+  animation: avatar-shake 0.7s ease-in-out infinite;
+}
+.avatar-face.is-blocked .avatar-eye:first-child {
+  animation: avatar-worry-l 1.8s ease-in-out infinite;
+}
+.avatar-face.is-blocked .avatar-eye:last-child {
+  animation: avatar-worry-r 1.8s ease-in-out infinite;
+}
+@keyframes avatar-blink {
+  0%, 86%, 94%, 100% { transform: scaleY(1); }
+  88.5%, 90.5% { transform: scaleY(0.1); }
+  91.5% { transform: scaleY(1); }
+  92.5%, 93.2% { transform: scaleY(0.1); }
+}
+@keyframes avatar-gaze {
+  0%, 100% { transform: translate(0, 0); }
+  30% { transform: translate(16%, 8%); }
+  58% { transform: translate(-14%, 6%); }
+  78% { transform: translate(6%, -8%); }
+}
+@keyframes avatar-gaze-busy {
+  0%, 100% { transform: translate(0, 0); }
+  22% { transform: translate(22%, -6%); }
+  52% { transform: translate(-24%, 8%); }
+  74% { transform: translate(12%, 4%); }
+}
+@keyframes avatar-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6%); }
+}
+@keyframes avatar-shake {
+  0%, 100% { transform: translateX(0) rotate(0deg); }
+  30% { transform: translateX(-3%) rotate(-2.4deg); }
+  70% { transform: translateX(3%) rotate(2.4deg); }
+}
+@keyframes avatar-worry-l {
+  0%, 100% { transform: rotate(9deg); }
+  50% { transform: rotate(14deg); }
+}
+@keyframes avatar-worry-r {
+  0%, 100% { transform: rotate(-9deg); }
+  50% { transform: rotate(-14deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .avatar-face.is-idle,
+  .avatar-face.is-working,
+  .avatar-face.is-blocked,
+  .avatar-face.is-idle .avatar-gaze,
+  .avatar-face.is-working .avatar-gaze,
+  .avatar-face.is-idle .avatar-blink,
+  .avatar-face.is-working .avatar-blink,
+  .avatar-face.is-blocked .avatar-blink,
+  .avatar-face.is-blocked .avatar-eye {
+    animation: none;
+  }
+}
 .avatar-letter { z-index: 0; }
 .avatar-img {
   position: absolute;

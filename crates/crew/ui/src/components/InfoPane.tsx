@@ -112,6 +112,7 @@ export function InfoPane({
               src={agent?.avatar}
               shape={agent?.avatar_shape}
               color={agent?.avatar_color}
+              status={agent?.status}
               title="사진 변경"
               onClick={onPickAvatar}
               overlay={<span className="info-avatar-overlay">사진 변경</span>}

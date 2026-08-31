@@ -1,5 +1,6 @@
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import { avatarColor, initialOf, resolveFace } from "../avatar";
+import type { AgentStatus } from "../types";
 import { BotFace } from "./BotFace";
 
 type Props = {
@@ -11,11 +12,23 @@ type Props = {
   letter?: string;
   className?: string;
   badge?: string | null;
+  status?: AgentStatus | null;
   title?: string;
   overlay?: ReactNode;
   as?: "div" | "button";
   onClick?: (e: MouseEvent) => void;
 };
+
+function faceStatus(
+  status?: AgentStatus | null,
+  badge?: string | null,
+): AgentStatus | null {
+  const s = status || badge;
+  if (s === "idle" || s === "working" || s === "blocked" || s === "exited") {
+    return s;
+  }
+  return null;
+}
 
 export function Avatar({
   id,
@@ -26,6 +39,7 @@ export function Avatar({
   letter,
   className,
   badge,
+  status,
   title,
   overlay,
   as = "div",
@@ -50,7 +64,14 @@ export function Avatar({
           onError={() => setBroken(true)}
         />
       ) : null}
-      {face ? <BotFace shape={face.shape} color={face.color} /> : null}
+      {face ? (
+        <BotFace
+          id={id}
+          shape={face.shape}
+          color={face.color}
+          status={faceStatus(status, badge)}
+        />
+      ) : null}
       {!showFace ? (
         <span className="avatar-letter">{letter || initialOf(name)}</span>
       ) : null}

@@ -441,6 +441,7 @@ function ItemRow({
         color={a?.avatar_color}
         letter={item.kind === "channel" ? "#" : undefined}
         badge={a?.status || undefined}
+        status={a?.status}
         title={onPickAvatar ? "사진 변경" : undefined}
         onClick={
           onPickAvatar

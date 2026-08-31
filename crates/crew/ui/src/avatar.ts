@@ -48,6 +48,10 @@ export function avatarColor(id: string | undefined | null): string {
   return PALETTE[h % PALETTE.length];
 }
 
+export function avatarPhase(id: string | undefined | null): number {
+  return (hashId(String(id || "")) % 83) / 10;
+}
+
 export function initialOf(name: string | undefined | null): string {
   const s = String(name || "?").trim();
   return s ? s[0].toUpperCase() : "?";

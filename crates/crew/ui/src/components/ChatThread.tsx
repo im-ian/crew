@@ -105,6 +105,7 @@ function EmptyChat({
           src={agent.avatar}
           shape={agent.avatar_shape}
           color={agent.avatar_color}
+          status={agent.status}
         />
         <strong>{agent.name || agent.id}</strong>
         <span>메시지를 보내 대화를 시작하세요</span>

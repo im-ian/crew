@@ -1,10 +1,14 @@
-import type { AvatarShape } from "../avatar";
+import type { CSSProperties } from "react";
+import { avatarPhase, type AvatarShape } from "../avatar";
+import type { AgentStatus } from "../types";
 
 type Props = {
   shape: AvatarShape;
   color: string;
   className?: string;
   title?: string;
+  status?: AgentStatus | null;
+  id?: string | null;
 };
 
 function eyesAt(shape: AvatarShape): { x: number; y: number } {
@@ -66,18 +70,49 @@ function Eyes({ cx, cy }: { cx: number; cy: number }) {
   const w = 6;
   const h = 10.5;
   return (
-    <g fill="#fff">
-      <rect x={cx - dx - w / 2} y={cy - h / 2} width={w} height={h} rx={w / 2} />
-      <rect x={cx + dx - w / 2} y={cy - h / 2} width={w} height={h} rx={w / 2} />
+    <g className="avatar-gaze" fill="#fff">
+      <g className="avatar-blink">
+        <rect
+          className="avatar-eye"
+          x={cx - dx - w / 2}
+          y={cy - h / 2}
+          width={w}
+          height={h}
+          rx={w / 2}
+        />
+        <rect
+          className="avatar-eye"
+          x={cx + dx - w / 2}
+          y={cy - h / 2}
+          width={w}
+          height={h}
+          rx={w / 2}
+        />
+      </g>
     </g>
   );
 }
 
-export function BotFace({ shape, color, className, title }: Props) {
+function liveMood(status?: AgentStatus | null): "idle" | "working" | "blocked" | null {
+  if (status === "idle" || status === "working" || status === "blocked") {
+    return status;
+  }
+  return null;
+}
+
+export function BotFace({ shape, color, className, title, status, id }: Props) {
   const eyes = eyesAt(shape);
+  const live = liveMood(status);
+  const cls = ["avatar-face", live ? `is-${live}` : "", className]
+    .filter(Boolean)
+    .join(" ");
+  const style = live
+    ? ({ ["--avatar-phase"]: avatarPhase(id) } as CSSProperties)
+    : undefined;
   return (
     <svg
-      className={className ? `avatar-face ${className}` : "avatar-face"}
+      className={cls}
+      style={style}
       viewBox="0 0 64 64"
       width="100%"
       height="100%"
