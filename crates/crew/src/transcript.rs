@@ -13,7 +13,8 @@ fn channel_key(id: &str) -> String {
     format!("ch:{id}")
 }
 
-const SEAL_IDLE: Duration = Duration::from_millis(500);
+const EMIT_INTERVAL: Duration = Duration::from_millis(60);
+const SEAL_IDLE: Duration = Duration::from_millis(650);
 const EXPECT_TIMEOUT: Duration = Duration::from_millis(2000);
 
 static CHATS: OnceLock<Mutex<HashMap<String, AgentChat>>> = OnceLock::new();
@@ -24,6 +25,8 @@ struct AgentChat {
     expecting: bool,
     pending_idx: Option<usize>,
     last_byte: Instant,
+    last_emit: Instant,
+    dirty: bool,
     utf8_tail: Vec<u8>,
 }
 
@@ -34,6 +37,8 @@ impl AgentChat {
             expecting: false,
             pending_idx: None,
             last_byte: Instant::now(),
+            last_emit: Instant::now(),
+            dirty: false,
             utf8_tail: Vec::new(),
         }
     }
@@ -84,6 +89,8 @@ fn load_key(key: &str, path: &Path) {
                 expecting: false,
                 pending_idx: None,
                 last_byte: Instant::now(),
+                last_emit: Instant::now(),
+                dirty: false,
                 utf8_tail: Vec::new(),
             },
         );
@@ -175,6 +182,7 @@ fn push_role(agent: &str, role: Role, from: &str, text: &str, expect: bool) -> C
         chat.messages.push(msg.clone());
         chat.expecting = expect;
         chat.pending_idx = None;
+        chat.dirty = false;
         chat.last_byte = Instant::now();
         persist(agent, chat);
     }
@@ -213,10 +221,17 @@ pub fn on_pty_bytes(agent: &str, bytes: &[u8]) {
         if cleaned.is_empty() {
             return;
         }
-        let msg = if let Some(idx) = chat.pending_idx {
+        if let Some(idx) = chat.pending_idx {
             chat.messages[idx].text.push_str(&cleaned);
             chat.messages[idx].ts = now_ms();
-            chat.messages[idx].clone()
+            if chat.last_emit.elapsed() >= EMIT_INTERVAL {
+                chat.last_emit = Instant::now();
+                chat.dirty = false;
+                Some(chat.messages[idx].clone())
+            } else {
+                chat.dirty = true;
+                None
+            }
         } else {
             let m = ChatMessage {
                 id: new_id(),
@@ -227,13 +242,52 @@ pub fn on_pty_bytes(agent: &str, bytes: &[u8]) {
             };
             chat.messages.push(m.clone());
             chat.pending_idx = Some(chat.messages.len() - 1);
-            m
-        };
-        persist(agent, chat);
-        Some(msg)
+            chat.last_emit = Instant::now();
+            chat.dirty = false;
+            Some(m)
+        }
     };
     if let Some(msg) = msg {
         emit(agent, msg);
+    }
+}
+
+pub fn tick() {
+    flush_dirty_all();
+    maybe_seal_all();
+}
+
+fn flush_dirty_all() {
+    let agents: Vec<String> = match chats().lock() {
+        Ok(m) => m.keys().cloned().collect(),
+        Err(_) => return,
+    };
+    for agent in agents {
+        let msg = {
+            let mut map = match chats().lock() {
+                Ok(m) => m,
+                Err(_) => return,
+            };
+            let Some(chat) = map.get_mut(&agent) else {
+                continue;
+            };
+            if !chat.dirty {
+                continue;
+            }
+            let Some(idx) = chat.pending_idx else {
+                chat.dirty = false;
+                continue;
+            };
+            if chat.last_emit.elapsed() < EMIT_INTERVAL {
+                continue;
+            }
+            chat.last_emit = Instant::now();
+            chat.dirty = false;
+            Some(chat.messages[idx].clone())
+        };
+        if let Some(msg) = msg {
+            emit(&agent, msg);
+        }
     }
 }
 
@@ -305,8 +359,10 @@ fn seal_now(agent: &str) {
 fn finish_pending(agent: &str, chat: &mut AgentChat) -> Option<ChatMessage> {
     let Some(idx) = chat.pending_idx.take() else {
         chat.expecting = false;
+        chat.dirty = false;
         return None;
     };
+    chat.dirty = false;
     chat.messages[idx].text = chat.messages[idx].text.trim_end().to_string();
     chat.expecting = false;
     if chat.messages[idx].text.is_empty() {
@@ -429,6 +485,33 @@ mod tests {
     fn strip_csi_and_cr() {
         let raw = "\u{1b}[31mhello\u{1b}[0m\r\nworld\r";
         assert_eq!(normalize_text(&strip_ansi(raw)), "hello\nworld\n");
+    }
+
+    #[test]
+    fn pending_assistant_reuses_id_before_seal() {
+        let agent = format!(
+            "stream-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        push_user(&agent, "user", "hi");
+        on_pty_bytes(&agent, b"hel");
+        let first = messages(&agent);
+        assert_eq!(first.last().unwrap().role, Role::Assistant);
+        assert_eq!(first.last().unwrap().text, "hel");
+        let id = first.last().unwrap().id.clone();
+        on_pty_bytes(&agent, b"lo");
+        let second = messages(&agent);
+        assert_eq!(second.last().unwrap().id, id);
+        assert_eq!(second.last().unwrap().text, "hello");
+        seal_now(&agent);
+        let sealed = messages(&agent);
+        assert_eq!(sealed.last().unwrap().id, id);
+        assert_eq!(sealed.last().unwrap().text, "hello");
+        drop_agent(&agent);
     }
 
     #[test]

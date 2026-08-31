@@ -55,6 +55,11 @@ export function App() {
           currentChannel={crew.currentChannel}
           stick={crew.stick}
           onStick={crew.setStick}
+          streaming={
+            crew.selectedKind === "agent" &&
+            (crew.currentAgent?.status === "working" ||
+              crew.currentAgent?.status === "blocked")
+          }
         />
         <Composer
           agents={crew.agents}
@@ -83,6 +88,8 @@ export function App() {
           onAddRoutine={crew.addRoutine}
           onToggleRoutine={crew.toggleRoutine}
           onDeleteRoutine={crew.deleteRoutine}
+          onLoadMemory={crew.loadMemory}
+          onSaveMemory={crew.saveMemory}
         />
       </main>
       <ConfirmDialog

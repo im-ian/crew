@@ -157,6 +157,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
     spawn_status_ticker();
+    spawn_transcript_ticker();
     spawn_routine_ticker();
 
     loop {
@@ -229,9 +230,21 @@ fn spawn_status_ticker() {
                     emit_frame(&session);
                 }
             }
-            crate::transcript::maybe_seal_all();
         })
         .expect("status ticker");
+}
+
+fn spawn_transcript_ticker() {
+    std::thread::Builder::new()
+        .name("crew-transcript".into())
+        .spawn(|| loop {
+            std::thread::sleep(Duration::from_millis(50));
+            crate::transcript::tick();
+            if EVENTS.get().is_none() {
+                return;
+            }
+        })
+        .expect("transcript ticker");
 }
 
 pub fn on_pty_output(agent: &str, bytes: &[u8]) {
@@ -905,6 +918,7 @@ fn clone_agent(src_id: &str, name: Option<String>) -> anyhow::Result<String> {
     let existing: Vec<String> = roster_vec().into_iter().map(|a| a.id).collect();
     let mut cfg = src.duplicate(name.as_deref(), existing.iter().map(|s| s.as_str()));
     cfg.avatar = crate::avatar::copy_for(src.avatar.as_deref(), &cfg.id);
+    crate::memory::copy(src_id, &cfg.id)?;
     let new_id = cfg.id.clone();
     insert_spawned_agent(cfg)?;
     Ok(new_id)
@@ -954,6 +968,7 @@ fn remove_agent(id: &str) -> anyhow::Result<()> {
     };
     configs().lock().expect("configs mutex").remove(id);
     crate::avatar::clear(id);
+    crate::memory::remove(id);
     crate::transcript::drop_agent(id);
     if let Ok(mut inner) = session.inner.lock() {
         let _ = inner.child.kill();

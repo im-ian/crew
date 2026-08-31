@@ -29,12 +29,13 @@ export function ChatHeader({
 
   if (currentChannel) {
     title = currentChannel.name || currentChannel.id;
-    meta = (currentChannel.members || [])
-      .map((id) => {
-        const a = agents.find((x) => x.id === id);
-        return a ? a.name || a.id : id;
-      })
-      .join(", ") || "멤버 없음";
+    meta =
+      (currentChannel.members || [])
+        .map((id) => {
+          const a = agents.find((x) => x.id === id);
+          return a ? a.name || a.id : id;
+        })
+        .join(", ") || "멤버 없음";
     showAvatar = true;
     avatarId = currentChannel.id;
     avatarName = currentChannel.name || currentChannel.id;
@@ -65,9 +66,7 @@ export function ChatHeader({
             if (selectedKind === "agent") onPickAvatar();
           }}
         />
-      ) : (
-        <button type="button" className="avatar head-avatar" hidden />
-      )}
+      ) : null}
       <div className="head">
         <button
           type="button"

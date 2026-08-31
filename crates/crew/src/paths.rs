@@ -245,3 +245,11 @@ pub fn channels_dir() -> PathBuf {
 pub fn channel_transcript_path(channel_id: &str) -> PathBuf {
     channels_dir().join(format!("{}.jsonl", safe_agent_id(channel_id)))
 }
+
+pub fn memory_dir() -> PathBuf {
+    home_dir().join("memory")
+}
+
+pub fn memory_path(agent_id: &str) -> PathBuf {
+    memory_dir().join(format!("{}.md", safe_agent_id(agent_id)))
+}

@@ -1,0 +1,14 @@
+import type { CliKind } from "./types";
+
+export const CLIS: { value: CliKind; label: string }[] = [
+  { value: "grok", label: "grok" },
+  { value: "claude", label: "claude" },
+  { value: "codex", label: "codex" },
+];
+
+export const EFFORTS: { value: string; label: string }[] = [
+  { value: "", label: "기본" },
+  { value: "low", label: "낮음" },
+  { value: "medium", label: "보통" },
+  { value: "high", label: "높음" },
+];

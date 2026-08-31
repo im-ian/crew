@@ -62,4 +62,7 @@ export const api = {
     invoke<void>("remove_routine", { agent, key }),
   setRoutineEnabled: (agent: string, key: string, enabled: boolean) =>
     invoke<void>("set_routine_enabled", { agent, key, enabled }),
+  getMemory: (agent: string) => invoke<string>("get_memory", { agent }),
+  setMemory: (agent: string, text: string) =>
+    invoke<void>("set_memory", { agent, text }),
 };

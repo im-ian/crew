@@ -6,6 +6,7 @@ mod config;
 mod cron;
 mod daemon;
 mod desktop;
+mod memory;
 mod paths;
 mod protocol;
 mod pty_agent;
@@ -71,6 +72,9 @@ enum Cmd {
     /// Group channels
     #[command(subcommand)]
     Channel(ChannelCmd),
+    /// Persistent per-agent notes (`$CREW_HOME/memory/AGENT.md`)
+    #[command(subcommand)]
+    Memory(MemoryCmd),
 }
 
 #[derive(Subcommand)]
@@ -190,6 +194,26 @@ enum ChannelCmd {
         from: Option<String>,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         message: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum MemoryCmd {
+    /// Print `$CREW_HOME/memory/AGENT.md`
+    Show { agent: Option<String> },
+    /// Replace memory. Text from args, or stdin if omitted.
+    Set {
+        #[arg(long, short)]
+        agent: Option<String>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        text: Vec<String>,
+    },
+    /// Append a note. PTY sessions may omit --agent and use $CREW_AGENT_ID.
+    Append {
+        #[arg(long, short)]
+        agent: Option<String>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        text: Vec<String>,
     },
 }
 
@@ -397,6 +421,7 @@ fn run() -> anyhow::Result<()> {
                     anyhow::bail!("unknown agent {id}");
                 }
                 crate::avatar::clear(&id);
+                crate::memory::remove(&id);
                 for ch in &mut cfg.channels {
                     ch.members.retain(|m| m != &id);
                 }
@@ -422,6 +447,7 @@ fn run() -> anyhow::Result<()> {
                 let ids: Vec<String> = cfg.agents.iter().map(|a| a.id.clone()).collect();
                 let mut agent = src.duplicate(name.as_deref(), ids.iter().map(|s| s.as_str()));
                 agent.avatar = crate::avatar::copy_for(src.avatar.as_deref(), &agent.id);
+                crate::memory::copy(&id, &agent.id)?;
                 let new_id = agent.id.clone();
                 cfg.agents.push(agent);
                 cfg.save()?;
@@ -432,7 +458,63 @@ fn run() -> anyhow::Result<()> {
         }
         Some(Cmd::Routine(sub)) => run_routine(sub),
         Some(Cmd::Channel(sub)) => run_channel(sub),
+        Some(Cmd::Memory(sub)) => run_memory(sub),
     }
+}
+
+fn run_memory(cmd: MemoryCmd) -> anyhow::Result<()> {
+    match cmd {
+        MemoryCmd::Show { agent } => {
+            let id = memory_agent(agent, &mut Vec::new())?;
+            print!("{}", crate::memory::read(&id));
+            Ok(())
+        }
+        MemoryCmd::Set { agent, mut text } => {
+            let id = memory_agent(agent, &mut text)?;
+            let body = memory_body(text)?;
+            crate::memory::write(&id, &body)?;
+            Ok(())
+        }
+        MemoryCmd::Append { agent, mut text } => {
+            let id = memory_agent(agent, &mut text)?;
+            let body = memory_body(text)?;
+            if body.trim().is_empty() {
+                anyhow::bail!("memory append needs text");
+            }
+            crate::memory::append(&id, &body)?;
+            Ok(())
+        }
+    }
+}
+
+fn memory_agent(flag: Option<String>, rest: &mut Vec<String>) -> anyhow::Result<String> {
+    if let Some(id) = flag.and_then(empty_to_none) {
+        return Ok(id);
+    }
+    if let Some(id) = std::env::var("CREW_AGENT_ID")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+    {
+        return Ok(id);
+    }
+    if !rest.is_empty() {
+        return Ok(rest.remove(0));
+    }
+    anyhow::bail!("memory needs an agent id (or CREW_AGENT_ID)")
+}
+
+fn memory_body(text: Vec<String>) -> anyhow::Result<String> {
+    if !text.is_empty() {
+        return Ok(text.join(" "));
+    }
+    use std::io::{self, IsTerminal, Read};
+    if io::stdin().is_terminal() {
+        anyhow::bail!("memory needs text (args or stdin)");
+    }
+    let mut buf = String::new();
+    io::stdin().read_to_string(&mut buf)?;
+    Ok(buf)
 }
 
 fn connect_for_tell() -> anyhow::Result<()> {

@@ -12,6 +12,7 @@ type Props = {
   currentChannel: ChannelInfo | null;
   stick: boolean;
   onStick: (stick: boolean) => void;
+  streaming?: boolean;
 };
 
 export function ChatThread({
@@ -23,13 +24,14 @@ export function ChatThread({
   currentChannel,
   stick,
   onStick,
+  streaming = false,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const el = ref.current;
     if (el && stick) el.scrollTop = el.scrollHeight;
-  }, [messages, stick, selected, selectedKind]);
+  }, [messages, stick, selected, selectedKind, streaming]);
 
   return (
     <div
@@ -44,7 +46,7 @@ export function ChatThread({
       {!messages.length ? (
         <EmptyChat agent={currentAgent} channel={currentChannel} />
       ) : (
-        messages.map((m) =>
+        messages.map((m, i) =>
           m.role === "system" ? (
             <SystemLine
               key={m.id}
@@ -58,10 +60,22 @@ export function ChatThread({
               key={m.id}
               message={m}
               selectedKind={selectedKind}
+              caret={
+                streaming &&
+                m.role === "assistant" &&
+                i === messages.length - 1
+              }
             />
           ),
         )
       )}
+      {streaming &&
+      messages.length > 0 &&
+      messages[messages.length - 1]?.role !== "assistant" ? (
+        <div className="row them">
+          <div className="bubble md streaming" />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -125,24 +139,27 @@ function SystemLine({
 function Bubble({
   message: m,
   selectedKind,
+  caret = false,
 }: {
   message: ChatMessage;
   selectedKind: Kind;
+  caret?: boolean;
 }) {
   const html = renderMarkdown(m.text || "");
+  const cls = "bubble md" + (caret ? " streaming" : "");
   if (selectedKind === "channel" && m.role !== "user") {
     return (
       <div className="row them">
         <div className="channel-msg">
           <div className="sys-from channel-who">{m.from || ""}</div>
-          <div className="bubble md" dangerouslySetInnerHTML={{ __html: html }} />
+          <div className={cls} dangerouslySetInnerHTML={{ __html: html }} />
         </div>
       </div>
     );
   }
   return (
     <div className={"row " + (m.role === "user" ? "me" : "them")}>
-      <div className="bubble md" dangerouslySetInnerHTML={{ __html: html }} />
+      <div className={cls} dangerouslySetInnerHTML={{ __html: html }} />
     </div>
   );
 }

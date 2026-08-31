@@ -322,6 +322,25 @@ export function useCrew() {
     }
   }
 
+  async function loadMemory(id: string) {
+    try {
+      return await api.getMemory(id);
+    } catch (err) {
+      showError(err);
+      return "";
+    }
+  }
+
+  async function saveMemory(text: string) {
+    const id = selectedRef.current.id;
+    if (!id || selectedRef.current.kind !== "agent") return;
+    try {
+      await api.setMemory(id, text);
+    } catch (err) {
+      showError(err);
+    }
+  }
+
   async function deleteRoutine(r: Routine) {
     const id = selectedRef.current.id;
     if (!id || !r) return;
@@ -508,12 +527,25 @@ export function useCrew() {
       }
     }
     void tick();
-    const id = window.setInterval(() => void tick(), 400);
+    const working =
+      selectedKind === "agent" &&
+      !!currentAgent &&
+      (currentAgent.status === "working" || currentAgent.status === "blocked");
+    const lastRole = messages[messages.length - 1]?.role;
+    const expecting = selectedKind === "agent" && lastRole === "user";
+    const ms = working || expecting ? 200 : 400;
+    const id = window.setInterval(() => void tick(), ms);
     return () => {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [refreshList, refreshMessages]);
+  }, [
+    refreshList,
+    refreshMessages,
+    selectedKind,
+    currentAgent?.status,
+    messages[messages.length - 1]?.role,
+  ]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -586,6 +618,8 @@ export function useCrew() {
     addRoutine,
     toggleRoutine,
     deleteRoutine,
+    loadMemory,
+    saveMemory,
     showError,
   };
 }

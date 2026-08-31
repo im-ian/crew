@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ConfirmKind } from "../types";
+import { Modal } from "./Modal";
 
 type Props = {
   open: boolean;
@@ -43,16 +44,10 @@ export function ConfirmDialog({ open, kind, onCancel, onConfirm }: Props) {
   }
 
   return (
-    <div
-      className={"modal" + (open ? " open" : "")}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}
-    >
-      <div className="dialog">
-        <h3>{title}</h3>
-        <p>{body}</p>
-        <label className="toggle" hidden={!showToggle}>
+    <Modal open={open} title={title} onClose={onCancel}>
+      <p>{body}</p>
+      {showToggle ? (
+        <label className="toggle">
           <input
             type="checkbox"
             checked={drop}
@@ -60,15 +55,15 @@ export function ConfirmDialog({ open, kind, onCancel, onConfirm }: Props) {
           />
           루틴도 함께 제거
         </label>
-        <div className="dialog-actions">
-          <button type="button" className="ghost" onClick={onCancel}>
-            취소
-          </button>
-          <button type="button" className={okClass} onClick={() => onConfirm(drop)}>
-            {ok}
-          </button>
-        </div>
+      ) : null}
+      <div className="actions spread">
+        <button type="button" className="ghost" onClick={onCancel}>
+          취소
+        </button>
+        <button type="button" className={okClass} onClick={() => onConfirm(drop)}>
+          {ok}
+        </button>
       </div>
-    </div>
+    </Modal>
   );
 }

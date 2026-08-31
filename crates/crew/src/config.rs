@@ -246,7 +246,10 @@ pub fn unique_agent_id<S: AsRef<str>>(name: &str, existing: impl IntoIterator<It
     unique_from_base(slug_id(name), existing)
 }
 
-pub fn unique_channel_id<S: AsRef<str>>(name: &str, existing: impl IntoIterator<Item = S>) -> String {
+pub fn unique_channel_id<S: AsRef<str>>(
+    name: &str,
+    existing: impl IntoIterator<Item = S>,
+) -> String {
     unique_from_base(slug_with_fallback(name, "channel"), existing)
 }
 
@@ -416,6 +419,7 @@ impl AgentConfig {
         }
         inject_model_effort(&program, &mut args, self.model.as_deref(), self.effort);
         inject_team_rules(&program, &mut args, self, roster);
+        inject_memory(&program, &mut args, &self.id);
         args
     }
 }
@@ -530,6 +534,9 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew channel:…]` / `[crew system]` are real messages.\n",
     );
     s.push_str("Live roster: $CREW_HOME/roster.md\n");
+    s.push_str(
+        "Persistent memory: `crew memory show` / `crew memory append <text>` writes $CREW_HOME/memory/$CREW_AGENT_ID.md and survives reset.\n",
+    );
     s
 }
 
@@ -571,6 +578,19 @@ fn inject_team_rules(
     match program {
         "grok" => append_flag_value(args, "--rules", &text),
         "claude" => append_flag_value(args, "--append-system-prompt", &text),
+        _ => {}
+    }
+}
+
+fn inject_memory(program: &str, args: &mut Vec<String>, agent_id: &str) {
+    let text = crate::memory::read(agent_id);
+    let text = text.trim();
+    if text.is_empty() {
+        return;
+    }
+    match program {
+        "grok" => append_flag_value(args, "--rules", text),
+        "claude" => append_flag_value(args, "--append-system-prompt", text),
         _ => {}
     }
 }

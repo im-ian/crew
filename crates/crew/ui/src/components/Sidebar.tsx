@@ -20,24 +20,10 @@ type Props = {
   onPickAvatar: (id: string) => void;
 };
 
-function matchesQuery(a: AgentInfo, query: string): boolean {
+function matches(parts: Array<string | null | undefined>, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  const blob = [a.name, a.id, a.title, a.role, a.preview]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-  return blob.includes(q);
-}
-
-function matchesChannel(c: ChannelInfo, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  const blob = [c.name, c.id, (c.members || []).join(" "), c.preview]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-  return blob.includes(q);
+  return parts.filter(Boolean).join(" ").toLowerCase().includes(q);
 }
 
 export function Sidebar({
@@ -57,10 +43,14 @@ export function Sidebar({
   onChannelCtx,
   onPickAvatar,
 }: Props) {
-  const shownAgents = agents.filter((a) => matchesQuery(a, query));
-  const shownChannels = channels.filter((c) => matchesChannel(c, query));
-  const connClass =
-    connected === null ? "conn-dot" : connected ? "conn-dot ok" : "conn-dot bad";
+  const shownAgents = agents.filter((a) =>
+    matches([a.name, a.id, a.title, a.role, a.preview], query),
+  );
+  const shownChannels = channels.filter((c) =>
+    matches([c.name, c.id, (c.members || []).join(" "), c.preview], query),
+  );
+  const connBadge =
+    connected === null ? "exited" : connected ? "idle" : "blocked";
 
   return (
     <aside>
@@ -75,68 +65,54 @@ export function Sidebar({
           value={query}
           onChange={(e) => onQuery(e.target.value)}
         />
-        <button
-          type="button"
-          className="new-bot-btn"
-          title="새 봇"
-          aria-label="새 봇"
-          onClick={onNewBot}
-        >
-          +
-        </button>
-        <span className={connClass} title={connDetail} />
       </div>
       <div className="rail-lists">
-        <div>
+        <section className="rail-section">
+          <div className="rail-head">
+            <div className="rail-label">에이전트</div>
+            <button
+              type="button"
+              className="icon-btn"
+              title="새 봇"
+              aria-label="새 봇"
+              onClick={onNewBot}
+            >
+              +
+            </button>
+          </div>
           {!shownAgents.length ? (
             <div className="empty-rail">
               {agents.length ? "검색 결과가 없습니다" : "에이전트가 없습니다"}
             </div>
           ) : (
             shownAgents.map((a) => (
-              <button
+              <RailRow
                 key={a.id}
-                type="button"
-                className={
-                  "agent" +
-                  (selectedKind === "agent" && a.id === selected ? " active" : "")
-                }
+                id={a.id}
+                name={a.name || a.id}
+                preview={a.preview}
+                active={selectedKind === "agent" && a.id === selected}
+                src={a.avatar}
+                badge={a.status || ""}
                 onClick={() => onSelectAgent(a.id)}
-                onContextMenu={(e) => {
+                onContextMenu={(e) => onAgentCtx(e, a.id)}
+                onAvatarClick={(e) => {
+                  if (selectedKind !== "agent" || selected !== a.id) {
+                    onSelectAgent(a.id);
+                  }
+                  onPickAvatar(a.id);
                   e.preventDefault();
-                  e.stopPropagation();
-                  onAgentCtx(e, a.id);
                 }}
-              >
-                <Avatar
-                  id={a.id}
-                  name={a.name || a.id}
-                  src={a.avatar}
-                  badge={a.status || ""}
-                  title="사진 변경"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (selectedKind !== "agent" || selected !== a.id) {
-                      onSelectAgent(a.id);
-                    }
-                    onPickAvatar(a.id);
-                  }}
-                />
-                <div>
-                  <div className="agent-name">{a.name || a.id}</div>
-                  {a.preview ? <div className="agent-preview">{a.preview}</div> : null}
-                </div>
-              </button>
+              />
             ))
           )}
-        </div>
-        <div className="rail-section">
+        </section>
+        <section className="rail-section">
           <div className="rail-head">
             <div className="rail-label">채널</div>
             <button
               type="button"
-              className="rail-add"
+              className="icon-btn"
               title="새 채널"
               aria-label="새 채널"
               onClick={onNewChannel}
@@ -144,48 +120,98 @@ export function Sidebar({
               +
             </button>
           </div>
-          <div>
-            {!shownChannels.length ? (
-              <div className="empty-rail">
-                {channels.length ? "검색 결과가 없습니다" : "없음"}
-              </div>
-            ) : (
-              shownChannels.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  className={
-                    "channel" +
-                    (selectedKind === "channel" && c.id === selected ? " active" : "")
-                  }
-                  onClick={() => onSelectChannel(c.id)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onChannelCtx(e, c.id);
-                  }}
-                >
-                  <Avatar id={c.id} name={c.name || c.id} letter="#" />
-                  <div>
-                    <div className="agent-name">{c.name || c.id}</div>
-                    {c.preview || (c.members || []).join(", ") ? (
-                      <div className="agent-preview">
-                        {c.preview || (c.members || []).join(", ")}
-                      </div>
-                    ) : null}
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
-        </div>
+          {!shownChannels.length ? (
+            <div className="empty-rail">
+              {channels.length ? "검색 결과가 없습니다" : "채널이 없습니다"}
+            </div>
+          ) : (
+            shownChannels.map((c) => (
+              <RailRow
+                key={c.id}
+                id={c.id}
+                name={c.name || c.id}
+                preview={c.preview || (c.members || []).join(", ")}
+                active={selectedKind === "channel" && c.id === selected}
+                letter="#"
+                onClick={() => onSelectChannel(c.id)}
+                onContextMenu={(e) => onChannelCtx(e, c.id)}
+              />
+            ))
+          )}
+        </section>
       </div>
       <div className="foot">
         <div className="account">
-          <div className="avatar">C</div>
+          <div className="avatar">
+            C
+            <span className={"badge " + connBadge} title={connDetail} />
+          </div>
           <div className="account-name">Crew</div>
         </div>
       </div>
     </aside>
+  );
+}
+
+function RailRow({
+  id,
+  name,
+  preview,
+  active,
+  letter,
+  src,
+  badge,
+  onClick,
+  onContextMenu,
+  onAvatarClick,
+}: {
+  id: string;
+  name: string;
+  preview?: string | null;
+  active: boolean;
+  letter?: string;
+  src?: string | null;
+  badge?: string | null;
+  onClick: () => void;
+  onContextMenu: (e: MouseEvent) => void;
+  onAvatarClick?: (e: MouseEvent) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={
+        "rail-row" +
+        (active ? " active" : "") +
+        (onAvatarClick ? " has-avatar-action" : "")
+      }
+      onClick={onClick}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu(e);
+      }}
+    >
+      <Avatar
+        id={id}
+        name={name}
+        src={src}
+        letter={letter}
+        badge={badge || undefined}
+        title={onAvatarClick ? "사진 변경" : undefined}
+        onClick={
+          onAvatarClick
+            ? (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onAvatarClick(e);
+              }
+            : undefined
+        }
+      />
+      <div className="rail-row-text">
+        <div className="agent-name">{name}</div>
+        {preview ? <div className="agent-preview">{preview}</div> : null}
+      </div>
+    </button>
   );
 }

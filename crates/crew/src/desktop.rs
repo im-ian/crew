@@ -177,6 +177,24 @@ fn channel_send(channel: String, text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_memory(agent: String) -> Result<String, String> {
+    let agent = agent.trim();
+    if agent.is_empty() {
+        return Err("agent is required".into());
+    }
+    Ok(crate::memory::read(agent))
+}
+
+#[tauri::command]
+fn set_memory(agent: String, text: String) -> Result<(), String> {
+    let agent = agent.trim();
+    if agent.is_empty() {
+        return Err("agent is required".into());
+    }
+    crate::memory::write(agent, &text).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_messages(agent: String) -> Result<Vec<ChatMessage>, String> {
     match client::rpc(Request::Messages { agent }) {
         Ok(Event::Messages { messages, .. }) => Ok(messages),
@@ -449,7 +467,9 @@ pub fn run() -> anyhow::Result<()> {
             clear_avatar,
             add_routine,
             remove_routine,
-            set_routine_enabled
+            set_routine_enabled,
+            get_memory,
+            set_memory
         ])
         .run(tauri::generate_context!())
         .map_err(|e| anyhow::anyhow!(e))?;
