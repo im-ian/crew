@@ -14,7 +14,7 @@ type Props = {
   onReset: () => void;
   onSetFace: (shape?: string | null, color?: string | null) => Promise<void>;
   onSave: (fields: {
-    title: string;
+    name: string;
     role: string;
     description: string;
     model: string;
@@ -29,18 +29,18 @@ export function InfoPane({
   onSetFace,
   onSave,
 }: Props) {
-  const [title, setTitle] = useState("");
+  const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [description, setDescription] = useState("");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
   const saveTimer = useRef<number | null>(null);
-  const fieldsRef = useRef({ title, role, description, model, effort });
-  fieldsRef.current = { title, role, description, model, effort };
+  const fieldsRef = useRef({ name, role, description, model, effort });
+  fieldsRef.current = { name, role, description, model, effort };
 
   useEffect(() => {
     if (!open || !agent) return;
-    setTitle(agent.title || "");
+    setName(agent.name || agent.id || "");
     setRole(agent.role || "");
     setDescription(agent.description || "");
     setModel(agent.model || "");
@@ -96,15 +96,15 @@ export function InfoPane({
           />
         </FacePop>
       </div>
-      <Field label="이름" htmlFor="info-title">
+      <Field label="이름" htmlFor="info-name">
         <input
-          id="info-title"
+          id="info-name"
           className="textin"
           placeholder="예: 기획 도우미"
-          value={title}
+          value={name}
           onChange={(e) => {
-            setTitle(e.target.value);
-            scheduleSave({ title: e.target.value });
+            setName(e.target.value);
+            scheduleSave({ name: e.target.value });
           }}
           onBlur={() => void flushSave()}
         />

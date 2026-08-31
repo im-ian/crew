@@ -19,7 +19,7 @@ type Props = {
   onReset: () => void;
   onSetFace: (shape?: string | null, color?: string | null) => Promise<void>;
   onSave: (fields: {
-    title: string;
+    name: string;
     role: string;
     description: string;
     model: string;

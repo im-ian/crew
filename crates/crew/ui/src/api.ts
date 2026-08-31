@@ -40,6 +40,7 @@ export const api = {
     unsetRole: boolean;
     shape?: string | null;
     color?: string | null;
+    name?: string | null;
   }) => invoke<void>("set_agent", args),
   addAgent: (args: {
     name: string;

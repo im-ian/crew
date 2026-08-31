@@ -327,7 +327,7 @@ export function useCrew() {
   }
 
   async function saveAgentInfo(fields: {
-    title: string;
+    name: string;
     role: string;
     description: string;
     model: string;
@@ -336,7 +336,7 @@ export function useCrew() {
     const id = selectedRef.current.id;
     if (!id || selectedRef.current.kind !== "agent") return;
     const model = fields.model.trim();
-    const title = fields.title.trim();
+    const name = fields.name.trim();
     const role = fields.role.trim();
     const description = fields.description.trim();
     try {
@@ -346,14 +346,15 @@ export function useCrew() {
         effort: fields.effort || null,
         unsetModel: !model,
         unsetEffort: !fields.effort,
-        title: title || null,
+        title: null,
         role: role || null,
         description: description || null,
-        unsetTitle: !title,
+        unsetTitle: false,
         unsetRole: !role,
         unsetDescription: !description,
         shape: null,
         color: null,
+        name: name || null,
       });
       await refreshList();
     } catch (err) {
