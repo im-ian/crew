@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AgentInfo, ChannelInfo, ChatMessage, Group } from "./types";
+import type { AgentInfo, ChannelInfo, ChatMessage, Group, ModelList } from "./types";
+
+const modelLists = new Map<string, Promise<ModelList>>();
 
 export function errMsg(err: unknown): string {
   if (typeof err === "string") return err;
@@ -69,4 +71,15 @@ export const api = {
     invoke<void>("set_memory", { agent, text }),
   listGroups: () => invoke<Group[]>("list_groups"),
   setGroups: (groups: Group[]) => invoke<void>("set_groups", { groups }),
+  listModels: (cli: string) => {
+    let pending = modelLists.get(cli);
+    if (!pending) {
+      pending = invoke<ModelList>("list_models", { cli }).catch((err) => {
+        modelLists.delete(cli);
+        throw err;
+      });
+      modelLists.set(cli, pending);
+    }
+    return pending;
+  },
 };

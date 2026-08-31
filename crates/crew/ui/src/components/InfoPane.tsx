@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { AvatarShape } from "../avatar";
-import { EFFORTS } from "../options";
+import { cliFromCmd, EFFORTS } from "../options";
 import type { AgentInfo } from "../types";
 import { Avatar } from "./Avatar";
 import { FacePicker } from "./FacePicker";
 import { Field } from "./Field";
+import { ModelSelect } from "./ModelSelect";
 import { Seg } from "./Seg";
 
 type Props = {
@@ -136,16 +137,15 @@ export function InfoPane({
         />
       </Field>
       <Field label="모델" htmlFor="model">
-        <input
+        <ModelSelect
           id="model"
-          className="textin"
-          placeholder="비워 두면 기본값"
+          cli={cliFromCmd(agent?.cmd)}
           value={model}
-          onChange={(e) => {
-            setModel(e.target.value);
-            scheduleSave({ model: e.target.value });
+          onChange={(next) => {
+            setModel(next);
+            void flushSave({ model: next });
           }}
-          onBlur={() => void flushSave()}
+          active={open}
         />
       </Field>
       <Field label="생각">

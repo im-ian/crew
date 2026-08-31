@@ -19,6 +19,11 @@ export type Group = {
 };
 export type CliKind = "grok" | "claude" | "codex";
 
+export type ModelList = {
+  models: string[];
+  default?: string | null;
+};
+
 export type Routine = {
   id: string;
   name: string;

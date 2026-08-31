@@ -267,6 +267,12 @@
           "markdownDescription": "Enables the list_groups command without any pre-configured scope."
         },
         {
+          "description": "Enables the list_models command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-models",
+          "markdownDescription": "Enables the list_models command without any pre-configured scope."
+        },
+        {
           "description": "Enables the remove_agent command without any pre-configured scope.",
           "type": "string",
           "const": "allow-remove-agent",
@@ -421,6 +427,12 @@
           "type": "string",
           "const": "deny-list-groups",
           "markdownDescription": "Denies the list_groups command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_models command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-models",
+          "markdownDescription": "Denies the list_models command without any pre-configured scope."
         },
         {
           "description": "Denies the remove_agent command without any pre-configured scope.",

@@ -32,6 +32,7 @@ fn main() {
             "set_memory",
             "list_groups",
             "set_groups",
+            "list_models",
         ])),
     )
     .expect("failed to run tauri build");

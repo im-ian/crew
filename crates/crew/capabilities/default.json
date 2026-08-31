@@ -37,6 +37,7 @@
     "allow-get-memory",
     "allow-set-memory",
     "allow-list-groups",
-    "allow-set-groups"
+    "allow-set-groups",
+    "allow-list-models"
   ]
 }

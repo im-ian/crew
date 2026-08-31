@@ -11,6 +11,7 @@ mod headless;
 #[cfg(debug_assertions)]
 mod ui_dev;
 mod memory;
+mod models;
 mod paths;
 mod protocol;
 mod pty_agent;

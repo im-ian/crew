@@ -183,6 +183,15 @@ impl AgentCli {
             other => anyhow::bail!("cli must be grok, claude, or codex (got {other})"),
         }
     }
+
+    pub fn from_cmd(cmd: &[String]) -> Option<Self> {
+        let bin = cmd.first()?;
+        let name = std::path::Path::new(bin)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(bin);
+        Self::from_key(name).ok()
+    }
 }
 
 pub fn resolve_add_cmd(cli: Option<AgentCli>, cmd: Vec<String>) -> anyhow::Result<Vec<String>> {
@@ -1486,6 +1495,24 @@ mod tests {
             AgentCli::Grok.default_cmd()
         );
         assert!(resolve_add_cmd(None, vec![]).is_err());
+    }
+
+    #[test]
+    fn agent_cli_from_cmd_uses_binary_name() {
+        assert_eq!(
+            AgentCli::from_cmd(&["grok".into(), "--always-approve".into()]),
+            Some(AgentCli::Grok)
+        );
+        assert_eq!(
+            AgentCli::from_cmd(&["/opt/homebrew/bin/claude".into()]),
+            Some(AgentCli::Claude)
+        );
+        assert_eq!(
+            AgentCli::from_cmd(&["codex".into(), "--yolo".into()]),
+            Some(AgentCli::Codex)
+        );
+        assert_eq!(AgentCli::from_cmd(&["cat".into()]), None);
+        assert_eq!(AgentCli::from_cmd(&[]), None);
     }
 
     #[test]

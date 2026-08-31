@@ -24,6 +24,12 @@ fn parse_shape(shape: Option<String>) -> Result<Option<AvatarShape>, String> {
 }
 
 #[tauri::command]
+fn list_models(cli: String) -> Result<crate::models::ModelList, String> {
+    let cli = AgentCli::from_key(&cli).map_err(|e| e.to_string())?;
+    crate::models::list_models(cli).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn list_agents() -> Result<Vec<AgentInfo>, String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     match client::rpc(Request::List) {
@@ -508,7 +514,8 @@ pub fn run() -> anyhow::Result<()> {
             get_memory,
             set_memory,
             list_groups,
-            set_groups
+            set_groups,
+            list_models
         ])
         .run(tauri::generate_context!())
         .map_err(|e| anyhow::anyhow!(e))?;

@@ -6,6 +6,7 @@ import { Avatar } from "./Avatar";
 import { FacePicker } from "./FacePicker";
 import { Field } from "./Field";
 import { Modal } from "./Modal";
+import { ModelSelect } from "./ModelSelect";
 import { Seg } from "./Seg";
 
 type Props = {
@@ -131,16 +132,22 @@ export function NewBotModal({
           />
         </Field>
         <Field label="AI">
-          <Seg value={cli} options={CLIS} onChange={setCli} />
+          <Seg
+            value={cli}
+            options={CLIS}
+            onChange={(next) => {
+              setCli(next);
+              setModel("");
+            }}
+          />
         </Field>
         <Field label="모델" htmlFor="new-model">
-          <input
+          <ModelSelect
             id="new-model"
-            className="textin"
-            placeholder="비워 두면 기본값"
-            autoComplete="off"
+            cli={cli}
             value={model}
-            onChange={(e) => setModel(e.target.value)}
+            onChange={setModel}
+            active={open}
           />
         </Field>
         <Field label="생각">

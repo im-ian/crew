@@ -960,7 +960,7 @@ label.field {
   color: var(--muted);
   margin: 0;
 }
-.textin, textarea.textin {
+.textin, textarea.textin, select.textin {
   width: 100%;
   background: var(--bg);
   border: 1px solid var(--line);
@@ -970,7 +970,21 @@ label.field {
   outline: none;
   border-radius: var(--radius-md);
 }
-.textin:focus, textarea.textin:focus { border-color: #4a4a4c; }
+.textin:focus, textarea.textin:focus, select.textin:focus { border-color: #4a4a4c; }
+select.textin {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 32px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%238d8d8d' d='M1 2h10L6 7z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 8px;
+}
+select.textin option {
+  background: var(--bg);
+  color: var(--ink);
+}
 textarea.textin {
   min-height: 64px;
   resize: vertical;
