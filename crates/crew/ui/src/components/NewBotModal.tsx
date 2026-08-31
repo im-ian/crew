@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AvatarShape } from "../avatar";
+import { hashedFace, type AvatarShape } from "../avatar";
 import { CLIS, EFFORTS } from "../options";
 import type { CliKind, PendingAvatar } from "../types";
 import { Avatar } from "./Avatar";
@@ -50,8 +50,9 @@ export function NewBotModal({
     setModel("");
     setCli("grok");
     setEffort("");
-    setShape("");
-    setColor("");
+    const face = hashedFace(crypto.randomUUID());
+    setShape(face.shape);
+    setColor(face.color);
     setBusy(false);
     const t = window.setTimeout(() => nameRef.current?.focus(), 0);
     return () => window.clearTimeout(t);
@@ -96,7 +97,7 @@ export function NewBotModal({
             <Avatar
               as="button"
               className="new-avatar"
-              id={name.trim() || "new"}
+              id="new"
               name={name.trim() || "new"}
               src={pendingAvatar?.data}
               shape={shape || null}
@@ -112,7 +113,7 @@ export function NewBotModal({
           </div>
         </Field>
         <FacePicker
-          id={name.trim() || "new"}
+          id="new"
           shape={shape || null}
           color={color || null}
           onShape={setShape}
