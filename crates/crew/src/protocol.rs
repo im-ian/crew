@@ -83,6 +83,8 @@ pub enum Request {
         shape: Option<AvatarShape>,
         #[serde(default)]
         color: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
     },
     Reset {
         agent: String,
@@ -490,6 +492,7 @@ mod tests {
             unset_avatar: false,
             shape: Some(crate::config::AvatarShape::Circle),
             color: Some("#ff6a00".into()),
+            name: None,
         };
         let line = req.to_line().unwrap();
         assert!(line.contains("\"avatar\":\"/tmp/a.png\""));

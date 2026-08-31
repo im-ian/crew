@@ -759,6 +759,7 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             unset_avatar,
             shape,
             color,
+            name,
         } => match set_agent(
             &id,
             model,
@@ -775,6 +776,7 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             unset_avatar,
             shape,
             color,
+            name,
         ) {
             Ok(()) => vec![Event::Ok, snapshot_event()],
             Err(err) => vec![Event::Error {
@@ -1257,6 +1259,7 @@ fn set_agent(
     unset_avatar: bool,
     shape: Option<AvatarShape>,
     color: Option<String>,
+    name: Option<String>,
 ) -> anyhow::Result<()> {
     let mut cfg = {
         let cfgs = configs().lock().expect("configs mutex");
@@ -1294,6 +1297,12 @@ fn set_agent(
     }
     if let Some(color) = color {
         cfg.avatar_color = Some(parse_hex_color(&color)?);
+    }
+    if let Some(name) = name {
+        let name = name.trim();
+        if !name.is_empty() {
+            cfg.name = name.to_string();
+        }
     }
     crate::avatar::apply(&mut cfg, avatar, unset_avatar)?;
     persist_config(&cfg)?;
