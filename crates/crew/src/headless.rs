@@ -131,6 +131,7 @@ pub fn kick(
             }
         }
         crate::daemon::emit_agent_frame(&session.id);
+        crate::daemon::pump_inbox(&session.id);
         return Err(err).context("spawn headless turn thread");
     }
     Ok(())
@@ -270,6 +271,7 @@ fn run_turn(
         inner.seq += 1;
     }
     crate::daemon::emit_agent_frame(&session.id);
+    crate::daemon::pump_inbox(&session.id);
 }
 
 /// A turn that died without a reply left no CLI conversation behind, so its id

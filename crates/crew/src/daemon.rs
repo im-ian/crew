@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -22,6 +22,7 @@ use crate::pty_agent::{self, PtySession};
 
 const DEFAULT_COLS: u16 = 100;
 const DEFAULT_ROWS: u16 = 32;
+const MAX_INBOX: usize = 32;
 
 #[derive(Clone)]
 enum LiveAgent {
@@ -162,6 +163,12 @@ static EVENTS: OnceLock<broadcast::Sender<Event>> = OnceLock::new();
 static AGENTS: OnceLock<Mutex<HashMap<String, LiveAgent>>> = OnceLock::new();
 static CONFIGS: OnceLock<Mutex<HashMap<String, AgentConfig>>> = OnceLock::new();
 static CHANNELS: OnceLock<Mutex<HashMap<String, Channel>>> = OnceLock::new();
+static INBOX: OnceLock<Mutex<HashMap<String, VecDeque<PendingDelivery>>>> = OnceLock::new();
+
+struct PendingDelivery {
+    text: String,
+    newline: bool,
+}
 
 pub fn events() -> &'static broadcast::Sender<Event> {
     EVENTS.get_or_init(|| {
@@ -180,6 +187,104 @@ fn configs() -> &'static Mutex<HashMap<String, AgentConfig>> {
 
 fn channels() -> &'static Mutex<HashMap<String, Channel>> {
     CHANNELS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn inbox() -> &'static Mutex<HashMap<String, VecDeque<PendingDelivery>>> {
+    INBOX.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn clear_inbox(id: &str) {
+    if let Ok(mut map) = inbox().lock() {
+        map.remove(id);
+    }
+}
+
+fn enqueue_delivery(id: &str, text: &str, newline: bool) -> anyhow::Result<()> {
+    let mut map = inbox().lock().expect("inbox mutex");
+    let q = map.entry(id.to_string()).or_default();
+    if q.len() >= MAX_INBOX {
+        anyhow::bail!("agent {id} is busy (inbox full)");
+    }
+    q.push_back(PendingDelivery {
+        text: text.to_string(),
+        newline,
+    });
+    Ok(())
+}
+
+fn is_busy_err(err: &anyhow::Error) -> bool {
+    err.to_string().contains("is working")
+}
+
+fn agent_busy(id: &str) -> anyhow::Result<bool> {
+    let map = agents().lock().expect("agents mutex");
+    let live = map
+        .get(id)
+        .with_context(|| format!("unknown agent {id}"))?;
+    match live {
+        LiveAgent::Headless(session) => {
+            let inner = session.inner.lock().expect("headless inner");
+            Ok(inner.status == AgentStatus::Working || inner.child.is_some())
+        }
+        LiveAgent::Pty(session) => {
+            let inner = session.inner.lock().expect("pty inner");
+            if inner.status == AgentStatus::Exited {
+                anyhow::bail!("agent {id} has exited");
+            }
+            Ok(false)
+        }
+    }
+}
+
+fn start_delivery(id: &str, text: &str, newline: bool) -> anyhow::Result<()> {
+    crate::transcript::expect_echo(id, text);
+    match deliver(id, text, newline) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            crate::transcript::cancel_expect(id);
+            Err(err)
+        }
+    }
+}
+
+fn submit_delivery(id: &str, text: &str, newline: bool) -> anyhow::Result<()> {
+    if agent_busy(id)? {
+        return enqueue_delivery(id, text, newline);
+    }
+    match start_delivery(id, text, newline) {
+        Ok(()) => Ok(()),
+        Err(err) if is_busy_err(&err) => enqueue_delivery(id, text, newline),
+        Err(err) => Err(err),
+    }
+}
+
+pub(crate) fn pump_inbox(id: &str) {
+    match agent_busy(id) {
+        Ok(false) => {}
+        _ => return,
+    }
+    let next = {
+        let mut map = match inbox().lock() {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        map.get_mut(id).and_then(|q| q.pop_front())
+    };
+    let Some(item) = next else {
+        return;
+    };
+    if let Err(err) = start_delivery(id, &item.text, item.newline) {
+        if is_busy_err(&err) {
+            if let Ok(mut map) = inbox().lock() {
+                map.entry(id.to_string())
+                    .or_default()
+                    .push_front(item);
+            }
+            return;
+        }
+        eprintln!("[crew] inbox {id}: {err:#}");
+        pump_inbox(id);
+    }
 }
 
 fn roster_vec() -> Vec<AgentConfig> {
@@ -492,8 +597,7 @@ fn tick_routines() {
             };
             match map.get(&agent) {
                 Some(live) => {
-                    let status = live.status();
-                    if status == AgentStatus::Exited || status == AgentStatus::Working {
+                    if live.status() == AgentStatus::Exited {
                         continue;
                     }
                 }
@@ -517,17 +621,9 @@ fn fire_routine(agent: &str, name: &str, prompt: &str) -> anyhow::Result<()> {
     ensure_accepts_turn(agent)?;
     crate::transcript::push_system(agent, name, prompt);
     let envelope = crate::protocol::routine_envelope(name, prompt);
-    crate::transcript::expect_echo(agent, &envelope);
-    match deliver(agent, &envelope, true) {
-        Ok(()) => {
-            eprintln!("[crew] routine {agent}/{name}");
-            Ok(())
-        }
-        Err(err) => {
-            crate::transcript::cancel_expect(agent);
-            Err(err)
-        }
-    }
+    submit_delivery(agent, &envelope, true)?;
+    eprintln!("[crew] routine {agent}/{name}");
+    Ok(())
 }
 
 fn mark_routine_run(agent: &str, key: &str, minute_key: &str) -> anyhow::Result<()> {
@@ -545,6 +641,9 @@ fn mark_routine_run(agent: &str, key: &str, minute_key: &str) -> anyhow::Result<
 
 fn shutdown_agents() {
     crate::transcript::seal_all_now();
+    if let Ok(mut map) = inbox().lock() {
+        map.clear();
+    }
     let list: Vec<LiveAgent> = match agents().lock() {
         Ok(mut map) => map.drain().map(|(_, v)| v).collect(),
         Err(_) => return,
@@ -960,13 +1059,7 @@ fn send_agent(id: &str, text: &str) -> anyhow::Result<()> {
     ensure_accepts_turn(id)?;
     crate::transcript::push_user(id, "user", text);
     let delivered = crate::config::with_mention_hint(text, id, &roster_vec());
-    match deliver(id, &delivered, true) {
-        Ok(()) => Ok(()),
-        Err(err) => {
-            crate::transcript::cancel_expect(id);
-            Err(err)
-        }
-    }
+    submit_delivery(id, &delivered, true)
 }
 
 fn ensure_accepts_turn(id: &str) -> anyhow::Result<()> {
@@ -975,20 +1068,15 @@ fn ensure_accepts_turn(id: &str) -> anyhow::Result<()> {
         .get(id)
         .with_context(|| format!("unknown agent {id}"))?;
     match live {
-        LiveAgent::Headless(session) => {
-            let inner = session.inner.lock().expect("headless inner");
-            if inner.status == AgentStatus::Working || inner.child.is_some() {
-                anyhow::bail!("agent {id} is working");
-            }
-        }
+        LiveAgent::Headless(_) => Ok(()),
         LiveAgent::Pty(session) => {
             let inner = session.inner.lock().expect("pty inner");
             if inner.status == AgentStatus::Exited {
                 anyhow::bail!("agent {id} has exited");
             }
+            Ok(())
         }
     }
-    Ok(())
 }
 
 fn from_id(from: &str) -> String {
@@ -1015,20 +1103,12 @@ fn tell_agent(from: &str, to: &str, text: &str) -> anyhow::Result<()> {
     ensure_accepts_turn(to)?;
     crate::transcript::push_system(to, &from, text);
     let envelope = crate::protocol::envelope(&from, text);
-    crate::transcript::expect_echo(to, &envelope);
-    match deliver(to, &envelope, true) {
-        Ok(()) => {
-            let _ = events().send(Event::Told {
-                from: from.clone(),
-                to: to.to_string(),
-            });
-            Ok(())
-        }
-        Err(err) => {
-            crate::transcript::cancel_expect(to);
-            Err(err)
-        }
-    }
+    submit_delivery(to, &envelope, true)?;
+    let _ = events().send(Event::Told {
+        from: from.clone(),
+        to: to.to_string(),
+    });
+    Ok(())
 }
 
 fn deliver(id: &str, text: &str, newline: bool) -> anyhow::Result<()> {
@@ -1198,6 +1278,7 @@ fn remove_agent(id: &str) -> anyhow::Result<()> {
     crate::memory::remove(id);
     crate::transcript::drop_agent(id);
     crate::headless::clear_session(id);
+    clear_inbox(id);
     session.kill();
     if let Ok(mut chans) = channels().lock() {
         for ch in chans.values_mut() {
@@ -1410,6 +1491,7 @@ fn reset_agent(id: &str, drop_routines: bool) -> anyhow::Result<String> {
 
     let roster = roster_vec();
     crate::headless::clear_session(id);
+    clear_inbox(id);
     let new_session = open_agent(&cfg, cols, rows, true, &roster)?;
     {
         let mut map = agents().lock().expect("agents mutex");
@@ -1590,13 +1672,9 @@ fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
             continue;
         }
         crate::transcript::push_system(to, &format!("#{channel}"), text);
-        crate::transcript::expect_echo(to, &envelope);
-        match deliver(to, &envelope, true) {
+        match submit_delivery(to, &envelope, true) {
             Ok(()) => sent += 1,
-            Err(err) => {
-                crate::transcript::cancel_expect(to);
-                last_err = Some(err);
-            }
+            Err(err) => last_err = Some(err),
         }
     }
     if sent == 0 {
@@ -1606,4 +1684,35 @@ fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
         anyhow::bail!("no members received the message");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod inbox_tests {
+    use super::*;
+
+    #[test]
+    fn inbox_is_fifo() {
+        let id = "test-inbox-fifo";
+        clear_inbox(id);
+        enqueue_delivery(id, "a", true).unwrap();
+        enqueue_delivery(id, "b", true).unwrap();
+        let mut map = inbox().lock().unwrap();
+        let q = map.get_mut(id).unwrap();
+        assert_eq!(q.pop_front().unwrap().text, "a");
+        assert_eq!(q.pop_front().unwrap().text, "b");
+        drop(map);
+        clear_inbox(id);
+    }
+
+    #[test]
+    fn inbox_caps_at_max() {
+        let id = "test-inbox-full";
+        clear_inbox(id);
+        for i in 0..MAX_INBOX {
+            enqueue_delivery(id, &i.to_string(), true).unwrap();
+        }
+        let err = enqueue_delivery(id, "overflow", true).unwrap_err();
+        assert!(err.to_string().contains("inbox full"), "{err}");
+        clear_inbox(id);
+    }
 }
