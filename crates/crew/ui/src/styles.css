@@ -38,6 +38,9 @@
 html, body, #root {
   margin: 0;
   height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
   background: var(--rail);
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
@@ -51,7 +54,9 @@ button, input, textarea, select {
 .app {
   display: grid;
   grid-template-columns: var(--rail-w) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
+  max-height: 100%;
   overflow: hidden;
 }
 aside {
@@ -59,6 +64,7 @@ aside {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
   position: relative;
 }
 .drag-top {
@@ -105,6 +111,7 @@ aside {
 .rail-lists {
   flex: 1;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 0 var(--rail-pad) var(--rail-pad);
   min-height: 0;
 }
@@ -521,6 +528,7 @@ button.head-identity:hover .head-title { opacity: 0.72; }
 .thread {
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 12px max(var(--content-pad), calc(50% - var(--content-max) / 2)) 16px;
   display: flex;
   flex-direction: column;
@@ -580,11 +588,14 @@ button.head-identity:hover .head-title { opacity: 0.72; }
 .row.me { justify-content: flex-end; }
 .row.them { justify-content: flex-start; align-items: flex-start; gap: 10px; }
 .msg-avatar {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   font-size: 11px;
   flex-shrink: 0;
-  margin-top: 2px;
+  margin-top: 1px;
+}
+button.msg-avatar {
+  cursor: pointer;
 }
 .bubble {
   line-height: 1.5;
@@ -682,12 +693,42 @@ textarea.textin.memory {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.channel-who {
-  text-align: left;
-  margin: 0 0 4px;
-}
 .channel-msg {
   min-width: 0;
+  max-width: min(36em, calc(100% - 42px));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.channel-who {
+  margin: 0 0 4px 2px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: left;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.channel-who {
+  cursor: pointer;
+}
+button.channel-who:hover {
+  text-decoration: underline;
+}
+.row.them .bubble.incoming {
+  width: fit-content;
+  max-width: 100%;
+  padding: 10px 14px;
+  border-radius: 18px;
+  background: var(--menu);
+  color: var(--ink);
 }
 .composer {
   display: flex;
@@ -923,6 +964,7 @@ button.mention-chip:hover {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 0 4px 4px;
   margin: 0 -4px;
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentInfo, ChannelInfo, ChatMessage, Kind } from "../types";
+import { resolveFace } from "../avatar";
 import { Avatar } from "./Avatar";
 import { MdBody } from "./MdBody";
 
@@ -8,6 +9,7 @@ const STICK_PX = 24;
 type Props = {
   messages: ChatMessage[];
   agents: AgentInfo[];
+  channels?: ChannelInfo[];
   selected: string | null;
   selectedKind: Kind;
   currentAgent: AgentInfo | null;
@@ -21,6 +23,7 @@ type Props = {
 export function ChatThread({
   messages,
   agents,
+  channels = [],
   selected,
   selectedKind,
   currentAgent,
@@ -80,6 +83,7 @@ export function ChatThread({
                   key={m.id}
                   message={m}
                   agents={agents}
+                  channels={channels}
                   selectedKind={selectedKind}
                   onSelectAgent={openAgent}
                 />
@@ -158,11 +162,13 @@ function EmptyChat({
 function SystemOrIncoming({
   message: m,
   agents,
+  channels,
   selectedKind,
   onSelectAgent,
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
+  channels: ChannelInfo[];
   selectedKind: Kind;
   onSelectAgent?: (id: string) => void;
 }) {
@@ -176,13 +182,17 @@ function SystemOrIncoming({
       />
     );
   }
+  const from = String(m.from || "");
   const agent = agents.find((a) => a.id === m.from) ?? null;
-  if (agent || String(m.from || "").startsWith("#")) {
+  const fromChannel = from.startsWith("#");
+  if (agent || fromChannel) {
     return (
       <Incoming
         message={m}
         agent={agent}
-        who={displayWho(m, agent)}
+        who={
+          fromChannel ? `#${channelDisplayName(from, channels)}` : displayWho(m, agent)
+        }
         agents={agents}
         onSelectAgent={onSelectAgent}
       />
@@ -211,11 +221,16 @@ function Incoming({
   caret?: boolean;
   onSelectAgent?: (id: string) => void;
 }) {
-  const cls = "bubble md" + (caret ? " streaming" : "");
+  const color = agent
+    ? whoColor(resolveFace(agent.id, agent.avatar_shape, agent.avatar_color).color)
+    : undefined;
+  const open = onSelectAgent && agent ? () => onSelectAgent(agent.id) : undefined;
+  const cls = "bubble md incoming" + (caret ? " streaming" : "");
   return (
-    <div className="row them">
+    <div className="row them incoming">
       {agent ? (
         <Avatar
+          as={open ? "button" : "div"}
           className="msg-avatar"
           id={agent.id}
           name={agent.name || agent.id}
@@ -223,10 +238,28 @@ function Incoming({
           shape={agent.avatar_shape}
           color={agent.avatar_color}
           status={agent.status}
+          title={who}
+          onClick={open}
         />
       ) : null}
       <div className="channel-msg">
-        <div className="sys-from channel-who">{who}</div>
+        {open ? (
+          <button
+            type="button"
+            className="channel-who"
+            style={color ? { color } : undefined}
+            onClick={open}
+          >
+            {who}
+          </button>
+        ) : (
+          <div
+            className="channel-who"
+            style={color ? { color } : undefined}
+          >
+            {who}
+          </div>
+        )}
         <MdBody
           className={cls}
           text={m.text || ""}
@@ -282,6 +315,23 @@ function Bubble({
 function displayWho(m: ChatMessage, agent: AgentInfo | null): string {
   if (agent) return agent.name || agent.id;
   return m.from || "";
+}
+
+function whoColor(hex: string): string {
+  const n = hex.replace("#", "");
+  if (n.length !== 6) return hex;
+  const r = parseInt(n.slice(0, 2), 16);
+  const g = parseInt(n.slice(2, 4), 16);
+  const b = parseInt(n.slice(4, 6), 16);
+  const l = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  if (l >= 0.38) return hex;
+  return `color-mix(in srgb, ${hex} 62%, white)`;
+}
+
+function channelDisplayName(from: string, channels: ChannelInfo[]): string {
+  const id = from.startsWith("#") ? from.slice(1) : from;
+  const ch = channels.find((c) => c.id === id);
+  return (ch?.name || ch?.id || id).replace(/^#/, "");
 }
 
 function isCrewMarkerLine(line: string): boolean {

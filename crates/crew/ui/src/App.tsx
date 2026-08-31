@@ -60,6 +60,7 @@ export function App() {
         <ChatThread
           messages={crew.messages}
           agents={crew.agents}
+          channels={crew.channels}
           selected={crew.selected}
           selectedKind={crew.selectedKind}
           currentAgent={crew.currentAgent}
