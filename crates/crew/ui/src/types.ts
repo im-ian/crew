@@ -2,6 +2,7 @@ export type AgentStatus = "working" | "idle" | "blocked" | "exited";
 export type Effort = "low" | "medium" | "high";
 export type Role = "user" | "assistant" | "system";
 export type Kind = "agent" | "channel";
+export type PaneTab = "info" | "routines" | "memory";
 export type CtxKind = Kind | "group" | "create";
 export type ConfirmKind =
   | "reset"

@@ -28,7 +28,6 @@ type Props = {
   onAgentCtx: (e: MouseEvent, id: string) => void;
   onChannelCtx: (e: MouseEvent, id: string) => void;
   onGroupCtx: (e: MouseEvent, id: string) => void;
-  onPickAvatar: (id: string) => void;
   onToggleGroup: (id: string) => void;
   onRenameGroup: (id: string, name: string) => void;
   onRenameDone: () => void;
@@ -81,7 +80,6 @@ export function Sidebar({
   onAgentCtx,
   onChannelCtx,
   onGroupCtx,
-  onPickAvatar,
   onToggleGroup,
   onRenameGroup,
   onRenameDone,
@@ -243,9 +241,6 @@ export function Sidebar({
                         }
                         onSelect={() => select(item)}
                         onContextMenu={(e) => ctx(e, item)}
-                        onPickAvatar={
-                          item.kind === "agent" ? () => onPickAvatar(item.id) : undefined
-                        }
                         onDragStart={(e) => onDragStart(e, item)}
                         onDragEnd={onDragEnd}
                         onDragOver={(e) => markDrop(e, group.id, item.key)}
@@ -274,9 +269,6 @@ export function Sidebar({
                     dropBefore={drop?.groupId === null && drop.beforeKey === item.key}
                     onSelect={() => select(item)}
                     onContextMenu={(e) => ctx(e, item)}
-                    onPickAvatar={
-                      item.kind === "agent" ? () => onPickAvatar(item.id) : undefined
-                    }
                     onDragStart={(e) => onDragStart(e, item)}
                     onDragEnd={onDragEnd}
                     onDragOver={(e) => markDrop(e, null, item.key)}
@@ -392,7 +384,6 @@ function ItemRow({
   dropBefore,
   onSelect,
   onContextMenu,
-  onPickAvatar,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -404,7 +395,6 @@ function ItemRow({
   dropBefore: boolean;
   onSelect: () => void;
   onContextMenu: (e: MouseEvent) => void;
-  onPickAvatar?: () => void;
   onDragStart: (e: DragEvent) => void;
   onDragEnd: () => void;
   onDragOver: (e: DragEvent) => void;
@@ -417,7 +407,6 @@ function ItemRow({
       className={
         "rail-row" +
         (active ? " active" : "") +
-        (onPickAvatar ? " has-avatar-action" : "") +
         (dragging ? " dragging" : "") +
         (dropBefore ? " drop-before" : "")
       }
@@ -442,17 +431,6 @@ function ItemRow({
         letter={item.kind === "channel" ? "#" : undefined}
         badge={a?.status || undefined}
         status={a?.status}
-        title={onPickAvatar ? "사진 변경" : undefined}
-        onClick={
-          onPickAvatar
-            ? (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (!active) onSelect();
-                onPickAvatar();
-              }
-            : undefined
-        }
       />
       <div className="rail-row-text">
         <div className="agent-name">{item.name}</div>

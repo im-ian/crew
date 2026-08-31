@@ -4,9 +4,8 @@ import { ChatThread } from "./components/ChatThread";
 import { Composer } from "./components/Composer";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ContextMenu, type MenuEntry } from "./components/ContextMenu";
-import { InfoPane } from "./components/InfoPane";
+import { AgentPane } from "./components/AgentPane";
 import { NewBotModal } from "./components/NewBotModal";
-import { RoutinesModal } from "./components/RoutinesModal";
 import { NewChannelModal } from "./components/NewChannelModal";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
@@ -40,7 +39,6 @@ export function App() {
         onAgentCtx={(e, id) => crew.showCtx(e, id, "agent")}
         onChannelCtx={(e, id) => crew.showCtx(e, id, "channel")}
         onGroupCtx={(e, id) => crew.showCtx(e, id, "group")}
-        onPickAvatar={crew.pickAvatar}
         onToggleGroup={crew.toggleGroup}
         onRenameGroup={crew.renameGroup}
         onRenameDone={finishRename}
@@ -49,7 +47,6 @@ export function App() {
       <main>
         <div className="titlebar-align" data-tauri-drag-region />
         <ChatHeader
-          selectedKind={crew.selectedKind}
           currentAgent={crew.currentAgent}
           currentChannel={crew.currentChannel}
           agents={crew.agents}
@@ -58,9 +55,6 @@ export function App() {
           }}
           onOpenRoutines={() => {
             if (crew.selected) crew.openRoutines(crew.selected);
-          }}
-          onPickAvatar={() => {
-            if (crew.selected) crew.pickAvatar(crew.selected);
           }}
         />
         <ChatThread
@@ -85,32 +79,23 @@ export function App() {
           placeholder={crew.placeholder}
           onSend={crew.onSend}
         />
-        <InfoPane
-          open={crew.infoOpen}
+        <AgentPane
+          open={crew.paneOpen}
+          tab={crew.paneTab}
           agent={crew.currentAgent}
-          onClose={crew.closeInfo}
+          onTab={crew.setPaneTab}
+          onClose={crew.closePane}
           onReset={() => {
-            crew.closeInfo();
+            crew.closePane();
             if (crew.selected) crew.openConfirm(crew.selected, "reset");
-          }}
-          onPickAvatar={() => {
-            if (crew.selected) crew.pickAvatar(crew.selected);
-          }}
-          onClearAvatar={() => {
-            if (crew.selected) void crew.clearAvatar(crew.selected);
           }}
           onSetFace={crew.saveAgentFace}
           onSave={crew.saveAgentInfo}
+          onAddRoutine={crew.addRoutine}
+          onToggleRoutine={crew.toggleRoutine}
+          onDeleteRoutine={crew.deleteRoutine}
           onLoadMemory={crew.loadMemory}
           onSaveMemory={crew.saveMemory}
-        />
-        <RoutinesModal
-          open={crew.routineOpen}
-          agent={crew.currentAgent}
-          onClose={crew.closeRoutines}
-          onAdd={crew.addRoutine}
-          onToggle={crew.toggleRoutine}
-          onDelete={crew.deleteRoutine}
         />
       </main>
       <ConfirmDialog
@@ -121,10 +106,7 @@ export function App() {
       />
       <NewBotModal
         open={crew.newBotOpen}
-        pendingAvatar={crew.pendingNewAvatar}
         onClose={crew.closeNewBot}
-        onPickAvatar={() => crew.pickAvatar("__new__")}
-        onClearAvatar={() => crew.setPendingNewAvatar(null)}
         onCreate={crew.createBot}
       />
       <NewChannelModal
@@ -138,17 +120,6 @@ export function App() {
         x={crew.ctx.x}
         y={crew.ctx.y}
         items={menuItems(crew, setRenameId)}
-      />
-      <input
-        ref={crew.fileRef}
-        className="avatar-file"
-        type="file"
-        accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          e.target.value = "";
-          void crew.onAvatarFile(file);
-        }}
       />
       <Toast text={crew.toast.text} show={crew.toast.show} />
     </div>

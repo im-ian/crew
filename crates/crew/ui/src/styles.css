@@ -455,6 +455,9 @@ header {
   color: var(--ink);
 }
 .head-action svg { display: block; }
+.app:has(.overlay.open) header .head-action {
+  visibility: hidden;
+}
 .head-title {
   margin: 0;
   padding: 0;
@@ -731,12 +734,15 @@ textarea.textin.memory {
   cursor: default;
 }
 .overlay {
+  grid-row: 1 / -1;
+  grid-column: 1;
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.28);
   display: none;
   justify-content: flex-end;
-  z-index: 20;
+  z-index: 30;
+  min-height: 0;
 }
 .overlay.open { display: flex; }
 .sheet {
@@ -747,6 +753,66 @@ textarea.textin.memory {
   padding: 22px 24px 24px;
   overflow: auto;
   animation: slide-in 0.22s ease;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.agent-sheet {
+  width: min(420px, 100%);
+  overflow: hidden;
+}
+.sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.sheet-head h3 { margin: 0; }
+.sheet-head p { margin: 6px 0 0; }
+.pane-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin: 16px 0 18px;
+  padding: 4px;
+  background: var(--bg);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+}
+.pane-tabs button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 0;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.pane-tabs button:hover { color: var(--ink); }
+.pane-tabs button.on {
+  background: var(--active);
+  color: var(--ink);
+}
+.sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 4px 4px;
+  margin: 0 -4px;
+}
+.pane-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pane-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 @keyframes slide-in {
   from { transform: translateX(16px); opacity: 0.6; }
@@ -756,7 +822,7 @@ textarea.textin.memory {
   .sheet { animation: none; }
 }
 .info-hero {
-  margin: 16px 0 0;
+  margin: 0;
 }
 .info-name {
   font-size: 16px;
@@ -806,7 +872,7 @@ textarea.textin.memory {
 .new-avatar.has-face { background: transparent; }
 .shape-picker {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
   gap: 6px;
 }
 .shape-pick {
@@ -833,7 +899,7 @@ textarea.textin.memory {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
   flex: 1;
 }
@@ -845,9 +911,11 @@ textarea.textin.memory {
   padding: 0;
   cursor: pointer;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
 }
 .color-swatch.on {
-  box-shadow: 0 0 0 2px var(--ink);
+  border-color: var(--ink);
+  box-shadow: none;
 }
 .color-hex {
   width: 108px;
@@ -946,7 +1014,10 @@ textarea.textin {
 .empty-routines {
   color: var(--muted);
   font-size: 13px;
-  padding: 4px 0;
+  padding: 18px 12px;
+  text-align: center;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-md);
 }
 .dow-row {
   display: grid;

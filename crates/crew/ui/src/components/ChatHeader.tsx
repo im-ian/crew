@@ -1,24 +1,20 @@
-import type { AgentInfo, ChannelInfo, Kind } from "../types";
+import type { AgentInfo, ChannelInfo } from "../types";
 import { Avatar } from "./Avatar";
 
 type Props = {
-  selectedKind: Kind;
   currentAgent: AgentInfo | null;
   currentChannel: ChannelInfo | null;
   agents: AgentInfo[];
   onOpenInfo: () => void;
   onOpenRoutines: () => void;
-  onPickAvatar: () => void;
 };
 
 export function ChatHeader({
-  selectedKind,
   currentAgent,
   currentChannel,
   agents,
   onOpenInfo,
   onOpenRoutines,
-  onPickAvatar,
 }: Props) {
   let title = "대화를 선택하세요";
   let meta = "";
@@ -63,7 +59,6 @@ export function ChatHeader({
       <div className="head-identity">
         {showAvatar ? (
           <Avatar
-            as="button"
             className="head-avatar"
             id={avatarId}
             name={avatarName}
@@ -72,11 +67,6 @@ export function ChatHeader({
             color={avatarColor}
             letter={avatarLetter}
             status={avatarStatus}
-            title={selectedKind === "agent" ? "사진 변경" : undefined}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (selectedKind === "agent") onPickAvatar();
-            }}
           />
         ) : null}
         <div className="head">
@@ -97,8 +87,8 @@ export function ChatHeader({
         <button
           type="button"
           className="head-action"
-          title="루틴 지정"
-          aria-label="루틴 지정"
+          title="봇 설정"
+          aria-label="봇 설정"
           onClick={onOpenRoutines}
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">

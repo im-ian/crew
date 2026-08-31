@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { hashedFace, type AvatarShape } from "../avatar";
 import { CLIS, EFFORTS } from "../options";
-import type { CliKind, PendingAvatar } from "../types";
+import type { CliKind } from "../types";
 import { Avatar } from "./Avatar";
 import { FacePicker } from "./FacePicker";
 import { Field } from "./Field";
@@ -10,10 +10,7 @@ import { Seg } from "./Seg";
 
 type Props = {
   open: boolean;
-  pendingAvatar: PendingAvatar | null;
   onClose: () => void;
-  onPickAvatar: () => void;
-  onClearAvatar: () => void;
   onCreate: (args: {
     name: string;
     persona: string;
@@ -27,10 +24,7 @@ type Props = {
 
 export function NewBotModal({
   open,
-  pendingAvatar,
   onClose,
-  onPickAvatar,
-  onClearAvatar,
   onCreate,
 }: Props) {
   const [name, setName] = useState("");
@@ -95,21 +89,12 @@ export function NewBotModal({
         <Field label="아바타">
           <div className="avatar-row">
             <Avatar
-              as="button"
               className="new-avatar"
               id="new"
               name={name.trim() || "new"}
-              src={pendingAvatar?.data}
               shape={shape || null}
               color={color || null}
-              title="사진 선택"
-              onClick={onPickAvatar}
             />
-            {pendingAvatar ? (
-              <button type="button" className="ghost" onClick={onClearAvatar}>
-                기본으로
-              </button>
-            ) : null}
           </div>
         </Field>
         <FacePicker
@@ -158,7 +143,7 @@ export function NewBotModal({
             onChange={(e) => setModel(e.target.value)}
           />
         </Field>
-        <Field label="꼼꼼함">
+        <Field label="생각">
           <Seg value={effort} options={EFFORTS} onChange={setEffort} />
         </Field>
       </div>

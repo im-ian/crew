@@ -26,7 +26,7 @@ import type {
   CtxKind,
   Group,
   Kind,
-  PendingAvatar,
+  PaneTab,
   Routine,
 } from "./types";
 
@@ -48,16 +48,13 @@ export function useCrew() {
   const [stick, setStick] = useState(true);
   const [connected, setConnected] = useState<boolean | null>(null);
   const [connDetail, setConnDetail] = useState("데몬 확인 중…");
-  const [infoOpen, setInfoOpen] = useState(false);
-  const [routineOpen, setRoutineOpen] = useState(false);
+  const [paneOpen, setPaneOpen] = useState(false);
+  const [paneTab, setPaneTab] = useState<PaneTab>("info");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmKind, setConfirmKind] = useState<ConfirmKind>("reset");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [newBotOpen, setNewBotOpen] = useState(false);
   const [newChannelOpen, setNewChannelOpen] = useState(false);
-  const [pendingNewAvatar, setPendingNewAvatar] = useState<PendingAvatar | null>(
-    null,
-  );
   const [toast, setToast] = useState({ text: "", show: false });
   const [ctx, setCtx] = useState<Ctx>({
     open: false,
@@ -71,18 +68,14 @@ export function useCrew() {
 
   const selectedRef = useRef({ id: selected, kind: selectedKind });
   selectedRef.current = { id: selected, kind: selectedKind };
-  const infoOpenRef = useRef(infoOpen);
-  infoOpenRef.current = infoOpen;
-  const routineOpenRef = useRef(routineOpen);
-  routineOpenRef.current = routineOpen;
+  const paneOpenRef = useRef(paneOpen);
+  paneOpenRef.current = paneOpen;
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
   const groupsLoaded = useRef(false);
   const toastTimer = useRef<number | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const avatarPickId = useRef<string | null>(null);
 
   const currentAgent = useMemo(() => {
     if (selectedKind !== "agent" || !selected) return null;
@@ -119,17 +112,8 @@ export function useCrew() {
     setCtx((c) => ({ ...c, open: false, id: null, kind: "agent" }));
   }
 
-  function closeInfo() {
-    setInfoOpen(false);
-  }
-
-  function closeRoutines() {
-    setRoutineOpen(false);
-  }
-
-  function closePanes() {
-    closeInfo();
-    closeRoutines();
+  function closePane() {
+    setPaneOpen(false);
   }
 
   function closeConfirm() {
@@ -140,7 +124,6 @@ export function useCrew() {
 
   function closeNewBot() {
     setNewBotOpen(false);
-    setPendingNewAvatar(null);
   }
 
   function closeNewChannel() {
@@ -152,7 +135,7 @@ export function useCrew() {
     setSelected(id);
     setSelectedKind("agent");
     setStick(true);
-    closePanes();
+    closePane();
     void refreshMessages();
   }
 
@@ -161,28 +144,26 @@ export function useCrew() {
     setSelected(id);
     setSelectedKind("channel");
     setStick(true);
-    closePanes();
+    closePane();
     void refreshMessages();
   }
 
-  function openInfo(id: string) {
+  function openPane(id: string, tab: PaneTab) {
     const a = agentsRef.current.find((x) => x.id === id);
     if (!a) return;
     selectedRef.current = { id, kind: "agent" };
     setSelected(id);
     setSelectedKind("agent");
-    closeRoutines();
-    setInfoOpen(true);
+    setPaneTab(tab);
+    setPaneOpen(true);
+  }
+
+  function openInfo(id: string) {
+    openPane(id, "info");
   }
 
   function openRoutines(id: string) {
-    const a = agentsRef.current.find((x) => x.id === id);
-    if (!a) return;
-    selectedRef.current = { id, kind: "agent" };
-    setSelected(id);
-    setSelectedKind("agent");
-    closeInfo();
-    setRoutineOpen(true);
+    openPane(id, "routines");
   }
 
   function openConfirm(id: string, kind: ConfirmKind = "reset") {
@@ -265,11 +246,6 @@ export function useCrew() {
     return groupIdOf(groups, kind, id);
   }
 
-  function pickAvatar(id: string) {
-    avatarPickId.current = id;
-    fileRef.current?.click();
-  }
-
   const refreshList = useCallback(async () => {
     const [list, chans] = await Promise.all([
       api.listAgents(),
@@ -316,12 +292,9 @@ export function useCrew() {
     }
     setSelected(sel);
     setSelectedKind(kind);
-    if (infoOpenRef.current || routineOpenRef.current) {
+    if (paneOpenRef.current) {
       const a = kind === "agent" ? list.find((x) => x.id === sel) : null;
-      if (!a) {
-        setInfoOpen(false);
-        setRoutineOpen(false);
-      }
+      if (!a) setPaneOpen(false);
     }
   }, []);
 
@@ -528,7 +501,7 @@ export function useCrew() {
       setSelectedKind("agent");
       setStick(true);
       setMessages([]);
-      closePanes();
+      closePane();
       await refreshList();
       await refreshMessages();
     } catch (err) {
@@ -579,16 +552,13 @@ export function useCrew() {
           color: args.color,
         });
       }
-      if (pendingNewAvatar) {
-        await api.setAvatar(id, pendingNewAvatar.data, pendingNewAvatar.name);
-      }
       closeNewBot();
       selectedRef.current = { id, kind: "agent" };
       setSelected(id);
       setSelectedKind("agent");
       setStick(true);
       setMessages([]);
-      closePanes();
+      closePane();
       await refreshList();
       await refreshMessages();
     } catch (err) {
@@ -611,44 +581,12 @@ export function useCrew() {
       setSelectedKind("channel");
       setStick(true);
       setMessages([]);
-      closePanes();
+      closePane();
       await refreshList();
       await refreshMessages();
     } catch (err) {
       showError(err);
       await refreshList();
-    }
-  }
-
-  async function onAvatarFile(file: File | undefined) {
-    const target = avatarPickId.current;
-    avatarPickId.current = null;
-    if (!file || !target) return;
-    const okType = /image\/(png|jpeg|jpg|webp|gif)/i.test(file.type);
-    const okName = /\.(png|jpe?g|webp|gif)$/i.test(file.name || "");
-    if (!okType && !okName) {
-      showError("png, jpg, webp, gif만 사용할 수 있습니다");
-      return;
-    }
-    const data = await readFileDataUrl(file);
-    if (target === "__new__") {
-      setPendingNewAvatar({ data, name: file.name });
-      return;
-    }
-    try {
-      await api.setAvatar(target, data, file.name);
-      await refreshList();
-    } catch (err) {
-      showError(err);
-    }
-  }
-
-  async function clearAvatar(id: string) {
-    try {
-      await api.clearAvatar(id);
-      await refreshList();
-    } catch (err) {
-      showError(err);
     }
   }
 
@@ -716,7 +654,7 @@ export function useCrew() {
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
       closeConfirm();
-      closePanes();
+      closePane();
       closeNewBot();
       closeNewChannel();
       hideCtx();
@@ -744,13 +682,13 @@ export function useCrew() {
     setStick,
     connected,
     connDetail,
-    infoOpen,
-    routineOpen,
+    paneOpen,
+    paneTab,
+    setPaneTab,
     confirmOpen,
     confirmKind,
     newBotOpen,
     newChannelOpen,
-    pendingNewAvatar,
     toast,
     ctx,
     groups,
@@ -759,13 +697,11 @@ export function useCrew() {
     currentAgent,
     currentChannel,
     placeholder,
-    fileRef,
     selectAgent,
     selectChannel,
     openInfo,
-    closeInfo,
     openRoutines,
-    closeRoutines,
+    closePane,
     openConfirm,
     closeConfirm,
     doConfirm,
@@ -785,10 +721,6 @@ export function useCrew() {
     moveToGroup,
     toggleGroup,
     itemGroupId,
-    pickAvatar,
-    onAvatarFile,
-    clearAvatar,
-    setPendingNewAvatar,
     onSend,
     saveAgentInfo,
     saveAgentFace,
@@ -799,13 +731,4 @@ export function useCrew() {
     saveMemory,
     showError,
   };
-}
-
-function readFileDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result || ""));
-    r.onerror = () => reject(r.error || new Error("read failed"));
-    r.readAsDataURL(file);
-  });
 }

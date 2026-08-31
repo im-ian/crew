@@ -9,13 +9,11 @@ import {
 } from "../schedule";
 import type { AgentInfo, Routine } from "../types";
 import { Field } from "./Field";
-import { Modal } from "./Modal";
 import { Seg } from "./Seg";
 
 type Props = {
   open: boolean;
   agent: AgentInfo | null;
-  onClose: () => void;
   onAdd: (name: string, schedule: string, prompt: string) => Promise<void>;
   onToggle: (r: Routine) => Promise<void>;
   onDelete: (r: Routine) => Promise<void>;
@@ -24,7 +22,6 @@ type Props = {
 export function RoutinesModal({
   open,
   agent,
-  onClose,
   onAdd,
   onToggle,
   onDelete,
@@ -47,8 +44,6 @@ export function RoutinesModal({
     setTime("09:00");
     setPrompt("");
     setBusy(false);
-    const t = window.setTimeout(() => nameRef.current?.focus(), 0);
-    return () => window.clearTimeout(t);
   }, [open, agent?.id]);
 
   function toggleDay(day: number) {
@@ -92,34 +87,37 @@ export function RoutinesModal({
   }
 
   return (
-    <Modal open={open} title="루틴" onClose={onClose}>
-      <p>원하는 시간에 봇이 알아서 하게 해 주세요.</p>
-      <div className="form-stack">
-        <div className="routine-list">
-          {!routines.length ? (
-            <div className="empty-routines">아직 예약된 일이 없습니다</div>
-          ) : (
-            routines.map((r) => (
-              <div className="routine" key={r.id || r.name}>
-                <div>
-                  <div className="routine-name">{r.name || r.id}</div>
-                  <div className="routine-meta">
-                    {formatSchedule(r.schedule || "")} ·{" "}
-                    {r.enabled === false ? "꺼짐" : "켜짐"}
+    <div className="form-stack">
+          <div className="pane-block">
+            <div className="pane-label">등록된 루틴</div>
+            <div className="routine-list">
+              {!routines.length ? (
+                <div className="empty-routines">아직 예약된 일이 없습니다</div>
+              ) : (
+                routines.map((r) => (
+                  <div className="routine" key={r.id || r.name}>
+                    <div>
+                      <div className="routine-name">{r.name || r.id}</div>
+                      <div className="routine-meta">
+                        {formatSchedule(r.schedule || "")} ·{" "}
+                        {r.enabled === false ? "꺼짐" : "켜짐"}
+                      </div>
+                    </div>
+                    <div className="routine-actions">
+                      <button type="button" onClick={() => void onToggle(r)}>
+                        {r.enabled === false ? "켜기" : "끄기"}
+                      </button>
+                      <button type="button" onClick={() => void onDelete(r)}>
+                        삭제
+                      </button>
+                    </div>
                   </div>
-                </div>
-                <div className="routine-actions">
-                  <button type="button" onClick={() => void onToggle(r)}>
-                    {r.enabled === false ? "켜기" : "끄기"}
-                  </button>
-                  <button type="button" onClick={() => void onDelete(r)}>
-                    삭제
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
+                ))
+              )}
+            </div>
+          </div>
+          <div className="pane-block">
+            <div className="pane-label">새로 추가</div>
         <Field label="이름" htmlFor="routine-name">
           <input
             id="routine-name"
@@ -181,20 +179,17 @@ export function RoutinesModal({
             onChange={(e) => setPrompt(e.target.value)}
           />
         </Field>
-      </div>
-      <div className="actions spread">
-        <button type="button" className="ghost" onClick={onClose}>
-          닫기
-        </button>
-        <button
-          type="button"
-          className="primary"
-          disabled={busy}
-          onClick={() => void submit()}
-        >
-          추가
-        </button>
-      </div>
-    </Modal>
+            <div className="actions">
+              <button
+                type="button"
+                className="primary"
+                disabled={busy}
+                onClick={() => void submit()}
+              >
+                추가
+              </button>
+            </div>
+          </div>
+    </div>
   );
 }
