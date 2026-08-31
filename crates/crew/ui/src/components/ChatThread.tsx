@@ -13,6 +13,7 @@ type Props = {
   stick: boolean;
   onStick: (stick: boolean) => void;
   streaming?: boolean;
+  onSelectAgent?: (id: string) => void;
 };
 
 export function ChatThread({
@@ -25,9 +26,16 @@ export function ChatThread({
   stick,
   onStick,
   streaming = false,
+  onSelectAgent,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const visible = visibleMessages(messages);
+  const openAgent =
+    onSelectAgent &&
+    ((id: string) => {
+      if (selectedKind === "agent" && selected === id) return;
+      onSelectAgent(id);
+    });
 
   useEffect(() => {
     const el = ref.current;
@@ -59,6 +67,7 @@ export function ChatThread({
                 message={m}
                 agents={agents}
                 selectedKind={selectedKind}
+                onSelectAgent={openAgent}
               />
             );
           }
@@ -69,6 +78,7 @@ export function ChatThread({
               agents={agents}
               selectedKind={selectedKind}
               caret={caret}
+              onSelectAgent={openAgent}
             />
           );
         })
@@ -123,10 +133,12 @@ function SystemOrIncoming({
   message: m,
   agents,
   selectedKind,
+  onSelectAgent,
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
   selectedKind: Kind;
+  onSelectAgent?: (id: string) => void;
 }) {
   if (m.from === "user") {
     return (
@@ -134,6 +146,7 @@ function SystemOrIncoming({
         message={{ ...m, role: "user" }}
         agents={agents}
         selectedKind={selectedKind}
+        onSelectAgent={onSelectAgent}
       />
     );
   }
@@ -145,6 +158,7 @@ function SystemOrIncoming({
         agent={agent}
         who={displayWho(m, agent)}
         agents={agents}
+        onSelectAgent={onSelectAgent}
       />
     );
   }
@@ -162,12 +176,14 @@ function Incoming({
   who,
   agents,
   caret = false,
+  onSelectAgent,
 }: {
   message: ChatMessage;
   agent: AgentInfo | null;
   who: string;
   agents: AgentInfo[];
   caret?: boolean;
+  onSelectAgent?: (id: string) => void;
 }) {
   const cls = "bubble md" + (caret ? " streaming" : "");
   return (
@@ -185,7 +201,12 @@ function Incoming({
       ) : null}
       <div className="channel-msg">
         <div className="sys-from channel-who">{who}</div>
-        <MdBody className={cls} text={m.text || ""} agents={agents} />
+        <MdBody
+          className={cls}
+          text={m.text || ""}
+          agents={agents}
+          onMention={onSelectAgent}
+        />
       </div>
     </div>
   );
@@ -196,11 +217,13 @@ function Bubble({
   agents,
   selectedKind,
   caret = false,
+  onSelectAgent,
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
   selectedKind: Kind;
   caret?: boolean;
+  onSelectAgent?: (id: string) => void;
 }) {
   const text =
     m.role === "assistant" ? stripCrewMarkers(m.text || "") : m.text || "";
@@ -213,13 +236,19 @@ function Bubble({
         who={displayWho(m, agent)}
         agents={agents}
         caret={caret}
+        onSelectAgent={onSelectAgent}
       />
     );
   }
   const cls = "bubble md" + (caret ? " streaming" : "");
   return (
     <div className={"row " + (m.role === "user" ? "me" : "them")}>
-      <MdBody className={cls} text={text} agents={agents} />
+      <MdBody
+        className={cls}
+        text={text}
+        agents={agents}
+        onMention={onSelectAgent}
+      />
     </div>
   );
 }

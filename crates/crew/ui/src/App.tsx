@@ -71,6 +71,7 @@ export function App() {
             (crew.currentAgent?.status === "working" ||
               crew.currentAgent?.status === "blocked")
           }
+          onSelectAgent={crew.selectAgent}
         />
         <Composer
           agents={crew.agents}

@@ -104,6 +104,10 @@ export function NewBotModal({
           color={color || null}
           onShape={setShape}
           onColor={setColor}
+          onFace={(nextShape, nextColor) => {
+            setShape(nextShape);
+            setColor(nextColor);
+          }}
         />
         <Field label="이름" htmlFor="new-name">
           <input

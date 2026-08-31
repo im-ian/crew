@@ -715,17 +715,28 @@ textarea.textin.memory {
   height: 26px;
   padding: 2px 10px 2px 3px;
   margin: 0 1px;
+  border: 0;
   border-radius: 999px;
   background: var(--btn);
   color: var(--ink);
+  font: inherit;
   vertical-align: middle;
   line-height: 1;
   white-space: nowrap;
   user-select: none;
   overflow: hidden;
 }
+button.mention-chip {
+  cursor: pointer;
+}
+button.mention-chip:hover {
+  background: var(--btn-hover);
+}
 .row.me .mention-chip {
   background: rgba(0, 0, 0, 0.32);
+}
+.row.me button.mention-chip:hover {
+  background: rgba(0, 0, 0, 0.48);
 }
 .mention-chip-avatar {
   width: 22px;
@@ -1007,6 +1018,25 @@ label.field {
   color: var(--muted);
   margin: 0;
 }
+.field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.field-action {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0;
+  cursor: pointer;
+  line-height: 1.2;
+}
+.field-action:hover { color: var(--ink); }
 .textin, textarea.textin, select.textin {
   width: 100%;
   background: var(--bg);

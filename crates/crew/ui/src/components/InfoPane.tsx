@@ -96,6 +96,9 @@ export function InfoPane({
         onColor={(next) => {
           void onSetFace(undefined, next);
         }}
+        onFace={(nextShape, nextColor) => {
+          void onSetFace(nextShape, nextColor);
+        }}
       />
       <Field label="직함" htmlFor="info-title">
         <input

@@ -86,6 +86,22 @@ export function hashedFace(id: string): { shape: AvatarShape; color: string } {
   };
 }
 
+export function randomFace(exclude?: {
+  shape?: string | null;
+  color?: string | null;
+}): { shape: AvatarShape; color: string } {
+  const shapes = AVATAR_SHAPES.filter((s) => s !== exclude?.shape);
+  const colors = AVATAR_SWATCHES.filter(
+    (c) => c.toLowerCase() !== String(exclude?.color || "").toLowerCase(),
+  );
+  const shapePool = shapes.length ? shapes : AVATAR_SHAPES;
+  const colorPool = colors.length ? colors : AVATAR_SWATCHES;
+  return {
+    shape: shapePool[Math.floor(Math.random() * shapePool.length)],
+    color: colorPool[Math.floor(Math.random() * colorPool.length)],
+  };
+}
+
 export function resolveFace(
   id?: string | null,
   shape?: string | null,

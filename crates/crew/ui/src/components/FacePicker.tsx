@@ -3,6 +3,7 @@ import {
   AVATAR_SHAPES,
   AVATAR_SWATCHES,
   normalizeHex,
+  randomFace,
   resolveFace,
   type AvatarShape,
 } from "../avatar";
@@ -15,9 +16,17 @@ type Props = {
   color?: string | null;
   onShape: (shape: AvatarShape) => void;
   onColor: (color: string) => void;
+  onFace?: (shape: AvatarShape, color: string) => void;
 };
 
-export function FacePicker({ id, shape, color, onShape, onColor }: Props) {
+export function FacePicker({
+  id,
+  shape,
+  color,
+  onShape,
+  onColor,
+  onFace,
+}: Props) {
   const resolved = resolveFace(id, shape, color);
   const [hex, setHex] = useState(resolved.color);
 
@@ -36,9 +45,30 @@ export function FacePicker({ id, shape, color, onShape, onColor }: Props) {
     (c) => c.toLowerCase() === resolved.color.toLowerCase(),
   );
 
+  function shuffle() {
+    const next = randomFace(resolved);
+    setHex(next.color);
+    if (onFace) onFace(next.shape, next.color);
+    else {
+      onShape(next.shape);
+      onColor(next.color);
+    }
+  }
+
   return (
     <>
-      <Field label="모양">
+      <div className="field-block">
+        <div className="field-head">
+          <label className="field">모양</label>
+          <button
+            type="button"
+            className="field-action"
+            aria-label="랜덤 조합"
+            onClick={shuffle}
+          >
+            랜덤
+          </button>
+        </div>
         <div className="shape-picker" role="listbox" aria-label="모양">
           {AVATAR_SHAPES.map((s) => (
             <button
@@ -54,7 +84,7 @@ export function FacePicker({ id, shape, color, onShape, onColor }: Props) {
             </button>
           ))}
         </div>
-      </Field>
+      </div>
       <Field label="색상">
         <div className="color-row">
           <div className="color-swatches">
