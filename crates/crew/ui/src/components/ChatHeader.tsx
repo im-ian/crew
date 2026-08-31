@@ -1,10 +1,9 @@
 import type { AgentInfo, ChannelInfo } from "../types";
-import { Avatar } from "./Avatar";
+import { WhoButton } from "./WhoButton";
 
 type Props = {
   currentAgent: AgentInfo | null;
   currentChannel: ChannelInfo | null;
-  agents: AgentInfo[];
   onOpenInfo: () => void;
   onOpenRoutines: () => void;
 };
@@ -12,83 +11,33 @@ type Props = {
 export function ChatHeader({
   currentAgent,
   currentChannel,
-  agents,
   onOpenInfo,
   onOpenRoutines,
 }: Props) {
-  let title = "대화를 선택하세요";
-  let meta = "";
-  let clickable = false;
-  let showAvatar = false;
-  let avatarId: string | undefined;
-  let avatarName: string | undefined;
-  let avatarSrc: string | null | undefined;
-  let avatarShape: string | null | undefined;
-  let avatarColor: string | null | undefined;
-  let avatarLetter: string | undefined;
-  let avatarStatus: AgentInfo["status"] | undefined;
-
+  let identity = <span className="head-empty">대화를 선택하세요</span>;
   if (currentChannel) {
-    title = currentChannel.name || currentChannel.id;
-    meta =
-      (currentChannel.members || [])
-        .map((id) => {
-          const a = agents.find((x) => x.id === id);
-          return a ? a.name || a.id : id;
-        })
-        .join(", ") || "멤버 없음";
-    showAvatar = true;
-    avatarId = currentChannel.id;
-    avatarName = currentChannel.name || currentChannel.id;
-    avatarLetter = "#";
+    identity = (
+      <WhoButton
+        agent={null}
+        who={currentChannel.name || currentChannel.id}
+        letter="#"
+        fallbackId={currentChannel.id}
+      />
+    );
   } else if (currentAgent) {
-    title = currentAgent.name || currentAgent.id;
-    meta = [currentAgent.title, currentAgent.role].filter(Boolean).join(" · ");
-    clickable = true;
-    showAvatar = true;
-    avatarId = currentAgent.id;
-    avatarName = currentAgent.name || currentAgent.id;
-    avatarSrc = currentAgent.avatar;
-    avatarShape = currentAgent.avatar_shape;
-    avatarColor = currentAgent.avatar_color;
-    avatarStatus = currentAgent.status;
+    identity = (
+      <WhoButton
+        agent={currentAgent}
+        who={currentAgent.name || currentAgent.id}
+        title="봇 정보"
+        onClick={onOpenInfo}
+      />
+    );
   }
-
-  const identity = (
-    <>
-      {showAvatar ? (
-        <Avatar
-          className="head-avatar"
-          id={avatarId}
-          name={avatarName}
-          src={avatarSrc}
-          shape={avatarShape}
-          color={avatarColor}
-          letter={avatarLetter}
-          status={avatarStatus}
-        />
-      ) : null}
-      <div className="head">
-        <div className="head-title">{title}</div>
-        {meta ? <div className="head-meta">{meta}</div> : null}
-      </div>
-    </>
-  );
 
   return (
     <header>
-      {clickable ? (
-        <button
-          type="button"
-          className="head-identity"
-          title="봇 정보"
-          onClick={onOpenInfo}
-        >
-          {identity}
-        </button>
-      ) : (
-        <div className="head-identity">{identity}</div>
-      )}
+      <div className="head-identity">{identity}</div>
       {currentAgent ? (
         <button
           type="button"

@@ -49,7 +49,6 @@ export function App() {
         <ChatHeader
           currentAgent={crew.currentAgent}
           currentChannel={crew.currentChannel}
-          agents={crew.agents}
           onOpenInfo={() => {
             if (crew.selected) crew.openInfo(crew.selected);
           }}

@@ -3,6 +3,7 @@ import type { AgentInfo, ChannelInfo, ChatMessage, Kind } from "../types";
 import { resolveFace } from "../avatar";
 import { Avatar } from "./Avatar";
 import { MdBody } from "./MdBody";
+import { WhoButton, whoColor } from "./WhoButton";
 
 const STICK_PX = 24;
 
@@ -255,9 +256,6 @@ function TransferNote({
   const who = fromChannel
     ? `#${channelDisplayName(otherId, channels)}`
     : displayWho({ ...m, from: otherId }, agent);
-  const color = agent
-    ? whoColor(resolveFace(agent.id, agent.avatar_shape, agent.avatar_color).color)
-    : undefined;
   const open =
     onSelectAgent && agent ? () => onSelectAgent(agent.id) : undefined;
   const label = kind === "sent" ? "보낸 메시지" : "받은 메시지";
@@ -265,35 +263,13 @@ function TransferNote({
     <div className={"xfer" + (m.queued ? " queued" : "")}>
       <div className="xfer-chip">
         <span className="xfer-label">{label}</span>
-        {agent || fromChannel ? (
-          <Avatar
-            as={open ? "button" : "div"}
-            className="xfer-avatar"
-            id={agent?.id || otherId}
-            name={who}
-            src={agent?.avatar}
-            shape={agent?.avatar_shape}
-            color={agent?.avatar_color}
-            letter={fromChannel ? "#" : undefined}
-            status={agent?.status}
-            title={who}
-            onClick={open}
-          />
-        ) : null}
-        {open ? (
-          <button
-            type="button"
-            className="xfer-who"
-            style={color ? { color } : undefined}
-            onClick={open}
-          >
-            {who}
-          </button>
-        ) : (
-          <span className="xfer-who" style={color ? { color } : undefined}>
-            {who}
-          </span>
-        )}
+        <WhoButton
+          agent={agent}
+          who={who}
+          letter={fromChannel ? "#" : undefined}
+          fallbackId={otherId}
+          onClick={open}
+        />
       </div>
       {m.text ? (
         <MdBody
@@ -456,17 +432,6 @@ function displayWho(m: ChatMessage, agent: AgentInfo | null): string {
 
 function sentTarget(from: string): string | null {
   return from.startsWith("to:") ? from.slice(3) : null;
-}
-
-function whoColor(hex: string): string {
-  const n = hex.replace("#", "");
-  if (n.length !== 6) return hex;
-  const r = parseInt(n.slice(0, 2), 16);
-  const g = parseInt(n.slice(2, 4), 16);
-  const b = parseInt(n.slice(4, 6), 16);
-  const l = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-  if (l >= 0.38) return hex;
-  return `color-mix(in srgb, ${hex} 62%, white)`;
 }
 
 function channelDisplayName(from: string, channels: ChannelInfo[]): string {

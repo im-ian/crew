@@ -24,7 +24,6 @@
   --rail-pad: 8px;
   --control-h: 32px;
   --avatar: 36px;
-  --avatar-head: 22px;
   --content-pad: 24px;
   --content-max: 720px;
   --chrome-h: 44px;
@@ -441,36 +440,12 @@ header {
 .head-identity {
   display: flex;
   align-items: center;
-  gap: 8px;
   min-width: 0;
   flex: 1;
 }
-button.head-identity {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  text-align: left;
-  border-radius: var(--radius-md);
-}
-button.head-identity .avatar-face {
-  pointer-events: none;
-}
-button.head-identity:hover .head-title { opacity: 0.72; }
-.head {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-.head-avatar {
-  width: var(--avatar-head);
-  height: var(--avatar-head);
-  font-size: 10px;
-  flex-shrink: 0;
+.head-empty {
+  color: var(--muted);
+  font-size: 14px;
 }
 .head-action {
   width: 32px;
@@ -492,30 +467,6 @@ button.head-identity:hover .head-title { opacity: 0.72; }
 .head-action svg { display: block; }
 .app:has(.overlay.open) header .head-action {
   visibility: hidden;
-}
-.head-title {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-align: left;
-  width: 100%;
-  line-height: 1.2;
-}
-.head-meta {
-  font-size: 12px;
-  color: var(--muted);
-  margin-top: 1px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.25;
 }
 .thread-wrap {
   position: relative;
@@ -813,35 +764,52 @@ button.channel-who:hover {
   line-height: 1.2;
   white-space: nowrap;
 }
-.xfer-avatar {
+.who-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 18em;
+  margin: 0;
+  border: 0;
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+.who-btn.is-static {
+  cursor: default;
+}
+.who-avatar {
   width: 18px;
   height: 18px;
   font-size: 8px;
   flex-shrink: 0;
 }
-button.xfer-avatar {
-  cursor: pointer;
-}
-.xfer-who {
-  margin: 0;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
+.who-name {
+  color: var(--who-color, var(--muted));
   font-size: 13px;
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 16em;
+  min-width: 0;
 }
-button.xfer-who {
-  cursor: pointer;
+button.who-btn:hover,
+button.who-btn:focus-visible {
+  background: #ececec;
 }
-button.xfer-who:hover {
-  text-decoration: underline;
+button.who-btn:hover .who-name,
+button.who-btn:focus-visible .who-name {
+  color: #1c1c1c;
+}
+button.who-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--who-color, #fff) 55%, transparent);
+  outline-offset: 2px;
 }
 .xfer-text {
   color: var(--muted);
