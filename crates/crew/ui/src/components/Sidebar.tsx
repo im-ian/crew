@@ -1,7 +1,50 @@
-import { useEffect, useRef, useState, type DragEvent, type MouseEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { itemKey, parseItemKey } from "../groups";
 import type { AgentInfo, ChannelInfo, Group, Kind } from "../types";
 import { Avatar } from "./Avatar";
+
+const RAIL_DEFAULT = 232;
+const RAIL_MIN = 176;
+const RAIL_MAX = 480;
+const RAIL_KEY = "crew.rail-w";
+
+function clampRail(px: number, vw = window.innerWidth): number {
+  const max = Math.max(RAIL_MIN, Math.min(RAIL_MAX, Math.floor(vw * 0.5)));
+  return Math.min(max, Math.max(RAIL_MIN, Math.round(px)));
+}
+
+function loadRail(): number {
+  try {
+    const raw = localStorage.getItem(RAIL_KEY);
+    if (!raw) return RAIL_DEFAULT;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return RAIL_DEFAULT;
+    return Math.min(RAIL_MAX, Math.max(RAIL_MIN, Math.round(n)));
+  } catch {
+    return RAIL_DEFAULT;
+  }
+}
+
+function saveRail(px: number) {
+  try {
+    localStorage.setItem(RAIL_KEY, String(px));
+  } catch {
+    /* private mode / quota */
+  }
+}
+
+function applyRail(px: number) {
+  document.documentElement.style.setProperty("--rail-w", `${px}px`);
+}
 
 type RailItem = {
   key: string;
@@ -130,6 +173,83 @@ export function Sidebar({
   );
   const searching = !!query.trim();
   const empty = !all.length;
+
+  const [preferredRail, setPreferredRail] = useState(() => {
+    const w = loadRail();
+    applyRail(clampRail(w));
+    return w;
+  });
+  const [viewW, setViewW] = useState(() => window.innerWidth);
+  const railW = clampRail(preferredRail, viewW);
+  const dragRail = useRef<{ startX: number; startW: number } | null>(null);
+
+  useLayoutEffect(() => {
+    applyRail(railW);
+  }, [railW]);
+
+  useEffect(() => {
+    function onWin() {
+      setViewW(window.innerWidth);
+    }
+    window.addEventListener("resize", onWin);
+    return () => window.removeEventListener("resize", onWin);
+  }, []);
+
+  function setRail(next: number, persist: boolean) {
+    const stored = clampRail(next);
+    setPreferredRail(stored);
+    if (persist) saveRail(stored);
+  }
+
+  function onRailPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRail.current = { startX: e.clientX, startW: railW };
+    document.documentElement.classList.add("rail-resizing");
+  }
+
+  function onRailPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragRail.current;
+    if (!drag) return;
+    setRail(drag.startW + (e.clientX - drag.startX), false);
+  }
+
+  function onRailPointerUp(e: ReactPointerEvent<HTMLDivElement>) {
+    if (!dragRail.current) return;
+    dragRail.current = null;
+    document.documentElement.classList.remove("rail-resizing");
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+    setPreferredRail((w) => {
+      saveRail(w);
+      return w;
+    });
+  }
+
+  function onRailKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
+    const step = e.shiftKey ? 32 : 16;
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      setRail(preferredRail - step, true);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      setRail(preferredRail + step, true);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setRail(RAIL_MIN, true);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setRail(RAIL_MAX, true);
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setRail(RAIL_DEFAULT, true);
+    }
+  }
 
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [drop, setDrop] = useState<{ groupId: string | null; beforeKey: string | null } | null>(
@@ -303,6 +423,22 @@ export function Sidebar({
           </>
         )}
       </div>
+      <div
+        className="rail-resize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="사이드바 너비 조절"
+        aria-valuemin={RAIL_MIN}
+        aria-valuemax={RAIL_MAX}
+        aria-valuenow={railW}
+        tabIndex={0}
+        onPointerDown={onRailPointerDown}
+        onPointerMove={onRailPointerMove}
+        onPointerUp={onRailPointerUp}
+        onPointerCancel={onRailPointerUp}
+        onDoubleClick={() => setRail(RAIL_DEFAULT, true)}
+        onKeyDown={onRailKeyDown}
+      />
     </aside>
   );
 }
