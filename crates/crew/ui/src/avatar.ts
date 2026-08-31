@@ -6,6 +6,10 @@ export const AVATAR_SHAPES = [
   "triangle",
   "cloud",
   "pill",
+  "diamond",
+  "pentagon",
+  "star",
+  "heart",
 ] as const;
 
 export type AvatarShape = (typeof AVATAR_SHAPES)[number];

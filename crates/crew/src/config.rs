@@ -98,6 +98,10 @@ pub enum AvatarShape {
     Triangle,
     Cloud,
     Pill,
+    Diamond,
+    Pentagon,
+    Star,
+    Heart,
 }
 
 impl AvatarShape {
@@ -110,20 +114,28 @@ impl AvatarShape {
             AvatarShape::Triangle => "triangle",
             AvatarShape::Cloud => "cloud",
             AvatarShape::Pill => "pill",
+            AvatarShape::Diamond => "diamond",
+            AvatarShape::Pentagon => "pentagon",
+            AvatarShape::Star => "star",
+            AvatarShape::Heart => "heart",
         }
     }
 
     pub fn from_key(s: &str) -> anyhow::Result<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "circle" => Ok(Self::Circle),
-            "teardrop" => Ok(Self::Teardrop),
+            "teardrop" | "droplet" => Ok(Self::Teardrop),
             "rounded-square" | "rounded_square" | "roundedsquare" => Ok(Self::RoundedSquare),
             "hexagon" => Ok(Self::Hexagon),
             "triangle" => Ok(Self::Triangle),
             "cloud" => Ok(Self::Cloud),
             "pill" => Ok(Self::Pill),
+            "diamond" | "rhombus" => Ok(Self::Diamond),
+            "pentagon" => Ok(Self::Pentagon),
+            "star" => Ok(Self::Star),
+            "heart" => Ok(Self::Heart),
             other => anyhow::bail!(
-                "shape must be circle, teardrop, rounded-square, hexagon, triangle, cloud, or pill (got {other})"
+                "shape must be circle, teardrop, rounded-square, hexagon, triangle, cloud, pill, diamond, pentagon, star, or heart (got {other})"
             ),
         }
     }
@@ -1378,7 +1390,24 @@ mod tests {
         let back: AvatarShape = serde_json::from_str(&raw).unwrap();
         assert_eq!(back, AvatarShape::RoundedSquare);
         assert_eq!(AvatarShape::from_key("rounded_square").unwrap(), back);
-        assert!(AvatarShape::from_key("star").is_err());
+        assert_eq!(AvatarShape::from_key("star").unwrap(), AvatarShape::Star);
+        assert_eq!(AvatarShape::from_key("droplet").unwrap(), AvatarShape::Teardrop);
+        for shape in [
+            AvatarShape::Circle,
+            AvatarShape::Teardrop,
+            AvatarShape::RoundedSquare,
+            AvatarShape::Hexagon,
+            AvatarShape::Triangle,
+            AvatarShape::Cloud,
+            AvatarShape::Pill,
+            AvatarShape::Diamond,
+            AvatarShape::Pentagon,
+            AvatarShape::Star,
+            AvatarShape::Heart,
+        ] {
+            assert_eq!(AvatarShape::from_key(shape.as_str()).unwrap(), shape);
+        }
+        assert!(AvatarShape::from_key("banana").is_err());
     }
 
     #[test]
