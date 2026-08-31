@@ -28,6 +28,8 @@ struct AgentChat {
     last_emit: Instant,
     dirty: bool,
     utf8_tail: Vec<u8>,
+    /// When set, idle-seal is deferred until `end_turn` (headless tool pauses).
+    hold: bool,
 }
 
 impl AgentChat {
@@ -40,6 +42,7 @@ impl AgentChat {
             last_emit: Instant::now(),
             dirty: false,
             utf8_tail: Vec::new(),
+            hold: false,
         }
     }
 }
@@ -92,6 +95,7 @@ fn load_key(key: &str, path: &Path) {
                 last_emit: Instant::now(),
                 dirty: false,
                 utf8_tail: Vec::new(),
+                hold: false,
             },
         );
     }
@@ -197,6 +201,81 @@ pub fn cancel_expect(agent: &str) {
         if let Some(chat) = map.get_mut(agent) {
             chat.expecting = false;
         }
+    }
+}
+
+pub fn begin_turn(agent: &str) {
+    if let Ok(mut map) = chats().lock() {
+        let chat = map
+            .entry(agent.to_string())
+            .or_insert_with(AgentChat::empty);
+        chat.expecting = true;
+        chat.hold = true;
+        chat.last_byte = Instant::now();
+    }
+}
+
+pub fn end_turn(agent: &str) {
+    if let Ok(mut map) = chats().lock() {
+        if let Some(chat) = map.get_mut(agent) {
+            chat.hold = false;
+        }
+    }
+    seal_now(agent);
+}
+
+pub fn on_assistant_delta(agent: &str, chunk: &str) {
+    if chunk.is_empty() {
+        return;
+    }
+    on_pty_bytes(agent, chunk.as_bytes());
+}
+
+pub fn set_pending_assistant(agent: &str, text: &str) {
+    let cleaned = normalize_text(&strip_ansi(text));
+    if cleaned.is_empty() {
+        return;
+    }
+    let msg = {
+        let mut map = match chats().lock() {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        let Some(chat) = map.get_mut(agent) else {
+            return;
+        };
+        if !chat.expecting && chat.pending_idx.is_none() {
+            return;
+        }
+        chat.last_byte = Instant::now();
+        if let Some(idx) = chat.pending_idx {
+            chat.messages[idx].text = cleaned;
+            chat.messages[idx].ts = now_ms();
+            if chat.last_emit.elapsed() >= EMIT_INTERVAL {
+                chat.last_emit = Instant::now();
+                chat.dirty = false;
+                Some(chat.messages[idx].clone())
+            } else {
+                chat.dirty = true;
+                None
+            }
+        } else {
+            let m = ChatMessage {
+                id: new_id(),
+                role: Role::Assistant,
+                from: agent.to_string(),
+                text: cleaned,
+                ts: now_ms(),
+            };
+            chat.messages.push(m.clone());
+            chat.pending_idx = Some(chat.messages.len() - 1);
+            chat.last_emit = Instant::now();
+            chat.dirty = false;
+            Some(m)
+        }
+    };
+    if let Some(msg) = msg {
+        emit(agent, msg);
     }
 }
 
@@ -324,6 +403,9 @@ fn maybe_seal(agent: &str) {
         let Some(chat) = map.get_mut(agent) else {
             return;
         };
+        if chat.hold {
+            return;
+        }
         if chat.pending_idx.is_none() {
             if chat.expecting && chat.last_byte.elapsed() > EXPECT_TIMEOUT {
                 chat.expecting = false;
@@ -357,6 +439,7 @@ fn seal_now(agent: &str) {
 }
 
 fn finish_pending(agent: &str, chat: &mut AgentChat) -> Option<ChatMessage> {
+    chat.hold = false;
     let Some(idx) = chat.pending_idx.take() else {
         chat.expecting = false;
         chat.dirty = false;
@@ -510,6 +593,33 @@ mod tests {
         seal_now(&agent);
         let sealed = messages(&agent);
         assert_eq!(sealed.last().unwrap().id, id);
+        assert_eq!(sealed.last().unwrap().text, "hello");
+        drop_agent(&agent);
+    }
+
+    #[test]
+    fn hold_skips_idle_seal_until_end_turn() {
+        let agent = format!(
+            "hold-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        push_user(&agent, "user", "hi");
+        begin_turn(&agent);
+        on_assistant_delta(&agent, "hel");
+        {
+            let mut map = chats().lock().unwrap();
+            map.get_mut(&agent).unwrap().last_byte = Instant::now() - Duration::from_secs(5);
+        }
+        maybe_seal(&agent);
+        let mid = messages(&agent);
+        assert_eq!(mid.last().unwrap().text, "hel");
+        on_assistant_delta(&agent, "lo");
+        end_turn(&agent);
+        let sealed = messages(&agent);
         assert_eq!(sealed.last().unwrap().text, "hello");
         drop_agent(&agent);
     }

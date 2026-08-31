@@ -253,3 +253,11 @@ pub fn memory_dir() -> PathBuf {
 pub fn memory_path(agent_id: &str) -> PathBuf {
     memory_dir().join(format!("{}.md", safe_agent_id(agent_id)))
 }
+
+pub fn cli_sessions_dir() -> PathBuf {
+    home_dir().join("cli-sessions")
+}
+
+pub fn cli_session_path(agent_id: &str) -> PathBuf {
+    cli_sessions_dir().join(safe_agent_id(agent_id))
+}

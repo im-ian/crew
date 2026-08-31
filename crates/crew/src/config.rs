@@ -422,6 +422,42 @@ impl AgentConfig {
         inject_memory(&program, &mut args, &self.id);
         args
     }
+
+    /// grok / claude / codex run as one-shot headless turns. `cat` and other
+    /// stubs stay on a long-lived PTY.
+    pub fn uses_pty(&self) -> bool {
+        uses_pty_program(&self.binary_name())
+    }
+
+    /// argv for one headless turn. Always strips stored resume flags, then
+    /// attaches this turn's session (`--resume` / `--session-id` / `exec resume`)
+    /// plus the real print/json flags for that CLI.
+    pub fn turn_cmd(
+        &self,
+        prompt: &str,
+        session: Option<&TurnSession>,
+        roster: &[AgentConfig],
+    ) -> Vec<String> {
+        let mut args = self.spawn_cmd_with(true, roster);
+        match self.binary_name().as_str() {
+            "grok" => apply_grok_turn(&mut args, prompt, session),
+            "claude" => apply_claude_turn(&mut args, prompt, session),
+            "codex" => apply_codex_turn(&mut args, prompt, session),
+            _ => {}
+        }
+        args
+    }
+}
+
+pub fn uses_pty_program(program: &str) -> bool {
+    !matches!(program, "grok" | "claude" | "codex")
+}
+
+/// CLI conversation to continue. `resume` false means a brand-new session id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnSession {
+    pub id: String,
+    pub resume: bool,
 }
 
 fn has_flag(args: &[String], names: &[&str]) -> bool {
@@ -580,6 +616,86 @@ fn inject_team_rules(
         "claude" => append_flag_value(args, "--append-system-prompt", &text),
         _ => {}
     }
+}
+
+fn apply_grok_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSession>) {
+    remove_flag_with_value(
+        args,
+        &[
+            "-p",
+            "--single",
+            "--output-format",
+            "--resume",
+            "-r",
+            "--session-id",
+            "-s",
+            "--prompt-file",
+            "--prompt-json",
+        ],
+    );
+    args.push("--output-format".into());
+    args.push("streaming-json".into());
+    apply_session_flags(args, session, "--resume", "--session-id");
+    args.push("-p".into());
+    args.push(prompt.to_string());
+}
+
+fn apply_claude_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSession>) {
+    remove_switch(
+        args,
+        &["-p", "--print", "--include-partial-messages"],
+    );
+    remove_flag_with_value(
+        args,
+        &["--output-format", "--resume", "-r", "--session-id"],
+    );
+    args.push("-p".into());
+    args.push("--output-format".into());
+    args.push("stream-json".into());
+    args.push("--include-partial-messages".into());
+    apply_session_flags(args, session, "--resume", "--session-id");
+    args.push(prompt.to_string());
+}
+
+fn apply_codex_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSession>) {
+    if args.get(1).map(|s| s.as_str()) == Some("exec") {
+        args.remove(1);
+        if args.get(1).map(|s| s.as_str()) == Some("resume") {
+            args.remove(1);
+            if args.get(1).map(|s| !s.starts_with('-')).unwrap_or(false) {
+                args.remove(1);
+            }
+        }
+    }
+    args.insert(1, "exec".into());
+    if let Some(s) = session.filter(|s| s.resume && !s.id.is_empty()) {
+        args.insert(2, "resume".into());
+        args.insert(3, s.id.clone());
+    }
+    if !has_flag(args, &["--json"]) {
+        args.push("--json".into());
+    }
+    args.push(prompt.to_string());
+}
+
+fn apply_session_flags(
+    args: &mut Vec<String>,
+    session: Option<&TurnSession>,
+    resume_flag: &str,
+    new_flag: &str,
+) {
+    let Some(session) = session else {
+        return;
+    };
+    if session.id.is_empty() {
+        return;
+    }
+    if session.resume {
+        args.push(resume_flag.into());
+    } else {
+        args.push(new_flag.into());
+    }
+    args.push(session.id.clone());
 }
 
 fn inject_memory(program: &str, args: &mut Vec<String>, agent_id: &str) {
@@ -810,6 +926,80 @@ mod tests {
     fn unknown_cli_does_not_invent_flags() {
         let argv = cfg(&["cat"], Some("whatever"), Some(Effort::High)).spawn_cmd(false);
         assert_eq!(argv, vec!["cat"]);
+    }
+
+    #[test]
+    fn grok_and_claude_are_headless_cat_stays_pty() {
+        assert!(!cfg(&["grok"], None, None).uses_pty());
+        assert!(!cfg(&["/opt/homebrew/bin/claude"], None, None).uses_pty());
+        assert!(!cfg(&["codex", "--yolo"], None, None).uses_pty());
+        assert!(cfg(&["cat"], None, None).uses_pty());
+    }
+
+    #[test]
+    fn grok_turn_uses_real_headless_flags() {
+        let c = cfg(&["grok", "--always-approve"], Some("grok-4"), Some(Effort::High));
+        let argv = c.turn_cmd("hello", None, &[]);
+        assert_eq!(argv[0], "grok");
+        assert!(argv.contains(&"--always-approve".to_string()));
+        assert!(argv.contains(&"--output-format".to_string()));
+        assert!(argv.contains(&"streaming-json".to_string()));
+        let p = argv.iter().position(|a| a == "-p").expect("-p");
+        assert_eq!(argv[p + 1], "hello");
+        assert!(!argv.iter().any(|a| a == "--resume" || a == "--session-id"));
+        let resume = TurnSession {
+            id: "11111111-2222-4333-8444-555555555555".into(),
+            resume: true,
+        };
+        let argv = c.turn_cmd("hi", Some(&resume), &[]);
+        assert!(argv.contains(&"--resume".to_string()));
+        assert!(argv.contains(&resume.id));
+        assert!(!argv.contains(&"--session-id".to_string()));
+        let fresh = TurnSession {
+            id: resume.id.clone(),
+            resume: false,
+        };
+        let argv = c.turn_cmd("hi", Some(&fresh), &[]);
+        assert!(argv.contains(&"--session-id".to_string()));
+        assert!(!argv.contains(&"--resume".to_string()));
+    }
+
+    #[test]
+    fn claude_turn_uses_print_and_stream_json() {
+        let c = cfg(&["claude", "--dangerously-skip-permissions"], None, None);
+        let argv = c.turn_cmd("hello", None, &[]);
+        assert!(argv.contains(&"-p".to_string()));
+        assert!(argv.contains(&"--output-format".to_string()));
+        assert!(argv.contains(&"stream-json".to_string()));
+        assert!(argv.contains(&"--include-partial-messages".to_string()));
+        assert_eq!(argv.last().map(|s| s.as_str()), Some("hello"));
+        let resume = TurnSession {
+            id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee".into(),
+            resume: true,
+        };
+        let argv = c.turn_cmd("next", Some(&resume), &[]);
+        assert!(argv.contains(&"--resume".to_string()));
+        assert_eq!(argv.last().map(|s| s.as_str()), Some("next"));
+    }
+
+    #[test]
+    fn codex_turn_inserts_exec_json_and_resume() {
+        let c = cfg(&["codex", "--yolo"], None, None);
+        let argv = c.turn_cmd("hello", None, &[]);
+        assert_eq!(argv[0], "codex");
+        assert_eq!(argv[1], "exec");
+        assert!(argv.contains(&"--yolo".to_string()));
+        assert!(argv.contains(&"--json".to_string()));
+        assert_eq!(argv.last().map(|s| s.as_str()), Some("hello"));
+        let resume = TurnSession {
+            id: "0199a213-81c0-7800-8aa1-bbab2a035a53".into(),
+            resume: true,
+        };
+        let argv = c.turn_cmd("again", Some(&resume), &[]);
+        assert_eq!(argv[1], "exec");
+        assert_eq!(argv[2], "resume");
+        assert_eq!(argv[3], resume.id);
+        assert_eq!(argv.last().map(|s| s.as_str()), Some("again"));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -14,6 +15,7 @@ use crate::config::{
     Channel, Config, Effort, Routine,
 };
 use crate::cron;
+use crate::headless::{self, HeadlessSession};
 use crate::paths;
 use crate::protocol::{AgentInfo, AgentStatus, ChannelInfo, Event, Request, Role};
 use crate::pty_agent::{self, PtySession};
@@ -21,8 +23,143 @@ use crate::pty_agent::{self, PtySession};
 const DEFAULT_COLS: u16 = 100;
 const DEFAULT_ROWS: u16 = 32;
 
+#[derive(Clone)]
+enum LiveAgent {
+    Pty(Arc<PtySession>),
+    Headless(Arc<HeadlessSession>),
+}
+
+impl LiveAgent {
+    fn id(&self) -> &str {
+        match self {
+            Self::Pty(s) => &s.id,
+            Self::Headless(s) => &s.id,
+        }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            Self::Pty(s) => &s.name,
+            Self::Headless(s) => &s.name,
+        }
+    }
+
+    fn cmd(&self) -> Vec<String> {
+        match self {
+            Self::Pty(s) => s.cmd.clone(),
+            Self::Headless(s) => s.cmd.clone(),
+        }
+    }
+
+    fn cwd(&self) -> PathBuf {
+        match self {
+            Self::Pty(s) => s.cwd.clone(),
+            Self::Headless(s) => s.cwd.clone(),
+        }
+    }
+
+    fn status(&self) -> AgentStatus {
+        match self {
+            Self::Pty(s) => s
+                .inner
+                .lock()
+                .map(|i| i.status)
+                .unwrap_or(AgentStatus::Idle),
+            Self::Headless(s) => s
+                .inner
+                .lock()
+                .map(|i| i.status)
+                .unwrap_or(AgentStatus::Idle),
+        }
+    }
+
+    fn is_live(&self) -> bool {
+        self.status() != AgentStatus::Exited
+    }
+
+    fn pty(&self) -> Option<Arc<PtySession>> {
+        match self {
+            Self::Pty(s) => Some(s.clone()),
+            Self::Headless(_) => None,
+        }
+    }
+
+    fn frame_event(&self) -> Event {
+        match self {
+            Self::Pty(s) => match s.inner.lock() {
+                Ok(inner) => Event::Frame {
+                    agent: s.id.clone(),
+                    cols: inner.cols,
+                    rows: inner.rows,
+                    text: pty_agent::screen_text(&inner),
+                    status: inner.status,
+                    seq: inner.seq,
+                },
+                Err(_) => Event::Frame {
+                    agent: s.id.clone(),
+                    cols: DEFAULT_COLS,
+                    rows: DEFAULT_ROWS,
+                    text: String::new(),
+                    status: AgentStatus::Idle,
+                    seq: 0,
+                },
+            },
+            Self::Headless(s) => match s.inner.lock() {
+                Ok(inner) => Event::Frame {
+                    agent: s.id.clone(),
+                    cols: inner.cols,
+                    rows: inner.rows,
+                    text: String::new(),
+                    status: inner.status,
+                    seq: inner.seq,
+                },
+                Err(_) => Event::Frame {
+                    agent: s.id.clone(),
+                    cols: DEFAULT_COLS,
+                    rows: DEFAULT_ROWS,
+                    text: String::new(),
+                    status: AgentStatus::Idle,
+                    seq: 0,
+                },
+            },
+        }
+    }
+
+    fn snapshot_event(&self) -> Event {
+        match self.frame_event() {
+            Event::Frame {
+                agent,
+                cols,
+                rows,
+                text,
+                status,
+                ..
+            } => Event::Snapshot {
+                agent,
+                cols,
+                rows,
+                text,
+                status,
+            },
+            other => other,
+        }
+    }
+
+    fn kill(&self) {
+        match self {
+            Self::Pty(s) => {
+                if let Ok(mut inner) = s.inner.lock() {
+                    let _ = inner.child.kill();
+                    let _ = inner.child.wait();
+                }
+            }
+            Self::Headless(s) => headless::kill(s),
+        }
+    }
+}
+
 static EVENTS: OnceLock<broadcast::Sender<Event>> = OnceLock::new();
-static AGENTS: OnceLock<Mutex<HashMap<String, Arc<PtySession>>>> = OnceLock::new();
+static AGENTS: OnceLock<Mutex<HashMap<String, LiveAgent>>> = OnceLock::new();
 static CONFIGS: OnceLock<Mutex<HashMap<String, AgentConfig>>> = OnceLock::new();
 static CHANNELS: OnceLock<Mutex<HashMap<String, Channel>>> = OnceLock::new();
 
@@ -33,7 +170,7 @@ pub fn events() -> &'static broadcast::Sender<Event> {
     })
 }
 
-fn agents() -> &'static Mutex<HashMap<String, Arc<PtySession>>> {
+fn agents() -> &'static Mutex<HashMap<String, LiveAgent>> {
     AGENTS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -85,7 +222,7 @@ pub fn emit_frame(session: &PtySession) {
             Err(_) => return,
         };
         match map.get(&session.id) {
-            Some(current) if std::ptr::eq(current.as_ref(), session) => {}
+            Some(LiveAgent::Pty(current)) if std::ptr::eq(current.as_ref(), session) => {}
             _ => return,
         }
     }
@@ -101,6 +238,45 @@ pub fn emit_frame(session: &PtySession) {
         Err(_) => return,
     };
     let _ = events().send(ev);
+}
+
+pub fn emit_agent_frame(id: &str) {
+    let ev = {
+        let map = match agents().lock() {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        match map.get(id) {
+            Some(live) => live.frame_event(),
+            None => return,
+        }
+    };
+    let _ = events().send(ev);
+}
+
+fn open_agent(
+    cfg: &AgentConfig,
+    cols: u16,
+    rows: u16,
+    fresh_session: bool,
+    roster: &[AgentConfig],
+) -> anyhow::Result<LiveAgent> {
+    if cfg.uses_pty() {
+        Ok(LiveAgent::Pty(pty_agent::spawn(
+            cfg,
+            cols,
+            rows,
+            fresh_session,
+            roster,
+        )?))
+    } else {
+        Ok(LiveAgent::Headless(headless::open(
+            cfg,
+            cols,
+            rows,
+            fresh_session,
+        )?))
+    }
 }
 
 pub async fn run() -> anyhow::Result<()> {
@@ -129,18 +305,26 @@ pub async fn run() -> anyhow::Result<()> {
     {
         let mut map = agents().lock().expect("agents mutex");
         for agent_cfg in &cfg.agents {
-            match pty_agent::spawn(agent_cfg, DEFAULT_COLS, DEFAULT_ROWS, false, &cfg.agents) {
-                Ok(session) => {
-                    eprintln!(
-                        "[crew] spawned {} -> {} ({})",
-                        session.id,
-                        agent_cfg.spawn_cmd_with(false, &cfg.agents).join(" "),
-                        session.cwd.display()
-                    );
-                    map.insert(session.id.clone(), session);
+            match open_agent(agent_cfg, DEFAULT_COLS, DEFAULT_ROWS, false, &cfg.agents) {
+                Ok(live) => {
+                    if agent_cfg.uses_pty() {
+                        eprintln!(
+                            "[crew] spawned {} -> {} ({})",
+                            live.id(),
+                            agent_cfg.spawn_cmd_with(false, &cfg.agents).join(" "),
+                            live.cwd().display()
+                        );
+                    } else {
+                        eprintln!(
+                            "[crew] registered {} (headless) ({})",
+                            live.id(),
+                            live.cwd().display()
+                        );
+                    }
+                    map.insert(live.id().to_string(), live);
                 }
                 Err(err) => {
-                    eprintln!("[crew] failed to spawn {}: {err:#}", agent_cfg.id);
+                    eprintln!("[crew] failed to open {}: {err:#}", agent_cfg.id);
                 }
             }
         }
@@ -201,14 +385,17 @@ fn spawn_status_ticker() {
         .name("crew-status".into())
         .spawn(|| loop {
             std::thread::sleep(Duration::from_millis(400));
-            let list: Vec<Arc<PtySession>> = match agents().lock() {
+            let list: Vec<LiveAgent> = match agents().lock() {
                 Ok(map) => map.values().cloned().collect(),
                 Err(_) => return,
             };
             if list.is_empty() && EVENTS.get().is_none() {
                 return;
             }
-            for session in list {
+            for live in list {
+                let Some(session) = live.pty() else {
+                    continue;
+                };
                 let mut changed = false;
                 if let Ok(mut inner) = session.inner.lock() {
                     if inner.status == AgentStatus::Exited {
@@ -304,13 +491,9 @@ fn tick_routines() {
                 Err(_) => return,
             };
             match map.get(&agent) {
-                Some(session) => {
-                    let status = session
-                        .inner
-                        .lock()
-                        .map(|i| i.status)
-                        .unwrap_or(AgentStatus::Exited);
-                    if status == AgentStatus::Exited {
+                Some(live) => {
+                    let status = live.status();
+                    if status == AgentStatus::Exited || status == AgentStatus::Working {
                         continue;
                     }
                 }
@@ -331,9 +514,10 @@ fn tick_routines() {
 }
 
 fn fire_routine(agent: &str, name: &str, prompt: &str) -> anyhow::Result<()> {
+    ensure_accepts_turn(agent)?;
     crate::transcript::push_system(agent, name, prompt);
     let envelope = crate::protocol::routine_envelope(name, prompt);
-    match write_agent(agent, &envelope, true) {
+    match deliver(agent, &envelope, true) {
         Ok(()) => {
             eprintln!("[crew] routine {agent}/{name}");
             Ok(())
@@ -360,15 +544,12 @@ fn mark_routine_run(agent: &str, key: &str, minute_key: &str) -> anyhow::Result<
 
 fn shutdown_agents() {
     crate::transcript::seal_all_now();
-    let list: Vec<Arc<PtySession>> = match agents().lock() {
+    let list: Vec<LiveAgent> = match agents().lock() {
         Ok(mut map) => map.drain().map(|(_, v)| v).collect(),
         Err(_) => return,
     };
-    for session in list {
-        if let Ok(mut inner) = session.inner.lock() {
-            let _ = inner.child.kill();
-            let _ = inner.child.wait();
-        }
+    for live in list {
+        live.kill();
     }
 }
 
@@ -512,7 +693,7 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
                 }
             }
         }
-        Request::Input { agent, data } => match write_agent(&agent, &data, false) {
+        Request::Input { agent, data } => match write_pty(&agent, &data, false) {
             Ok(()) => vec![Event::Ok],
             Err(err) => vec![Event::Error {
                 message: err.to_string(),
@@ -714,20 +895,16 @@ fn list_agents() -> Vec<AgentInfo> {
     let mut list: Vec<AgentInfo> = map
         .values()
         .map(|s| {
-            let status = s
-                .inner
-                .lock()
-                .map(|i| i.status)
-                .unwrap_or(AgentStatus::Idle);
-            let cfg = cfgs.get(&s.id);
+            let status = s.status();
+            let cfg = cfgs.get(s.id());
             AgentInfo {
-                id: s.id.clone(),
+                id: s.id().to_string(),
                 name: cfg
                     .map(|c| c.display_name().to_string())
-                    .unwrap_or_else(|| s.name.clone()),
+                    .unwrap_or_else(|| s.name().to_string()),
                 status,
-                cmd: cfg.map(|c| c.cmd.clone()).unwrap_or_else(|| s.cmd.clone()),
-                cwd: s.cwd.display().to_string(),
+                cmd: cfg.map(|c| c.cmd.clone()).unwrap_or_else(|| s.cmd()),
+                cwd: s.cwd().display().to_string(),
                 model: cfg.and_then(|c| c.model.clone()),
                 effort: cfg.and_then(|c| c.effort),
                 avatar: cfg.and_then(|c| c.avatar.clone()),
@@ -748,15 +925,13 @@ fn list_agents() -> Vec<AgentInfo> {
 
 fn all_snapshots() -> Vec<Event> {
     let map = agents().lock().expect("agents mutex");
-    map.values()
-        .filter_map(|s| snapshot_session(s).ok())
-        .collect()
+    map.values().map(|s| s.snapshot_event()).collect()
 }
 
 fn snapshot_agent(id: &str) -> anyhow::Result<Event> {
     let map = agents().lock().expect("agents mutex");
     let session = map.get(id).with_context(|| format!("unknown agent {id}"))?;
-    snapshot_session(session)
+    Ok(session.snapshot_event())
 }
 
 fn messages_agent(id: &str) -> anyhow::Result<Event> {
@@ -773,14 +948,9 @@ fn messages_agent(id: &str) -> anyhow::Result<Event> {
 }
 
 fn send_agent(id: &str, text: &str) -> anyhow::Result<()> {
-    {
-        let map = agents().lock().expect("agents mutex");
-        if !map.contains_key(id) {
-            anyhow::bail!("unknown agent {id}");
-        }
-    }
+    ensure_accepts_turn(id)?;
     crate::transcript::push_user(id, "user", text);
-    match write_agent(id, text, true) {
+    match deliver(id, text, true) {
         Ok(()) => Ok(()),
         Err(err) => {
             crate::transcript::cancel_expect(id);
@@ -789,15 +959,26 @@ fn send_agent(id: &str, text: &str) -> anyhow::Result<()> {
     }
 }
 
-fn snapshot_session(session: &PtySession) -> anyhow::Result<Event> {
-    let inner = session.inner.lock().expect("pty inner");
-    Ok(Event::Snapshot {
-        agent: session.id.clone(),
-        cols: inner.cols,
-        rows: inner.rows,
-        text: pty_agent::screen_text(&inner),
-        status: inner.status,
-    })
+fn ensure_accepts_turn(id: &str) -> anyhow::Result<()> {
+    let map = agents().lock().expect("agents mutex");
+    let live = map
+        .get(id)
+        .with_context(|| format!("unknown agent {id}"))?;
+    match live {
+        LiveAgent::Headless(session) => {
+            let inner = session.inner.lock().expect("headless inner");
+            if inner.status == AgentStatus::Working || inner.child.is_some() {
+                anyhow::bail!("agent {id} is working");
+            }
+        }
+        LiveAgent::Pty(session) => {
+            let inner = session.inner.lock().expect("pty inner");
+            if inner.status == AgentStatus::Exited {
+                anyhow::bail!("agent {id} has exited");
+            }
+        }
+    }
+    Ok(())
 }
 
 fn from_id(from: &str) -> String {
@@ -821,9 +1002,10 @@ fn tell_agent(from: &str, to: &str, text: &str) -> anyhow::Result<()> {
         }
     }
     let from = from_id(from);
+    ensure_accepts_turn(to)?;
     crate::transcript::push_system(to, &from, text);
     let envelope = crate::protocol::envelope(&from, text);
-    match write_agent(to, &envelope, true) {
+    match deliver(to, &envelope, true) {
         Ok(()) => {
             let _ = events().send(Event::Told {
                 from: from.clone(),
@@ -838,12 +1020,33 @@ fn tell_agent(from: &str, to: &str, text: &str) -> anyhow::Result<()> {
     }
 }
 
-fn write_agent(id: &str, text: &str, newline: bool) -> anyhow::Result<()> {
-    let session = {
+fn deliver(id: &str, text: &str, newline: bool) -> anyhow::Result<()> {
+    let live = {
         let map = agents().lock().expect("agents mutex");
         map.get(id)
             .cloned()
             .with_context(|| format!("unknown agent {id}"))?
+    };
+    match live {
+        LiveAgent::Pty(_) => write_pty(id, text, newline),
+        LiveAgent::Headless(session) => {
+            let cfg = clone_agent_cfg(id)?;
+            let roster = roster_vec();
+            headless::kick(session, cfg, roster, text.to_string())
+        }
+    }
+}
+
+fn write_agent(id: &str, text: &str, newline: bool) -> anyhow::Result<()> {
+    write_pty(id, text, newline)
+}
+
+fn write_pty(id: &str, text: &str, newline: bool) -> anyhow::Result<()> {
+    let session = {
+        let map = agents().lock().expect("agents mutex");
+        let live = map.get(id).with_context(|| format!("unknown agent {id}"))?;
+        live.pty()
+            .with_context(|| format!("agent {id} is headless (no PTY)"))?
     };
     {
         let mut inner = session.inner.lock().expect("pty inner");
@@ -868,27 +1071,40 @@ fn write_agent(id: &str, text: &str, newline: bool) -> anyhow::Result<()> {
 fn resize_agent(id: &str, cols: u16, rows: u16) -> anyhow::Result<()> {
     let cols = cols.max(20);
     let rows = rows.max(8);
-    let session = {
+    let live = {
         let map = agents().lock().expect("agents mutex");
         map.get(id)
             .cloned()
             .with_context(|| format!("unknown agent {id}"))?
     };
-    {
-        let mut inner = session.inner.lock().expect("pty inner");
-        inner.master.resize(portable_pty::PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })?;
-        inner.parser.set_size(rows, cols);
-        inner.cols = cols;
-        inner.rows = rows;
-        inner.seq += 1;
+    match live {
+        LiveAgent::Headless(session) => {
+            if let Ok(mut inner) = session.inner.lock() {
+                inner.cols = cols;
+                inner.rows = rows;
+                inner.seq += 1;
+            }
+            emit_agent_frame(id);
+            Ok(())
+        }
+        LiveAgent::Pty(session) => {
+            {
+                let mut inner = session.inner.lock().expect("pty inner");
+                inner.master.resize(portable_pty::PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })?;
+                inner.parser.set_size(rows, cols);
+                inner.cols = cols;
+                inner.rows = rows;
+                inner.seq += 1;
+            }
+            emit_frame(&session);
+            Ok(())
+        }
     }
-    emit_frame(&session);
-    Ok(())
 }
 
 fn add_agent(
@@ -945,12 +1161,12 @@ fn insert_spawned_agent(cfg: AgentConfig) -> anyhow::Result<()> {
     if !roster.iter().any(|a| a.id == cfg.id) {
         roster.push(cfg.clone());
     }
-    let session = pty_agent::spawn(&cfg, DEFAULT_COLS, DEFAULT_ROWS, false, &roster)?;
+    let live = open_agent(&cfg, DEFAULT_COLS, DEFAULT_ROWS, false, &roster)?;
     crate::transcript::load_agent(&id);
     agents()
         .lock()
         .expect("agents mutex")
-        .insert(id.clone(), session);
+        .insert(id.clone(), live);
     configs()
         .lock()
         .expect("configs mutex")
@@ -970,9 +1186,8 @@ fn remove_agent(id: &str) -> anyhow::Result<()> {
     crate::avatar::clear(id);
     crate::memory::remove(id);
     crate::transcript::drop_agent(id);
-    if let Ok(mut inner) = session.inner.lock() {
-        let _ = inner.child.kill();
-    }
+    crate::headless::clear_session(id);
+    session.kill();
     if let Ok(mut chans) = channels().lock() {
         for ch in chans.values_mut() {
             ch.members.retain(|m| m != id);
@@ -992,12 +1207,7 @@ fn inject_roster_update(skip: Option<&str>) {
                 if skip == Some(id.as_str()) {
                     return false;
                 }
-                session
-                    .inner
-                    .lock()
-                    .ok()
-                    .map(|inner| inner.status != AgentStatus::Exited)
-                    .unwrap_or(false)
+                session.pty().is_some() && session.is_live()
             })
             .map(|(id, _)| id.clone())
             .collect(),
@@ -1124,14 +1334,20 @@ fn reset_agent(id: &str, drop_routines: bool) -> anyhow::Result<String> {
             .cloned()
             .with_context(|| format!("unknown agent {id}"))?
     };
-    let (cols, rows, pane, status) = {
-        let inner = old.inner.lock().expect("pty inner");
-        (
-            inner.cols,
-            inner.rows,
-            pty_agent::screen_text(&inner),
-            inner.status,
-        )
+    let (cols, rows, pane, status) = match &old {
+        LiveAgent::Pty(session) => {
+            let inner = session.inner.lock().expect("pty inner");
+            (
+                inner.cols,
+                inner.rows,
+                pty_agent::screen_text(&inner),
+                inner.status,
+            )
+        }
+        LiveAgent::Headless(session) => {
+            let inner = session.inner.lock().expect("headless inner");
+            (inner.cols, inner.rows, String::new(), inner.status)
+        }
     };
 
     let mut cfg = {
@@ -1167,16 +1383,14 @@ fn reset_agent(id: &str, drop_routines: bool) -> anyhow::Result<String> {
     persist_config(&cfg)?;
 
     let roster = roster_vec();
-    let new_session = pty_agent::spawn(&cfg, cols, rows, true, &roster)?;
+    crate::headless::clear_session(id);
+    let new_session = open_agent(&cfg, cols, rows, true, &roster)?;
     {
         let mut map = agents().lock().expect("agents mutex");
         map.insert(id.to_string(), new_session.clone());
     }
-    if let Ok(mut inner) = old.inner.lock() {
-        let _ = inner.child.kill();
-        let _ = inner.child.wait();
-    }
-    emit_frame(&new_session);
+    old.kill();
+    emit_agent_frame(id);
     eprintln!(
         "[crew] reset {} -> archived {} (drop_routines={drop_routines})",
         id,
@@ -1346,8 +1560,11 @@ fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
     let mut sent = 0usize;
     let mut last_err: Option<anyhow::Error> = None;
     for to in &targets {
+        if ensure_accepts_turn(to).is_err() {
+            continue;
+        }
         crate::transcript::push_system(to, &format!("#{channel}"), text);
-        match write_agent(to, &envelope, true) {
+        match deliver(to, &envelope, true) {
             Ok(()) => sent += 1,
             Err(err) => {
                 crate::transcript::cancel_expect(to);

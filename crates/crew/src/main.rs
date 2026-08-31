@@ -6,6 +6,7 @@ mod config;
 mod cron;
 mod daemon;
 mod desktop;
+mod headless;
 mod memory;
 mod paths;
 mod protocol;
