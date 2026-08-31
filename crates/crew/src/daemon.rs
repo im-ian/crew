@@ -517,6 +517,7 @@ fn fire_routine(agent: &str, name: &str, prompt: &str) -> anyhow::Result<()> {
     ensure_accepts_turn(agent)?;
     crate::transcript::push_system(agent, name, prompt);
     let envelope = crate::protocol::routine_envelope(name, prompt);
+    crate::transcript::expect_echo(agent, &envelope);
     match deliver(agent, &envelope, true) {
         Ok(()) => {
             eprintln!("[crew] routine {agent}/{name}");
@@ -1011,6 +1012,7 @@ fn tell_agent(from: &str, to: &str, text: &str) -> anyhow::Result<()> {
     ensure_accepts_turn(to)?;
     crate::transcript::push_system(to, &from, text);
     let envelope = crate::protocol::envelope(&from, text);
+    crate::transcript::expect_echo(to, &envelope);
     match deliver(to, &envelope, true) {
         Ok(()) => {
             let _ = events().send(Event::Told {
@@ -1578,6 +1580,7 @@ fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
             continue;
         }
         crate::transcript::push_system(to, &format!("#{channel}"), text);
+        crate::transcript::expect_echo(to, &envelope);
         match deliver(to, &envelope, true) {
             Ok(()) => sent += 1,
             Err(err) => {

@@ -30,6 +30,8 @@ struct AgentChat {
     utf8_tail: Vec<u8>,
     /// When set, idle-seal is deferred until `end_turn` (headless tool pauses).
     hold: bool,
+    /// Injected stdin expected to echo on the PTY; stripped from assistant text.
+    echo_skip: String,
 }
 
 impl AgentChat {
@@ -43,6 +45,7 @@ impl AgentChat {
             dirty: false,
             utf8_tail: Vec::new(),
             hold: false,
+            echo_skip: String::new(),
         }
     }
 }
@@ -96,6 +99,7 @@ fn load_key(key: &str, path: &Path) {
                 dirty: false,
                 utf8_tail: Vec::new(),
                 hold: false,
+                echo_skip: String::new(),
             },
         );
     }
@@ -152,6 +156,19 @@ pub fn push_system(agent: &str, from: &str, text: &str) -> ChatMessage {
     push_role(agent, Role::System, from, text, true)
 }
 
+/// Record injected PTY/prompt text so local echo is not stored as assistant output.
+pub fn expect_echo(agent: &str, text: &str) {
+    let mut t = normalize_text(text);
+    if !t.is_empty() && !t.ends_with('\n') {
+        t.push('\n');
+    }
+    if let Ok(mut map) = chats().lock() {
+        if let Some(chat) = map.get_mut(agent) {
+            chat.echo_skip = t;
+        }
+    }
+}
+
 pub fn channel_messages(id: &str) -> Vec<ChatMessage> {
     messages(&channel_key(id))
 }
@@ -200,6 +217,7 @@ pub fn cancel_expect(agent: &str) {
     if let Ok(mut map) = chats().lock() {
         if let Some(chat) = map.get_mut(agent) {
             chat.expecting = false;
+            chat.echo_skip.clear();
         }
     }
 }
@@ -232,10 +250,6 @@ pub fn on_assistant_delta(agent: &str, chunk: &str) {
 }
 
 pub fn set_pending_assistant(agent: &str, text: &str) {
-    let cleaned = normalize_text(&strip_ansi(text));
-    if cleaned.is_empty() {
-        return;
-    }
     let msg = {
         let mut map = match chats().lock() {
             Ok(m) => m,
@@ -245,6 +259,13 @@ pub fn set_pending_assistant(agent: &str, text: &str) {
             return;
         };
         if !chat.expecting && chat.pending_idx.is_none() {
+            return;
+        }
+        let cleaned = normalize_text(&strip_ansi(text));
+        let cleaned = strip_prefix_echo(&chat.echo_skip, &cleaned);
+        let had_marker = cleaned.lines().any(is_crew_marker_line);
+        let cleaned = strip_crew_markers(&cleaned);
+        if cleaned.is_empty() || (had_marker && is_inbound_echo(chat, &cleaned)) {
             return;
         }
         chat.last_byte = Instant::now();
@@ -296,12 +317,23 @@ pub fn on_pty_bytes(agent: &str, bytes: &[u8]) {
         let (raw, rest) = decode_utf8_keep_tail(&data);
         chat.utf8_tail = rest;
         chat.last_byte = Instant::now();
-        let cleaned = normalize_text(&strip_ansi(&raw));
-        if cleaned.is_empty() {
+        let raw = normalize_text(&strip_ansi(&raw));
+        let raw = consume_echo(&mut chat.echo_skip, &raw);
+        let had_marker = raw.lines().any(is_crew_marker_line);
+        let cleaned = strip_crew_markers(&raw);
+        if cleaned.is_empty() || (had_marker && is_inbound_echo(chat, &cleaned)) {
             return;
         }
         if let Some(idx) = chat.pending_idx {
             chat.messages[idx].text.push_str(&cleaned);
+            let combined = strip_crew_markers(&chat.messages[idx].text);
+            chat.messages[idx].text = combined.clone();
+            if combined.is_empty() || (had_marker && is_inbound_echo(chat, &combined)) {
+                if had_marker && is_inbound_echo(chat, &combined) {
+                    chat.messages[idx].text.clear();
+                }
+                return;
+            }
             chat.messages[idx].ts = now_ms();
             if chat.last_emit.elapsed() >= EMIT_INTERVAL {
                 chat.last_emit = Instant::now();
@@ -409,6 +441,7 @@ fn maybe_seal(agent: &str) {
         if chat.pending_idx.is_none() {
             if chat.expecting && chat.last_byte.elapsed() > EXPECT_TIMEOUT {
                 chat.expecting = false;
+                chat.echo_skip.clear();
             }
             return;
         }
@@ -443,10 +476,14 @@ fn finish_pending(agent: &str, chat: &mut AgentChat) -> Option<ChatMessage> {
     let Some(idx) = chat.pending_idx.take() else {
         chat.expecting = false;
         chat.dirty = false;
+        chat.echo_skip.clear();
         return None;
     };
     chat.dirty = false;
-    chat.messages[idx].text = chat.messages[idx].text.trim_end().to_string();
+    chat.echo_skip.clear();
+    chat.messages[idx].text = strip_crew_markers(&chat.messages[idx].text)
+        .trim_end()
+        .to_string();
     chat.expecting = false;
     if chat.messages[idx].text.is_empty() {
         chat.messages.remove(idx);
@@ -560,6 +597,105 @@ fn normalize_text(s: &str) -> String {
     s.replace("\r\n", "\n").replace('\r', "\n")
 }
 
+fn is_crew_marker_line(line: &str) -> bool {
+    let t = line.trim();
+    if !t.starts_with("[crew ") || !t.ends_with(']') {
+        return false;
+    }
+    let inner = &t["[crew ".len()..t.len() - 1];
+    inner == "system"
+        || inner.starts_with("from:")
+        || inner.starts_with("routine:")
+        || inner.starts_with("channel:")
+}
+
+fn last_inbound_text(chat: &AgentChat) -> Option<&str> {
+    chat.messages.iter().enumerate().rev().find_map(|(i, m)| {
+        if chat.pending_idx == Some(i) || m.role == Role::Assistant {
+            None
+        } else {
+            Some(m.text.as_str())
+        }
+    })
+}
+
+fn is_inbound_echo(chat: &AgentChat, text: &str) -> bool {
+    let Some(src) = last_inbound_text(chat)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        return false;
+    };
+    let mut any = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        any = true;
+        if line != src {
+            return false;
+        }
+    }
+    any
+}
+
+fn strip_crew_markers(s: &str) -> String {
+    let mut out = String::new();
+    for line in s.split('\n') {
+        if is_crew_marker_line(line) {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(line);
+    }
+    out
+}
+
+fn common_prefix_bytes(a: &str, b: &str) -> usize {
+    let mut len = 0;
+    for (ca, cb) in a.chars().zip(b.chars()) {
+        if ca != cb {
+            break;
+        }
+        len += ca.len_utf8();
+    }
+    len
+}
+
+fn strip_prefix_echo(echo: &str, incoming: &str) -> String {
+    if echo.is_empty() {
+        return incoming.to_string();
+    }
+    if incoming.starts_with(echo) {
+        incoming[echo.len()..].to_string()
+    } else {
+        incoming.to_string()
+    }
+}
+
+fn consume_echo(pending: &mut String, incoming: &str) -> String {
+    if pending.is_empty() {
+        return incoming.to_string();
+    }
+    if incoming.is_empty() {
+        return String::new();
+    }
+    let n = common_prefix_bytes(pending, incoming);
+    if n == 0 || (n < pending.len() && n < incoming.len()) {
+        pending.clear();
+        return incoming.to_string();
+    }
+    if n == pending.len() {
+        pending.clear();
+        return incoming[n..].to_string();
+    }
+    pending.replace_range(..n, "");
+    String::new()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -637,5 +773,51 @@ mod tests {
         let back: ChatMessage = serde_json::from_str(&line).unwrap();
         assert_eq!(back.from, "alpha");
         assert_eq!(back.role, Role::System);
+    }
+
+    #[test]
+    fn strip_crew_marker_lines() {
+        let raw = "[crew from:user]\n안녕?\n[crew from:user]\n안녕?";
+        assert_eq!(strip_crew_markers(raw), "안녕?\n안녕?");
+        assert_eq!(strip_crew_markers("[crew from:user]\n"), "");
+        assert_eq!(
+            strip_crew_markers("[crew channel:room from:alpha]\nhello"),
+            "hello"
+        );
+        assert_eq!(strip_crew_markers("[crew system]\nTeammates: a"), "Teammates: a");
+        assert_eq!(strip_crew_markers("keep\n[crew from:x]\nthis"), "keep\nthis");
+    }
+
+    #[test]
+    fn consume_echo_skips_injected_envelope() {
+        let mut pending = "[crew from:user]\n안녕?\n".to_string();
+        assert_eq!(consume_echo(&mut pending, "[crew from:"), "");
+        assert_eq!(pending, "user]\n안녕?\n");
+        assert_eq!(consume_echo(&mut pending, "user]\n안녕?\nhello"), "hello");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn envelope_echo_is_not_stored_as_assistant() {
+        let agent = format!(
+            "echo-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        push_system(&agent, "user", "안녕?");
+        expect_echo(&agent, "[crew from:user]\n안녕?");
+        on_pty_bytes(
+            &agent,
+            "[crew from:user]\n안녕?\n[crew from:user]\n안녕?".as_bytes(),
+        );
+        seal_now(&agent);
+        let msgs = messages(&agent);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].role, Role::System);
+        assert_eq!(msgs[0].text, "안녕?");
+        drop_agent(&agent);
     }
 }
