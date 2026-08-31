@@ -24,6 +24,10 @@ pub fn agents_path() -> PathBuf {
     home_dir().join("agents.json")
 }
 
+pub fn groups_path() -> PathBuf {
+    home_dir().join("groups.json")
+}
+
 pub fn pid_path() -> PathBuf {
     home_dir().join("crew.pid")
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-leave-channel"
+description = "Enables the leave_channel command without any pre-configured scope."
+commands.allow = ["leave_channel"]
+
+[[permission]]
+identifier = "deny-leave-channel"
+description = "Denies the leave_channel command without any pre-configured scope."
+commands.deny = ["leave_channel"]

@@ -7,12 +7,24 @@ import {
   type MouseEvent,
 } from "react";
 import { api, errMsg } from "./api";
+import {
+  groupIdOf,
+  groupsChanged,
+  itemKey,
+  moveItem,
+  newGroupId,
+  normalizeGroups,
+  pruneGroups,
+  uniqueGroupName,
+} from "./groups";
 import type {
   AgentInfo,
   ChannelInfo,
   ChatMessage,
   CliKind,
   ConfirmKind,
+  CtxKind,
+  Group,
   Kind,
   PendingAvatar,
   Routine,
@@ -23,7 +35,7 @@ type Ctx = {
   x: number;
   y: number;
   id: string | null;
-  kind: Kind;
+  kind: CtxKind;
 };
 
 export function useCrew() {
@@ -54,6 +66,8 @@ export function useCrew() {
     id: null,
     kind: "agent",
   });
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [pendingRenameId, setPendingRenameId] = useState<string | null>(null);
 
   const selectedRef = useRef({ id: selected, kind: selectedKind });
   selectedRef.current = { id: selected, kind: selectedKind };
@@ -61,6 +75,9 @@ export function useCrew() {
   infoOpenRef.current = infoOpen;
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
+  const groupsLoaded = useRef(false);
   const toastTimer = useRef<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const avatarPickId = useRef<string | null>(null);
@@ -154,8 +171,77 @@ export function useCrew() {
     setConfirmOpen(true);
   }
 
-  function showCtx(e: MouseEvent, id: string, kind: Kind) {
+  function showCtx(e: MouseEvent, id: string | null, kind: CtxKind) {
     setCtx({ open: true, x: e.clientX, y: e.clientY, id, kind });
+  }
+
+  function showCreateMenu(e: MouseEvent) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setCtx({
+      open: true,
+      x: Math.round(r.right - 168),
+      y: Math.round(r.bottom + 4),
+      id: null,
+      kind: "create",
+    });
+  }
+
+  function persistGroups(next: Group[]) {
+    groupsLoaded.current = true;
+    groupsRef.current = next;
+    setGroups(next);
+    void api.setGroups(next).catch((err) => showError(err));
+  }
+
+  function createGroup(withItem?: { kind: Kind; id: string } | null) {
+    const current = groupsRef.current;
+    const id = newGroupId(current.map((g) => g.id));
+    const name = uniqueGroupName(current);
+    const key = withItem ? itemKey(withItem.kind, withItem.id) : null;
+    const next = key
+      ? moveItem(current, key, null)
+      : current.map((g) => ({ ...g, items: [...g.items] }));
+    next.push({
+      id,
+      name,
+      collapsed: false,
+      items: key ? [key] : [],
+    });
+    persistGroups(next);
+    setPendingRenameId(id);
+  }
+
+  function renameGroup(id: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    persistGroups(
+      groupsRef.current.map((g) => (g.id === id ? { ...g, name: trimmed } : g)),
+    );
+  }
+
+  function removeGroup(id: string) {
+    persistGroups(groupsRef.current.filter((g) => g.id !== id));
+  }
+
+  function moveToGroup(
+    kind: Kind,
+    id: string,
+    groupId: string | null,
+    beforeKey?: string | null,
+  ) {
+    persistGroups(moveItem(groupsRef.current, itemKey(kind, id), groupId, beforeKey));
+  }
+
+  function toggleGroup(id: string) {
+    persistGroups(
+      groupsRef.current.map((g) =>
+        g.id === id ? { ...g, collapsed: !g.collapsed } : g,
+      ),
+    );
+  }
+
+  function itemGroupId(kind: Kind, id: string): string | null {
+    return groupIdOf(groups, kind, id);
   }
 
   function pickAvatar(id: string) {
@@ -203,6 +289,10 @@ export function useCrew() {
     selectedRef.current = { id: sel, kind };
     setAgents(list);
     setChannels(chans || []);
+    if (groupsLoaded.current) {
+      const pruned = pruneGroups(groupsRef.current, list, chans || []);
+      if (groupsChanged(pruned, groupsRef.current)) persistGroups(pruned);
+    }
     setSelected(sel);
     setSelectedKind(kind);
     setToId((prev) => {
@@ -402,6 +492,11 @@ export function useCrew() {
           setSelected(null);
           setMessages([]);
         }
+      } else if (kind === "remove-group") {
+        removeGroup(id);
+        await refreshList();
+        await refreshMessages();
+        return;
       } else if (kind === "remove-channel") {
         await api.removeChannel(id);
         if (
@@ -556,6 +651,27 @@ export function useCrew() {
 
   useEffect(() => {
     let cancelled = false;
+    void api
+      .listGroups()
+      .then((raw) => {
+        if (cancelled || groupsLoaded.current) return;
+        const next = normalizeGroups(raw);
+        groupsLoaded.current = true;
+        groupsRef.current = next;
+        setGroups(next);
+      })
+      .catch(() => {
+        if (cancelled || groupsLoaded.current) return;
+        groupsLoaded.current = true;
+        setGroups([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     async function tick() {
       try {
         await api.daemonPing();
@@ -635,6 +751,9 @@ export function useCrew() {
     pendingNewAvatar,
     toast,
     ctx,
+    groups,
+    pendingRenameId,
+    clearPendingRename: () => setPendingRenameId(null),
     currentAgent,
     currentChannel,
     placeholder,
@@ -654,7 +773,14 @@ export function useCrew() {
     createChannel,
     cloneBot,
     showCtx,
+    showCreateMenu,
     hideCtx,
+    createGroup,
+    renameGroup,
+    removeGroup,
+    moveToGroup,
+    toggleGroup,
+    itemGroupId,
     pickAvatar,
     onAvatarFile,
     clearAvatar,

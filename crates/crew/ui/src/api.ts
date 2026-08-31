@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AgentInfo, ChannelInfo, ChatMessage } from "./types";
+import type { AgentInfo, ChannelInfo, ChatMessage, Group } from "./types";
 
 export function errMsg(err: unknown): string {
   if (typeof err === "string") return err;
@@ -67,4 +67,6 @@ export const api = {
   getMemory: (agent: string) => invoke<string>("get_memory", { agent }),
   setMemory: (agent: string, text: string) =>
     invoke<void>("set_memory", { agent, text }),
+  listGroups: () => invoke<Group[]>("list_groups"),
+  setGroups: (groups: Group[]) => invoke<void>("set_groups", { groups }),
 };

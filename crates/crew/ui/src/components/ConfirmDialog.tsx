@@ -41,6 +41,12 @@ export function ConfirmDialog({ open, kind, onCancel, onConfirm }: Props) {
     ok = "삭제";
     okClass = "danger";
     showToggle = false;
+  } else if (kind === "remove-group") {
+    title = "그룹을 삭제할까요?";
+    body = "그룹만 사라지고, 안의 대화는 목록에 남습니다.";
+    ok = "삭제";
+    okClass = "danger";
+    showToggle = false;
   }
 
   return (

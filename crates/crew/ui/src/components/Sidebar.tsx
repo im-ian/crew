@@ -1,21 +1,38 @@
-import type { MouseEvent } from "react";
-import type { AgentInfo, ChannelInfo, Kind } from "../types";
+import { useEffect, useRef, useState, type DragEvent, type MouseEvent } from "react";
+import { itemKey, parseItemKey } from "../groups";
+import type { AgentInfo, ChannelInfo, Group, Kind } from "../types";
 import { Avatar } from "./Avatar";
+
+type RailItem = {
+  key: string;
+  kind: Kind;
+  id: string;
+  name: string;
+  preview?: string | null;
+  agent?: AgentInfo;
+  channel?: ChannelInfo;
+};
 
 type Props = {
   agents: AgentInfo[];
   channels: ChannelInfo[];
+  groups: Group[];
   selected: string | null;
   selectedKind: Kind;
   query: string;
+  renamingId: string | null;
   onQuery: (q: string) => void;
   onSelectAgent: (id: string) => void;
   onSelectChannel: (id: string) => void;
-  onNewBot: () => void;
-  onNewChannel: () => void;
+  onCreateMenu: (e: MouseEvent) => void;
   onAgentCtx: (e: MouseEvent, id: string) => void;
   onChannelCtx: (e: MouseEvent, id: string) => void;
+  onGroupCtx: (e: MouseEvent, id: string) => void;
   onPickAvatar: (id: string) => void;
+  onToggleGroup: (id: string) => void;
+  onRenameGroup: (id: string, name: string) => void;
+  onRenameDone: () => void;
+  onMove: (kind: Kind, id: string, groupId: string | null, beforeKey?: string | null) => void;
 };
 
 function matches(parts: Array<string | null | undefined>, query: string): boolean {
@@ -24,27 +41,131 @@ function matches(parts: Array<string | null | undefined>, query: string): boolea
   return parts.filter(Boolean).join(" ").toLowerCase().includes(q);
 }
 
+function toItems(agents: AgentInfo[], channels: ChannelInfo[]): RailItem[] {
+  const items: RailItem[] = [];
+  for (const a of agents) {
+    items.push({
+      key: itemKey("agent", a.id),
+      kind: "agent",
+      id: a.id,
+      name: a.name || a.id,
+      preview: a.preview,
+      agent: a,
+    });
+  }
+  for (const c of channels) {
+    items.push({
+      key: itemKey("channel", c.id),
+      kind: "channel",
+      id: c.id,
+      name: c.name || c.id,
+      preview: c.preview || (c.members || []).join(", "),
+      channel: c,
+    });
+  }
+  return items;
+}
+
 export function Sidebar({
   agents,
   channels,
+  groups,
   selected,
   selectedKind,
   query,
+  renamingId,
   onQuery,
   onSelectAgent,
   onSelectChannel,
-  onNewBot,
-  onNewChannel,
+  onCreateMenu,
   onAgentCtx,
   onChannelCtx,
+  onGroupCtx,
   onPickAvatar,
+  onToggleGroup,
+  onRenameGroup,
+  onRenameDone,
+  onMove,
 }: Props) {
-  const shownAgents = agents.filter((a) =>
-    matches([a.name, a.id, a.title, a.role, a.preview], query),
+  const all = toItems(agents, channels).filter((item) => {
+    if (item.agent) {
+      return matches(
+        [item.agent.name, item.agent.id, item.agent.title, item.agent.role, item.agent.preview],
+        query,
+      );
+    }
+    const c = item.channel;
+    return matches([c?.name, c?.id, (c?.members || []).join(" "), c?.preview], query);
+  });
+  const byKey = new Map(all.map((item) => [item.key, item]));
+  const used = new Set<string>();
+  const grouped = groups.map((group) => {
+    const items: RailItem[] = [];
+    for (const key of group.items) {
+      const item = byKey.get(key);
+      if (!item) continue;
+      items.push(item);
+      used.add(key);
+    }
+    return { group, items };
+  });
+  const ungrouped = all
+    .filter((item) => !used.has(item.key))
+    .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  const searching = !!query.trim();
+  const empty = !all.length;
+
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const [drop, setDrop] = useState<{ groupId: string | null; beforeKey: string | null } | null>(
+    null,
   );
-  const shownChannels = channels.filter((c) =>
-    matches([c.name, c.id, (c.members || []).join(" "), c.preview], query),
-  );
+
+  function select(item: RailItem) {
+    if (item.kind === "channel") onSelectChannel(item.id);
+    else onSelectAgent(item.id);
+  }
+
+  function ctx(e: MouseEvent, item: RailItem) {
+    if (item.kind === "channel") onChannelCtx(e, item.id);
+    else onAgentCtx(e, item.id);
+  }
+
+  function onDragStart(e: DragEvent, item: RailItem) {
+    e.dataTransfer.setData("text/plain", item.key);
+    e.dataTransfer.effectAllowed = "move";
+    setDragKey(item.key);
+  }
+
+  function onDragEnd() {
+    setDragKey(null);
+    setDrop(null);
+  }
+
+  function parseDrag(e: DragEvent): { kind: Kind; id: string } | null {
+    const raw = e.dataTransfer.getData("text/plain") || dragKey;
+    return raw ? parseItemKey(raw) : null;
+  }
+
+  function markDrop(e: DragEvent, groupId: string | null, beforeKey: string | null) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    const next = { groupId, beforeKey };
+    if (drop?.groupId !== next.groupId || drop?.beforeKey !== next.beforeKey) {
+      setDrop(next);
+    }
+  }
+
+  function applyDrop(e: DragEvent, groupId: string | null, beforeKey: string | null) {
+    e.preventDefault();
+    e.stopPropagation();
+    const parsed = parseDrag(e);
+    setDragKey(null);
+    setDrop(null);
+    if (!parsed) return;
+    if (beforeKey === itemKey(parsed.kind, parsed.id)) return;
+    onMove(parsed.kind, parsed.id, groupId, beforeKey);
+  }
 
   return (
     <aside>
@@ -59,151 +180,282 @@ export function Sidebar({
           value={query}
           onChange={(e) => onQuery(e.target.value)}
         />
+        <button
+          type="button"
+          className="icon-btn"
+          title="추가"
+          aria-label="추가"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onCreateMenu(e);
+          }}
+        >
+          +
+        </button>
       </div>
       <div className="rail-lists">
-        <section className="rail-section">
-          <div className="rail-head">
-            <div className="rail-label">에이전트</div>
-            <button
-              type="button"
-              className="icon-btn"
-              title="새 봇"
-              aria-label="새 봇"
-              onClick={onNewBot}
-            >
-              +
-            </button>
+        {empty ? (
+          <div className="empty-rail">
+            {agents.length || channels.length ? "검색 결과가 없습니다" : "대화가 없습니다"}
           </div>
-          {!shownAgents.length ? (
-            <div className="empty-rail">
-              {agents.length ? "검색 결과가 없습니다" : "에이전트가 없습니다"}
-            </div>
-          ) : (
-            shownAgents.map((a) => (
-              <RailRow
-                key={a.id}
-                id={a.id}
-                name={a.name || a.id}
-                preview={a.preview}
-                active={selectedKind === "agent" && a.id === selected}
-                src={a.avatar}
-                shape={a.avatar_shape}
-                color={a.avatar_color}
-                badge={a.status || ""}
-                onClick={() => onSelectAgent(a.id)}
-                onContextMenu={(e) => onAgentCtx(e, a.id)}
-                onAvatarClick={(e) => {
-                  if (selectedKind !== "agent" || selected !== a.id) {
-                    onSelectAgent(a.id);
+        ) : (
+          <>
+            {grouped.map(({ group, items }) => {
+              if (searching && !items.length) return null;
+              const hidden = !searching && group.collapsed;
+              const showEmpty = !hidden && !items.length && !searching;
+              return (
+                <section
+                  key={group.id}
+                  className={
+                    "rail-section" +
+                    (drop?.groupId === group.id && !drop.beforeKey ? " drop-over" : "")
                   }
-                  onPickAvatar(a.id);
-                  e.preventDefault();
-                }}
-              />
-            ))
-          )}
-        </section>
-        <section className="rail-section">
-          <div className="rail-head">
-            <div className="rail-label">채널</div>
-            <button
-              type="button"
-              className="icon-btn"
-              title="새 채널"
-              aria-label="새 채널"
-              onClick={onNewChannel}
-            >
-              +
-            </button>
-          </div>
-          {!shownChannels.length ? (
-            <div className="empty-rail">
-              {channels.length ? "검색 결과가 없습니다" : "채널이 없습니다"}
-            </div>
-          ) : (
-            shownChannels.map((c) => (
-              <RailRow
-                key={c.id}
-                id={c.id}
-                name={c.name || c.id}
-                preview={c.preview || (c.members || []).join(", ")}
-                active={selectedKind === "channel" && c.id === selected}
-                letter="#"
-                onClick={() => onSelectChannel(c.id)}
-                onContextMenu={(e) => onChannelCtx(e, c.id)}
-              />
-            ))
-          )}
-        </section>
+                  onDragOver={(e) => markDrop(e, group.id, null)}
+                  onDrop={(e) => applyDrop(e, group.id, null)}
+                >
+                  <GroupHead
+                    group={group}
+                    renaming={renamingId === group.id}
+                    searching={searching}
+                    onToggle={() => onToggleGroup(group.id)}
+                    onRename={(name) => {
+                      onRenameGroup(group.id, name);
+                      onRenameDone();
+                    }}
+                    onCancelRename={onRenameDone}
+                    onContextMenu={(e) => onGroupCtx(e, group.id)}
+                    onDragOver={(e) => markDrop(e, group.id, null)}
+                    onDrop={(e) => applyDrop(e, group.id, null)}
+                  />
+                  {hidden ? null : showEmpty ? (
+                    <div className="empty-rail">여기로 끌어다 놓으세요</div>
+                  ) : (
+                    items.map((item) => (
+                      <ItemRow
+                        key={item.key}
+                        item={item}
+                        active={selectedKind === item.kind && selected === item.id}
+                        dragging={dragKey === item.key}
+                        dropBefore={
+                          drop?.groupId === group.id && drop.beforeKey === item.key
+                        }
+                        onSelect={() => select(item)}
+                        onContextMenu={(e) => ctx(e, item)}
+                        onPickAvatar={
+                          item.kind === "agent" ? () => onPickAvatar(item.id) : undefined
+                        }
+                        onDragStart={(e) => onDragStart(e, item)}
+                        onDragEnd={onDragEnd}
+                        onDragOver={(e) => markDrop(e, group.id, item.key)}
+                        onDrop={(e) => applyDrop(e, group.id, item.key)}
+                      />
+                    ))
+                  )}
+                </section>
+              );
+            })}
+            {ungrouped.length || dragKey ? (
+              <section
+                className={
+                  "rail-section" +
+                  (drop && drop.groupId === null && !drop.beforeKey ? " drop-over" : "")
+                }
+                onDragOver={(e) => markDrop(e, null, null)}
+                onDrop={(e) => applyDrop(e, null, null)}
+              >
+                {ungrouped.map((item) => (
+                  <ItemRow
+                    key={item.key}
+                    item={item}
+                    active={selectedKind === item.kind && selected === item.id}
+                    dragging={dragKey === item.key}
+                    dropBefore={drop?.groupId === null && drop.beforeKey === item.key}
+                    onSelect={() => select(item)}
+                    onContextMenu={(e) => ctx(e, item)}
+                    onPickAvatar={
+                      item.kind === "agent" ? () => onPickAvatar(item.id) : undefined
+                    }
+                    onDragStart={(e) => onDragStart(e, item)}
+                    onDragEnd={onDragEnd}
+                    onDragOver={(e) => markDrop(e, null, item.key)}
+                    onDrop={(e) => applyDrop(e, null, item.key)}
+                  />
+                ))}
+                {!ungrouped.length && dragKey ? (
+                  <div className="empty-rail">그룹에서 빼기</div>
+                ) : null}
+              </section>
+            ) : null}
+          </>
+        )}
       </div>
     </aside>
   );
 }
 
-function RailRow({
-  id,
-  name,
-  preview,
-  active,
-  letter,
-  src,
-  shape,
-  color,
-  badge,
-  onClick,
+function GroupHead({
+  group,
+  renaming,
+  searching,
+  onToggle,
+  onRename,
+  onCancelRename,
   onContextMenu,
-  onAvatarClick,
+  onDragOver,
+  onDrop,
 }: {
-  id: string;
-  name: string;
-  preview?: string | null;
-  active: boolean;
-  letter?: string;
-  src?: string | null;
-  shape?: string | null;
-  color?: string | null;
-  badge?: string | null;
-  onClick: () => void;
+  group: Group;
+  renaming: boolean;
+  searching: boolean;
+  onToggle: () => void;
+  onRename: (name: string) => void;
+  onCancelRename: () => void;
   onContextMenu: (e: MouseEvent) => void;
-  onAvatarClick?: (e: MouseEvent) => void;
+  onDragOver: (e: DragEvent) => void;
+  onDrop: (e: DragEvent) => void;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [draft, setDraft] = useState(group.name);
+
+  useEffect(() => {
+    if (!renaming) return;
+    setDraft(group.name);
+    const t = window.setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [renaming, group.name]);
+
+  function commit() {
+    const name = draft.trim();
+    if (!name || name === group.name) {
+      onCancelRename();
+      return;
+    }
+    onRename(name);
+  }
+
+  return (
+    <div
+      className={"group-head" + (!searching && group.collapsed ? " collapsed" : "")}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu(e);
+      }}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      <button
+        type="button"
+        className="group-toggle"
+        title={group.collapsed ? "펼치기" : "접기"}
+        aria-label={group.collapsed ? "펼치기" : "접기"}
+        onClick={onToggle}
+      >
+        <span className="group-chevron">▾</span>
+      </button>
+      {renaming ? (
+        <input
+          ref={inputRef}
+          className="group-name-input"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              onCancelRename();
+            }
+          }}
+        />
+      ) : (
+        <button type="button" className="group-name" onClick={onToggle}>
+          {group.name}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ItemRow({
+  item,
+  active,
+  dragging,
+  dropBefore,
+  onSelect,
+  onContextMenu,
+  onPickAvatar,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+}: {
+  item: RailItem;
+  active: boolean;
+  dragging: boolean;
+  dropBefore: boolean;
+  onSelect: () => void;
+  onContextMenu: (e: MouseEvent) => void;
+  onPickAvatar?: () => void;
+  onDragStart: (e: DragEvent) => void;
+  onDragEnd: () => void;
+  onDragOver: (e: DragEvent) => void;
+  onDrop: (e: DragEvent) => void;
+}) {
+  const a = item.agent;
   return (
     <button
       type="button"
       className={
         "rail-row" +
         (active ? " active" : "") +
-        (onAvatarClick ? " has-avatar-action" : "")
+        (onPickAvatar ? " has-avatar-action" : "") +
+        (dragging ? " dragging" : "") +
+        (dropBefore ? " drop-before" : "")
       }
-      onClick={onClick}
+      draggable
+      onClick={onSelect}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
         onContextMenu(e);
       }}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
     >
       <Avatar
-        id={id}
-        name={name}
-        src={src}
-        shape={shape}
-        color={color}
-        letter={letter}
-        badge={badge || undefined}
-        title={onAvatarClick ? "사진 변경" : undefined}
+        id={item.id}
+        name={item.name}
+        src={a?.avatar}
+        shape={a?.avatar_shape}
+        color={a?.avatar_color}
+        letter={item.kind === "channel" ? "#" : undefined}
+        badge={a?.status || undefined}
+        title={onPickAvatar ? "사진 변경" : undefined}
         onClick={
-          onAvatarClick
+          onPickAvatar
             ? (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                onAvatarClick(e);
+                if (!active) onSelect();
+                onPickAvatar();
               }
             : undefined
         }
       />
       <div className="rail-row-text">
-        <div className="agent-name">{name}</div>
-        {preview ? <div className="agent-preview">{preview}</div> : null}
+        <div className="agent-name">{item.name}</div>
+        {item.preview ? <div className="agent-preview">{item.preview}</div> : null}
       </div>
     </button>
   );

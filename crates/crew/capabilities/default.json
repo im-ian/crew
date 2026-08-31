@@ -10,5 +10,33 @@
       "http://localhost:1420/*"
     ]
   },
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "allow-list-agents",
+    "allow-list-channels",
+    "allow-send-message",
+    "allow-tell-message",
+    "allow-add-channel",
+    "allow-leave-channel",
+    "allow-remove-channel",
+    "allow-channel-send",
+    "allow-get-snapshot",
+    "allow-get-messages",
+    "allow-get-channel-messages",
+    "allow-daemon-ping",
+    "allow-reset-agent",
+    "allow-set-agent",
+    "allow-add-agent",
+    "allow-clone-agent",
+    "allow-remove-agent",
+    "allow-set-avatar",
+    "allow-clear-avatar",
+    "allow-add-routine",
+    "allow-remove-routine",
+    "allow-set-routine-enabled",
+    "allow-get-memory",
+    "allow-set-memory",
+    "allow-list-groups",
+    "allow-set-groups"
+  ]
 }

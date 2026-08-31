@@ -3,6 +3,7 @@ use crate::config::{
     empty_to_none, resolve_add_cmd, unique_agent_id, unique_channel_id, AgentCli, AvatarShape,
     Effort,
 };
+use crate::groups::SidebarGroup;
 use crate::protocol::{AgentInfo, ChannelInfo, ChatMessage, Event, Request};
 
 fn parse_effort(effort: Option<String>) -> Result<Option<Effort>, String> {
@@ -182,6 +183,16 @@ fn channel_send(channel: String, text: String) -> Result<(), String> {
         Ok(_) => Err("unexpected daemon response".into()),
         Err(err) => Err(err.to_string()),
     }
+}
+
+#[tauri::command]
+fn list_groups() -> Result<Vec<SidebarGroup>, String> {
+    crate::groups::load().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_groups(groups: Vec<SidebarGroup>) -> Result<(), String> {
+    crate::groups::save(&groups).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -495,7 +506,9 @@ pub fn run() -> anyhow::Result<()> {
             remove_routine,
             set_routine_enabled,
             get_memory,
-            set_memory
+            set_memory,
+            list_groups,
+            set_groups
         ])
         .run(tauri::generate_context!())
         .map_err(|e| anyhow::anyhow!(e))?;

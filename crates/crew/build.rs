@@ -1,9 +1,40 @@
 use std::path::Path;
 use std::process::Command;
+use tauri_build::{AppManifest, Attributes};
 
 fn main() {
     build_frontend();
-    tauri_build::build();
+    tauri_build::try_build(
+        Attributes::new().app_manifest(AppManifest::new().commands(&[
+            "list_agents",
+            "list_channels",
+            "send_message",
+            "tell_message",
+            "add_channel",
+            "leave_channel",
+            "remove_channel",
+            "channel_send",
+            "get_snapshot",
+            "get_messages",
+            "get_channel_messages",
+            "daemon_ping",
+            "reset_agent",
+            "set_agent",
+            "add_agent",
+            "clone_agent",
+            "remove_agent",
+            "set_avatar",
+            "clear_avatar",
+            "add_routine",
+            "remove_routine",
+            "set_routine_enabled",
+            "get_memory",
+            "set_memory",
+            "list_groups",
+            "set_groups",
+        ])),
+    )
+    .expect("failed to run tauri build");
 }
 
 fn build_frontend() {

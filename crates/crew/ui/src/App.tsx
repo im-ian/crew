@@ -1,34 +1,49 @@
+import { useState } from "react";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatThread } from "./components/ChatThread";
 import { Composer } from "./components/Composer";
 import { ConfirmDialog } from "./components/ConfirmDialog";
-import { ContextMenu } from "./components/ContextMenu";
+import { ContextMenu, type MenuEntry } from "./components/ContextMenu";
 import { InfoPane } from "./components/InfoPane";
 import { NewBotModal } from "./components/NewBotModal";
 import { NewChannelModal } from "./components/NewChannelModal";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
+import type { Kind } from "./types";
 import { useCrew } from "./useCrew";
 
 export function App() {
   const crew = useCrew();
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const renamingId = crew.pendingRenameId || renameId;
+
+  function finishRename() {
+    crew.clearPendingRename();
+    setRenameId(null);
+  }
 
   return (
     <div className="app">
       <Sidebar
         agents={crew.agents}
         channels={crew.channels}
+        groups={crew.groups}
         selected={crew.selected}
         selectedKind={crew.selectedKind}
         query={crew.query}
+        renamingId={renamingId}
         onQuery={crew.setQuery}
         onSelectAgent={crew.selectAgent}
         onSelectChannel={crew.selectChannel}
-        onNewBot={crew.openNewBot}
-        onNewChannel={crew.openNewChannel}
+        onCreateMenu={crew.showCreateMenu}
         onAgentCtx={(e, id) => crew.showCtx(e, id, "agent")}
         onChannelCtx={(e, id) => crew.showCtx(e, id, "channel")}
+        onGroupCtx={(e, id) => crew.showCtx(e, id, "group")}
         onPickAvatar={crew.pickAvatar}
+        onToggleGroup={crew.toggleGroup}
+        onRenameGroup={crew.renameGroup}
+        onRenameDone={finishRename}
+        onMove={crew.moveToGroup}
       />
       <main>
         <div className="titlebar-align" data-tauri-drag-region />
@@ -115,31 +130,7 @@ export function App() {
         open={crew.ctx.open}
         x={crew.ctx.x}
         y={crew.ctx.y}
-        kind={crew.ctx.kind}
-        onReset={() => {
-          const id = crew.ctx.id;
-          crew.hideCtx();
-          if (id) crew.openConfirm(id, "reset");
-        }}
-        onClone={() => {
-          const id = crew.ctx.id;
-          const kind = crew.ctx.kind;
-          crew.hideCtx();
-          if (id && kind !== "channel") void crew.cloneBot(id);
-        }}
-        onLeave={() => {
-          const id = crew.ctx.id;
-          crew.hideCtx();
-          if (id) crew.openConfirm(id, "leave-channel");
-        }}
-        onRemove={() => {
-          const id = crew.ctx.id;
-          const kind = crew.ctx.kind;
-          crew.hideCtx();
-          if (id) {
-            crew.openConfirm(id, kind === "channel" ? "remove-channel" : "remove");
-          }
-        }}
+        items={menuItems(crew, setRenameId)}
       />
       <input
         ref={crew.fileRef}
@@ -155,4 +146,136 @@ export function App() {
       <Toast text={crew.toast.text} show={crew.toast.show} />
     </div>
   );
+}
+
+function menuItems(
+  crew: ReturnType<typeof useCrew>,
+  setRenameId: (id: string | null) => void,
+): MenuEntry[] {
+  const { ctx, groups } = crew;
+  if (ctx.kind === "create") {
+    return [
+      {
+        type: "action",
+        label: "새 봇",
+        onClick: () => {
+          crew.hideCtx();
+          crew.openNewBot();
+        },
+      },
+      {
+        type: "action",
+        label: "새 채널",
+        onClick: () => {
+          crew.hideCtx();
+          crew.openNewChannel();
+        },
+      },
+      {
+        type: "action",
+        label: "새 그룹",
+        onClick: () => {
+          crew.hideCtx();
+          crew.createGroup();
+        },
+      },
+    ];
+  }
+  if (ctx.kind === "group") {
+    const id = ctx.id;
+    return [
+      {
+        type: "action",
+        label: "이름 변경",
+        onClick: () => {
+          crew.hideCtx();
+          if (id) setRenameId(id);
+        },
+      },
+      {
+        type: "action",
+        label: "그룹 삭제",
+        danger: true,
+        onClick: () => {
+          crew.hideCtx();
+          if (id) crew.openConfirm(id, "remove-group");
+        },
+      },
+    ];
+  }
+  const id = ctx.id;
+  const kind: Kind = ctx.kind === "channel" ? "channel" : "agent";
+  const isCh = kind === "channel";
+  const currentGroup = id ? crew.itemGroupId(kind, id) : null;
+  const moveItems: MenuEntry[] = groups
+    .filter((g) => g.id !== currentGroup)
+    .map((g) => ({
+      type: "action" as const,
+      label: g.name,
+      onClick: () => {
+        crew.hideCtx();
+        if (id) crew.moveToGroup(kind, id, g.id);
+      },
+    }));
+  if (currentGroup) {
+    moveItems.push({
+      type: "action",
+      label: "그룹에서 빼기",
+      onClick: () => {
+        crew.hideCtx();
+        if (id) crew.moveToGroup(kind, id, null);
+      },
+    });
+  }
+  const items: MenuEntry[] = [];
+  if (!isCh) {
+    items.push({
+      type: "action",
+      label: "히스토리 지우기",
+      onClick: () => {
+        crew.hideCtx();
+        if (id) crew.openConfirm(id, "reset");
+      },
+    });
+    items.push({
+      type: "action",
+      label: "봇 복제",
+      onClick: () => {
+        crew.hideCtx();
+        if (id) void crew.cloneBot(id);
+      },
+    });
+  } else {
+    items.push({
+      type: "action",
+      label: "채널 나가기",
+      onClick: () => {
+        crew.hideCtx();
+        if (id) crew.openConfirm(id, "leave-channel");
+      },
+    });
+  }
+  items.push({ type: "sep" });
+  if (moveItems.length) {
+    items.push({ type: "sub", label: "그룹으로 이동", items: moveItems });
+  }
+  items.push({
+    type: "action",
+    label: "새 그룹으로 이동",
+    onClick: () => {
+      crew.hideCtx();
+      if (id) crew.createGroup({ kind, id });
+    },
+  });
+  items.push({ type: "sep" });
+  items.push({
+    type: "action",
+    label: isCh ? "채널 삭제" : "봇 삭제",
+    danger: true,
+    onClick: () => {
+      crew.hideCtx();
+      if (id) crew.openConfirm(id, isCh ? "remove-channel" : "remove");
+    },
+  });
+  return items;
 }

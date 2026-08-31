@@ -6,6 +6,7 @@ mod config;
 mod cron;
 mod daemon;
 mod desktop;
+mod groups;
 mod headless;
 #[cfg(debug_assertions)]
 mod ui_dev;

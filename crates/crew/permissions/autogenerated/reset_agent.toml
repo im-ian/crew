@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reset-agent"
+description = "Enables the reset_agent command without any pre-configured scope."
+commands.allow = ["reset_agent"]
+
+[[permission]]
+identifier = "deny-reset-agent"
+description = "Denies the reset_agent command without any pre-configured scope."
+commands.deny = ["reset_agent"]

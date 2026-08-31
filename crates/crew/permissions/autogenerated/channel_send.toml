@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-channel-send"
+description = "Enables the channel_send command without any pre-configured scope."
+commands.allow = ["channel_send"]
+
+[[permission]]
+identifier = "deny-channel-send"
+description = "Denies the channel_send command without any pre-configured scope."
+commands.deny = ["channel_send"]

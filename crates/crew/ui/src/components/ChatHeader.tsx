@@ -18,7 +18,7 @@ export function ChatHeader({
   onOpenInfo,
   onPickAvatar,
 }: Props) {
-  let title = "에이전트를 선택하세요";
+  let title = "대화를 선택하세요";
   let meta = "";
   let clickable = false;
   let showAvatar = false;

@@ -177,6 +177,318 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the add_agent command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-add-agent",
+          "markdownDescription": "Enables the add_agent command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the add_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-add-channel",
+          "markdownDescription": "Enables the add_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the add_routine command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-add-routine",
+          "markdownDescription": "Enables the add_routine command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the channel_send command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-channel-send",
+          "markdownDescription": "Enables the channel_send command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clear_avatar command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-avatar",
+          "markdownDescription": "Enables the clear_avatar command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clone_agent command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clone-agent",
+          "markdownDescription": "Enables the clone_agent command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the daemon_ping command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-daemon-ping",
+          "markdownDescription": "Enables the daemon_ping command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_channel_messages command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-channel-messages",
+          "markdownDescription": "Enables the get_channel_messages command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-memory",
+          "markdownDescription": "Enables the get_memory command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_messages command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-messages",
+          "markdownDescription": "Enables the get_messages command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-snapshot",
+          "markdownDescription": "Enables the get_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the leave_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-leave-channel",
+          "markdownDescription": "Enables the leave_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_agents command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-agents",
+          "markdownDescription": "Enables the list_agents command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_channels command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-channels",
+          "markdownDescription": "Enables the list_channels command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_groups command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-groups",
+          "markdownDescription": "Enables the list_groups command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remove_agent command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remove-agent",
+          "markdownDescription": "Enables the remove_agent command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remove_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remove-channel",
+          "markdownDescription": "Enables the remove_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remove_routine command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remove-routine",
+          "markdownDescription": "Enables the remove_routine command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the reset_agent command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-reset-agent",
+          "markdownDescription": "Enables the reset_agent command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the send_message command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-send-message",
+          "markdownDescription": "Enables the send_message command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_agent command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-agent",
+          "markdownDescription": "Enables the set_agent command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_avatar command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-avatar",
+          "markdownDescription": "Enables the set_avatar command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_groups command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-groups",
+          "markdownDescription": "Enables the set_groups command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-memory",
+          "markdownDescription": "Enables the set_memory command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_routine_enabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-routine-enabled",
+          "markdownDescription": "Enables the set_routine_enabled command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the tell_message command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-tell-message",
+          "markdownDescription": "Enables the tell_message command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the add_agent command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-add-agent",
+          "markdownDescription": "Denies the add_agent command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the add_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-add-channel",
+          "markdownDescription": "Denies the add_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the add_routine command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-add-routine",
+          "markdownDescription": "Denies the add_routine command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the channel_send command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-channel-send",
+          "markdownDescription": "Denies the channel_send command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_avatar command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-avatar",
+          "markdownDescription": "Denies the clear_avatar command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clone_agent command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clone-agent",
+          "markdownDescription": "Denies the clone_agent command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the daemon_ping command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-daemon-ping",
+          "markdownDescription": "Denies the daemon_ping command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_channel_messages command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-channel-messages",
+          "markdownDescription": "Denies the get_channel_messages command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-memory",
+          "markdownDescription": "Denies the get_memory command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_messages command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-messages",
+          "markdownDescription": "Denies the get_messages command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-snapshot",
+          "markdownDescription": "Denies the get_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the leave_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-leave-channel",
+          "markdownDescription": "Denies the leave_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_agents command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-agents",
+          "markdownDescription": "Denies the list_agents command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_channels command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-channels",
+          "markdownDescription": "Denies the list_channels command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_groups command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-groups",
+          "markdownDescription": "Denies the list_groups command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remove_agent command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remove-agent",
+          "markdownDescription": "Denies the remove_agent command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remove_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remove-channel",
+          "markdownDescription": "Denies the remove_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remove_routine command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remove-routine",
+          "markdownDescription": "Denies the remove_routine command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the reset_agent command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-reset-agent",
+          "markdownDescription": "Denies the reset_agent command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the send_message command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-send-message",
+          "markdownDescription": "Denies the send_message command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_agent command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-agent",
+          "markdownDescription": "Denies the set_agent command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_avatar command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-avatar",
+          "markdownDescription": "Denies the set_avatar command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_groups command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-groups",
+          "markdownDescription": "Denies the set_groups command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-memory",
+          "markdownDescription": "Denies the set_memory command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_routine_enabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-routine-enabled",
+          "markdownDescription": "Denies the set_routine_enabled command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the tell_message command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-tell-message",
+          "markdownDescription": "Denies the tell_message command without any pre-configured scope."
+        },
+        {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
           "type": "string",
           "const": "core:default",

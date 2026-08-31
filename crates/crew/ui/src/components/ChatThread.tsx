@@ -111,7 +111,7 @@ function EmptyChat({
       </div>
     );
   }
-  return <div className="empty-chat">에이전트를 선택하세요</div>;
+  return <div className="empty-chat">대화를 선택하세요</div>;
 }
 
 function SystemLine({
