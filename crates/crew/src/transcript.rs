@@ -195,6 +195,7 @@ fn push_role(agent: &str, role: Role, from: &str, text: &str, expect: bool) -> C
         from: from.to_string(),
         text: text.to_string(),
         ts: now_ms(),
+        queued: false,
     };
     if let Ok(mut map) = chats().lock() {
         let chat = map
@@ -211,6 +212,29 @@ fn push_role(agent: &str, role: Role, from: &str, text: &str, expect: bool) -> C
         emit(agent, msg.clone());
     }
     msg
+}
+
+pub fn set_queued(agent: &str, id: &str, queued: bool) {
+    let msg = {
+        let mut map = match chats().lock() {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        let Some(chat) = map.get_mut(agent) else {
+            return;
+        };
+        let Some(m) = chat.messages.iter_mut().rev().find(|m| m.id == id) else {
+            return;
+        };
+        if m.queued == queued {
+            return;
+        }
+        m.queued = queued;
+        let out = m.clone();
+        persist(agent, chat);
+        out
+    };
+    emit(agent, msg);
 }
 
 pub fn cancel_expect(agent: &str) {
@@ -287,6 +311,7 @@ pub fn set_pending_assistant(agent: &str, text: &str) {
                 from: agent.to_string(),
                 text: cleaned,
                 ts: now_ms(),
+                queued: false,
             };
             chat.messages.push(m.clone());
             chat.pending_idx = Some(chat.messages.len() - 1);
@@ -350,6 +375,7 @@ pub fn on_pty_bytes(agent: &str, bytes: &[u8]) {
                 from: agent.to_string(),
                 text: cleaned,
                 ts: now_ms(),
+                queued: false,
             };
             chat.messages.push(m.clone());
             chat.pending_idx = Some(chat.messages.len() - 1);
@@ -520,7 +546,9 @@ fn persist(agent: &str, chat: &AgentChat) {
     }
     let mut out = String::new();
     for m in &chat.messages {
-        if let Ok(line) = serde_json::to_string(m) {
+        let mut stored = m.clone();
+        stored.queued = false;
+        if let Ok(line) = serde_json::to_string(&stored) {
             out.push_str(&line);
             out.push('\n');
         }
@@ -768,11 +796,40 @@ mod tests {
             from: "alpha".into(),
             text: "hi".into(),
             ts: 9,
+            queued: false,
         };
         let line = serde_json::to_string(&msg).unwrap();
+        assert!(!line.contains("queued"), "{line}");
         let back: ChatMessage = serde_json::from_str(&line).unwrap();
         assert_eq!(back.from, "alpha");
         assert_eq!(back.role, Role::System);
+        assert!(!back.queued);
+    }
+
+    #[test]
+    fn set_queued_toggles_in_memory() {
+        let agent = format!(
+            "queued-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        let msg = push_system(&agent, "alpha", "wait");
+        assert!(!msg.queued);
+        set_queued(&agent, &msg.id, true);
+        assert!(messages(&agent).last().unwrap().queued);
+        let line = serde_json::to_string(&{
+            let mut stored = messages(&agent).last().unwrap().clone();
+            stored.queued = false;
+            stored
+        })
+        .unwrap();
+        assert!(!line.contains("queued"), "{line}");
+        set_queued(&agent, &msg.id, false);
+        assert!(!messages(&agent).last().unwrap().queued);
+        drop_agent(&agent);
     }
 
     #[test]

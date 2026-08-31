@@ -168,6 +168,7 @@ static INBOX: OnceLock<Mutex<HashMap<String, VecDeque<PendingDelivery>>>> = Once
 struct PendingDelivery {
     text: String,
     newline: bool,
+    msg_id: Option<String>,
 }
 
 pub fn events() -> &'static broadcast::Sender<Event> {
@@ -199,7 +200,12 @@ fn clear_inbox(id: &str) {
     }
 }
 
-fn enqueue_delivery(id: &str, text: &str, newline: bool) -> anyhow::Result<()> {
+fn enqueue_delivery(
+    id: &str,
+    text: &str,
+    newline: bool,
+    msg_id: Option<String>,
+) -> anyhow::Result<()> {
     let mut map = inbox().lock().expect("inbox mutex");
     let q = map.entry(id.to_string()).or_default();
     if q.len() >= MAX_INBOX {
@@ -208,7 +214,12 @@ fn enqueue_delivery(id: &str, text: &str, newline: bool) -> anyhow::Result<()> {
     q.push_back(PendingDelivery {
         text: text.to_string(),
         newline,
+        msg_id: msg_id.clone(),
     });
+    drop(map);
+    if let Some(mid) = msg_id {
+        crate::transcript::set_queued(id, &mid, true);
+    }
     Ok(())
 }
 
@@ -247,13 +258,18 @@ fn start_delivery(id: &str, text: &str, newline: bool) -> anyhow::Result<()> {
     }
 }
 
-fn submit_delivery(id: &str, text: &str, newline: bool) -> anyhow::Result<()> {
+fn submit_delivery(
+    id: &str,
+    text: &str,
+    newline: bool,
+    msg_id: Option<String>,
+) -> anyhow::Result<()> {
     if agent_busy(id)? {
-        return enqueue_delivery(id, text, newline);
+        return enqueue_delivery(id, text, newline, msg_id);
     }
     match start_delivery(id, text, newline) {
         Ok(()) => Ok(()),
-        Err(err) if is_busy_err(&err) => enqueue_delivery(id, text, newline),
+        Err(err) if is_busy_err(&err) => enqueue_delivery(id, text, newline, msg_id),
         Err(err) => Err(err),
     }
 }
@@ -273,17 +289,24 @@ pub(crate) fn pump_inbox(id: &str) {
     let Some(item) = next else {
         return;
     };
-    if let Err(err) = start_delivery(id, &item.text, item.newline) {
-        if is_busy_err(&err) {
-            if let Ok(mut map) = inbox().lock() {
-                map.entry(id.to_string())
-                    .or_default()
-                    .push_front(item);
+    match start_delivery(id, &item.text, item.newline) {
+        Ok(()) => {
+            if let Some(ref mid) = item.msg_id {
+                crate::transcript::set_queued(id, mid, false);
             }
-            return;
         }
-        eprintln!("[crew] inbox {id}: {err:#}");
-        pump_inbox(id);
+        Err(err) if is_busy_err(&err) => {
+            if let Ok(mut map) = inbox().lock() {
+                map.entry(id.to_string()).or_default().push_front(item);
+            }
+        }
+        Err(err) => {
+            if let Some(ref mid) = item.msg_id {
+                crate::transcript::set_queued(id, mid, false);
+            }
+            eprintln!("[crew] inbox {id}: {err:#}");
+            pump_inbox(id);
+        }
     }
 }
 
@@ -619,9 +642,9 @@ fn tick_routines() {
 
 fn fire_routine(agent: &str, name: &str, prompt: &str) -> anyhow::Result<()> {
     ensure_accepts_turn(agent)?;
-    crate::transcript::push_system(agent, name, prompt);
+    let msg = crate::transcript::push_system(agent, name, prompt);
     let envelope = crate::protocol::routine_envelope(name, prompt);
-    submit_delivery(agent, &envelope, true)?;
+    submit_delivery(agent, &envelope, true, Some(msg.id))?;
     eprintln!("[crew] routine {agent}/{name}");
     Ok(())
 }
@@ -1057,9 +1080,9 @@ fn messages_agent(id: &str) -> anyhow::Result<Event> {
 
 fn send_agent(id: &str, text: &str) -> anyhow::Result<()> {
     ensure_accepts_turn(id)?;
-    crate::transcript::push_user(id, "user", text);
+    let msg = crate::transcript::push_user(id, "user", text);
     let delivered = crate::config::with_mention_hint(text, id, &roster_vec());
-    submit_delivery(id, &delivered, true)
+    submit_delivery(id, &delivered, true, Some(msg.id))
 }
 
 fn ensure_accepts_turn(id: &str) -> anyhow::Result<()> {
@@ -1101,9 +1124,9 @@ fn tell_agent(from: &str, to: &str, text: &str) -> anyhow::Result<()> {
     }
     let from = from_id(from);
     ensure_accepts_turn(to)?;
-    crate::transcript::push_system(to, &from, text);
+    let msg = crate::transcript::push_system(to, &from, text);
     let envelope = crate::protocol::envelope(&from, text);
-    submit_delivery(to, &envelope, true)?;
+    submit_delivery(to, &envelope, true, Some(msg.id))?;
     let _ = events().send(Event::Told {
         from: from.clone(),
         to: to.to_string(),
@@ -1671,8 +1694,8 @@ fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
         if ensure_accepts_turn(to).is_err() {
             continue;
         }
-        crate::transcript::push_system(to, &format!("#{channel}"), text);
-        match submit_delivery(to, &envelope, true) {
+        let msg = crate::transcript::push_system(to, &format!("#{channel}"), text);
+        match submit_delivery(to, &envelope, true, Some(msg.id)) {
             Ok(()) => sent += 1,
             Err(err) => last_err = Some(err),
         }
@@ -1694,8 +1717,8 @@ mod inbox_tests {
     fn inbox_is_fifo() {
         let id = "test-inbox-fifo";
         clear_inbox(id);
-        enqueue_delivery(id, "a", true).unwrap();
-        enqueue_delivery(id, "b", true).unwrap();
+        enqueue_delivery(id, "a", true, None).unwrap();
+        enqueue_delivery(id, "b", true, None).unwrap();
         let mut map = inbox().lock().unwrap();
         let q = map.get_mut(id).unwrap();
         assert_eq!(q.pop_front().unwrap().text, "a");
@@ -1709,9 +1732,9 @@ mod inbox_tests {
         let id = "test-inbox-full";
         clear_inbox(id);
         for i in 0..MAX_INBOX {
-            enqueue_delivery(id, &i.to_string(), true).unwrap();
+            enqueue_delivery(id, &i.to_string(), true, None).unwrap();
         }
-        let err = enqueue_delivery(id, "overflow", true).unwrap_err();
+        let err = enqueue_delivery(id, "overflow", true, None).unwrap_err();
         assert!(err.to_string().contains("inbox full"), "{err}");
         clear_inbox(id);
     }

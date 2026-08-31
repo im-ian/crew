@@ -260,6 +260,8 @@ pub struct ChatMessage {
     pub from: String,
     pub text: String,
     pub ts: u64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub queued: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -452,6 +454,7 @@ mod tests {
             from: "user".into(),
             text: "hello".into(),
             ts: 1,
+            queued: false,
         };
         let line = serde_json::to_string(&msg).unwrap();
         assert!(line.contains("\"role\":\"user\""));
