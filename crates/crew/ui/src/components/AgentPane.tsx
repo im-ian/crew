@@ -57,8 +57,21 @@ export function AgentPane({
       <div className="sheet agent-sheet">
         <div className="sheet-head">
           <h3>{agent?.name || agent?.id || "봇"}</h3>
-          <button type="button" className="ghost" onClick={onClose}>
-            닫기
+          <button
+            type="button"
+            className="sheet-close"
+            title="닫기"
+            aria-label="닫기"
+            onClick={onClose}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="M4 4l8 8M12 4l-8 8"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
           </button>
         </div>
         <div className="pane-tabs" role="tablist">

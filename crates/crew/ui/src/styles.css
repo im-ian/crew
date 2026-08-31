@@ -24,7 +24,7 @@
   --rail-pad: 8px;
   --control-h: 32px;
   --avatar: 36px;
-  --avatar-head: 32px;
+  --avatar-head: 22px;
   --content-pad: 24px;
   --content-max: 720px;
   --chrome-h: 44px;
@@ -225,7 +225,7 @@ aside {
   margin-bottom: 1px;
   cursor: pointer;
   display: grid;
-  grid-template-columns: var(--avatar) minmax(0, 1fr);
+  grid-template-columns: 32px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
   border-radius: var(--radius-lg);
@@ -235,6 +235,11 @@ aside {
 .rail-row.active { background: var(--active); }
 .rail-row-text { min-width: 0; }
 .rail-row.has-avatar-action .avatar { cursor: pointer; }
+.rail-row .avatar {
+  width: 32px;
+  height: 32px;
+  font-size: 12px;
+}
 .avatar {
   width: var(--avatar);
   height: var(--avatar);
@@ -429,7 +434,7 @@ header {
 .head-identity {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
   flex: 1;
 }
@@ -457,7 +462,7 @@ button.head-identity:hover .head-title { opacity: 0.72; }
 .head-avatar {
   width: var(--avatar-head);
   height: var(--avatar-head);
-  font-size: 13px;
+  font-size: 10px;
   flex-shrink: 0;
 }
 .head-action {
@@ -833,13 +838,30 @@ button.mention-chip:hover {
 }
 .sheet-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-shrink: 0;
 }
 .sheet-head h3 { margin: 0; }
 .sheet-head p { margin: 6px 0 0; }
+.sheet-close {
+  width: var(--control-h);
+  height: var(--control-h);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.sheet-close:hover {
+  background: var(--active);
+  color: var(--ink);
+}
 .pane-tabs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
