@@ -192,7 +192,8 @@ aside {
   outline: none;
 }
 .rail-section.drop-over { background: var(--hover); border-radius: var(--radius-lg); }
-.rail-row.dragging { opacity: 0.45; }
+.rail-row[draggable="true"] { cursor: grab; }
+.rail-row.dragging { opacity: 0.45; cursor: grabbing; }
 .rail-row.drop-before { box-shadow: inset 0 2px 0 #5a5a5c; }
 .member-list {
   display: flex;

@@ -16,6 +16,7 @@ import {
   normalizeGroups,
   pruneLayout,
   toPersist,
+  UNGROUPED_ID,
   uniqueGroupName,
   uniqueKeys,
   visibleUngroupedKeys,
@@ -197,7 +198,7 @@ export function useCrew() {
 
   function persistLayout(next: RailLayout) {
     const layout = {
-      groups: next.groups.filter((g) => g.id !== "__ungrouped"),
+      groups: next.groups.filter((g) => g.id !== UNGROUPED_ID),
       ungrouped: next.ungrouped,
     };
     groupsLoaded.current = true;

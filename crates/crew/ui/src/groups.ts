@@ -158,7 +158,6 @@ export function moveItem(
     else list.splice(idx, 0, key);
     return { groups, ungrouped: uniqueKeys(list) };
   }
-  const ungrouped = layout.ungrouped.filter((k) => k !== key);
   return {
     groups: groups.map((g) => {
       if (g.id !== destGroupId) return g;
@@ -168,7 +167,7 @@ export function moveItem(
       else items.splice(idx, 0, key);
       return { ...g, items };
     }),
-    ungrouped,
+    ungrouped: uniqueKeys(ungroupedVisual.filter((k) => k !== key)),
   };
 }
 
