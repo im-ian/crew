@@ -391,6 +391,7 @@ fn run() -> anyhow::Result<()> {
                     unset_avatar,
                     shape,
                     color,
+                    name: None,
                 })? {
                     Event::Error { message } => anyhow::bail!("{message}"),
                     ev => client::print_event(ev),
@@ -418,6 +419,7 @@ fn run() -> anyhow::Result<()> {
                     unset_avatar,
                     shape,
                     color,
+                    None,
                 )?;
                 cfg.save()?;
                 write_roster(&cfg.agents, &cfg.channels)?;
@@ -746,6 +748,7 @@ fn apply_agent_set(
     unset_avatar: bool,
     shape: Option<AvatarShape>,
     color: Option<String>,
+    name: Option<String>,
 ) -> anyhow::Result<()> {
     if unset_model {
         agent.model = None;
@@ -777,6 +780,12 @@ fn apply_agent_set(
     }
     if let Some(color) = color {
         agent.avatar_color = Some(parse_hex_color(&color)?);
+    }
+    if let Some(name) = name {
+        let name = name.trim();
+        if !name.is_empty() {
+            agent.name = name.to_string();
+        }
     }
     crate::avatar::apply(agent, avatar, unset_avatar)?;
     Ok(())
