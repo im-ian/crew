@@ -46,7 +46,6 @@ export function useCrew() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [query, setQuery] = useState("");
   const [stick, setStick] = useState(true);
-  const [toId, setToId] = useState("");
   const [connected, setConnected] = useState<boolean | null>(null);
   const [connDetail, setConnDetail] = useState("데몬 확인 중…");
   const [infoOpen, setInfoOpen] = useState(false);
@@ -95,7 +94,7 @@ export function useCrew() {
   const placeholder = currentChannel
     ? `+ ${currentChannel.name || currentChannel.id}에 메시지`
     : currentAgent
-      ? `+ ${currentAgent.name || currentAgent.id}에게 메시지`
+      ? `+ ${currentAgent.name || currentAgent.id}에게 메시지 (@다른 봇)`
       : "+ 메시지";
 
   function showToast(text: string) {
@@ -140,7 +139,6 @@ export function useCrew() {
     selectedRef.current = { id, kind: "agent" };
     setSelected(id);
     setSelectedKind("agent");
-    setToId(id);
     setStick(true);
     closeInfo();
     void refreshMessages();
@@ -295,10 +293,6 @@ export function useCrew() {
     }
     setSelected(sel);
     setSelectedKind(kind);
-    setToId((prev) => {
-      if (list.some((a) => a.id === prev)) return prev;
-      return sel && kind === "agent" ? sel : list[0]?.id || "";
-    });
     if (infoOpenRef.current) {
       const a = kind === "agent" ? list.find((x) => x.id === sel) : null;
       if (!a) setInfoOpen(false);
@@ -330,20 +324,30 @@ export function useCrew() {
       }
       return;
     }
-    const parsed = parseOutgoing(raw, agentsRef.current, toId || sel);
+    const parsed = parseOutgoing(raw, agentsRef.current, sel);
     if (parsed.mention && !parsed.to) {
-      showError("unknown agent " + parsed.mention);
+      showError("알 수 없는 봇 @" + parsed.mention);
       return;
+    }
+    if (parsed.mention && parsed.to) {
+      if (!parsed.text) {
+        if (parsed.to !== sel) selectAgent(parsed.to);
+        return;
+      }
+      if (parsed.to !== sel) {
+        try {
+          await api.tellMessage(parsed.to, parsed.text);
+          selectAgent(parsed.to);
+        } catch (err) {
+          showError(err);
+        }
+        return;
+      }
     }
     const to = parsed.to || sel;
     if (!to) return;
     try {
-      if (parsed.mention || to !== sel) {
-        await api.tellMessage(to, parsed.text);
-        showToast("user → " + to);
-      } else {
-        await api.sendMessage(to, parsed.text);
-      }
+      await api.sendMessage(to, parsed.text);
       await refreshMessages();
     } catch (err) {
       showError(err);
@@ -739,8 +743,6 @@ export function useCrew() {
     setQuery,
     stick,
     setStick,
-    toId,
-    setToId,
     connected,
     connDetail,
     infoOpen,
@@ -802,10 +804,10 @@ function parseOutgoing(
   agents: AgentInfo[],
   fallback: string | null,
 ): { to: string | null; text: string; mention: string | null } {
-  const m = raw.match(/^@(\S+)\s+([\s\S]*)$/);
+  const m = raw.match(/^@(\S+)(?:\s+([\s\S]*))?$/);
   if (m) {
     const key = m[1];
-    const text = m[2];
+    const text = (m[2] || "").trim();
     const lower = key.toLowerCase();
     const agent =
       agents.find((a) => a.id === key || a.name === key) ||

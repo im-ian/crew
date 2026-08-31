@@ -79,8 +79,6 @@ export function App() {
           selected={crew.selected}
           selectedKind={crew.selectedKind}
           placeholder={crew.placeholder}
-          toId={crew.toId}
-          onTo={crew.setToId}
           onSend={crew.onSend}
         />
         <InfoPane

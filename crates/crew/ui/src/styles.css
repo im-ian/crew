@@ -492,7 +492,14 @@ header {
   max-width: 100%;
 }
 .row.me { justify-content: flex-end; }
-.row.them { justify-content: flex-start; }
+.row.them { justify-content: flex-start; align-items: flex-start; gap: 10px; }
+.msg-avatar {
+  width: 28px;
+  height: 28px;
+  font-size: 11px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
 .bubble {
   line-height: 1.5;
   word-break: break-word;
@@ -570,7 +577,6 @@ header {
 textarea.textin.memory {
   min-height: 120px;
 }
-.to-wrap[hidden] { display: none !important; }
 .sys {
   align-self: center;
   max-width: 80%;
@@ -604,6 +610,7 @@ textarea.textin.memory {
   background: var(--bg);
 }
 .composer-box {
+  position: relative;
   width: 100%;
   max-width: var(--content-max);
   display: flex;
@@ -614,37 +621,53 @@ textarea.textin.memory {
   padding: 6px 6px 6px 14px;
   min-height: 44px;
 }
-.composer-box:focus-within { background: var(--line); }
-.to-wrap {
-  position: relative;
-  flex-shrink: 0;
+.mention-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  background: var(--menu);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  z-index: 8;
+  max-height: 240px;
+  overflow: auto;
+}
+.mention-item {
   display: flex;
   align-items: center;
-  height: var(--control-h);
-}
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
+  gap: 8px;
+  width: 100%;
   border: 0;
-}
-.composer-box select {
-  appearance: none;
   background: transparent;
-  border: 0;
-  color: var(--muted);
-  font-size: 12.5px;
-  font-weight: 500;
-  outline: none;
-  max-width: 92px;
-  padding: 0 2px;
+  color: var(--ink);
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  font-size: 14px;
   cursor: pointer;
 }
+.mention-item.active,
+.mention-item:hover { background: var(--btn); }
+.mention-avatar {
+  width: 22px;
+  height: 22px;
+  font-size: 10px;
+}
+.mention-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mention-id {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 12px;
+}
+.composer-box:focus-within { background: var(--line); }
 .composer-box textarea {
   flex: 1;
   min-width: 0;
