@@ -53,6 +53,8 @@ export const api = {
     shape?: string | null;
     color?: string | null;
     name?: string | null;
+    cwd?: string | null;
+    unsetCwd?: boolean;
   }) => invoke<void>("set_agent", args),
   addAgent: (args: {
     name: string;

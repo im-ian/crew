@@ -24,6 +24,7 @@ type Props = {
     description: string;
     model: string;
     effort: string;
+    cwd: string;
   }) => Promise<void>;
   onAddRoutine: (name: string, schedule: string, prompt: string) => Promise<void>;
   onToggleRoutine: (r: Routine) => Promise<void>;

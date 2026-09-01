@@ -1399,6 +1399,19 @@ mod tests {
     }
 
     #[test]
+    fn default_cwd_prefers_agent_path() {
+        let mut a = AgentConfig::new("x".into(), "X".into(), vec!["cat".into()], None);
+        assert_eq!(Config::default_cwd(&a), PathBuf::from("/tmp/crew-demo"));
+        a.cwd = Some("".into());
+        assert_eq!(Config::default_cwd(&a), PathBuf::from("/tmp/crew-demo"));
+        a.cwd = Some("/tmp/crew-work/x".into());
+        assert_eq!(
+            Config::default_cwd(&a),
+            PathBuf::from("/tmp/crew-work/x")
+        );
+    }
+
+    #[test]
     fn slug_id_ascii_lowercase_hyphens() {
         assert_eq!(slug_id("Frontend Bot"), "frontend-bot");
         assert_eq!(slug_id("My_Bot"), "my-bot");

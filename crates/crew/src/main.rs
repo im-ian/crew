@@ -150,6 +150,10 @@ enum AgentCmd {
         shape: Option<AvatarShape>,
         #[arg(long)]
         color: Option<String>,
+        #[arg(long)]
+        cwd: Option<String>,
+        #[arg(long)]
+        unset_cwd: bool,
     },
 }
 
@@ -375,6 +379,8 @@ fn run() -> anyhow::Result<()> {
             unset_avatar,
             shape,
             color,
+            cwd,
+            unset_cwd,
         })) => {
             if model.is_none()
                 && effort.is_none()
@@ -384,15 +390,17 @@ fn run() -> anyhow::Result<()> {
                 && avatar.is_none()
                 && shape.is_none()
                 && color.is_none()
+                && cwd.is_none()
                 && !unset_model
                 && !unset_effort
                 && !unset_title
                 && !unset_description
                 && !unset_role
                 && !unset_avatar
+                && !unset_cwd
             {
                 anyhow::bail!(
-                    "nothing to set; pass --model, --effort, --title, --description, --role, --avatar, --shape, --color, or an --unset-* flag"
+                    "nothing to set; pass --model, --effort, --title, --description, --role, --avatar, --shape, --color, --cwd, or an --unset-* flag"
                 );
             }
             if paths::is_socket_live() {
@@ -413,6 +421,8 @@ fn run() -> anyhow::Result<()> {
                     shape,
                     color,
                     name: None,
+                    cwd,
+                    unset_cwd,
                 })? {
                     Event::Error { message } => anyhow::bail!("{message}"),
                     ev => client::print_event(ev),
@@ -441,6 +451,8 @@ fn run() -> anyhow::Result<()> {
                     shape,
                     color,
                     None,
+                    cwd,
+                    unset_cwd,
                 )?;
                 cfg.save()?;
                 write_roster(&cfg.agents, &cfg.channels)?;
@@ -815,6 +827,8 @@ fn apply_agent_set(
     shape: Option<AvatarShape>,
     color: Option<String>,
     name: Option<String>,
+    cwd: Option<String>,
+    unset_cwd: bool,
 ) -> anyhow::Result<()> {
     if unset_model {
         agent.model = None;
@@ -852,6 +866,11 @@ fn apply_agent_set(
         if !name.is_empty() {
             agent.name = name.to_string();
         }
+    }
+    if unset_cwd {
+        agent.cwd = None;
+    } else if let Some(cwd) = cwd {
+        agent.cwd = empty_to_none(cwd);
     }
     crate::avatar::apply(agent, avatar, unset_avatar)?;
     Ok(())

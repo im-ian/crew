@@ -315,6 +315,8 @@ fn set_agent(
     shape: Option<String>,
     color: Option<String>,
     name: Option<String>,
+    cwd: Option<String>,
+    unset_cwd: bool,
 ) -> Result<(), String> {
     let effort = parse_effort(effort)?;
     let shape = parse_shape(shape)?;
@@ -336,6 +338,8 @@ fn set_agent(
         shape,
         color,
         name,
+        cwd: cwd.and_then(empty_to_none),
+        unset_cwd,
     }) {
         Ok(Event::Ok) | Ok(Event::Agents { .. }) => Ok(()),
         Ok(Event::Error { message }) => Err(message),
@@ -397,6 +401,8 @@ fn add_agent(
             shape: None,
             color: None,
             name: None,
+            cwd: None,
+            unset_cwd: false,
         }) {
             Ok(Event::Ok) | Ok(Event::Agents { .. }) => {}
             Ok(Event::Error { message }) => return Err(message),
@@ -453,6 +459,8 @@ fn rpc_set_avatar(id: String, avatar: Option<String>, unset_avatar: bool) -> Res
         shape: None,
         color: None,
         name: None,
+        cwd: None,
+        unset_cwd: false,
     }) {
         Ok(Event::Ok) | Ok(Event::Agents { .. }) => Ok(()),
         Ok(Event::Error { message }) => Err(message),

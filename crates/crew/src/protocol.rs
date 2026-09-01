@@ -85,6 +85,10 @@ pub enum Request {
         color: Option<String>,
         #[serde(default)]
         name: Option<String>,
+        #[serde(default)]
+        cwd: Option<String>,
+        #[serde(default)]
+        unset_cwd: bool,
     },
     Reset {
         agent: String,
@@ -614,11 +618,14 @@ mod tests {
             shape: Some(crate::config::AvatarShape::Circle),
             color: Some("#ff6a00".into()),
             name: None,
+            cwd: Some("~/proj".into()),
+            unset_cwd: false,
         };
         let line = req.to_line().unwrap();
         assert!(line.contains("\"avatar\":\"/tmp/a.png\""));
         assert!(line.contains("\"shape\":\"circle\""));
         assert!(line.contains("\"color\":\"#ff6a00\""));
+        assert!(line.contains("\"cwd\":\"~/proj\""));
         let back: Request = serde_json::from_str(&line).unwrap();
         match back {
             Request::SetAgent {
@@ -627,6 +634,8 @@ mod tests {
                 unset_avatar,
                 shape,
                 color,
+                cwd,
+                unset_cwd,
                 ..
             } => {
                 assert_eq!(id, "grok");
@@ -634,6 +643,8 @@ mod tests {
                 assert!(!unset_avatar);
                 assert_eq!(shape, Some(crate::config::AvatarShape::Circle));
                 assert_eq!(color.as_deref(), Some("#ff6a00"));
+                assert_eq!(cwd.as_deref(), Some("~/proj"));
+                assert!(!unset_cwd);
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -645,12 +656,16 @@ mod tests {
                 avatar,
                 shape,
                 color,
+                cwd,
+                unset_cwd,
                 ..
             } => {
                 assert!(avatar.is_none());
                 assert!(!unset_avatar);
                 assert!(shape.is_none());
                 assert!(color.is_none());
+                assert!(cwd.is_none());
+                assert!(!unset_cwd);
             }
             other => panic!("unexpected {other:?}"),
         }

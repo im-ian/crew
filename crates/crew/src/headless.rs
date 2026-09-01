@@ -236,7 +236,11 @@ fn run_turn(
     }
 
     let argv = cfg.turn_cmd(&prompt, turn_session.as_ref(), &roster);
-    let result = spawn_and_stream(&session, &argv, generation);
+    let cwd = crate::config::Config::default_cwd(&cfg);
+    if let Err(err) = crate::paths::create_cwd(&cwd) {
+        eprintln!("[crew] cwd {}: {err:#}", cwd.display());
+    }
+    let result = spawn_and_stream(&session, &argv, generation, &cwd);
 
     let stale = session
         .inner
@@ -343,6 +347,7 @@ fn spawn_and_stream(
     session: &HeadlessSession,
     argv: &[String],
     generation: u64,
+    cwd: &std::path::Path,
 ) -> anyhow::Result<TurnOutcome> {
     if argv.is_empty() {
         anyhow::bail!("empty command");
@@ -352,7 +357,7 @@ fn spawn_and_stream(
     for arg in argv.iter().skip(1) {
         cmd.arg(arg);
     }
-    cmd.current_dir(&session.cwd);
+    cmd.current_dir(cwd);
     cmd.env("PATH", paths::enriched_path());
     cmd.env("CREW_AGENT_ID", &session.id);
     cmd.env("CREW_HOME", paths::home_dir());

@@ -446,6 +446,7 @@ export function useCrew() {
     description: string;
     model: string;
     effort: string;
+    cwd: string;
   }) {
     const id = selectedRef.current.id;
     if (!id || selectedRef.current.kind !== "agent") return;
@@ -453,6 +454,7 @@ export function useCrew() {
     const name = fields.name.trim();
     const role = fields.role.trim();
     const description = fields.description.trim();
+    const cwd = fields.cwd.trim();
     try {
       await api.setAgent({
         id,
@@ -469,6 +471,8 @@ export function useCrew() {
         shape: null,
         color: null,
         name: name || null,
+        cwd: cwd || null,
+        unsetCwd: !cwd,
       });
       await refreshList();
     } catch (err) {
@@ -517,6 +521,8 @@ export function useCrew() {
         unsetDescription: false,
         shape: shape || null,
         color: color || null,
+        cwd: null,
+        unsetCwd: false,
       });
       await refreshList();
     } catch (err) {

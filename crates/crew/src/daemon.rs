@@ -1073,6 +1073,8 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             shape,
             color,
             name,
+            cwd,
+            unset_cwd,
         } => match set_agent(
             &id,
             model,
@@ -1090,6 +1092,8 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             shape,
             color,
             name,
+            cwd,
+            unset_cwd,
         ) {
             Ok(()) => vec![Event::Ok, snapshot_event()],
             Err(err) => vec![Event::Error {
@@ -1259,7 +1263,9 @@ fn list_agents() -> Vec<AgentInfo> {
                     .unwrap_or_else(|| s.name().to_string()),
                 status,
                 cmd: cfg.map(|c| c.cmd.clone()).unwrap_or_else(|| s.cmd()),
-                cwd: s.cwd().display().to_string(),
+                cwd: cfg
+                    .map(|c| crate::config::Config::default_cwd(c).display().to_string())
+                    .unwrap_or_else(|| s.cwd().display().to_string()),
                 model: cfg.and_then(|c| c.model.clone()),
                 effort: cfg.and_then(|c| c.effort),
                 avatar: cfg.and_then(|c| c.avatar.clone()),
@@ -1646,6 +1652,8 @@ fn set_agent(
     shape: Option<AvatarShape>,
     color: Option<String>,
     name: Option<String>,
+    cwd: Option<String>,
+    unset_cwd: bool,
 ) -> anyhow::Result<()> {
     let mut cfg = {
         let cfgs = configs().lock().expect("configs mutex");
@@ -1689,6 +1697,11 @@ fn set_agent(
         if !name.is_empty() {
             cfg.name = name.to_string();
         }
+    }
+    if unset_cwd {
+        cfg.cwd = None;
+    } else if let Some(cwd) = cwd {
+        cfg.cwd = empty_to_none(cwd);
     }
     crate::avatar::apply(&mut cfg, avatar, unset_avatar)?;
     persist_config(&cfg)?;

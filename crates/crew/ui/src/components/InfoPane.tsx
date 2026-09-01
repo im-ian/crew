@@ -19,6 +19,7 @@ type Props = {
     description: string;
     model: string;
     effort: string;
+    cwd: string;
   }) => Promise<void>;
 };
 
@@ -34,9 +35,10 @@ export function InfoPane({
   const [description, setDescription] = useState("");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
+  const [cwd, setCwd] = useState("");
   const saveTimer = useRef<number | null>(null);
-  const fieldsRef = useRef({ name, role, description, model, effort });
-  fieldsRef.current = { name, role, description, model, effort };
+  const fieldsRef = useRef({ name, role, description, model, effort, cwd });
+  fieldsRef.current = { name, role, description, model, effort, cwd };
 
   useEffect(() => {
     if (!open || !agent) return;
@@ -45,6 +47,7 @@ export function InfoPane({
     setDescription(agent.description || "");
     setModel(agent.model || "");
     setEffort(agent.effort || "");
+    setCwd(agent.cwd || "");
   }, [open, agent?.id]);
 
   function scheduleSave(next?: Partial<typeof fieldsRef.current>) {
@@ -147,6 +150,19 @@ export function InfoPane({
           active={open}
         />
       </Field>
+      <Field label="작업 폴더" htmlFor="info-cwd">
+        <input
+          id="info-cwd"
+          className="textin"
+          placeholder="예: ~/Projects/app"
+          value={cwd}
+          onChange={(e) => {
+            setCwd(e.target.value);
+            scheduleSave({ cwd: e.target.value });
+          }}
+          onBlur={() => void flushSave()}
+        />
+      </Field>
       <Field label="생각">
         <Seg
           value={effort}
@@ -158,8 +174,8 @@ export function InfoPane({
         />
       </Field>
       <p className="apply-note">
-        모델·생각·역할은 다음 대화부터 적용됩니다. 대화를 지우면 바로 새 설정으로
-        시작됩니다.
+        모델·생각·역할·작업 폴더는 다음 대화부터 적용됩니다. 대화를 지우면 바로
+        새 설정으로 시작됩니다.
       </p>
       <div className="actions">
         <button type="button" className="danger" onClick={onReset}>
