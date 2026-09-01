@@ -154,6 +154,9 @@ pub enum Request {
         agent: String,
         allow: bool,
     },
+    Search {
+        query: String,
+    },
     Shutdown,
 }
 
@@ -220,6 +223,9 @@ pub enum Event {
         agent: String,
         key: String,
         runs: Vec<crate::routine_log::RoutineRun>,
+    },
+    Search {
+        hits: Vec<crate::search::SearchHit>,
     },
     Shutdown,
 }
@@ -288,6 +294,7 @@ pub enum MessageKind {
     Received,
     Routine,
     Handoff,
+    Tool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

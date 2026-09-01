@@ -33,6 +33,7 @@ import type {
   Kind,
   PaneTab,
   Routine,
+  SearchHit,
 } from "./types";
 
 type Ctx = {
@@ -71,6 +72,7 @@ export function useCrew() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [ungrouped, setUngrouped] = useState<string[]>([]);
   const [pendingRenameId, setPendingRenameId] = useState<string | null>(null);
+  const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
 
   const selectedRef = useRef({ id: selected, kind: selectedKind });
   selectedRef.current = { id: selected, kind: selectedKind };
@@ -289,6 +291,38 @@ export function useCrew() {
 
   function itemGroupId(kind: Kind, id: string): string | null {
     return groupIdOf(groups, kind, id);
+  }
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setSearchHits([]);
+      return;
+    }
+    const t = window.setTimeout(() => {
+      void api.searchCrew(q).then(setSearchHits).catch(() => setSearchHits([]));
+    }, 160);
+    return () => window.clearTimeout(t);
+  }, [query]);
+
+  function openSearchHit(hit: SearchHit) {
+    if (hit.kind === "bot") {
+      selectAgent(hit.id);
+      return;
+    }
+    if (hit.kind === "routine") {
+      const agent = hit.id.split(":")[0];
+      if (agent) {
+        selectAgent(agent);
+        openRoutines(agent);
+      }
+      return;
+    }
+    if (hit.kind === "message") {
+      const scope = hit.id.split(":")[0];
+      if (scope?.startsWith("ch:")) selectChannel(scope.slice(3));
+      else if (scope) selectAgent(scope);
+    }
   }
 
   const refreshList = useCallback(async () => {
@@ -790,6 +824,8 @@ export function useCrew() {
     messages,
     query,
     setQuery,
+    searchHits,
+    openSearchHit,
     stick,
     setStick,
     connected,

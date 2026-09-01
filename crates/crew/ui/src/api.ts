@@ -6,6 +6,8 @@ import type {
   Group,
   ModelList,
   RoutineRun,
+  SearchHit,
+  Skill,
 } from "./types";
 
 const modelLists = new Map<string, Promise<ModelList>>();
@@ -98,6 +100,13 @@ export const api = {
     invoke<void>("set_memory", { agent, text }),
   listGroups: () => invoke<Group[]>("list_groups"),
   setGroups: (groups: Group[]) => invoke<void>("set_groups", { groups }),
+  searchCrew: (query: string) => invoke<SearchHit[]>("search_crew", { query }),
+  listSkills: () => invoke<Skill[]>("list_skills"),
+  lookupSkill: (query: string) => invoke<Skill | null>("lookup_skill", { query }),
+  saveSkill: (name: string, body: string) =>
+    invoke<Skill>("save_skill", { name, body }),
+  saveUpload: (name: string, data: string) =>
+    invoke<string>("save_upload", { name, data }),
   listModels: (cli: string) => {
     let pending = modelLists.get(cli);
     if (!pending) {

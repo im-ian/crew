@@ -192,6 +192,47 @@ pub fn push_handoff(agent: &str, from: &str, text: &str) -> ChatMessage {
     )
 }
 
+pub fn push_tool(agent: &str, name: &str, detail: &str) -> ChatMessage {
+    let msg = ChatMessage {
+        id: new_id(),
+        role: Role::System,
+        from: name.to_string(),
+        text: detail.to_string(),
+        ts: now_ms(),
+        queued: false,
+        kind: Some(MessageKind::Tool),
+        approval: None,
+    };
+    if let Ok(mut map) = chats().lock() {
+        let chat = map
+            .entry(agent.to_string())
+            .or_insert_with(AgentChat::empty);
+        if let Some(idx) = chat.pending_idx {
+            chat.messages.insert(idx, msg.clone());
+            chat.pending_idx = Some(idx + 1);
+        } else {
+            chat.messages.push(msg.clone());
+        }
+        persist(agent, chat);
+    }
+    emit(agent, msg.clone());
+    msg
+}
+
+pub fn all_messages() -> Vec<(String, ChatMessage)> {
+    let map = match chats().lock() {
+        Ok(m) => m,
+        Err(_) => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    for (key, chat) in map.iter() {
+        for m in &chat.messages {
+            out.push((key.clone(), m.clone()));
+        }
+    }
+    out
+}
+
 pub fn push_routine(agent: &str, name: &str, text: &str) -> ChatMessage {
     push_role(
         agent,

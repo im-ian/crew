@@ -38,6 +38,11 @@ fn main() {
             "list_groups",
             "set_groups",
             "list_models",
+            "search_crew",
+            "list_skills",
+            "lookup_skill",
+            "save_skill",
+            "save_upload",
         ])),
     )
     .expect("failed to run tauri build");

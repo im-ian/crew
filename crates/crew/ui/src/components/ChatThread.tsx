@@ -221,6 +221,9 @@ function SystemOrIncoming({
       />
     );
   }
+  if (classKind === "tool" || m.kind === "tool") {
+    return <ToolCardRow name={from || "tool"} detail={displayText(m)} />;
+  }
   if (classKind === "handoff") {
     return (
       <TransferNote
@@ -434,6 +437,19 @@ function Incoming({
   );
 }
 
+function ToolCardRow({ name, detail }: { name: string; detail: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="tool-card">
+      <button type="button" className="tool-card-head" onClick={() => setOpen((v) => !v)}>
+        <span className="tool-card-name">{name}</span>
+        <span className="tool-card-chevron">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && detail ? <div className="tool-card-body">{detail}</div> : null}
+    </div>
+  );
+}
+
 function ApprovalCard({
   state,
   onApprove,
@@ -590,8 +606,14 @@ function isPlainEcho(raw: string, messages: ChatMessage[], index: number): boole
 function rowClass(
   m: ChatMessage,
   agents: AgentInfo[],
-): "sent" | "received" | "routine" | "handoff" | "user" | "assistant" | "hidden" {
-  if (m.kind === "sent" || m.kind === "received" || m.kind === "routine" || m.kind === "handoff") {
+): "sent" | "received" | "routine" | "handoff" | "tool" | "user" | "assistant" | "hidden" {
+  if (
+    m.kind === "sent" ||
+    m.kind === "received" ||
+    m.kind === "routine" ||
+    m.kind === "handoff" ||
+    m.kind === "tool"
+  ) {
     return m.kind;
   }
   if (m.role === "user") return "user";

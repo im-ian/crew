@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-lookup-skill"
+description = "Enables the lookup_skill command without any pre-configured scope."
+commands.allow = ["lookup_skill"]
+
+[[permission]]
+identifier = "deny-lookup-skill"
+description = "Denies the lookup_skill command without any pre-configured scope."
+commands.deny = ["lookup_skill"]

@@ -383,6 +383,11 @@ fn spawn_and_stream(
             Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(err) => return Err(err.into()),
         };
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+            if let Some(card) = crate::tool_card::from_event(&v) {
+                crate::transcript::push_tool(&session.id, &card.name, &card.detail);
+            }
+        }
         if let Some(chunk) = ingest_line(cli, &line, &mut state) {
             feed_text(cli, session, &chunk);
             if let Ok(mut inner) = session.inner.lock() {

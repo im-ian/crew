@@ -32,8 +32,10 @@ export function App() {
         selected={crew.selected}
         selectedKind={crew.selectedKind}
         query={crew.query}
+        searchHits={crew.searchHits}
         renamingId={renamingId}
         onQuery={crew.setQuery}
+        onSearchHit={crew.openSearchHit}
         onSelectAgent={crew.selectAgent}
         onSelectChannel={crew.selectChannel}
         onCreateMenu={crew.showCreateMenu}

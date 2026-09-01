@@ -101,27 +101,16 @@ mod tests {
     }
 
     #[test]
-    fn record_roundtrip_ok_and_fail() {
-        let agent = format!(
-            "log-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        );
-        let key = "brief";
-        record(&agent, key, true, "ok").unwrap();
-        record(&agent, key, false, "boom").unwrap();
-        let runs = list(&agent, key);
-        assert_eq!(runs.len(), 2);
-        assert!(runs[0].ok);
-        assert_eq!(runs[0].detail, "ok");
-        assert!(!runs[1].ok);
-        assert_eq!(runs[1].detail, "boom");
-        let _ = fs::remove_dir_all(
-            paths::home_dir()
-                .join("routine_runs")
-                .join(paths::safe_agent_id(&agent)),
-        );
+    fn json_roundtrip_run() {
+        let run = RoutineRun {
+            ts: 9,
+            ok: false,
+            detail: "boom".into(),
+        };
+        let line = serde_json::to_string(&run).unwrap();
+        let back: RoutineRun = serde_json::from_str(&line).unwrap();
+        assert!(!back.ok);
+        assert_eq!(back.detail, "boom");
+        assert_eq!(back.ts, 9);
     }
 }

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import type { AgentInfo, Kind } from "../types";
+import type { AgentInfo, Kind, Skill } from "../types";
+import { api } from "../api";
 import { resolveMention, trimMentionPunct } from "../mentions";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
@@ -28,6 +29,10 @@ export function Composer({
   const [mention, setMention] = useState<Mention | null>(null);
   const [mentionIdx, setMentionIdx] = useState(0);
   const [empty, setEmpty] = useState(true);
+  const [slash, setSlash] = useState<Mention | null>(null);
+  const [slashIdx, setSlashIdx] = useState(0);
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const matches = useMemo(() => {
     if (!mention) return [];
@@ -59,6 +64,18 @@ export function Composer({
     return out.slice(0, 8);
   }, [agents, mention, selected, selectedKind]);
 
+  const skillMatches = useMemo(() => {
+    if (!slash) return [];
+    const q = slash.query.toLowerCase();
+    return skills
+      .filter((s) => !q || s.name.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [skills, slash]);
+
+  useEffect(() => {
+    void api.listSkills().then(setSkills).catch(() => setSkills([]));
+  }, []);
+
   function fit() {
     const el = inputRef.current;
     if (!el) return;
@@ -79,6 +96,15 @@ export function Composer({
       return;
     }
     const before = ctx.node.textContent?.slice(0, ctx.offset) ?? "";
+    const slashM = before.match(/(^|[\s])\/(\S*)$/);
+    if (slashM) {
+      setSlash({
+        start: before.length - slashM[2].length - 1,
+        query: slashM[2],
+      });
+    } else {
+      setSlash(null);
+    }
     const m = before.match(/(^|[\s])@(\S*)$/);
     if (!m) {
       setMention(null);
@@ -99,6 +125,26 @@ export function Composer({
     fit();
   }
 
+  function pickSkill(skill: Skill) {
+    if (!insertSlashText(inputRef.current, skill.body.trim())) return;
+    setSlash(null);
+    refreshEmpty();
+    fit();
+  }
+
+  async function attachFiles(files: FileList | File[]) {
+    for (const file of Array.from(files)) {
+      const data = await readFileData(file);
+      const path = await api.saveUpload(file.name, data);
+      const md = file.type.startsWith("image/")
+        ? `![${file.name}](${path})`
+        : `[${file.name}](${path})`;
+      document.execCommand("insertText", false, md + " ");
+    }
+    refreshEmpty();
+    fit();
+  }
+
   useEffect(() => {
     fit();
   }, [placeholder]);
@@ -112,6 +158,7 @@ export function Composer({
   }, [mentionIdx, matches.length]);
 
   const mentionOpen = !!mention && matches.length > 0;
+  const slashOpen = !!slash && skillMatches.length > 0;
 
   return (
     <form
@@ -130,6 +177,25 @@ export function Composer({
       }}
     >
       <div className="composer-box">
+        {slashOpen ? (
+          <div className="mention-menu" role="listbox">
+            {skillMatches.map((s, i) => (
+              <button
+                key={s.name}
+                type="button"
+                role="option"
+                aria-selected={i === slashIdx}
+                className={"mention-item" + (i === slashIdx ? " active" : "")}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  pickSkill(s);
+                }}
+              >
+                <span className="mention-name">/{s.name}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
         {mentionOpen ? (
           <div className="mention-menu" role="listbox">
             {matches.map((a, i) => (
@@ -184,11 +250,40 @@ export function Composer({
             scanMention();
           }}
           onPaste={(e) => {
+            const files = e.clipboardData?.files;
+            if (files && files.length) {
+              e.preventDefault();
+              void attachFiles(files);
+              return;
+            }
             e.preventDefault();
             const text = e.clipboardData?.getData("text/plain") ?? "";
             document.execCommand("insertText", false, text);
           }}
           onKeyDown={(e) => {
+            if (slashOpen) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setSlashIdx((i) => (i + 1) % skillMatches.length);
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setSlashIdx((i) => (i - 1 + skillMatches.length) % skillMatches.length);
+                return;
+              }
+              if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                e.preventDefault();
+                const skill = skillMatches[slashIdx] ?? skillMatches[0];
+                if (skill) pickSkill(skill);
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setSlash(null);
+                return;
+              }
+            }
             if (mentionOpen) {
               if (e.key === "ArrowDown") {
                 e.preventDefault();
@@ -238,12 +333,64 @@ export function Composer({
             }
           }}
         />
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files?.length) void attachFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <button
+          type="button"
+          className="attach-btn"
+          title="파일 첨부"
+          aria-label="파일 첨부"
+          onClick={() => fileRef.current?.click()}
+        >
+          +
+        </button>
         <button type="submit" aria-label="보내기" disabled={!selected}>
           ↑
         </button>
       </div>
     </form>
   );
+}
+
+function insertSlashText(editor: HTMLElement | null, body: string): boolean {
+  const ctx = caretTextContext(editor);
+  if (!ctx) return false;
+  const prefix = ctx.node.textContent?.slice(0, ctx.offset) ?? "";
+  const m = prefix.match(/(^|[\s])\/(\S*)$/);
+  if (!m) return false;
+  const start = prefix.length - m[2].length - 1;
+  const range = document.createRange();
+  range.setStart(ctx.node, start);
+  range.setEnd(ctx.node, ctx.offset);
+  range.deleteContents();
+  const text = document.createTextNode(body + " ");
+  range.insertNode(text);
+  const sel = window.getSelection();
+  if (sel) {
+    sel.removeAllRanges();
+    const after = document.createRange();
+    after.setStart(text, text.data.length);
+    after.collapse(true);
+    sel.addRange(after);
+  }
+  return true;
+}
+
+function readFileData(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
 }
 
 function insertChip(editor: HTMLElement | null, agent: AgentInfo): boolean {

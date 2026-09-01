@@ -43,6 +43,11 @@
     "allow-set-memory",
     "allow-list-groups",
     "allow-set-groups",
-    "allow-list-models"
+    "allow-list-models",
+    "allow-search-crew",
+    "allow-list-skills",
+    "allow-lookup-skill",
+    "allow-save-skill",
+    "allow-save-upload"
   ]
 }

@@ -455,6 +455,7 @@ pub fn emit_frame(session: &PtySession) {
         },
         Err(_) => return,
     };
+    notify_from_frame(&ev);
     let _ = events().send(ev);
 }
 
@@ -469,7 +470,70 @@ pub fn emit_agent_frame(id: &str) {
             None => return,
         }
     };
+    notify_from_frame(&ev);
     let _ = events().send(ev);
+}
+
+fn notify_from_frame(ev: &Event) {
+    let Event::Frame {
+        agent,
+        status,
+        ..
+    } = ev
+    else {
+        return;
+    };
+    let prev = {
+        let mut map = last_status().lock().expect("status mutex");
+        let prev = map.get(agent).copied().unwrap_or(AgentStatus::Idle);
+        map.insert(agent.clone(), *status);
+        prev
+    };
+    let name = configs()
+        .lock()
+        .ok()
+        .and_then(|m| m.get(agent).map(|c| c.display_name().to_string()))
+        .unwrap_or_else(|| agent.clone());
+    crate::notify::maybe_status_notify(&name, prev, *status);
+}
+
+fn last_status() -> &'static Mutex<HashMap<String, AgentStatus>> {
+    static LAST: OnceLock<Mutex<HashMap<String, AgentStatus>>> = OnceLock::new();
+    LAST.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn search_corpus(query: &str) -> Vec<crate::search::SearchHit> {
+    let roster = roster_vec();
+    let bots: Vec<_> = roster
+        .iter()
+        .map(|a| crate::search::SearchBot {
+            id: a.id.as_str(),
+            name: a.name.as_str(),
+            role: a.role.as_deref(),
+        })
+        .collect();
+    let routines: Vec<_> = roster
+        .iter()
+        .flat_map(|a| {
+            a.routines.iter().map(|r| crate::search::SearchRoutine {
+                agent: a.id.as_str(),
+                id: r.id.as_str(),
+                name: r.name.as_str(),
+                prompt: r.prompt.as_str(),
+            })
+        })
+        .collect();
+    let stored = crate::transcript::all_messages();
+    let messages: Vec<_> = stored
+        .iter()
+        .map(|(scope, m)| crate::search::SearchMessage {
+            scope: scope.as_str(),
+            id: m.id.as_str(),
+            from: m.from.as_str(),
+            text: m.text.as_str(),
+        })
+        .collect();
+    crate::search::search(query, &bots, &routines, &messages)
 }
 
 fn open_agent(
@@ -892,6 +956,9 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
                 message: err.to_string(),
             }],
         },
+        Request::Search { query } => vec![Event::Search {
+            hits: search_corpus(&query),
+        }],
         Request::Tell {
             from,
             to,

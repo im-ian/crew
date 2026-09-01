@@ -9,7 +9,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { itemKey, parseItemKey } from "../groups";
-import type { AgentInfo, ChannelInfo, Group, Kind } from "../types";
+import type { AgentInfo, ChannelInfo, Group, Kind, SearchHit } from "../types";
 import { Avatar } from "./Avatar";
 
 const RAIL_DEFAULT = 232;
@@ -184,8 +184,10 @@ type Props = {
   selected: string | null;
   selectedKind: Kind;
   query: string;
+  searchHits?: SearchHit[];
   renamingId: string | null;
   onQuery: (q: string) => void;
+  onSearchHit?: (hit: SearchHit) => void;
   onSelectAgent: (id: string) => void;
   onSelectChannel: (id: string) => void;
   onCreateMenu: (e: MouseEvent) => void;
@@ -252,8 +254,10 @@ export function Sidebar({
   selected,
   selectedKind,
   query,
+  searchHits = [],
   renamingId,
   onQuery,
+  onSearchHit,
   onSelectAgent,
   onSelectChannel,
   onCreateMenu,
@@ -555,6 +559,24 @@ export function Sidebar({
           +
         </button>
       </div>
+      {searchHits.length ? (
+        <div className="search-hits">
+          {searchHits.slice(0, 12).map((hit) => (
+            <button
+              key={hit.kind + hit.id}
+              type="button"
+              className="search-hit"
+              onClick={() => onSearchHit?.(hit)}
+            >
+              <span className="search-hit-kind">{hit.kind}</span>
+              <span className="search-hit-title">{hit.title}</span>
+              {hit.snippet ? (
+                <span className="search-hit-snippet">{hit.snippet}</span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="rail-lists">
         {empty ? (
           <div className="empty-rail">

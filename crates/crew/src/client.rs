@@ -51,6 +51,7 @@ pub fn rpc(req: Request) -> anyhow::Result<Event> {
             | (Request::RoutineRuns { .. }, Event::RoutineRuns { .. })
             | (Request::Interrupt { .. }, Event::Ok)
             | (Request::Approve { .. }, Event::Ok)
+            | (Request::Search { .. }, Event::Search { .. })
             | (Request::ListChannels, Event::Channels { .. } | Event::Agents { .. })
             | (Request::ChannelMessages { .. }, Event::ChannelMessages { .. })
             | (

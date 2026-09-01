@@ -10,6 +10,7 @@ pub enum RowClass {
     Received,
     Routine,
     Handoff,
+    Tool,
     Hidden,
 }
 
@@ -94,6 +95,7 @@ pub fn classify_row(
             MessageKind::Received => RowClass::Received,
             MessageKind::Routine => RowClass::Routine,
             MessageKind::Handoff => RowClass::Handoff,
+            MessageKind::Tool => RowClass::Tool,
         };
     }
     match msg.role {

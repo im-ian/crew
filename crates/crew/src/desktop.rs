@@ -546,6 +546,43 @@ fn list_routine_runs(
     }
 }
 
+#[tauri::command]
+fn search_crew(query: String) -> Result<Vec<crate::search::SearchHit>, String> {
+    match client::rpc(Request::Search { query }) {
+        Ok(Event::Search { hits }) => Ok(hits),
+        Ok(Event::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected daemon response".into()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+#[tauri::command]
+fn list_skills() -> Result<Vec<crate::skills::Skill>, String> {
+    Ok(crate::skills::list())
+}
+
+#[tauri::command]
+fn lookup_skill(query: String) -> Result<Option<crate::skills::Skill>, String> {
+    Ok(crate::skills::lookup(&query))
+}
+
+#[tauri::command]
+fn save_skill(name: String, body: String) -> Result<crate::skills::Skill, String> {
+    crate::skills::save(&name, &body).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_upload(name: String, data: String) -> Result<String, String> {
+    let bytes = crate::avatar::decode_input(&data).map_err(|e| e.to_string())?;
+    let dir = crate::paths::home_dir().join("uploads");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stamp = crate::paths::utc_timestamp();
+    let safe = crate::paths::safe_agent_id(&name);
+    let path = dir.join(format!("{stamp}-{safe}"));
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 pub fn run() -> anyhow::Result<()> {
     client::ensure_daemon()?;
     #[cfg(debug_assertions)]
@@ -589,7 +626,12 @@ pub fn run() -> anyhow::Result<()> {
             set_memory,
             list_groups,
             set_groups,
-            list_models
+            list_models,
+            search_crew,
+            list_skills,
+            lookup_skill,
+            save_skill,
+            save_upload
         ])
         .run(tauri::generate_context!())
         .map_err(|e| anyhow::anyhow!(e))?;

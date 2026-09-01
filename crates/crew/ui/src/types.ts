@@ -39,6 +39,18 @@ export type RoutineRun = {
   detail: string;
 };
 
+export type Skill = {
+  name: string;
+  body: string;
+};
+
+export type SearchHit = {
+  kind: "bot" | "routine" | "message" | string;
+  id: string;
+  title: string;
+  snippet: string;
+};
+
 export type AgentInfo = {
   id: string;
   name: string;
@@ -64,7 +76,7 @@ export type ChannelInfo = {
   preview?: string | null;
 };
 
-export type MessageKind = "sent" | "received" | "routine" | "handoff";
+export type MessageKind = "sent" | "received" | "routine" | "handoff" | "tool";
 export type ApprovalState = "pending" | "allowed" | "denied";
 
 export type ChatMessage = {
