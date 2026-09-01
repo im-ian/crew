@@ -272,14 +272,65 @@ function TransferNote({
         />
       </div>
       {m.text ? (
-        <MdBody
-          className="xfer-text md"
-          text={m.text}
-          agents={agents}
-          onMention={onSelectAgent}
-        />
+        <XferBody text={m.text} agents={agents} onMention={onSelectAgent} />
       ) : null}
       {m.queued ? <QueueWait /> : null}
+    </div>
+  );
+}
+
+const XFER_CLAMP_CHARS = 110;
+const XFER_CLAMP_LINES = 2;
+
+function isLongXfer(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length > XFER_CLAMP_CHARS) return true;
+  return trimmed.split(/\n+/).filter(Boolean).length > XFER_CLAMP_LINES;
+}
+
+function XferBody({
+  text,
+  agents,
+  onMention,
+}: {
+  text: string;
+  agents: AgentInfo[];
+  onMention?: (id: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const long = isLongXfer(text);
+  const clamped = long && !expanded;
+  return (
+    <div className="xfer-body">
+      {clamped ? (
+        <div className="xfer-text is-clamped">{text.trim()}</div>
+      ) : (
+        <MdBody
+          className="xfer-text md"
+          text={text}
+          agents={agents}
+          onMention={onMention}
+        />
+      )}
+      {long ? (
+        <button
+          type="button"
+          className="xfer-toggle"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "접기" : "더 보기"}
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+            <path
+              d="M2.2 3.6 5 6.4 7.8 3.6"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      ) : null}
     </div>
   );
 }

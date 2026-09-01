@@ -345,7 +345,7 @@ export function Sidebar({
                 <section
                   key={group.id}
                   className={
-                    "rail-section" +
+                    "rail-section grouped" +
                     (drop?.groupId === group.id && !drop.beforeKey ? " drop-over" : "")
                   }
                   onDragOver={(e) => markDrop(e, group.id, null)}
