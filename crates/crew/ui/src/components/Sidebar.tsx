@@ -3,11 +3,11 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type DragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { itemKey, parseItemKey } from "../groups";
 import type { AgentInfo, ChannelInfo, Group, Kind } from "../types";
 import { Avatar } from "./Avatar";
@@ -55,6 +55,126 @@ type RailItem = {
   agent?: AgentInfo;
   channel?: ChannelInfo;
 };
+
+type RailDrop = {
+  groupId: string | null;
+  beforeKey: string | null;
+  into: boolean;
+  line: { left: number; top: number; width: number } | null;
+};
+
+type RailDrag = {
+  key: string;
+  item: RailItem;
+  x: number;
+  y: number;
+  grabX: number;
+  grabY: number;
+  width: number;
+  armed: boolean;
+};
+
+const DRAG_THRESHOLD = 6;
+
+function lineAt(rect: DOMRect, before: boolean, inset: number) {
+  return {
+    left: Math.round(rect.left + inset),
+    width: Math.max(32, Math.round(rect.width - inset - 8)),
+    top: Math.round(before ? rect.top : rect.bottom),
+  };
+}
+
+function nextRailRow(row: HTMLElement): HTMLElement | null {
+  let n = row.nextElementSibling;
+  while (n) {
+    if (n instanceof HTMLElement && n.hasAttribute("data-rail-row")) return n;
+    n = n.nextElementSibling;
+  }
+  return null;
+}
+
+function pickClosest(stack: Element[], sel: string): HTMLElement | null {
+  for (const node of stack) {
+    const hit = node.closest(sel);
+    if (hit instanceof HTMLElement) return hit;
+  }
+  return null;
+}
+
+function hitRailTarget(x: number, y: number, dragKey: string): RailDrop | null {
+  const stack = document.elementsFromPoint(x, y);
+  const row = pickClosest(stack, "[data-rail-row]");
+  if (row) {
+    const key = row.dataset.railRow || null;
+    const rect = row.getBoundingClientRect();
+    const groupEl = row.closest("[data-rail-group]");
+    const groupId =
+      groupEl instanceof HTMLElement ? groupEl.dataset.railGroup || null : null;
+    const inset = groupEl ? 24 : 8;
+    const before = y < rect.top + rect.height * 0.5;
+    if (before) {
+      return { groupId, beforeKey: key, into: false, line: lineAt(rect, true, inset) };
+    }
+    const next = nextRailRow(row);
+    let insertBefore = next?.dataset.railRow || null;
+    if (insertBefore === dragKey && next) {
+      insertBefore = nextRailRow(next)?.dataset.railRow || null;
+    }
+    return {
+      groupId,
+      beforeKey: insertBefore,
+      into: false,
+      line: lineAt(rect, false, inset),
+    };
+  }
+
+  const head = pickClosest(stack, "[data-rail-group-head]");
+  if (head) {
+    return {
+      groupId: head.dataset.railGroupHead || null,
+      beforeKey: null,
+      into: true,
+      line: null,
+    };
+  }
+
+  const empty = pickClosest(stack, "[data-rail-empty]");
+  if (empty) {
+    const groupEl = empty.closest("[data-rail-group]");
+    const groupId =
+      groupEl instanceof HTMLElement ? groupEl.dataset.railGroup || null : null;
+    return { groupId, beforeKey: null, into: true, line: null };
+  }
+
+  const group = pickClosest(stack, "[data-rail-group]");
+  if (group) {
+    return {
+      groupId: group.dataset.railGroup || null,
+      beforeKey: null,
+      into: true,
+      line: null,
+    };
+  }
+
+  const ungrouped = pickClosest(stack, "[data-rail-ungrouped]");
+  if (ungrouped) {
+    return { groupId: null, beforeKey: null, into: true, line: null };
+  }
+
+  return null;
+}
+
+function autoScrollLists(y: number) {
+  const lists = document.querySelector(".rail-lists");
+  if (!(lists instanceof HTMLElement)) return;
+  const r = lists.getBoundingClientRect();
+  const edge = 36;
+  if (y < r.top + edge) {
+    lists.scrollTop -= Math.max(6, (r.top + edge - y) * 0.4);
+  } else if (y > r.bottom - edge) {
+    lists.scrollTop += Math.max(6, (y - (r.bottom - edge)) * 0.4);
+  }
+}
 
 type Props = {
   agents: AgentInfo[];
@@ -251,10 +371,26 @@ export function Sidebar({
     }
   }
 
-  const [dragKey, setDragKey] = useState<string | null>(null);
-  const [drop, setDrop] = useState<{ groupId: string | null; beforeKey: string | null } | null>(
-    null,
-  );
+  const [drag, setDrag] = useState<RailDrag | null>(null);
+  const [drop, setDrop] = useState<RailDrop | null>(null);
+  const dragRef = useRef<RailDrag | null>(null);
+  const dropRef = useRef<RailDrop | null>(null);
+  const didDrag = useRef(false);
+  const stopListen = useRef<(() => void) | null>(null);
+  const expandTimer = useRef<number | null>(null);
+  const expandFor = useRef<string | null>(null);
+  const onMoveRef = useRef(onMove);
+  const onToggleGroupRef = useRef(onToggleGroup);
+  onMoveRef.current = onMove;
+  onToggleGroupRef.current = onToggleGroup;
+
+  useEffect(() => {
+    return () => {
+      stopListen.current?.();
+      if (expandTimer.current) window.clearTimeout(expandTimer.current);
+      document.documentElement.classList.remove("rail-dragging");
+    };
+  }, []);
 
   function select(item: RailItem) {
     if (item.kind === "channel") onSelectChannel(item.id);
@@ -266,41 +402,130 @@ export function Sidebar({
     else onAgentCtx(e, item.id);
   }
 
-  function onDragStart(e: DragEvent, item: RailItem) {
-    e.dataTransfer.setData("text/plain", item.key);
-    e.dataTransfer.effectAllowed = "move";
-    setDragKey(item.key);
+  function clearExpandTimer() {
+    if (expandTimer.current) {
+      window.clearTimeout(expandTimer.current);
+      expandTimer.current = null;
+    }
+    expandFor.current = null;
   }
 
-  function onDragEnd() {
-    setDragKey(null);
+  function queueExpand(groupId: string | null, into: boolean) {
+    if (!into || !groupId) {
+      clearExpandTimer();
+      return;
+    }
+    if (expandFor.current === groupId) return;
+    clearExpandTimer();
+    expandFor.current = groupId;
+    expandTimer.current = window.setTimeout(() => {
+      const collapsed = document.querySelector(
+        `[data-rail-group="${groupId}"] .group-head.collapsed`,
+      );
+      if (collapsed) onToggleGroupRef.current(groupId);
+    }, 450);
+  }
+
+  function endDrag(apply: boolean) {
+    const d = dragRef.current;
+    const t = dropRef.current;
+    clearExpandTimer();
+    stopListen.current?.();
+    stopListen.current = null;
+    document.documentElement.classList.remove("rail-dragging");
+    dragRef.current = null;
+    dropRef.current = null;
+    setDrag(null);
     setDrop(null);
-  }
-
-  function parseDrag(e: DragEvent): { kind: Kind; id: string } | null {
-    const raw = e.dataTransfer.getData("text/plain") || dragKey;
-    return raw ? parseItemKey(raw) : null;
-  }
-
-  function markDrop(e: DragEvent, groupId: string | null, beforeKey: string | null) {
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = "move";
-    const next = { groupId, beforeKey };
-    if (drop?.groupId !== next.groupId || drop?.beforeKey !== next.beforeKey) {
-      setDrop(next);
+    if (!apply) didDrag.current = false;
+    if (!apply || !d || !t) return;
+    if (t.beforeKey === d.key) return;
+    const parsed = parseItemKey(d.key);
+    if (!parsed) return;
+    onMoveRef.current(parsed.kind, parsed.id, t.groupId, t.beforeKey);
+    if (t.into && t.groupId) {
+      const collapsed = document.querySelector(
+        `[data-rail-group="${t.groupId}"] .group-head.collapsed`,
+      );
+      if (collapsed) onToggleGroupRef.current(t.groupId);
     }
   }
 
-  function applyDrop(e: DragEvent, groupId: string | null, beforeKey: string | null) {
-    e.preventDefault();
-    e.stopPropagation();
-    const parsed = parseDrag(e);
-    setDragKey(null);
-    setDrop(null);
-    if (!parsed) return;
-    if (beforeKey === itemKey(parsed.kind, parsed.id)) return;
-    onMove(parsed.kind, parsed.id, groupId, beforeKey);
+  function onRowPointerDown(e: ReactPointerEvent<HTMLButtonElement>, item: RailItem) {
+    if (e.button !== 0 || searching) return;
+    if ((e.target as HTMLElement).closest("input, textarea, a")) return;
+    const rowEl = e.currentTarget;
+    const rect = rowEl.getBoundingClientRect();
+    const originX = e.clientX;
+    const originY = e.clientY;
+    const pending: RailDrag = {
+      key: item.key,
+      item,
+      x: e.clientX,
+      y: e.clientY,
+      grabX: e.clientX - rect.left,
+      grabY: e.clientY - rect.top,
+      width: rect.width,
+      armed: false,
+    };
+    dragRef.current = pending;
+    didDrag.current = false;
+
+    const onMovePtr = (ev: PointerEvent) => {
+      const cur = dragRef.current;
+      if (!cur || ev.pointerId !== e.pointerId) return;
+      const dx = ev.clientX - originX;
+      const dy = ev.clientY - originY;
+      if (!cur.armed) {
+        if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+        cur.armed = true;
+        didDrag.current = true;
+        document.documentElement.classList.add("rail-dragging");
+        try {
+          rowEl.setPointerCapture(e.pointerId);
+        } catch {
+          /* already released */
+        }
+      }
+      ev.preventDefault();
+      const next: RailDrag = {
+        ...cur,
+        x: ev.clientX,
+        y: ev.clientY,
+        armed: true,
+      };
+      dragRef.current = next;
+      setDrag(next);
+      autoScrollLists(ev.clientY);
+      const target = hitRailTarget(ev.clientX, ev.clientY, cur.key);
+      dropRef.current = target;
+      setDrop(target);
+      queueExpand(target?.groupId ?? null, !!target?.into);
+    };
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
+      const armed = !!dragRef.current?.armed;
+      endDrag(armed);
+      if (armed) window.setTimeout(() => {
+        didDrag.current = false;
+      }, 0);
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        endDrag(false);
+      }
+    };
+    window.addEventListener("pointermove", onMovePtr);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    window.addEventListener("keydown", onKey);
+    stopListen.current = () => {
+      window.removeEventListener("pointermove", onMovePtr);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      window.removeEventListener("keydown", onKey);
+    };
   }
 
   return (
@@ -346,15 +571,15 @@ export function Sidebar({
                   key={group.id}
                   className={
                     "rail-section grouped" +
-                    (drop?.groupId === group.id && !drop.beforeKey ? " drop-over" : "")
+                    (drop?.groupId === group.id && drop.into ? " drop-into" : "")
                   }
-                  onDragOver={(e) => markDrop(e, group.id, null)}
-                  onDrop={(e) => applyDrop(e, group.id, null)}
+                  data-rail-group={group.id}
                 >
                   <GroupHead
                     group={group}
                     renaming={renamingId === group.id}
                     searching={searching}
+                    dropInto={drop?.groupId === group.id && drop.into}
                     onToggle={() => onToggleGroup(group.id)}
                     onRename={(name) => {
                       onRenameGroup(group.id, name);
@@ -362,61 +587,60 @@ export function Sidebar({
                     }}
                     onCancelRename={onRenameDone}
                     onContextMenu={(e) => onGroupCtx(e, group.id)}
-                    onDragOver={(e) => markDrop(e, group.id, null)}
-                    onDrop={(e) => applyDrop(e, group.id, null)}
                   />
                   {hidden ? null : showEmpty ? (
-                    <div className="empty-rail">여기로 끌어다 놓으세요</div>
+                    <div className="empty-rail" data-rail-empty="1">
+                      여기로 끌어다 놓으세요
+                    </div>
                   ) : (
                     items.map((item) => (
                       <ItemRow
                         key={item.key}
                         item={item}
                         active={selectedKind === item.kind && selected === item.id}
-                        dragging={dragKey === item.key}
-                        dropBefore={
-                          drop?.groupId === group.id && drop.beforeKey === item.key
-                        }
-                        draggable={!searching}
-                        onSelect={() => select(item)}
+                        dragging={drag?.key === item.key && drag.armed}
+                        onSelect={() => {
+                          if (didDrag.current) return;
+                          select(item);
+                        }}
                         onContextMenu={(e) => ctx(e, item)}
-                        onDragStart={(e) => onDragStart(e, item)}
-                        onDragEnd={onDragEnd}
-                        onDragOver={(e) => markDrop(e, group.id, item.key)}
-                        onDrop={(e) => applyDrop(e, group.id, item.key)}
+                        onPointerDown={
+                          searching ? undefined : (e) => onRowPointerDown(e, item)
+                        }
                       />
                     ))
                   )}
                 </section>
               );
             })}
-            {ungroupedItems.length || dragKey ? (
+            {ungroupedItems.length || drag?.armed ? (
               <section
                 className={
                   "rail-section" +
-                  (drop && drop.groupId === null && !drop.beforeKey ? " drop-over" : "")
+                  (drop && drop.groupId === null && drop.into ? " drop-into" : "")
                 }
-                onDragOver={(e) => markDrop(e, null, null)}
-                onDrop={(e) => applyDrop(e, null, null)}
+                data-rail-ungrouped="1"
               >
                 {ungroupedItems.map((item) => (
                   <ItemRow
                     key={item.key}
                     item={item}
                     active={selectedKind === item.kind && selected === item.id}
-                    dragging={dragKey === item.key}
-                    dropBefore={drop?.groupId === null && drop.beforeKey === item.key}
-                    draggable={!searching}
-                    onSelect={() => select(item)}
+                    dragging={drag?.key === item.key && drag.armed}
+                    onSelect={() => {
+                      if (didDrag.current) return;
+                      select(item);
+                    }}
                     onContextMenu={(e) => ctx(e, item)}
-                    onDragStart={(e) => onDragStart(e, item)}
-                    onDragEnd={onDragEnd}
-                    onDragOver={(e) => markDrop(e, null, item.key)}
-                    onDrop={(e) => applyDrop(e, null, item.key)}
+                    onPointerDown={
+                      searching ? undefined : (e) => onRowPointerDown(e, item)
+                    }
                   />
                 ))}
-                {!ungroupedItems.length && dragKey ? (
-                  <div className="empty-rail">그룹에서 빼기</div>
+                {!ungroupedItems.length && drag?.armed ? (
+                  <div className="empty-rail" data-rail-empty="1">
+                    그룹에서 빼기
+                  </div>
                 ) : null}
               </section>
             ) : null}
@@ -439,6 +663,35 @@ export function Sidebar({
         onDoubleClick={() => setRail(RAIL_DEFAULT, true)}
         onKeyDown={onRailKeyDown}
       />
+      {drag?.armed
+        ? createPortal(
+            <>
+              {drop?.line && drop.beforeKey !== drag.key ? (
+                <div
+                  className="rail-drop-line"
+                  style={{
+                    left: drop.line.left,
+                    top: drop.line.top,
+                    width: drop.line.width,
+                  }}
+                />
+              ) : null}
+              <div
+                className="rail-ghost"
+                style={{
+                  width: drag.width,
+                  left: drag.x - drag.grabX,
+                  top: drag.y - drag.grabY,
+                  ["--ghost-ox" as string]: `${drag.grabX}px`,
+                  ["--ghost-oy" as string]: `${drag.grabY}px`,
+                }}
+              >
+                <ItemRow item={drag.item} ghost />
+              </div>
+            </>,
+            document.body,
+          )
+        : null}
     </aside>
   );
 }
@@ -447,22 +700,20 @@ function GroupHead({
   group,
   renaming,
   searching,
+  dropInto,
   onToggle,
   onRename,
   onCancelRename,
   onContextMenu,
-  onDragOver,
-  onDrop,
 }: {
   group: Group;
   renaming: boolean;
   searching: boolean;
+  dropInto?: boolean;
   onToggle: () => void;
   onRename: (name: string) => void;
   onCancelRename: () => void;
   onContextMenu: (e: MouseEvent) => void;
-  onDragOver: (e: DragEvent) => void;
-  onDrop: (e: DragEvent) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(group.name);
@@ -488,14 +739,17 @@ function GroupHead({
 
   return (
     <div
-      className={"group-head" + (!searching && group.collapsed ? " collapsed" : "")}
+      className={
+        "group-head" +
+        (!searching && group.collapsed ? " collapsed" : "") +
+        (dropInto ? " drop-into" : "")
+      }
+      data-rail-group-head={group.id}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
         onContextMenu(e);
       }}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
     >
       <button
         type="button"
@@ -537,49 +791,22 @@ function ItemRow({
   item,
   active,
   dragging,
-  dropBefore,
-  draggable = true,
+  ghost,
   onSelect,
   onContextMenu,
-  onDragStart,
-  onDragEnd,
-  onDragOver,
-  onDrop,
+  onPointerDown,
 }: {
   item: RailItem;
-  active: boolean;
-  dragging: boolean;
-  dropBefore: boolean;
-  draggable?: boolean;
-  onSelect: () => void;
-  onContextMenu: (e: MouseEvent) => void;
-  onDragStart: (e: DragEvent) => void;
-  onDragEnd: () => void;
-  onDragOver: (e: DragEvent) => void;
-  onDrop: (e: DragEvent) => void;
+  active?: boolean;
+  dragging?: boolean;
+  ghost?: boolean;
+  onSelect?: () => void;
+  onContextMenu?: (e: MouseEvent) => void;
+  onPointerDown?: (e: ReactPointerEvent<HTMLButtonElement>) => void;
 }) {
   const a = item.agent;
-  return (
-    <button
-      type="button"
-      className={
-        "rail-row" +
-        (active ? " active" : "") +
-        (dragging ? " dragging" : "") +
-        (dropBefore ? " drop-before" : "")
-      }
-      draggable={draggable}
-      onClick={onSelect}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onContextMenu(e);
-      }}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-    >
+  const inner = (
+    <>
       <Avatar
         id={item.id}
         name={item.name}
@@ -594,6 +821,30 @@ function ItemRow({
         <div className="agent-name">{item.name}</div>
         {item.preview ? <div className="agent-preview">{item.preview}</div> : null}
       </div>
+    </>
+  );
+  if (ghost) {
+    return (
+      <div className="rail-row" aria-hidden>
+        {inner}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className={"rail-row" + (active ? " active" : "") + (dragging ? " dragging" : "")}
+      data-rail-row={item.key}
+      onClick={onSelect}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu?.(e);
+      }}
+      onPointerDown={onPointerDown}
+      onDragStart={(e) => e.preventDefault()}
+    >
+      {inner}
     </button>
   );
 }

@@ -145,6 +145,14 @@ export function moveItem(
 ): RailLayout {
   const parsed = parseItemKey(key);
   if (!parsed) return layout;
+  if (beforeKey === key) return layout;
+  if (
+    destGroupId &&
+    destGroupId !== UNGROUPED_ID &&
+    !layout.groups.some((g) => g.id === destGroupId)
+  ) {
+    return layout;
+  }
   const groups = layout.groups
     .filter((g) => g.id !== UNGROUPED_ID)
     .map((g) => ({
