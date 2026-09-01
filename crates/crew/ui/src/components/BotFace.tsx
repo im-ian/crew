@@ -1,4 +1,10 @@
-import { useLayoutEffect, useRef, useState, type PointerEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent,
+} from "react";
 import { avatarPhase, type AvatarShape } from "../avatar";
 import type { AgentStatus } from "../types";
 
@@ -102,39 +108,68 @@ function Shape({ shape, color }: { shape: AvatarShape; color: string }) {
   }
 }
 
-function Eyes({ cx, cy }: { cx: number; cy: number }) {
-  const dx = 7.2;
+function Eye({ x, y, dir }: { x: number; y: number; dir: number }) {
   const w = 6;
   const h = 10.5;
+  const ax = x + dir * 1.6;
+  return (
+    <g className="avatar-eye">
+      <rect
+        className="avatar-pill"
+        x={x - w / 2}
+        y={y - h / 2}
+        width={w}
+        height={h}
+        rx={w / 2}
+      />
+      <path
+        className="avatar-arc"
+        d={`M${ax - 3} ${y + 1.8}Q${ax} ${y - 3.8} ${ax + 3} ${y + 1.8}`}
+      />
+    </g>
+  );
+}
+
+function Eyes({ cx, cy }: { cx: number; cy: number }) {
+  const dx = 7.2;
   return (
     <g className="avatar-gaze" fill="#fff">
       <g className="avatar-blink">
-        <rect
-          className="avatar-eye"
-          x={cx - dx - w / 2}
-          y={cy - h / 2}
-          width={w}
-          height={h}
-          rx={w / 2}
-        />
-        <rect
-          className="avatar-eye"
-          x={cx + dx - w / 2}
-          y={cy - h / 2}
-          width={w}
-          height={h}
-          rx={w / 2}
-        />
+        <Eye x={cx - dx} y={cy} dir={-1} />
+        <Eye x={cx + dx} y={cy} dir={1} />
       </g>
     </g>
   );
 }
 
-function liveMood(status?: AgentStatus | null): "idle" | "working" | "blocked" | null {
-  if (status === "idle" || status === "working" || status === "blocked") {
+type Mood = "idle" | "working" | "blocked" | "exited" | "happy";
+
+function liveMood(status?: AgentStatus | null): Mood | null {
+  if (
+    status === "idle" ||
+    status === "working" ||
+    status === "blocked" ||
+    status === "exited"
+  ) {
     return status;
   }
   return null;
+}
+
+const HAPPY_MS = 1600;
+
+function useHappy(status?: AgentStatus | null): boolean {
+  const prev = useRef(status);
+  const [happy, setHappy] = useState(false);
+  useEffect(() => {
+    const was = prev.current;
+    prev.current = status;
+    if (was !== "working" || status !== "idle") return;
+    setHappy(true);
+    const t = setTimeout(() => setHappy(false), HAPPY_MS);
+    return () => clearTimeout(t);
+  }, [status]);
+  return happy;
 }
 
 const GAZE_X = 4.6;
@@ -164,9 +199,28 @@ const SHAPE_BOX: Record<AvatarShape, ShapeBox> = {
   heart: { x: 3.2, y: 3.2, w: 57.6, h: 55.6, optical: 1.12, opticalY: 1.4 },
 };
 
-function shapeFit(shape: AvatarShape): string {
+// Measured ink coverage of each shape's rendered alpha mask, not a hand fudge.
+// min(area, width, height) match, so spiky shapes shrink toward the mean rather
+// than inflating the way plain area matching would. Multiplies on top of SHAPE_BOX.
+const SHAPE_INK: Record<AvatarShape, number> = {
+  circle: 0.938,
+  teardrop: 0.976,
+  "rounded-square": 0.881,
+  hexagon: 0.972,
+  triangle: 0.942,
+  cloud: 1.006,
+  pill: 1.006,
+  diamond: 0.993,
+  pentagon: 0.983,
+  star: 0.904,
+  heart: 0.895,
+};
+
+// ponytail: scaling about the face centre is just a bigger `s`, since shapeFit
+// already maps the shape's centre to (32,32) — no wrapper transform needed.
+function shapeFit(shape: AvatarShape, ink = 1): string {
   const b = SHAPE_BOX[shape];
-  const s = (FACE_SPAN / Math.max(b.w, b.h)) * (b.optical ?? 1);
+  const s = (FACE_SPAN / Math.max(b.w, b.h)) * (b.optical ?? 1) * ink;
   const cx = b.x + b.w / 2;
   const cy = b.y + b.h / 2 + (b.opticalY ?? 0);
   return `translate(32 32) scale(${s}) translate(${-cx} ${-cy})`;
@@ -206,7 +260,7 @@ function applyGaze(
 
 export function BotFace({ shape, color, className, title, status, id }: Props) {
   const eyes = eyesAt(shape);
-  const live = liveMood(status);
+  const live = useHappy(status) ? "happy" : liveMood(status);
   const svgRef = useRef<SVGSVGElement>(null);
   const gazeRef = useRef<{ x: number; y: number } | null>(null);
   const [tracking, setTracking] = useState(false);
@@ -256,8 +310,10 @@ export function BotFace({ shape, color, className, title, status, id }: Props) {
       onPointerLeave={onPointerLeave}
     >
       {title ? <title>{title}</title> : null}
-      <g transform={shapeFit(shape)}>
+      <g transform={shapeFit(shape, SHAPE_INK[shape])}>
         <Shape shape={shape} color={color} />
+      </g>
+      <g transform={shapeFit(shape)}>
         <Eyes cx={eyes.x} cy={eyes.y} />
       </g>
     </svg>

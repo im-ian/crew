@@ -508,21 +508,61 @@ button.avatar {
   height: 100%;
   display: block;
   overflow: visible;
+  position: relative;
+  z-index: 1;
 }
 .avatar-face .avatar-gaze,
 .avatar-face .avatar-blink,
-.avatar-face .avatar-eye {
+.avatar-face .avatar-eye,
+.avatar-face .avatar-pill,
+.avatar-face .avatar-arc {
   transform-box: fill-box;
   transform-origin: center;
 }
+.avatar-pill,
+.avatar-arc {
+  transition:
+    transform 0.28s cubic-bezier(0.34, 1.4, 0.64, 1),
+    opacity 0.2s ease;
+}
+.avatar-arc {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 3.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  transform: scaleY(0.35);
+}
+.avatar-face.is-blocked .avatar-pill {
+  transform: scaleY(0.2);
+  opacity: 0;
+}
+.avatar-face.is-blocked .avatar-arc {
+  transform: scaleY(-1);
+  opacity: 1;
+}
+.avatar-face.is-exited .avatar-pill {
+  transform: scaleY(0.3);
+  opacity: 0.55;
+}
+.avatar-face.is-happy .avatar-pill {
+  transform: scaleY(0.14);
+  opacity: 0;
+}
+.avatar-face.is-happy .avatar-arc {
+  transform: scaleY(1);
+  opacity: 1;
+}
 .avatar-face.is-idle .avatar-gaze,
+.avatar-face.is-happy .avatar-gaze,
 .avatar-face.is-working .avatar-gaze {
   animation: avatar-gaze 7.2s ease-in-out infinite;
   animation-delay: calc(var(--avatar-phase, 0) * -1s);
 }
 .avatar-face.is-working .avatar-gaze {
-  animation-name: avatar-gaze-busy;
-  animation-duration: 2.4s;
+  animation-name: avatar-ponder;
+  animation-duration: 8.4s;
 }
 .avatar-face.is-tracking .avatar-gaze {
   animation: none;
@@ -560,11 +600,11 @@ button.avatar {
   58% { transform: translate(-14%, 6%); }
   78% { transform: translate(6%, -8%); }
 }
-@keyframes avatar-gaze-busy {
-  0%, 100% { transform: translate(0, 0); }
-  22% { transform: translate(22%, -6%); }
-  52% { transform: translate(-24%, 8%); }
-  74% { transform: translate(12%, 4%); }
+@keyframes avatar-ponder {
+  0%, 9% { transform: translate(0, 0); }
+  33%, 54% { transform: translate(-30%, -12%); }
+  78%, 91% { transform: translate(22%, -8%); }
+  100% { transform: translate(0, 0); }
 }
 @keyframes avatar-bob {
   0%, 100% { transform: translateY(0); }
@@ -592,16 +632,27 @@ button.avatar {
   .avatar-face.is-idle .avatar-blink,
   .avatar-face.is-working .avatar-blink,
   .avatar-face.is-blocked .avatar-blink,
-  .avatar-face.is-blocked .avatar-eye,
+  .avatar-face.is-blocked .avatar-eye:first-child,
+  .avatar-face.is-blocked .avatar-eye:last-child,
+  .avatar-face.is-happy .avatar-gaze,
   .avatar-face.is-tracking .avatar-gaze,
-  .avatar-orbit-ring,
-  .avatar-orbit-dots,
-  .avatar-orbit-dots i {
+  .avatar-pill,
+  .avatar-arc {
     animation: none;
     transition: none;
   }
 }
-.avatar-letter { z-index: 0; }
+/* ponytail: the letter span doubles as the disc that occludes the back hoop —
+   background: inherit takes the container's colour, so no extra element. */
+.avatar-letter {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 1;
+  background: inherit;
+  border-radius: inherit;
+}
 .avatar-img {
   position: absolute;
   inset: 0;
@@ -617,76 +668,70 @@ button.avatar {
 .avatar.is-blocked {
   overflow: visible;
 }
+/* The hoop plane: a circle squashed into a tilted ellipse. Bead sizes below are
+   pre-divided by this 0.42 so they render round. */
 .avatar-orbit {
   position: absolute;
-  inset: -5px;
+  inset: -6px;
   pointer-events: none;
-  z-index: 3;
+  transform: scaleY(0.42);
 }
-.avatar-orbit-ring {
+.avatar-orbit.is-back { z-index: 0; }
+.avatar-orbit.is-front { z-index: 3; }
+.avatar-orbit i {
   position: absolute;
   inset: 0;
-  border-radius: 50%;
-  border: 1.5px solid color-mix(in srgb, var(--working) 22%, transparent);
-  border-top-color: var(--working);
-  animation: avatar-orbit-spin 1.15s linear infinite;
+  animation: avatar-hoop 1.9s linear infinite;
   animation-delay: calc(var(--avatar-phase, 0) * -0.2s);
 }
-.avatar-orbit.is-blocked .avatar-orbit-ring {
-  border-color: color-mix(in srgb, var(--blocked) 28%, transparent);
-  border-top-color: var(--blocked);
-  animation-duration: 2.4s;
-}
-.avatar-orbit-dots {
-  position: absolute;
-  inset: 0;
-  animation: avatar-orbit-spin 1.35s linear infinite;
-  animation-delay: calc(var(--avatar-phase, 0) * -0.35s);
-}
-.avatar-orbit.is-blocked .avatar-orbit-dots {
-  animation-duration: 2.8s;
-}
-.avatar-orbit-dots i {
+.avatar-orbit b {
   position: absolute;
   left: 50%;
-  top: -1px;
-  width: 5px;
-  height: 5px;
-  margin-left: -2.5px;
+  top: 0;
+  width: 4.5px;
+  height: 10.7px;
+  margin: -5.35px 0 0 -2.25px;
   border-radius: 50%;
   background: var(--working);
   box-shadow: 0 0 7px color-mix(in srgb, var(--working) 85%, white);
+  animation:
+    avatar-hoop 1.9s linear infinite reverse,
+    avatar-hoop-front 1.9s linear infinite;
+  animation-delay: calc(var(--avatar-phase, 0) * -0.2s);
 }
-.avatar-orbit.is-blocked .avatar-orbit-dots i {
+.avatar-orbit.is-back b {
+  width: 3.2px;
+  height: 7.6px;
+  margin: -3.8px 0 0 -1.6px;
+  animation-name: avatar-hoop, avatar-hoop-back;
+}
+.avatar-orbit.is-blocked i,
+.avatar-orbit.is-blocked b {
+  animation-duration: 3.4s;
+}
+.avatar-orbit.is-blocked b {
   background: var(--blocked);
   box-shadow: 0 0 7px color-mix(in srgb, var(--blocked) 80%, white);
 }
-.avatar-orbit-dots i:nth-child(2) {
-  top: auto;
-  bottom: 2px;
-  left: 14%;
-  width: 3px;
-  height: 3px;
-  margin-left: 0;
-  opacity: 0.75;
-  animation: avatar-orbit-twinkle 1.1s ease-in-out infinite;
-}
-.avatar-orbit-dots i:nth-child(3) {
-  top: 58%;
-  left: auto;
-  right: -1px;
-  width: 3.5px;
-  height: 3.5px;
-  margin-left: 0;
-  opacity: 0.9;
-  animation: avatar-orbit-twinkle 1.4s ease-in-out infinite 0.3s;
-}
-@keyframes avatar-orbit-spin {
+@keyframes avatar-hoop {
   to { transform: rotate(360deg); }
 }
-@keyframes avatar-orbit-twinkle {
-  0%, 100% { opacity: 0.35; transform: scale(0.75); }
-  50% { opacity: 1; transform: scale(1); }
+@keyframes avatar-hoop-back {
+  0%, 22% { opacity: 1; }
+  28%, 72% { opacity: 0; }
+  78%, 100% { opacity: 1; }
+}
+@keyframes avatar-hoop-front {
+  0%, 22% { opacity: 0; }
+  28%, 72% { opacity: 1; }
+  78%, 100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .avatar-orbit i,
+  .avatar-orbit b {
+    animation: none;
+  }
+  .avatar-orbit.is-back { display: none; }
 }
 .mention-chip .avatar-orbit {
   display: none;
@@ -694,9 +739,10 @@ button.avatar {
 .who-avatar .avatar-orbit {
   inset: -3px;
 }
-.who-avatar .avatar-orbit-dots i {
-  width: 3.5px;
-  height: 3.5px;
+.who-avatar .avatar-orbit b {
+  width: 3.6px;
+  height: 8.6px;
+  margin: -4.3px 0 0 -1.8px;
 }
 .badge {
   position: absolute;

@@ -37,16 +37,19 @@ function statusDot(badge?: string | null) {
   return null;
 }
 
-function StatusOrbit({ status }: { status: AgentStatus | null }) {
+function StatusOrbit({
+  status,
+  half,
+}: {
+  status: AgentStatus | null;
+  half: "back" | "front";
+}) {
   if (status !== "working" && status !== "blocked") return null;
   return (
-    <span className={`avatar-orbit is-${status}`} aria-hidden>
-      <span className="avatar-orbit-ring" />
-      <span className="avatar-orbit-dots">
-        <i />
-        <i />
-        <i />
-      </span>
+    <span className={`avatar-orbit is-${status} is-${half}`} aria-hidden>
+      <i>
+        <b />
+      </i>
     </span>
   );
 }
@@ -87,6 +90,7 @@ export function Avatar({
     .join(" ");
   const body = (
     <>
+      <StatusOrbit status={live} half="back" />
       {showImg ? (
         <img
           className="avatar-img"
@@ -106,7 +110,7 @@ export function Avatar({
       {!showFace ? (
         <span className="avatar-letter">{letter || initialOf(name)}</span>
       ) : null}
-      <StatusOrbit status={live} />
+      <StatusOrbit status={live} half="front" />
       {statusDot(badge)}
       {overlay}
     </>
