@@ -58,6 +58,8 @@ export type ChannelInfo = {
   preview?: string | null;
 };
 
+export type MessageKind = "sent" | "received" | "routine" | "handoff";
+
 export type ChatMessage = {
   id: string;
   role: Role;
@@ -65,6 +67,7 @@ export type ChatMessage = {
   text: string;
   ts: number;
   queued?: boolean;
+  kind?: MessageKind | null;
 };
 
 export type PendingAvatar = {

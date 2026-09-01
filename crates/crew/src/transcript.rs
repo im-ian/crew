@@ -7,7 +7,8 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::paths;
-use crate::protocol::{ChatMessage, Event, Role};
+use crate::protocol::{ChatMessage, Event, MessageKind, Role};
+use crate::rows::{is_crew_marker_line, strip_crew_markers};
 
 fn channel_key(id: &str) -> String {
     format!("ch:{id}")
@@ -19,6 +20,11 @@ const EXPECT_TIMEOUT: Duration = Duration::from_millis(2000);
 
 static CHATS: OnceLock<Mutex<HashMap<String, AgentChat>>> = OnceLock::new();
 static ID_SEQ: AtomicU64 = AtomicU64::new(1);
+static SEAL_HOOK: OnceLock<fn(&str, &ChatMessage)> = OnceLock::new();
+
+pub fn set_seal_hook(hook: fn(&str, &ChatMessage)) {
+    let _ = SEAL_HOOK.set(hook);
+}
 
 struct AgentChat {
     messages: Vec<ChatMessage>,
@@ -149,16 +155,62 @@ pub fn preview(agent: &str) -> Option<String> {
 }
 
 pub fn push_user(agent: &str, from: &str, text: &str) -> ChatMessage {
-    push_role(agent, Role::User, from, text, true)
+    push_role(agent, Role::User, from, text, true, None)
 }
 
 pub fn push_system(agent: &str, from: &str, text: &str) -> ChatMessage {
-    push_role(agent, Role::System, from, text, true)
+    push_role(
+        agent,
+        Role::System,
+        from,
+        text,
+        true,
+        infer_system_kind(from),
+    )
 }
 
 /// System row that must not open a turn, e.g. a "sent to other session" receipt.
 pub fn push_notice(agent: &str, from: &str, text: &str) -> ChatMessage {
-    push_role(agent, Role::System, from, text, false)
+    push_role(
+        agent,
+        Role::System,
+        from,
+        text,
+        false,
+        Some(MessageKind::Sent),
+    )
+}
+
+pub fn push_handoff(agent: &str, from: &str, text: &str) -> ChatMessage {
+    push_role(
+        agent,
+        Role::System,
+        from,
+        text,
+        false,
+        Some(MessageKind::Handoff),
+    )
+}
+
+pub fn push_routine(agent: &str, name: &str, text: &str) -> ChatMessage {
+    push_role(
+        agent,
+        Role::System,
+        name,
+        text,
+        true,
+        Some(MessageKind::Routine),
+    )
+}
+
+fn infer_system_kind(from: &str) -> Option<MessageKind> {
+    if from.starts_with("to:") {
+        Some(MessageKind::Sent)
+    } else if from.starts_with('#') {
+        Some(MessageKind::Received)
+    } else {
+        Some(MessageKind::Received)
+    }
 }
 
 /// Record injected PTY/prompt text so local echo is not stored as assistant output.
@@ -184,7 +236,11 @@ pub fn channel_preview(id: &str) -> Option<String> {
 
 pub fn push_channel(id: &str, role: Role, from: &str, text: &str) -> ChatMessage {
     let key = channel_key(id);
-    let msg = push_role(&key, role, from, text, false);
+    let kind = match role {
+        Role::System => infer_system_kind(from),
+        _ => None,
+    };
+    let msg = push_role(&key, role, from, text, false, kind);
     let _ = crate::daemon::events().send(Event::ChannelMessage {
         channel: id.to_string(),
         message: msg.clone(),
@@ -192,7 +248,14 @@ pub fn push_channel(id: &str, role: Role, from: &str, text: &str) -> ChatMessage
     msg
 }
 
-fn push_role(agent: &str, role: Role, from: &str, text: &str, expect: bool) -> ChatMessage {
+fn push_role(
+    agent: &str,
+    role: Role,
+    from: &str,
+    text: &str,
+    expect: bool,
+    kind: Option<MessageKind>,
+) -> ChatMessage {
     seal_now(agent);
     let msg = ChatMessage {
         id: new_id(),
@@ -201,6 +264,7 @@ fn push_role(agent: &str, role: Role, from: &str, text: &str, expect: bool) -> C
         text: text.to_string(),
         ts: now_ms(),
         queued: false,
+        kind,
     };
     if let Ok(mut map) = chats().lock() {
         let chat = map
@@ -317,6 +381,7 @@ pub fn set_pending_assistant(agent: &str, text: &str) {
                 text: cleaned,
                 ts: now_ms(),
                 queued: false,
+                kind: None,
             };
             chat.messages.push(m.clone());
             chat.pending_idx = Some(chat.messages.len() - 1);
@@ -381,6 +446,7 @@ pub fn on_pty_bytes(agent: &str, bytes: &[u8]) {
                 text: cleaned,
                 ts: now_ms(),
                 queued: false,
+                kind: None,
             };
             chat.messages.push(m.clone());
             chat.pending_idx = Some(chat.messages.len() - 1);
@@ -482,7 +548,7 @@ fn maybe_seal(agent: &str) {
         finish_pending(agent, chat)
     };
     if let Some(msg) = emitted {
-        emit(agent, msg);
+        emit_sealed(agent, msg);
     }
 }
 
@@ -498,7 +564,7 @@ fn seal_now(agent: &str) {
         finish_pending(agent, chat)
     };
     if let Some(msg) = emitted {
-        emit(agent, msg);
+        emit_sealed(agent, msg);
     }
 }
 
@@ -568,6 +634,13 @@ fn emit(agent: &str, message: ChatMessage) {
     });
 }
 
+fn emit_sealed(agent: &str, message: ChatMessage) {
+    emit(agent, message.clone());
+    if let Some(hook) = SEAL_HOOK.get() {
+        hook(agent, &message);
+    }
+}
+
 fn decode_utf8_keep_tail(buf: &[u8]) -> (String, Vec<u8>) {
     match std::str::from_utf8(buf) {
         Ok(s) => (s.to_string(), Vec::new()),
@@ -630,18 +703,6 @@ fn normalize_text(s: &str) -> String {
     s.replace("\r\n", "\n").replace('\r', "\n")
 }
 
-fn is_crew_marker_line(line: &str) -> bool {
-    let t = line.trim();
-    if !t.starts_with("[crew ") || !t.ends_with(']') {
-        return false;
-    }
-    let inner = &t["[crew ".len()..t.len() - 1];
-    inner == "system"
-        || inner.starts_with("from:")
-        || inner.starts_with("routine:")
-        || inner.starts_with("channel:")
-}
-
 fn last_inbound_text(chat: &AgentChat) -> Option<&str> {
     chat.messages.iter().enumerate().rev().find_map(|(i, m)| {
         if chat.pending_idx == Some(i) || m.role == Role::Assistant {
@@ -671,20 +732,6 @@ fn is_inbound_echo(chat: &AgentChat, text: &str) -> bool {
         }
     }
     any
-}
-
-fn strip_crew_markers(s: &str) -> String {
-    let mut out = String::new();
-    for line in s.split('\n') {
-        if is_crew_marker_line(line) {
-            continue;
-        }
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        out.push_str(line);
-    }
-    out
 }
 
 fn common_prefix_bytes(a: &str, b: &str) -> usize {
@@ -802,6 +849,7 @@ mod tests {
             text: "hi".into(),
             ts: 9,
             queued: false,
+            kind: None,
         };
         let line = serde_json::to_string(&msg).unwrap();
         assert!(!line.contains("queued"), "{line}");

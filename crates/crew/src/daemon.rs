@@ -17,8 +17,9 @@ use crate::config::{
 use crate::cron;
 use crate::headless::{self, HeadlessSession};
 use crate::paths;
-use crate::protocol::{AgentInfo, AgentStatus, ChannelInfo, Event, Request, Role};
+use crate::protocol::{AgentInfo, AgentStatus, ChannelInfo, ChatMessage, Event, Request, Role};
 use crate::pty_agent::{self, PtySession};
+use crate::targeting::{self, TurnOrigin};
 
 const DEFAULT_COLS: u16 = 100;
 const DEFAULT_ROWS: u16 = 32;
@@ -164,11 +165,31 @@ static AGENTS: OnceLock<Mutex<HashMap<String, LiveAgent>>> = OnceLock::new();
 static CONFIGS: OnceLock<Mutex<HashMap<String, AgentConfig>>> = OnceLock::new();
 static CHANNELS: OnceLock<Mutex<HashMap<String, Channel>>> = OnceLock::new();
 static INBOX: OnceLock<Mutex<HashMap<String, VecDeque<PendingDelivery>>>> = OnceLock::new();
+static ORIGINS: OnceLock<Mutex<HashMap<String, TurnOrigin>>> = OnceLock::new();
 
 struct PendingDelivery {
     text: String,
     newline: bool,
     msg_id: Option<String>,
+    origin: TurnOrigin,
+}
+
+fn origins() -> &'static Mutex<HashMap<String, TurnOrigin>> {
+    ORIGINS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn set_origin(id: &str, origin: TurnOrigin) {
+    if let Ok(mut map) = origins().lock() {
+        map.insert(id.to_string(), origin);
+    }
+}
+
+fn get_origin(id: &str) -> Option<TurnOrigin> {
+    origins().lock().ok()?.get(id).cloned()
+}
+
+fn take_origin(id: &str) -> Option<TurnOrigin> {
+    origins().lock().ok()?.remove(id)
 }
 
 pub fn events() -> &'static broadcast::Sender<Event> {
@@ -205,6 +226,7 @@ fn enqueue_delivery(
     text: &str,
     newline: bool,
     msg_id: Option<String>,
+    origin: TurnOrigin,
 ) -> anyhow::Result<()> {
     let mut map = inbox().lock().expect("inbox mutex");
     let q = map.entry(id.to_string()).or_default();
@@ -215,6 +237,7 @@ fn enqueue_delivery(
         text: text.to_string(),
         newline,
         msg_id: msg_id.clone(),
+        origin,
     });
     drop(map);
     if let Some(mid) = msg_id {
@@ -247,12 +270,14 @@ fn agent_busy(id: &str) -> anyhow::Result<bool> {
     }
 }
 
-fn start_delivery(id: &str, text: &str, newline: bool) -> anyhow::Result<()> {
+fn start_delivery(id: &str, text: &str, newline: bool, origin: TurnOrigin) -> anyhow::Result<()> {
     crate::transcript::expect_echo(id, text);
+    set_origin(id, origin);
     match deliver(id, text, newline) {
         Ok(()) => Ok(()),
         Err(err) => {
             crate::transcript::cancel_expect(id);
+            take_origin(id);
             Err(err)
         }
     }
@@ -263,13 +288,14 @@ fn submit_delivery(
     text: &str,
     newline: bool,
     msg_id: Option<String>,
+    origin: TurnOrigin,
 ) -> anyhow::Result<()> {
     if agent_busy(id)? {
-        return enqueue_delivery(id, text, newline, msg_id);
+        return enqueue_delivery(id, text, newline, msg_id, origin);
     }
-    match start_delivery(id, text, newline) {
+    match start_delivery(id, text, newline, origin.clone()) {
         Ok(()) => Ok(()),
-        Err(err) if is_busy_err(&err) => enqueue_delivery(id, text, newline, msg_id),
+        Err(err) if is_busy_err(&err) => enqueue_delivery(id, text, newline, msg_id, origin),
         Err(err) => Err(err),
     }
 }
@@ -289,7 +315,7 @@ pub(crate) fn pump_inbox(id: &str) {
     let Some(item) = next else {
         return;
     };
-    match start_delivery(id, &item.text, item.newline) {
+    match start_delivery(id, &item.text, item.newline, item.origin.clone()) {
         Ok(()) => {
             if let Some(ref mid) = item.msg_id {
                 crate::transcript::set_queued(id, mid, false);
@@ -416,6 +442,8 @@ pub async fn run() -> anyhow::Result<()> {
         );
     }
     paths::remove_stale_socket();
+
+    crate::transcript::set_seal_hook(on_assistant_sealed);
 
     let cfg = Config::load()?;
     {
@@ -642,9 +670,15 @@ fn tick_routines() {
 
 fn fire_routine(agent: &str, name: &str, prompt: &str) -> anyhow::Result<()> {
     ensure_accepts_turn(agent)?;
-    let msg = crate::transcript::push_system(agent, name, prompt);
+    let msg = crate::transcript::push_routine(agent, name, prompt);
     let envelope = crate::protocol::routine_envelope(name, prompt);
-    submit_delivery(agent, &envelope, true, Some(msg.id))?;
+    submit_delivery(
+        agent,
+        &envelope,
+        true,
+        Some(msg.id),
+        TurnOrigin::routine(name),
+    )?;
     eprintln!("[crew] routine {agent}/{name}");
     Ok(())
 }
@@ -1080,9 +1114,23 @@ fn messages_agent(id: &str) -> anyhow::Result<Event> {
 
 fn send_agent(id: &str, text: &str) -> anyhow::Result<()> {
     ensure_accepts_turn(id)?;
+    let roster = roster_vec();
     let msg = crate::transcript::push_user(id, "user", text);
-    let delivered = crate::config::with_mention_hint(text, id, &roster_vec());
-    submit_delivery(id, &delivered, true, Some(msg.id))
+    let mentions = targeting::one_on_one_tell_targets(text, id, &roster);
+    let delivered = crate::config::with_mention_hint(text, id, &roster);
+    submit_delivery(id, &delivered, true, Some(msg.id), TurnOrigin::user())?;
+    for to in mentions {
+        let origin = TurnOrigin::mention_tell(id);
+        match tell_agent_origin("user", &to, text, Some(origin)) {
+            Ok(()) => {
+                crate::transcript::push_notice(id, &format!("to:{to}"), text);
+            }
+            Err(err) => {
+                eprintln!("[crew] mention tell {id} -> {to}: {err:#}");
+            }
+        }
+    }
+    Ok(())
 }
 
 fn ensure_accepts_turn(id: &str) -> anyhow::Result<()> {
@@ -1112,6 +1160,15 @@ fn from_id(from: &str) -> String {
 }
 
 fn tell_agent(from: &str, to: &str, text: &str) -> anyhow::Result<()> {
+    tell_agent_origin(from, to, text, None)
+}
+
+fn tell_agent_origin(
+    from: &str,
+    to: &str,
+    text: &str,
+    origin: Option<TurnOrigin>,
+) -> anyhow::Result<()> {
     let to = to.trim();
     if to.is_empty() {
         anyhow::bail!("unknown agent {to}");
@@ -1126,7 +1183,10 @@ fn tell_agent(from: &str, to: &str, text: &str) -> anyhow::Result<()> {
     ensure_accepts_turn(to)?;
     let msg = crate::transcript::push_system(to, &from, text);
     let envelope = crate::protocol::envelope(&from, text);
-    submit_delivery(to, &envelope, true, Some(msg.id))?;
+    let parsed = targeting::origin_from_envelope(&envelope);
+    let parent = origin.or_else(|| get_origin(&from));
+    let origin = targeting::inherit_origin(parent.as_ref(), parsed);
+    submit_delivery(to, &envelope, true, Some(msg.id), origin)?;
     if from != "user" && from != to {
         let known = agents()
             .lock()
@@ -1690,14 +1750,27 @@ fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
     };
     crate::transcript::push_channel(&ch.id, role, &from, text);
     let envelope = crate::protocol::channel_envelope(&ch.id, &from, text);
-    let targets: Vec<String> = if from == "user" {
-        ch.members.clone()
+    let default_one = from == "user";
+    let last = if default_one {
+        channel_last_member_speaker(&ch.id, &ch.members)
     } else {
-        ch.members.iter().filter(|m| *m != &from).cloned().collect()
+        None
     };
+    let mut pool = ch.members.clone();
+    if from != "user" {
+        pool.retain(|m| m != &from);
+    }
+    let targets = targeting::channel_wake_targets(
+        text,
+        &pool,
+        &roster_vec(),
+        last.as_deref(),
+        default_one,
+    );
     if targets.is_empty() {
         return Ok(());
     }
+    let origin = TurnOrigin::channel(&ch.id, &from);
     let mut sent = 0usize;
     let mut last_err: Option<anyhow::Error> = None;
     for to in &targets {
@@ -1705,7 +1778,7 @@ fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
             continue;
         }
         let msg = crate::transcript::push_system(to, &format!("#{channel}"), text);
-        match submit_delivery(to, &envelope, true, Some(msg.id)) {
+        match submit_delivery(to, &envelope, true, Some(msg.id), origin.clone()) {
             Ok(()) => sent += 1,
             Err(err) => last_err = Some(err),
         }
@@ -1719,6 +1792,56 @@ fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn channel_last_member_speaker(channel: &str, members: &[String]) -> Option<String> {
+    crate::transcript::channel_messages(channel)
+        .into_iter()
+        .rev()
+        .find_map(|m| {
+            if m.from == "user" || m.role == Role::User {
+                return None;
+            }
+            members.iter().find(|id| *id == &m.from).cloned()
+        })
+}
+
+fn known_channel(id: &str) -> bool {
+    channels()
+        .lock()
+        .ok()
+        .map(|m| m.contains_key(id))
+        .unwrap_or(false)
+}
+
+fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
+    if msg.role != Role::Assistant {
+        return;
+    }
+    let text = crate::rows::display_text(msg);
+    if text.is_empty() {
+        return;
+    }
+    let Some(origin) = take_origin(agent) else {
+        return;
+    };
+    let targets = targeting::postback_targets(&origin, agent);
+    if let Some(channel) = targets.channel {
+        if known_channel(&channel) {
+            let dup = crate::transcript::channel_messages(&channel)
+                .last()
+                .map(|m| m.from == agent && m.text.trim() == text)
+                .unwrap_or(false);
+            if !dup {
+                crate::transcript::push_channel(&channel, Role::Assistant, agent, &text);
+            }
+        }
+    }
+    if let Some(peer) = targets.agent {
+        if known_agent(&peer) {
+            crate::transcript::push_handoff(&peer, agent, &text);
+        }
+    }
+}
+
 #[cfg(test)]
 mod inbox_tests {
     use super::*;
@@ -1727,8 +1850,8 @@ mod inbox_tests {
     fn inbox_is_fifo() {
         let id = "test-inbox-fifo";
         clear_inbox(id);
-        enqueue_delivery(id, "a", true, None).unwrap();
-        enqueue_delivery(id, "b", true, None).unwrap();
+        enqueue_delivery(id, "a", true, None, TurnOrigin::user()).unwrap();
+        enqueue_delivery(id, "b", true, None, TurnOrigin::user()).unwrap();
         let mut map = inbox().lock().unwrap();
         let q = map.get_mut(id).unwrap();
         assert_eq!(q.pop_front().unwrap().text, "a");
@@ -1742,10 +1865,91 @@ mod inbox_tests {
         let id = "test-inbox-full";
         clear_inbox(id);
         for i in 0..MAX_INBOX {
-            enqueue_delivery(id, &i.to_string(), true, None).unwrap();
+            enqueue_delivery(id, &i.to_string(), true, None, TurnOrigin::user()).unwrap();
         }
-        let err = enqueue_delivery(id, "overflow", true, None).unwrap_err();
+        let err = enqueue_delivery(id, "overflow", true, None, TurnOrigin::user()).unwrap_err();
         assert!(err.to_string().contains("inbox full"), "{err}");
         clear_inbox(id);
+    }
+
+    #[test]
+    fn sealed_reply_posts_back_to_origin_channel() {
+        let ch = format!(
+            "room-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let speaker = format!("beta-{ch}");
+        channels().lock().unwrap().insert(
+            ch.clone(),
+            crate::config::Channel::new(ch.clone(), ch.clone(), vec![speaker.clone()]).unwrap(),
+        );
+        configs().lock().unwrap().insert(
+            speaker.clone(),
+            crate::config::AgentConfig::new(
+                speaker.clone(),
+                speaker.clone(),
+                vec!["cat".into()],
+                None,
+            ),
+        );
+        crate::transcript::load_channel(&ch);
+        crate::transcript::push_channel(&ch, Role::User, "user", "hello");
+        set_origin(&speaker, TurnOrigin::channel(&ch, "user"));
+        let reply = ChatMessage {
+            id: "r1".into(),
+            role: Role::Assistant,
+            from: speaker.clone(),
+            text: "on it".into(),
+            ts: 1,
+            queued: false,
+            kind: None,
+        };
+        on_assistant_sealed(&speaker, &reply);
+        let msgs = crate::transcript::channel_messages(&ch);
+        let last = msgs.last().expect("channel reply");
+        assert_eq!(last.from, speaker);
+        assert_eq!(last.role, Role::Assistant);
+        assert_eq!(last.text, "on it");
+        crate::transcript::drop_channel(&ch);
+        channels().lock().unwrap().remove(&ch);
+        configs().lock().unwrap().remove(&speaker);
+    }
+
+    #[test]
+    fn sealed_reply_handoff_to_origin_agent() {
+        let peer = format!(
+            "alpha-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let speaker = format!("beta-{peer}");
+        configs().lock().unwrap().insert(
+            peer.clone(),
+            crate::config::AgentConfig::new(peer.clone(), peer.clone(), vec!["cat".into()], None),
+        );
+        crate::transcript::load_agent(&peer);
+        set_origin(&speaker, TurnOrigin::mention_tell(&peer));
+        let reply = ChatMessage {
+            id: "r2".into(),
+            role: Role::Assistant,
+            from: speaker.clone(),
+            text: "reviewed".into(),
+            ts: 1,
+            queued: false,
+            kind: None,
+        };
+        on_assistant_sealed(&speaker, &reply);
+        let msgs = crate::transcript::messages(&peer);
+        let last = msgs.last().expect("handoff");
+        assert_eq!(last.from, speaker);
+        assert_eq!(last.kind, Some(crate::protocol::MessageKind::Handoff));
+        assert_eq!(last.text, "reviewed");
+        crate::transcript::drop_agent(&peer);
+        configs().lock().unwrap().remove(&peer);
     }
 }

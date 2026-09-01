@@ -32,16 +32,31 @@ export function Composer({
   const matches = useMemo(() => {
     if (!mention) return [];
     const q = mention.query.toLowerCase();
-    return agents
-      .filter((a) => {
-        if (selectedKind === "agent" && a.id === selected) return false;
-        if (!q) return true;
-        return (
-          a.id.toLowerCase().includes(q) ||
-          (a.name || "").toLowerCase().includes(q)
-        );
-      })
-      .slice(0, 8);
+    const everyone: AgentInfo = {
+      id: "everyone",
+      name: "everyone",
+      status: "idle",
+      cmd: [],
+      cwd: "",
+      routines: [],
+    };
+    const bots = agents.filter((a) => {
+      if (selectedKind === "agent" && a.id === selected) return false;
+      if (!q) return true;
+      return (
+        a.id.toLowerCase().includes(q) ||
+        (a.name || "").toLowerCase().includes(q)
+      );
+    });
+    const out: AgentInfo[] = [];
+    if (
+      selectedKind === "channel" &&
+      (!q || "everyone".startsWith(q) || "all".startsWith(q) || "here".startsWith(q))
+    ) {
+      out.push(everyone);
+    }
+    out.push(...bots);
+    return out.slice(0, 8);
   }, [agents, mention, selected, selectedKind]);
 
   function fit() {

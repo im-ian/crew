@@ -15,6 +15,8 @@ mod models;
 mod paths;
 mod protocol;
 mod pty_agent;
+mod rows;
+mod targeting;
 mod transcript;
 
 use config::{

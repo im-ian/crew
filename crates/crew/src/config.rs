@@ -715,12 +715,12 @@ pub fn with_mention_hint(text: &str, self_id: &str, roster: &[AgentConfig]) -> S
         return text.to_string();
     }
     format!(
-        "{text}\n\n[crew system]\nUser @mentioned teammates: {}. They named them for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>`. Do not ask the user to switch chats. Do not pretend.",
+        "{text}\n\n[crew system]\nUser already messaged teammates via crew: {}. They have this request. Stay in this session. Do not ask the user to switch chats. Do not pretend.",
         ids.join(", ")
     )
 }
 
-fn mention_tokens(text: &str) -> Vec<String> {
+pub(crate) fn mention_tokens(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut prev_ws = true;
     for (idx, ch) in text.char_indices() {
@@ -744,7 +744,7 @@ fn is_mention_punct(c: char) -> bool {
     )
 }
 
-fn resolve_mention(token: &str, self_id: &str, roster: &[AgentConfig]) -> Option<String> {
+pub(crate) fn resolve_mention(token: &str, self_id: &str, roster: &[AgentConfig]) -> Option<String> {
     let lower = token.to_lowercase();
     roster
         .iter()
@@ -1479,7 +1479,7 @@ mod tests {
         assert!(hinted.starts_with("ping @Beta please"));
         assert!(hinted.contains("[crew system]"));
         assert!(hinted.contains("beta"));
-        assert!(hinted.contains("crew tell"));
+        assert!(hinted.contains("already messaged teammates"));
         assert_eq!(
             with_mention_hint("no mentions", "alpha", &roster),
             "no mentions"

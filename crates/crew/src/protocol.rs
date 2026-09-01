@@ -253,6 +253,15 @@ impl Role {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageKind {
+    Sent,
+    Received,
+    Routine,
+    Handoff,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub id: String,
@@ -262,6 +271,8 @@ pub struct ChatMessage {
     pub ts: u64,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub queued: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<MessageKind>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -455,6 +466,7 @@ mod tests {
             text: "hello".into(),
             ts: 1,
             queued: false,
+            kind: None,
         };
         let line = serde_json::to_string(&msg).unwrap();
         assert!(line.contains("\"role\":\"user\""));

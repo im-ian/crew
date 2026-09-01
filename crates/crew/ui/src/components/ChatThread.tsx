@@ -200,27 +200,39 @@ function SystemOrIncoming({
     );
   }
   const from = String(m.from || "");
-  const sentId = sentTarget(from);
-  if (sentId) {
+  const classKind = rowClass(m, agents);
+  if (classKind === "sent" || sentTarget(from)) {
     return (
       <TransferNote
         kind="sent"
-        otherId={sentId}
-        message={m}
+        otherId={sentTarget(from) || from}
+        message={{ ...m, text: displayText(m) }}
         agents={agents}
         channels={channels}
         onSelectAgent={onSelectAgent}
       />
     );
   }
-  const agent = agents.find((a) => a.id === m.from) ?? null;
+  if (classKind === "handoff") {
+    return (
+      <TransferNote
+        kind="handoff"
+        otherId={from}
+        message={{ ...m, text: displayText(m) }}
+        agents={agents}
+        channels={channels}
+        onSelectAgent={onSelectAgent}
+      />
+    );
+  }
+  const agent = agents.find((a) => a.id === from) ?? null;
   const fromChannel = from.startsWith("#");
-  if (agent || fromChannel) {
+  if (classKind === "received" || agent || fromChannel) {
     return (
       <TransferNote
         kind="received"
         otherId={from}
-        message={m}
+        message={{ ...m, text: displayText(m) }}
         agents={agents}
         channels={channels}
         onSelectAgent={onSelectAgent}
@@ -230,7 +242,7 @@ function SystemOrIncoming({
   return (
     <div className={"sys" + (m.queued ? " queued" : "")}>
       <div className="sys-from">{`루틴 · ${m.from || ""}`}</div>
-      <div className="sys-text">{m.text || ""}</div>
+      <div className="sys-text">{displayText(m)}</div>
       {m.queued ? <QueueWait /> : null}
     </div>
   );
@@ -244,7 +256,7 @@ function TransferNote({
   channels,
   onSelectAgent,
 }: {
-  kind: "sent" | "received";
+  kind: "sent" | "received" | "handoff";
   otherId: string;
   message: ChatMessage;
   agents: AgentInfo[];
@@ -258,7 +270,8 @@ function TransferNote({
     : displayWho({ ...m, from: otherId }, agent);
   const open =
     onSelectAgent && agent ? () => onSelectAgent(agent.id) : undefined;
-  const label = kind === "sent" ? "보낸 메시지" : "받은 메시지";
+  const label =
+    kind === "sent" ? "보낸 메시지" : kind === "handoff" ? "핸드오프" : "받은 메시지";
   return (
     <div className={"xfer" + (m.queued ? " queued" : "")}>
       <div className="xfer-chip">
@@ -528,6 +541,25 @@ function isPlainEcho(raw: string, messages: ChatMessage[], index: number): boole
     }
   }
   return false;
+}
+
+function rowClass(
+  m: ChatMessage,
+  agents: AgentInfo[],
+): "sent" | "received" | "routine" | "handoff" | "user" | "assistant" | "hidden" {
+  if (m.kind === "sent" || m.kind === "received" || m.kind === "routine" || m.kind === "handoff") {
+    return m.kind;
+  }
+  if (m.role === "user") return "user";
+  if (m.role === "assistant") return "assistant";
+  const from = String(m.from || "");
+  if (from.startsWith("to:")) return "sent";
+  if (from.startsWith("#") || agents.some((a) => a.id === from)) return "received";
+  return "routine";
+}
+
+function displayText(m: ChatMessage): string {
+  return stripCrewMarkers(m.text || "");
 }
 
 function visibleMessages(messages: ChatMessage[]): ChatMessage[] {
