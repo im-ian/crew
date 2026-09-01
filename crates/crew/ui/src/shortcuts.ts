@@ -8,6 +8,7 @@ export type Shortcut = {
 /** Shown in the help overlay, in order. Combos use Meta for ⌘/Ctrl. */
 export const SHORTCUTS: Shortcut[] = [
   { id: "help", combo: "Meta+/", group: "일반", label: "단축키 보기" },
+  { id: "settings", combo: "Meta+,", group: "일반", label: "설정" },
   { id: "search", combo: "Meta+K", group: "이동", label: "검색" },
   { id: "composer", combo: "Meta+J", group: "이동", label: "입력창" },
   { id: "prev-chat", combo: "Meta+Alt+ArrowUp", group: "이동", label: "이전 대화" },
@@ -130,6 +131,7 @@ function selfCheck() {
     [{ key: "n", metaKey: true }, true, "new-bot"],
     [{ key: "N", metaKey: true, shiftKey: true }, false, "new-channel"],
     [{ key: "/", metaKey: true }, false, "help"],
+    [{ key: ",", metaKey: true }, false, "settings"],
     [{ key: ".", metaKey: true }, true, "stop"],
     [{ key: "?", metaKey: true, shiftKey: true }, false, "help"],
     [{ key: "?", shiftKey: true }, false, "help"],

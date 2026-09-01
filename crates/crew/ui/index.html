@@ -4,6 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Crew</title>
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("crew.theme") || "dark";
+          var resolved = t;
+          if (t === "system") {
+            resolved = matchMedia("(prefers-color-scheme: light)").matches
+              ? "light"
+              : "dark";
+          }
+          if (resolved !== "light" && resolved !== "dark") resolved = "dark";
+          document.documentElement.dataset.theme = resolved;
+          document.documentElement.style.colorScheme = resolved;
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

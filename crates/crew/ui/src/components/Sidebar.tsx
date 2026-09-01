@@ -201,6 +201,7 @@ type Props = {
   onMove: (kind: Kind, id: string, groupId: string | null, beforeKey?: string | null) => void;
   unread?: string[];
   searchRef?: Ref<HTMLInputElement>;
+  onOpenSettings?: () => void;
 };
 
 function matches(parts: Array<string | null | undefined>, query: string): boolean {
@@ -273,6 +274,7 @@ export function Sidebar({
   onMove,
   unread = [],
   searchRef,
+  onOpenSettings,
 }: Props) {
   const all = toItems(agents, channels).filter((item) => {
     if (item.agent) {
@@ -678,6 +680,27 @@ export function Sidebar({
           </>
         )}
       </div>
+      {onOpenSettings ? (
+        <div className="rail-foot">
+          <button
+            type="button"
+            className="icon-btn"
+            title="설정 ⌘,"
+            aria-label="설정"
+            onClick={onOpenSettings}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="8" cy="8" r="2.15" stroke="currentColor" strokeWidth="1.4" />
+              <path
+                d="M8 1.7v1.6M8 12.7v1.6M1.7 8h1.6M12.7 8h1.6M3.4 3.4l1.15 1.15M11.45 11.45l1.15 1.15M3.4 12.6l1.15-1.15M11.45 4.55l1.15-1.15"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        </div>
+      ) : null}
       <div
         className="rail-resize"
         role="separator"

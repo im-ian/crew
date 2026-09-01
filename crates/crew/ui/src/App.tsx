@@ -8,12 +8,19 @@ import { AgentPane } from "./components/AgentPane";
 import { ChannelPane } from "./components/ChannelPane";
 import { NewBotModal } from "./components/NewBotModal";
 import { NewChannelModal } from "./components/NewChannelModal";
+import { SettingsPane } from "./components/SettingsPane";
 import { ShortcutHelp } from "./components/ShortcutHelp";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
 import { busyInChannel } from "./busy";
 import { railOrder } from "./groups";
 import { isTypingTarget, shortcutId } from "./shortcuts";
+import {
+  applyTheme,
+  loadThemePref,
+  saveThemePref,
+  type ThemePref,
+} from "./theme";
 import type { Kind } from "./types";
 import { useCrew } from "./useCrew";
 
@@ -23,6 +30,8 @@ export function App() {
   crewRef.current = crew;
   const [renameId, setRenameId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [theme, setTheme] = useState<ThemePref>(loadThemePref);
   const [jumpSeq, setJumpSeq] = useState(0);
   const renamingId = crew.pendingRenameId || renameId;
   const searchRef = useRef<HTMLInputElement>(null);
@@ -34,8 +43,23 @@ export function App() {
   }
 
   useEffect(() => {
+    applyTheme(theme);
+    saveThemePref(theme);
+    if (theme !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: light)");
+    const onChange = () => applyTheme("system");
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [theme]);
+
+  useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.isComposing) return;
+      if (settingsOpen && e.key === "Escape") {
+        e.preventDefault();
+        setSettingsOpen(false);
+        return;
+      }
       if (helpOpen && e.key === "Escape") {
         e.preventDefault();
         setHelpOpen(false);
@@ -52,6 +76,11 @@ export function App() {
         setHelpOpen((open) => !open);
         return;
       }
+      if (id === "settings") {
+        setSettingsOpen((open) => !open);
+        return;
+      }
+      if (settingsOpen) setSettingsOpen(false);
       if (id === "search") {
         searchRef.current?.focus();
         searchRef.current?.select();
@@ -124,7 +153,7 @@ export function App() {
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [helpOpen]);
+  }, [helpOpen, settingsOpen]);
 
   return (
     <div className="app">
@@ -152,6 +181,7 @@ export function App() {
         onMove={crew.moveToGroup}
         unread={crew.unread}
         searchRef={searchRef}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
       <main>
         <div className="titlebar-align" data-tauri-drag-region />
@@ -267,6 +297,16 @@ export function App() {
         x={crew.ctx.x}
         y={crew.ctx.y}
         items={menuItems(crew, setRenameId)}
+      />
+      <SettingsPane
+        open={settingsOpen}
+        theme={theme}
+        onTheme={setTheme}
+        onClose={() => setSettingsOpen(false)}
+        onOpenShortcuts={() => {
+          setSettingsOpen(false);
+          setHelpOpen(true);
+        }}
       />
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
       <Toast
