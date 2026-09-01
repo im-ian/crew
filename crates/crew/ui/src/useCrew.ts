@@ -73,6 +73,7 @@ export function useCrew() {
   const [ungrouped, setUngrouped] = useState<string[]>([]);
   const [pendingRenameId, setPendingRenameId] = useState<string | null>(null);
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
 
   const selectedRef = useRef({ id: selected, kind: selectedKind });
   selectedRef.current = { id: selected, kind: selectedKind };
@@ -142,20 +143,22 @@ export function useCrew() {
     setNewChannelOpen(false);
   }
 
-  function selectAgent(id: string) {
+  function selectAgent(id: string, highlight: string | null = null) {
     selectedRef.current = { id, kind: "agent" };
     setSelected(id);
     setSelectedKind("agent");
-    setStick(true);
+    setStick(!highlight);
+    setHighlightId(highlight);
     closePane();
     void refreshMessages();
   }
 
-  function selectChannel(id: string) {
+  function selectChannel(id: string, highlight: string | null = null) {
     selectedRef.current = { id, kind: "channel" };
     setSelected(id);
     setSelectedKind("channel");
-    setStick(true);
+    setStick(!highlight);
+    setHighlightId(highlight);
     closePane();
     void refreshMessages();
   }
@@ -327,9 +330,10 @@ export function useCrew() {
       return;
     }
     if (hit.kind === "message") {
-      const scope = hit.id.split(":")[0];
-      if (scope?.startsWith("ch:")) selectChannel(scope.slice(3));
-      else if (scope) selectAgent(scope);
+      const parsed = parseMessageHit(hit.id);
+      if (!parsed) return;
+      if (parsed.kind === "channel") selectChannel(parsed.id, parsed.messageId);
+      else selectAgent(parsed.id, parsed.messageId);
     }
   }
 
@@ -866,6 +870,8 @@ export function useCrew() {
     setQuery,
     searchHits,
     openSearchHit,
+    highlightId,
+    clearHighlight: () => setHighlightId(null),
     stick,
     setStick,
     connected,
@@ -926,4 +932,20 @@ export function useCrew() {
     saveMemory,
     showError,
   };
+}
+
+function parseMessageHit(
+  id: string,
+): { kind: Kind; id: string; messageId: string } | null {
+  const last = id.lastIndexOf(":");
+  if (last <= 0) return null;
+  const messageId = id.slice(last + 1);
+  const scope = id.slice(0, last);
+  if (!messageId || !scope) return null;
+  if (scope.startsWith("ch:")) {
+    const channel = scope.slice(3);
+    if (!channel) return null;
+    return { kind: "channel", id: channel, messageId };
+  }
+  return { kind: "agent", id: scope, messageId };
 }

@@ -20,6 +20,8 @@ type Props = {
   streaming?: boolean;
   onSelectAgent?: (id: string) => void;
   onApprove?: (allow: boolean) => void;
+  highlightId?: string | null;
+  onHighlightDone?: () => void;
 };
 
 export function ChatThread({
@@ -35,6 +37,8 @@ export function ChatThread({
   streaming = false,
   onSelectAgent,
   onApprove,
+  highlightId = null,
+  onHighlightDone,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [away, setAway] = useState(false);
@@ -65,9 +69,22 @@ export function ChatThread({
 
   useEffect(() => {
     const el = ref.current;
-    if (el && stick) el.scrollTop = el.scrollHeight;
+    if (el && stick && !highlightId) el.scrollTop = el.scrollHeight;
     syncStick();
-  }, [messages, stick, selected, selectedKind, streaming]);
+  }, [messages, stick, selected, selectedKind, streaming, highlightId]);
+
+  useEffect(() => {
+    if (!highlightId) return;
+    const root = ref.current;
+    if (!root) return;
+    const el = root.querySelector(
+      `[data-msg-id="${CSS.escape(highlightId)}"]`,
+    ) as HTMLElement | null;
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    const t = window.setTimeout(() => onHighlightDone?.(), 1600);
+    return () => window.clearTimeout(t);
+  }, [highlightId, messages, onHighlightDone]);
 
   return (
     <div className="thread-wrap">
@@ -80,6 +97,7 @@ export function ChatThread({
               streaming &&
               m.role === "assistant" &&
               i === list.length - 1;
+            const flash = highlightId === m.id;
             if (m.role === "system") {
               return (
                 <SystemOrIncoming
@@ -89,6 +107,7 @@ export function ChatThread({
                   channels={channels}
                   selectedKind={selectedKind}
                   onSelectAgent={openAgent}
+                  flash={flash}
                 />
               );
             }
@@ -103,6 +122,7 @@ export function ChatThread({
                 caret={caret}
                 onSelectAgent={openAgent}
                 onApprove={onApprove}
+                flash={flash}
               />
             );
           })
@@ -188,12 +208,14 @@ function SystemOrIncoming({
   channels,
   selectedKind,
   onSelectAgent,
+  flash = false,
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
   channels: ChannelInfo[];
   selectedKind: Kind;
   onSelectAgent?: (id: string) => void;
+  flash?: boolean;
 }) {
   if (m.from === "user") {
     return (
@@ -204,6 +226,7 @@ function SystemOrIncoming({
         selectedKind={selectedKind}
         currentAgent={null}
         onSelectAgent={onSelectAgent}
+        flash={flash}
       />
     );
   }
@@ -218,11 +241,19 @@ function SystemOrIncoming({
         agents={agents}
         channels={channels}
         onSelectAgent={onSelectAgent}
+        flash={flash}
       />
     );
   }
   if (classKind === "tool" || m.kind === "tool") {
-    return <ToolCardRow name={from || "tool"} detail={displayText(m)} />;
+    return (
+      <ToolCardRow
+        name={from || "tool"}
+        detail={displayText(m)}
+        id={m.id}
+        flash={flash}
+      />
+    );
   }
   if (classKind === "handoff") {
     return (
@@ -233,6 +264,7 @@ function SystemOrIncoming({
         agents={agents}
         channels={channels}
         onSelectAgent={onSelectAgent}
+        flash={flash}
       />
     );
   }
@@ -247,11 +279,15 @@ function SystemOrIncoming({
         agents={agents}
         channels={channels}
         onSelectAgent={onSelectAgent}
+        flash={flash}
       />
     );
   }
   return (
-    <div className={"sys" + (m.queued ? " queued" : "")}>
+    <div
+      className={"sys" + (m.queued ? " queued" : "") + (flash ? " flash" : "")}
+      data-msg-id={m.id}
+    >
       <div className="sys-from">{`루틴 · ${m.from || ""}`}</div>
       <div className="sys-text">{displayText(m)}</div>
       {m.queued ? <QueueWait /> : null}
@@ -266,6 +302,7 @@ function TransferNote({
   agents,
   channels,
   onSelectAgent,
+  flash = false,
 }: {
   kind: "sent" | "received" | "handoff";
   otherId: string;
@@ -273,6 +310,7 @@ function TransferNote({
   agents: AgentInfo[];
   channels: ChannelInfo[];
   onSelectAgent?: (id: string) => void;
+  flash?: boolean;
 }) {
   const fromChannel = otherId.startsWith("#");
   const agent = agents.find((a) => a.id === otherId) ?? null;
@@ -284,7 +322,10 @@ function TransferNote({
   const label =
     kind === "sent" ? "보낸 메시지" : kind === "handoff" ? "핸드오프" : "받은 메시지";
   return (
-    <div className={"xfer" + (m.queued ? " queued" : "")}>
+    <div
+      className={"xfer" + (m.queued ? " queued" : "") + (flash ? " flash" : "")}
+      data-msg-id={m.id}
+    >
       <div className="xfer-chip">
         <span className="xfer-label">{label}</span>
         <WhoButton
@@ -368,6 +409,7 @@ function Incoming({
   openName = true,
   onSelectAgent,
   onApprove,
+  flash = false,
 }: {
   message: ChatMessage;
   agent: AgentInfo | null;
@@ -377,6 +419,7 @@ function Incoming({
   openName?: boolean;
   onSelectAgent?: (id: string) => void;
   onApprove?: (allow: boolean) => void;
+  flash?: boolean;
 }) {
   const color = agent
     ? whoColor(resolveFace(agent.id, agent.avatar_shape, agent.avatar_color).color)
@@ -391,7 +434,12 @@ function Incoming({
     (caret ? " streaming" : "") +
     (queued ? " queued" : "");
   return (
-    <div className={"row them incoming" + (queued ? " queued" : "")}>
+    <div
+      className={
+        "row them incoming" + (queued ? " queued" : "") + (flash ? " flash" : "")
+      }
+      data-msg-id={m.id}
+    >
       {agent ? (
         <Avatar
           as={open ? "button" : "div"}
@@ -437,10 +485,23 @@ function Incoming({
   );
 }
 
-function ToolCardRow({ name, detail }: { name: string; detail: string }) {
+function ToolCardRow({
+  name,
+  detail,
+  id,
+  flash = false,
+}: {
+  name: string;
+  detail: string;
+  id?: string;
+  flash?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="tool-card">
+    <div
+      className={"tool-card" + (flash ? " flash" : "")}
+      data-msg-id={id}
+    >
       <button type="button" className="tool-card-head" onClick={() => setOpen((v) => !v)}>
         <span className="tool-card-name">{name}</span>
         <span className="tool-card-chevron">{open ? "▾" : "▸"}</span>
@@ -489,6 +550,7 @@ function Bubble({
   caret = false,
   onSelectAgent,
   onApprove,
+  flash = false,
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
@@ -498,6 +560,7 @@ function Bubble({
   caret?: boolean;
   onSelectAgent?: (id: string) => void;
   onApprove?: (allow: boolean) => void;
+  flash?: boolean;
 }) {
   const text =
     m.role === "assistant" ? stripCrewMarkers(m.text || "") : m.text || "";
@@ -515,6 +578,7 @@ function Bubble({
         openName={!self}
         onSelectAgent={onSelectAgent}
         onApprove={onApprove}
+        flash={flash}
       />
     );
   }
@@ -522,7 +586,10 @@ function Bubble({
   const cls =
     "bubble md" + (caret ? " streaming" : "") + (queued ? " queued" : "");
   return (
-    <div className={"row me" + (queued ? " queued" : "")}>
+    <div
+      className={"row me" + (queued ? " queued" : "") + (flash ? " flash" : "")}
+      data-msg-id={m.id}
+    >
       <div className="me-msg">
         <MdBody
           className={cls}

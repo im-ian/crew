@@ -78,6 +78,8 @@ export function App() {
           }
           onSelectAgent={crew.selectAgent}
           onApprove={(allow) => void crew.approveAgent(allow)}
+          highlightId={crew.highlightId}
+          onHighlightDone={crew.clearHighlight}
         />
         <Composer
           agents={crew.agents}
