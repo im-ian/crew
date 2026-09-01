@@ -51,6 +51,7 @@
     "allow-save-skill",
     "allow-save-upload",
     "allow-peek-pending-focus",
-    "allow-take-pending-focus"
+    "allow-take-pending-focus",
+    "allow-open-path"
   ]
 }

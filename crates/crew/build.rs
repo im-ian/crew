@@ -46,6 +46,7 @@ fn main() {
             "save_upload",
             "peek_pending_focus",
             "take_pending_focus",
+            "open_path",
         ])),
     )
     .expect("failed to run tauri build");

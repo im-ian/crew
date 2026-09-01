@@ -337,7 +337,12 @@ function TransferNote({
         />
       </div>
       {m.text ? (
-        <XferBody text={m.text} agents={agents} onMention={onSelectAgent} />
+        <XferBody
+          text={m.text}
+          agents={agents}
+          onMention={onSelectAgent}
+          baseDir={agent?.cwd || undefined}
+        />
       ) : null}
       {m.queued ? <QueueWait /> : null}
     </div>
@@ -357,10 +362,12 @@ function XferBody({
   text,
   agents,
   onMention,
+  baseDir,
 }: {
   text: string;
   agents: AgentInfo[];
   onMention?: (id: string) => void;
+  baseDir?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const long = isLongXfer(text);
@@ -375,6 +382,7 @@ function XferBody({
           text={text}
           agents={agents}
           onMention={onMention}
+          baseDir={baseDir}
         />
       )}
       {long ? (
@@ -477,6 +485,7 @@ function Incoming({
           text={m.text || ""}
           agents={agents}
           onMention={onSelectAgent}
+          baseDir={agent?.cwd || undefined}
         />
         {queued ? <QueueWait /> : null}
         <ApprovalCard state={m.approval} onApprove={onApprove} />
@@ -596,6 +605,7 @@ function Bubble({
           text={text}
           agents={agents}
           onMention={onSelectAgent}
+          baseDir={currentAgent?.cwd || undefined}
         />
         {queued ? <QueueWait /> : null}
       </div>

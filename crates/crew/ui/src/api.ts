@@ -126,6 +126,7 @@ export const api = {
     invoke<string>("save_upload", { name, data }),
   peekPendingFocus: () => invoke<FocusTarget | null>("peek_pending_focus"),
   takePendingFocus: () => invoke<FocusTarget | null>("take_pending_focus"),
+  openPath: (path: string) => invoke<void>("open_path", { path }),
   listModels: (cli: string) => {
     let pending = modelLists.get(cli);
     if (!pending) {

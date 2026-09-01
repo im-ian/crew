@@ -617,6 +617,23 @@ fn take_pending_focus() -> Result<Option<crate::notify::FocusTarget>, String> {
 }
 
 #[tauri::command]
+fn open_path(path: String) -> Result<(), String> {
+    let raw = path.trim();
+    if raw.is_empty() {
+        return Err("path is empty".into());
+    }
+    let p = crate::paths::expand_tilde(raw);
+    if !p.exists() {
+        return Err(format!("file not found: {}", p.display()));
+    }
+    std::process::Command::new("open")
+        .arg(&p)
+        .status()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn save_upload(name: String, data: String) -> Result<String, String> {
     let bytes = crate::avatar::decode_input(&data).map_err(|e| e.to_string())?;
     let dir = crate::paths::home_dir().join("uploads");
@@ -685,7 +702,8 @@ pub fn run() -> anyhow::Result<()> {
             save_skill,
             save_upload,
             peek_pending_focus,
-            take_pending_focus
+            take_pending_focus,
+            open_path
         ])
         .run(tauri::generate_context!())
         .map_err(|e| anyhow::anyhow!(e))?;

@@ -1,3 +1,5 @@
+import { convertFileSrc } from "@tauri-apps/api/core";
+
 export function escapeHtml(s: string): string {
   return String(s)
     .replace(/&/g, "&amp;")
@@ -22,7 +24,7 @@ export function renderMarkdown(raw: string): string {
   s = s.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, "$1<em>$2</em>");
   s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '<img alt="$1" src="$2" />');
   s = s.replace(
-    /\[([^\]]+)\]\((https?:\/\/[^)\s]+|file:\/\/[^)\s]+|\/[^)\s]+)\)/g,
+    /\[([^\]]+)\]\((https?:\/\/[^)\s]+|file:\/\/[^)\s]+|\/[^)\s]+|\.\/[^)\s]+)\)/g,
     '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
   );
   const lines = s.split("\n");
@@ -81,4 +83,49 @@ export function renderMarkdown(raw: string): string {
     out.push("<p>" + para.join("<br>") + "</p>");
   }
   return out.join("");
+}
+
+export function resolveLocalPath(src: string, baseDir?: string): string | null {
+  const s = src.trim();
+  if (!s) return null;
+  if (
+    s.startsWith("data:") ||
+    s.startsWith("blob:") ||
+    s.startsWith("http://") ||
+    s.startsWith("https://") ||
+    s.startsWith("asset:") ||
+    s.startsWith("tauri://")
+  ) {
+    return null;
+  }
+  let path = s;
+  if (path.startsWith("file://")) {
+    path = decodeURIComponent(path.slice("file://".length).replace(/^localhost/i, ""));
+  }
+  if (path.startsWith("~")) {
+    return path;
+  }
+  if (path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)) {
+    return path;
+  }
+  if (baseDir) {
+    const rel = path.replace(/^\.\//, "");
+    return baseDir.replace(/\/$/, "") + "/" + rel;
+  }
+  return null;
+}
+
+export function mediaSrc(src: string, baseDir?: string): string {
+  const local = resolveLocalPath(src, baseDir);
+  if (!local) return src;
+  const path = local.startsWith("~") ? local : local;
+  try {
+    return convertFileSrc(path);
+  } catch {
+    return src;
+  }
+}
+
+export function isLocalHref(href: string, baseDir?: string): boolean {
+  return resolveLocalPath(href, baseDir) !== null;
 }

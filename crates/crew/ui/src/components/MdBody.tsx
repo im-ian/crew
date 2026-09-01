@@ -1,6 +1,7 @@
 import { createElement, useMemo, useRef, type ReactNode } from "react";
 import { injectMentionChips } from "../mentions";
-import { renderMarkdown } from "../markdown";
+import { isLocalHref, mediaSrc, renderMarkdown, resolveLocalPath } from "../markdown";
+import { api } from "../api";
 import type { AgentInfo } from "../types";
 import { MentionChip } from "./MentionChip";
 
@@ -10,6 +11,7 @@ const TAGS = new Set([
   "STRONG",
   "EM",
   "A",
+  "IMG",
   "CODE",
   "PRE",
   "UL",
@@ -26,9 +28,10 @@ type Props = {
   agents: AgentInfo[];
   className?: string;
   onMention?: (id: string) => void;
+  baseDir?: string;
 };
 
-export function MdBody({ text, agents, className, onMention }: Props) {
+export function MdBody({ text, agents, className, onMention, baseDir }: Props) {
   const onMentionRef = useRef(onMention);
   onMentionRef.current = onMention;
   const clickable = !!onMention;
@@ -37,30 +40,32 @@ export function MdBody({ text, agents, className, onMention }: Props) {
     const handle = clickable
       ? (id: string) => onMentionRef.current?.(id)
       : undefined;
-    return htmlToReact(html, agents, handle);
-  }, [text, agents, clickable]);
+    return htmlToReact(html, agents, handle, baseDir);
+  }, [text, agents, clickable, baseDir]);
   return <div className={className}>{nodes}</div>;
 }
 
 function htmlToReact(
   html: string,
   agents: AgentInfo[],
-  onMention?: (id: string) => void,
+  onMention: ((id: string) => void) | undefined,
+  baseDir?: string,
 ): ReactNode[] {
   const tmpl = document.createElement("template");
   tmpl.innerHTML = html;
-  return nodesToReact(tmpl.content.childNodes, agents, "m", onMention);
+  return nodesToReact(tmpl.content.childNodes, agents, "m", onMention, baseDir);
 }
 
 function nodesToReact(
   nodes: NodeListOf<ChildNode>,
   agents: AgentInfo[],
   prefix: string,
-  onMention?: (id: string) => void,
+  onMention: ((id: string) => void) | undefined,
+  baseDir?: string,
 ): ReactNode[] {
   const out: ReactNode[] = [];
   Array.from(nodes).forEach((node, i) => {
-    const child = nodeToReact(node, agents, prefix + "-" + i, onMention);
+    const child = nodeToReact(node, agents, prefix + "-" + i, onMention, baseDir);
     if (child !== null && child !== undefined && child !== "") out.push(child);
   });
   return out;
@@ -70,7 +75,8 @@ function nodeToReact(
   node: Node,
   agents: AgentInfo[],
   key: string,
-  onMention?: (id: string) => void,
+  onMention: ((id: string) => void) | undefined,
+  baseDir?: string,
 ): ReactNode {
   if (node.nodeType === Node.TEXT_NODE) return node.textContent;
   if (node.nodeType !== Node.ELEMENT_NODE) return null;
@@ -87,13 +93,39 @@ function nodeToReact(
     return id ? <span key={key}>@{id}</span> : null;
   }
   if (tag === "BR") return <br key={key} />;
-  const kids = nodesToReact(el.childNodes, agents, key, onMention);
+  const kids = nodesToReact(el.childNodes, agents, key, onMention, baseDir);
   if (!TAGS.has(tag)) return kids;
+  if (tag === "IMG") {
+    const raw = el.getAttribute("src") || "";
+    return (
+      <img
+        key={key}
+        alt={el.getAttribute("alt") || ""}
+        src={mediaSrc(raw, baseDir)}
+      />
+    );
+  }
   if (tag === "A") {
+    const href = el.getAttribute("href") || "";
+    if (isLocalHref(href, baseDir)) {
+      return (
+        <a
+          key={key}
+          href={href}
+          onClick={(e) => {
+            e.preventDefault();
+            const path = resolveLocalPath(href, baseDir);
+            if (path) void api.openPath(path);
+          }}
+        >
+          {kids}
+        </a>
+      );
+    }
     return (
       <a
         key={key}
-        href={el.getAttribute("href") || undefined}
+        href={href || undefined}
         target="_blank"
         rel="noopener noreferrer"
       >
