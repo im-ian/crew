@@ -19,6 +19,7 @@ type Props = {
   onStick: (stick: boolean) => void;
   streaming?: boolean;
   onSelectAgent?: (id: string) => void;
+  onApprove?: (allow: boolean) => void;
 };
 
 export function ChatThread({
@@ -33,6 +34,7 @@ export function ChatThread({
   onStick,
   streaming = false,
   onSelectAgent,
+  onApprove,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [away, setAway] = useState(false);
@@ -100,6 +102,7 @@ export function ChatThread({
                 currentAgent={currentAgent}
                 caret={caret}
                 onSelectAgent={openAgent}
+                onApprove={onApprove}
               />
             );
           })
@@ -122,6 +125,11 @@ export function ChatThread({
             openName={false}
             onSelectAgent={openAgent}
           />
+        ) : null}
+        {currentAgent?.status === "blocked" &&
+        onApprove &&
+        !messages.some((m) => m.approval === "pending") ? (
+          <ApprovalCard state="pending" onApprove={onApprove} />
         ) : null}
       </div>
       {away ? (
@@ -356,6 +364,7 @@ function Incoming({
   caret = false,
   openName = true,
   onSelectAgent,
+  onApprove,
 }: {
   message: ChatMessage;
   agent: AgentInfo | null;
@@ -364,6 +373,7 @@ function Incoming({
   caret?: boolean;
   openName?: boolean;
   onSelectAgent?: (id: string) => void;
+  onApprove?: (allow: boolean) => void;
 }) {
   const color = agent
     ? whoColor(resolveFace(agent.id, agent.avatar_shape, agent.avatar_color).color)
@@ -418,6 +428,37 @@ function Incoming({
           onMention={onSelectAgent}
         />
         {queued ? <QueueWait /> : null}
+        <ApprovalCard state={m.approval} onApprove={onApprove} />
+      </div>
+    </div>
+  );
+}
+
+function ApprovalCard({
+  state,
+  onApprove,
+}: {
+  state?: ChatMessage["approval"];
+  onApprove?: (allow: boolean) => void;
+}) {
+  if (!state) return null;
+  if (state === "allowed") {
+    return <div className="approval-status">한 번 허용함</div>;
+  }
+  if (state === "denied") {
+    return <div className="approval-status is-denied">거부함</div>;
+  }
+  if (!onApprove) return null;
+  return (
+    <div className="approval-card">
+      <div className="approval-copy">이 작업을 진행할까요?</div>
+      <div className="approval-actions">
+        <button type="button" className="approval-allow" onClick={() => onApprove(true)}>
+          한 번 허용
+        </button>
+        <button type="button" className="approval-deny" onClick={() => onApprove(false)}>
+          거부
+        </button>
       </div>
     </div>
   );
@@ -431,6 +472,7 @@ function Bubble({
   currentAgent,
   caret = false,
   onSelectAgent,
+  onApprove,
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
@@ -439,6 +481,7 @@ function Bubble({
   currentAgent: AgentInfo | null;
   caret?: boolean;
   onSelectAgent?: (id: string) => void;
+  onApprove?: (allow: boolean) => void;
 }) {
   const text =
     m.role === "assistant" ? stripCrewMarkers(m.text || "") : m.text || "";
@@ -455,6 +498,7 @@ function Bubble({
         caret={caret}
         openName={!self}
         onSelectAgent={onSelectAgent}
+        onApprove={onApprove}
       />
     );
   }

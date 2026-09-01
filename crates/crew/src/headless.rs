@@ -89,17 +89,45 @@ pub fn save_session(agent_id: &str, session_id: &str) -> anyhow::Result<()> {
 }
 
 pub fn kill(session: &HeadlessSession) {
+    interrupt(session);
     if let Ok(mut inner) = session.inner.lock() {
-        inner.generation = inner.generation.wrapping_add(1);
-        if let Some(mut child) = inner.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        inner.status = AgentStatus::Idle;
-        inner.seq += 1;
         inner.session_id = None;
     }
     clear_session(&session.id);
+}
+
+/// Stop the in-flight child. Keeps the CLI session so a later turn can resume.
+/// Does not undo already-sealed assistant text.
+pub fn interrupt(session: &HeadlessSession) {
+    let child = {
+        let mut inner = match session.inner.lock() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        inner.generation = inner.generation.wrapping_add(1);
+        inner.child.take()
+    };
+    if let Some(mut child) = child {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    if let Ok(mut inner) = session.inner.lock() {
+        if inner.status != AgentStatus::Exited {
+            inner.status = AgentStatus::Idle;
+        }
+        inner.seq += 1;
+        inner.child = None;
+    }
+}
+
+pub fn set_status(session: &HeadlessSession, status: AgentStatus) {
+    if let Ok(mut inner) = session.inner.lock() {
+        if inner.status == AgentStatus::Exited {
+            return;
+        }
+        inner.status = status;
+        inner.seq += 1;
+    }
 }
 
 pub fn kick(
@@ -264,7 +292,7 @@ fn run_turn(
     crate::transcript::end_turn(&session.id);
     if let Ok(mut inner) = session.inner.lock() {
         inner.child = None;
-        if inner.status != AgentStatus::Exited {
+        if inner.status != AgentStatus::Exited && inner.status != AgentStatus::Blocked {
             inner.status = AgentStatus::Idle;
         }
         inner.last_output = Instant::now();

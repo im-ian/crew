@@ -131,6 +131,15 @@ pub enum Request {
     RemoveChannel {
         channel: String,
     },
+    /// End the in-flight turn. Does not undo already-sealed assistant text.
+    Interrupt {
+        agent: String,
+    },
+    /// Allow-once or deny a pending judgment card.
+    Approve {
+        agent: String,
+        allow: bool,
+    },
     Shutdown,
 }
 
@@ -262,6 +271,14 @@ pub enum MessageKind {
     Handoff,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalState {
+    Pending,
+    Allowed,
+    Denied,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub id: String,
@@ -273,6 +290,8 @@ pub struct ChatMessage {
     pub queued: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<MessageKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<ApprovalState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -467,6 +486,7 @@ mod tests {
             ts: 1,
             queued: false,
             kind: None,
+            approval: None,
         };
         let line = serde_json::to_string(&msg).unwrap();
         assert!(line.contains("\"role\":\"user\""));

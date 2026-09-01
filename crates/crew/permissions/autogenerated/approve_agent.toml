@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-approve-agent"
+description = "Enables the approve_agent command without any pre-configured scope."
+commands.allow = ["approve_agent"]
+
+[[permission]]
+identifier = "deny-approve-agent"
+description = "Denies the approve_agent command without any pre-configured scope."
+commands.deny = ["approve_agent"]

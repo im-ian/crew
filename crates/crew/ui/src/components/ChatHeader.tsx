@@ -6,6 +6,7 @@ type Props = {
   currentChannel: ChannelInfo | null;
   onOpenInfo: () => void;
   onOpenRoutines: () => void;
+  onStop?: () => void;
 };
 
 export function ChatHeader({
@@ -13,6 +14,7 @@ export function ChatHeader({
   currentChannel,
   onOpenInfo,
   onOpenRoutines,
+  onStop,
 }: Props) {
   let identity = <span className="head-empty">대화를 선택하세요</span>;
   if (currentChannel) {
@@ -38,6 +40,21 @@ export function ChatHeader({
   return (
     <header>
       <div className="head-identity">{identity}</div>
+      {currentAgent &&
+      (currentAgent.status === "working" || currentAgent.status === "blocked") &&
+      onStop ? (
+        <button
+          type="button"
+          className="head-action"
+          title="중지"
+          aria-label="중지"
+          onClick={onStop}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <rect x="4" y="4" width="8" height="8" rx="1.2" fill="currentColor" />
+          </svg>
+        </button>
+      ) : null}
       {currentAgent ? (
         <button
           type="button"

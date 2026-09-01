@@ -56,6 +56,7 @@ export function App() {
           onOpenRoutines={() => {
             if (crew.selected) crew.openRoutines(crew.selected);
           }}
+          onStop={() => void crew.stopAgent()}
         />
         <ChatThread
           messages={crew.messages}
@@ -73,6 +74,7 @@ export function App() {
               crew.currentAgent?.status === "blocked")
           }
           onSelectAgent={crew.selectAgent}
+          onApprove={(allow) => void crew.approveAgent(allow)}
         />
         <Composer
           agents={crew.agents}

@@ -59,6 +59,7 @@ export type ChannelInfo = {
 };
 
 export type MessageKind = "sent" | "received" | "routine" | "handoff";
+export type ApprovalState = "pending" | "allowed" | "denied";
 
 export type ChatMessage = {
   id: string;
@@ -68,6 +69,7 @@ export type ChatMessage = {
   ts: number;
   queued?: boolean;
   kind?: MessageKind | null;
+  approval?: ApprovalState | null;
 };
 
 export type PendingAvatar = {

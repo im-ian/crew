@@ -9,6 +9,8 @@ fn main() {
             "list_agents",
             "list_channels",
             "send_message",
+            "stop_agent",
+            "approve_agent",
             "tell_message",
             "add_channel",
             "leave_channel",

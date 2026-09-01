@@ -56,6 +56,26 @@ fn send_message(agent: String, text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn stop_agent(agent: String) -> Result<(), String> {
+    match client::rpc(Request::Interrupt { agent }) {
+        Ok(Event::Ok) => Ok(()),
+        Ok(Event::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected daemon response".into()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+#[tauri::command]
+fn approve_agent(agent: String, allow: bool) -> Result<(), String> {
+    match client::rpc(Request::Approve { agent, allow }) {
+        Ok(Event::Ok) => Ok(()),
+        Ok(Event::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected daemon response".into()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+#[tauri::command]
 fn tell_message(from: Option<String>, to: String, text: String) -> Result<(), String> {
     let from = client::tell_from(from);
     match client::rpc(Request::Tell {
@@ -496,6 +516,8 @@ pub fn run() -> anyhow::Result<()> {
             list_agents,
             list_channels,
             send_message,
+            stop_agent,
+            approve_agent,
             tell_message,
             add_channel,
             leave_channel,

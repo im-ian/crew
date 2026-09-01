@@ -903,6 +903,53 @@ button.channel-who:hover {
     content: "...";
   }
 }
+.approval-card {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--elevated);
+  max-width: 100%;
+}
+.approval-copy {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.approval-actions {
+  display: flex;
+  gap: 8px;
+}
+.approval-allow,
+.approval-deny {
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.approval-allow {
+  background: var(--working);
+  color: #fff;
+}
+.approval-deny {
+  background: var(--btn);
+  color: var(--ink);
+}
+.approval-allow:hover,
+.approval-deny:hover {
+  filter: brightness(1.08);
+}
+.approval-status {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.approval-status.is-denied {
+  color: var(--blocked);
+}
 .xfer {
   align-self: center;
   display: flex;

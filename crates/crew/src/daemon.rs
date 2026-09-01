@@ -251,6 +251,10 @@ fn is_busy_err(err: &anyhow::Error) -> bool {
 }
 
 fn agent_busy(id: &str) -> anyhow::Result<bool> {
+    Ok(live_status(id)? == AgentStatus::Working)
+}
+
+fn live_status(id: &str) -> anyhow::Result<AgentStatus> {
     let map = agents().lock().expect("agents mutex");
     let live = map
         .get(id)
@@ -258,16 +262,76 @@ fn agent_busy(id: &str) -> anyhow::Result<bool> {
     match live {
         LiveAgent::Headless(session) => {
             let inner = session.inner.lock().expect("headless inner");
-            Ok(inner.status == AgentStatus::Working || inner.child.is_some())
+            if inner.child.is_some() {
+                Ok(AgentStatus::Working)
+            } else {
+                Ok(inner.status)
+            }
         }
         LiveAgent::Pty(session) => {
             let inner = session.inner.lock().expect("pty inner");
             if inner.status == AgentStatus::Exited {
                 anyhow::bail!("agent {id} has exited");
             }
-            Ok(false)
+            Ok(inner.status)
         }
     }
+}
+
+fn set_live_status(id: &str, status: AgentStatus) {
+    let live = {
+        let map = match agents().lock() {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        match map.get(id) {
+            Some(LiveAgent::Headless(s)) => Some(s.clone()),
+            _ => None,
+        }
+    };
+    if let Some(session) = live {
+        headless::set_status(&session, status);
+    }
+    emit_agent_frame(id);
+}
+
+fn interrupt_turn(id: &str) -> anyhow::Result<()> {
+    let live = {
+        let map = agents().lock().expect("agents mutex");
+        map.get(id)
+            .cloned()
+            .with_context(|| format!("unknown agent {id}"))?
+    };
+    match live {
+        LiveAgent::Headless(session) => headless::interrupt(&session),
+        LiveAgent::Pty(_) => {}
+    }
+    crate::transcript::end_turn(id);
+    emit_agent_frame(id);
+    Ok(())
+}
+
+fn approve_agent(id: &str, allow: bool) -> anyhow::Result<()> {
+    let Some(msg) = crate::transcript::pending_approval(id) else {
+        anyhow::bail!("no pending approval");
+    };
+    let state = if allow {
+        crate::protocol::ApprovalState::Allowed
+    } else {
+        crate::protocol::ApprovalState::Denied
+    };
+    crate::transcript::set_approval(id, &msg.id, state);
+    set_live_status(id, AgentStatus::Idle);
+    if allow {
+        submit_delivery(
+            id,
+            "User allowed this action. Continue.",
+            true,
+            None,
+            TurnOrigin::user(),
+        )?;
+    }
+    Ok(())
 }
 
 fn start_delivery(id: &str, text: &str, newline: bool, origin: TurnOrigin) -> anyhow::Result<()> {
@@ -814,6 +878,18 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
                 message: err.to_string(),
             }],
         },
+        Request::Interrupt { agent } => match interrupt_turn(&agent) {
+            Ok(()) => vec![Event::Ok],
+            Err(err) => vec![Event::Error {
+                message: err.to_string(),
+            }],
+        },
+        Request::Approve { agent, allow } => match approve_agent(&agent, allow) {
+            Ok(()) => vec![Event::Ok],
+            Err(err) => vec![Event::Error {
+                message: err.to_string(),
+            }],
+        },
         Request::Tell {
             from,
             to,
@@ -1113,6 +1189,18 @@ fn messages_agent(id: &str) -> anyhow::Result<Event> {
 }
 
 fn send_agent(id: &str, text: &str) -> anyhow::Result<()> {
+    let status = live_status(id)?;
+    match crate::interrupt::user_send_action(status, text) {
+        crate::interrupt::UserSendAction::Stop => {
+            crate::transcript::push_user(id, "user", text);
+            interrupt_turn(id)?;
+            return Ok(());
+        }
+        crate::interrupt::UserSendAction::Redirect => {
+            interrupt_turn(id)?;
+        }
+        crate::interrupt::UserSendAction::Start => {}
+    }
     ensure_accepts_turn(id)?;
     let roster = roster_vec();
     let msg = crate::transcript::push_user(id, "user", text);
@@ -1840,6 +1928,10 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
             crate::transcript::push_handoff(&peer, agent, &text);
         }
     }
+    if crate::interrupt::looks_like_judgment_question(&text) {
+        crate::transcript::set_approval(agent, &msg.id, crate::protocol::ApprovalState::Pending);
+        set_live_status(agent, AgentStatus::Blocked);
+    }
 }
 
 #[cfg(test)]
@@ -1906,6 +1998,7 @@ mod inbox_tests {
             ts: 1,
             queued: false,
             kind: None,
+            approval: None,
         };
         on_assistant_sealed(&speaker, &reply);
         let msgs = crate::transcript::channel_messages(&ch);
@@ -1942,6 +2035,7 @@ mod inbox_tests {
             ts: 1,
             queued: false,
             kind: None,
+            approval: None,
         };
         on_assistant_sealed(&speaker, &reply);
         let msgs = crate::transcript::messages(&peer);

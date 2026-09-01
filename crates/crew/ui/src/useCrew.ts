@@ -97,9 +97,11 @@ export function useCrew() {
 
   const placeholder = currentChannel
     ? `+ ${currentChannel.name || currentChannel.id}에 메시지`
-    : currentAgent
-      ? `+ ${currentAgent.name || currentAgent.id}에게 메시지 (@이름으로 부르기)`
-      : "+ 메시지";
+    : currentAgent?.status === "working"
+      ? `+ 보내면 방향을 바꿉니다 · 중지하려면 stop`
+      : currentAgent
+        ? `+ ${currentAgent.name || currentAgent.id}에게 메시지 (@이름으로 부르기)`
+        : "+ 메시지";
 
   function showToast(text: string) {
     setToast({ text, show: true });
@@ -363,6 +365,30 @@ export function useCrew() {
       } else {
         await api.sendMessage(sel, raw);
       }
+      await refreshMessages();
+    } catch (err) {
+      showError(err);
+    }
+  }
+
+  async function stopAgent() {
+    const { id: sel, kind } = selectedRef.current;
+    if (!sel || kind !== "agent") return;
+    try {
+      await api.stopAgent(sel);
+      await refreshList();
+      await refreshMessages();
+    } catch (err) {
+      showError(err);
+    }
+  }
+
+  async function approveAgent(allow: boolean) {
+    const { id: sel, kind } = selectedRef.current;
+    if (!sel || kind !== "agent") return;
+    try {
+      await api.approveAgent(sel, allow);
+      await refreshList();
       await refreshMessages();
     } catch (err) {
       showError(err);
@@ -769,6 +795,8 @@ export function useCrew() {
     toggleGroup,
     itemGroupId,
     onSend,
+    stopAgent,
+    approveAgent,
     saveAgentInfo,
     saveAgentFace,
     addRoutine,

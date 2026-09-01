@@ -195,6 +195,12 @@
           "markdownDescription": "Enables the add_routine command without any pre-configured scope."
         },
         {
+          "description": "Enables the approve_agent command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-approve-agent",
+          "markdownDescription": "Enables the approve_agent command without any pre-configured scope."
+        },
+        {
           "description": "Enables the channel_send command without any pre-configured scope.",
           "type": "string",
           "const": "allow-channel-send",
@@ -333,6 +339,12 @@
           "markdownDescription": "Enables the set_routine_enabled command without any pre-configured scope."
         },
         {
+          "description": "Enables the stop_agent command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-stop-agent",
+          "markdownDescription": "Enables the stop_agent command without any pre-configured scope."
+        },
+        {
           "description": "Enables the tell_message command without any pre-configured scope.",
           "type": "string",
           "const": "allow-tell-message",
@@ -355,6 +367,12 @@
           "type": "string",
           "const": "deny-add-routine",
           "markdownDescription": "Denies the add_routine command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the approve_agent command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-approve-agent",
+          "markdownDescription": "Denies the approve_agent command without any pre-configured scope."
         },
         {
           "description": "Denies the channel_send command without any pre-configured scope.",
@@ -493,6 +511,12 @@
           "type": "string",
           "const": "deny-set-routine-enabled",
           "markdownDescription": "Denies the set_routine_enabled command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stop_agent command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-stop-agent",
+          "markdownDescription": "Denies the stop_agent command without any pre-configured scope."
         },
         {
           "description": "Denies the tell_message command without any pre-configured scope.",

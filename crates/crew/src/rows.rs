@@ -132,6 +132,7 @@ mod tests {
             ts: 1,
             queued: false,
             kind: None,
+            approval: None,
         }
     }
 

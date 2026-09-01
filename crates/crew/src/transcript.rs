@@ -7,7 +7,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::paths;
-use crate::protocol::{ChatMessage, Event, MessageKind, Role};
+use crate::protocol::{ApprovalState, ChatMessage, Event, MessageKind, Role};
 use crate::rows::{is_crew_marker_line, strip_crew_markers};
 
 fn channel_key(id: &str) -> String {
@@ -265,6 +265,7 @@ fn push_role(
         ts: now_ms(),
         queued: false,
         kind,
+        approval: None,
     };
     if let Ok(mut map) = chats().lock() {
         let chat = map
@@ -281,6 +282,33 @@ fn push_role(
         emit(agent, msg.clone());
     }
     msg
+}
+
+pub fn set_approval(agent: &str, id: &str, state: ApprovalState) {
+    let msg = {
+        let mut map = match chats().lock() {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        let Some(chat) = map.get_mut(agent) else {
+            return;
+        };
+        let Some(m) = chat.messages.iter_mut().rev().find(|m| m.id == id) else {
+            return;
+        };
+        if m.approval == Some(state) {
+            return;
+        }
+        m.approval = Some(state);
+        let out = m.clone();
+        persist(agent, chat);
+        out
+    };
+    emit(agent, msg);
+}
+
+pub fn pending_approval(agent: &str) -> Option<ChatMessage> {
+    messages(agent).into_iter().rev().find(|m| m.approval == Some(ApprovalState::Pending))
 }
 
 pub fn set_queued(agent: &str, id: &str, queued: bool) {
@@ -382,6 +410,7 @@ pub fn set_pending_assistant(agent: &str, text: &str) {
                 ts: now_ms(),
                 queued: false,
                 kind: None,
+                approval: None,
             };
             chat.messages.push(m.clone());
             chat.pending_idx = Some(chat.messages.len() - 1);
@@ -447,6 +476,7 @@ pub fn on_pty_bytes(agent: &str, bytes: &[u8]) {
                 ts: now_ms(),
                 queued: false,
                 kind: None,
+                approval: None,
             };
             chat.messages.push(m.clone());
             chat.pending_idx = Some(chat.messages.len() - 1);
@@ -850,6 +880,7 @@ mod tests {
             ts: 9,
             queued: false,
             kind: None,
+            approval: None,
         };
         let line = serde_json::to_string(&msg).unwrap();
         assert!(!line.contains("queued"), "{line}");

@@ -16,6 +16,9 @@ export const api = {
   listChannels: () => invoke<ChannelInfo[]>("list_channels"),
   sendMessage: (agent: string, text: string) =>
     invoke<void>("send_message", { agent, text }),
+  stopAgent: (agent: string) => invoke<void>("stop_agent", { agent }),
+  approveAgent: (agent: string, allow: boolean) =>
+    invoke<void>("approve_agent", { agent, allow }),
   tellMessage: (to: string, text: string, from = "user") =>
     invoke<void>("tell_message", { from, to, text }),
   channelSend: (channel: string, text: string) =>

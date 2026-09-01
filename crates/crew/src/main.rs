@@ -8,6 +8,7 @@ mod daemon;
 mod desktop;
 mod groups;
 mod headless;
+mod interrupt;
 #[cfg(debug_assertions)]
 mod ui_dev;
 mod memory;
