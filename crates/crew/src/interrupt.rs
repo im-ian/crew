@@ -32,19 +32,16 @@ pub fn is_stop_command(text: &str) -> bool {
     )
 }
 
-pub fn user_send_action(status: AgentStatus, text: &str) -> UserSendAction {
+pub fn user_send_action(_status: AgentStatus, text: &str) -> UserSendAction {
     if is_stop_command(text) {
         return UserSendAction::Stop;
     }
-    if status == AgentStatus::Working {
-        UserSendAction::Redirect
-    } else {
-        UserSendAction::Start
-    }
+    // A follow-up while working is queued by submit_delivery, not a redirect.
+    UserSendAction::Start
 }
 
-/// Channel (and 1:1) user messages interrupt a working member. Bot-originated
-/// posts do not; they enqueue if the member is busy.
+/// Channel (and 1:1) user follow-ups queue if the member is busy. Bot-originated
+/// posts also enqueue. Explicit stop phrases end the in-flight turn.
 pub fn member_turn_action(from_user: bool, status: AgentStatus, text: &str) -> UserSendAction {
     if from_user {
         user_send_action(status, text)
@@ -94,7 +91,7 @@ mod tests {
     fn stop_vs_queue_vs_redirect() {
         assert_eq!(
             user_send_action(AgentStatus::Working, "hello"),
-            UserSendAction::Redirect
+            UserSendAction::Start
         );
         assert_eq!(
             user_send_action(AgentStatus::Idle, "hello"),
@@ -114,7 +111,7 @@ mod tests {
         );
         assert_eq!(
             user_send_action(AgentStatus::Working, "don't stop"),
-            UserSendAction::Redirect
+            UserSendAction::Start
         );
         assert_eq!(
             user_send_action(AgentStatus::Working, "Stop."),
@@ -123,10 +120,10 @@ mod tests {
     }
 
     #[test]
-    fn channel_user_send_interrupts_working_member() {
+    fn channel_user_send_queues_working_member() {
         assert_eq!(
             member_turn_action(true, AgentStatus::Working, "follow up"),
-            UserSendAction::Redirect
+            UserSendAction::Start
         );
         assert_eq!(
             member_turn_action(true, AgentStatus::Working, "stop now"),

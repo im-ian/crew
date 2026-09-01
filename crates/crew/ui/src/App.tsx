@@ -195,6 +195,26 @@ export function App() {
           selectedKind={crew.selectedKind}
           placeholder={crew.placeholder}
           onSend={crew.onSend}
+          busy={
+            (crew.selectedKind === "agent" &&
+              (crew.currentAgent?.status === "working" ||
+                crew.currentAgent?.status === "blocked")) ||
+            (crew.selectedKind === "channel" &&
+              busyInChannel(crew.agents, crew.currentChannel?.id).some(
+                (a) => a.status === "working" || a.status === "blocked",
+              ))
+          }
+          onStop={() => {
+            if (crew.selectedKind === "channel" && crew.currentChannel) {
+              for (const a of busyInChannel(crew.agents, crew.currentChannel.id)) {
+                if (a.status === "working" || a.status === "blocked") {
+                  void crew.stopAgent(a.id);
+                }
+              }
+              return;
+            }
+            void crew.stopAgent();
+          }}
         />
         <ChannelPane
           open={crew.paneOpen && crew.selectedKind === "channel"}

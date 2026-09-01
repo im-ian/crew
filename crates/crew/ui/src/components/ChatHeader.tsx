@@ -71,7 +71,7 @@ export function ChatHeader({
       {stopIds.length && onStop ? (
         <button
           type="button"
-          className="head-action"
+          className="head-action is-stop"
           title="중지 ⌘."
           aria-label="중지"
           onClick={() => {

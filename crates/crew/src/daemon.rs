@@ -308,6 +308,7 @@ fn interrupt_turn(id: &str) -> anyhow::Result<()> {
     }
     crate::transcript::end_turn(id);
     emit_agent_frame(id);
+    pump_inbox(id);
     Ok(())
 }
 

@@ -18,6 +18,8 @@ type Props = {
   selectedKind: Kind;
   placeholder: string;
   onSend: (raw: string) => Promise<void>;
+  busy?: boolean;
+  onStop?: () => void;
 };
 
 type Mention = { start: number; query: string };
@@ -36,6 +38,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   selectedKind,
   placeholder,
   onSend,
+  busy = false,
+  onStop,
 }, ref) {
   const inputRef = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
@@ -316,7 +320,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           contentEditable
           role="textbox"
           aria-multiline="true"
-          data-placeholder={placeholder}
+          data-placeholder={
+            busy ? "작업 중 · 보내면 줄에 서요" : placeholder
+          }
           onInput={() => {
             refreshEmpty();
             fit();
@@ -434,6 +440,19 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         >
           +
         </button>
+        {busy && onStop ? (
+          <button
+            type="button"
+            className="stop-btn"
+            title="중지 ⌘."
+            aria-label="중지"
+            onClick={onStop}
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <rect x="2" y="2" width="8" height="8" rx="1.2" fill="currentColor" />
+            </svg>
+          </button>
+        ) : null}
         <button
           type="submit"
           aria-label="보내기"
