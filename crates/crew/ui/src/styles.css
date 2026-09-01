@@ -359,7 +359,7 @@ html.rail-dragging {
   color: inherit;
   padding: 8px;
   margin-bottom: 1px;
-  cursor: grab;
+  cursor: pointer;
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr);
   gap: 10px;
