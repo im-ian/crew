@@ -713,6 +713,26 @@ button.avatar {
   background: var(--blocked);
   box-shadow: 0 0 7px color-mix(in srgb, var(--blocked) 80%, white);
 }
+/* The ring, blocked only. `u` carries this copy's half of the hoop and does not
+   rotate, so the clip stays put in screen space while the ring spins inside it —
+   clipping .avatar-orbit itself would slice the bead at the crossover. Same
+   period and phase as the bead, so the bright arc rides with it. */
+.avatar-orbit u {
+  position: absolute;
+  inset: 0;
+}
+.avatar-orbit.is-back u { clip-path: inset(0 0 50% 0); }
+.avatar-orbit.is-front u { clip-path: inset(50% 0 0 0); }
+.avatar-orbit u::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--blocked) 18%, transparent);
+  border-top-color: var(--blocked);
+  animation: avatar-hoop 3.4s linear infinite;
+  animation-delay: calc(var(--avatar-phase, 0) * -0.2s);
+}
 @keyframes avatar-hoop {
   to { transform: rotate(360deg); }
 }
@@ -728,10 +748,14 @@ button.avatar {
 }
 @media (prefers-reduced-motion: reduce) {
   .avatar-orbit i,
-  .avatar-orbit b {
+  .avatar-orbit b,
+  .avatar-orbit.is-back b,
+  .avatar-orbit u::before {
     animation: none;
   }
   .avatar-orbit.is-back { display: none; }
+  /* back copy is hidden, so the front one carries the whole ring */
+  .avatar-orbit.is-front u { clip-path: none; }
 }
 .mention-chip .avatar-orbit {
   display: none;
@@ -739,6 +763,7 @@ button.avatar {
 .who-avatar .avatar-orbit {
   inset: -3px;
 }
+.who-avatar .avatar-orbit u::before { border-width: 1.5px; }
 .who-avatar .avatar-orbit b {
   width: 3.6px;
   height: 8.6px;

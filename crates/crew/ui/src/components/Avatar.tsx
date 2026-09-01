@@ -50,6 +50,7 @@ function StatusOrbit({
       <i>
         <b />
       </i>
+      {status === "blocked" ? <u /> : null}
     </span>
   );
 }
