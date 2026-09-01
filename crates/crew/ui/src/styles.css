@@ -580,6 +580,17 @@ header {
   min-width: 0;
   flex: 1;
 }
+.head-busy {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+}
+.head-busy .who-btn {
+  max-width: 140px;
+}
 header .who-btn {
   height: var(--chrome-h);
   padding: 4px 8px 4px 4px;

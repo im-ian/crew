@@ -425,11 +425,13 @@ export function useCrew() {
     }
   }
 
-  async function stopAgent() {
-    const { id: sel, kind } = selectedRef.current;
-    if (!sel || kind !== "agent") return;
+  async function stopAgent(agentId?: string) {
+    const id =
+      agentId ||
+      (selectedRef.current.kind === "agent" ? selectedRef.current.id : null);
+    if (!id) return;
     try {
-      await api.stopAgent(sel);
+      await api.stopAgent(id);
       await refreshList();
       await refreshMessages();
     } catch (err) {
@@ -437,11 +439,13 @@ export function useCrew() {
     }
   }
 
-  async function approveAgent(allow: boolean) {
-    const { id: sel, kind } = selectedRef.current;
-    if (!sel || kind !== "agent") return;
+  async function approveAgent(allow: boolean, agentId?: string) {
+    const id =
+      agentId ||
+      (selectedRef.current.kind === "agent" ? selectedRef.current.id : null);
+    if (!id) return;
     try {
-      await api.approveAgent(sel, allow);
+      await api.approveAgent(id, allow);
       await refreshList();
       await refreshMessages();
     } catch (err) {
@@ -828,9 +832,10 @@ export function useCrew() {
     const working =
       selectedKind === "agent" &&
       !!currentAgent &&
-      (currentAgent.status === "working" || currentAgent.status === "blocked");
+      (currentAgent.status === "working" ||
+        currentAgent.status === "blocked");
     const lastRole = messages[messages.length - 1]?.role;
-    const expecting = selectedKind === "agent" && lastRole === "user";
+    const expecting = lastRole === "user";
     const ms = working || expecting ? 200 : 400;
     const id = window.setInterval(() => void tick(), ms);
     return () => {

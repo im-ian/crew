@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentInfo, ChannelInfo, ChatMessage, Kind } from "../types";
+import { busyInChannel } from "../busy";
 import { resolveFace } from "../avatar";
 import { Avatar } from "./Avatar";
 import { MdBody } from "./MdBody";
@@ -19,7 +20,7 @@ type Props = {
   onStick: (stick: boolean) => void;
   streaming?: boolean;
   onSelectAgent?: (id: string) => void;
-  onApprove?: (allow: boolean) => void;
+  onApprove?: (allow: boolean, agentId?: string) => void;
   highlightId?: string | null;
   onHighlightDone?: () => void;
 };
@@ -49,6 +50,30 @@ export function ChatThread({
       if (selectedKind === "agent" && selected === id) return;
       onSelectAgent(id);
     });
+  const lastVisible = visible[visible.length - 1];
+  function workingPlaceholders(): AgentInfo[] {
+    const live = currentChannel
+      ? busyInChannel(agents, currentChannel.id).filter((a) => a.status === "working")
+      : streaming && currentAgent
+        ? [currentAgent]
+        : [];
+    return live.filter((a) => {
+      if (lastVisible?.role === "assistant" && lastVisible.from === a.id) {
+        return false;
+      }
+      return true;
+    });
+  }
+  function blockedCards(): AgentInfo[] {
+    const live = currentChannel
+      ? busyInChannel(agents, currentChannel.id).filter((a) => a.status === "blocked")
+      : currentAgent?.status === "blocked"
+        ? [currentAgent]
+        : [];
+    return live.filter(
+      (a) => !messages.some((m) => m.from === a.id && m.approval === "pending"),
+    );
+  }
 
   function syncStick() {
     const el = ref.current;
@@ -121,36 +146,44 @@ export function ChatThread({
                 currentAgent={currentAgent}
                 caret={caret}
                 onSelectAgent={openAgent}
-                onApprove={onApprove}
+                onApprove={
+                  onApprove
+                    ? (allow) => onApprove(allow, m.from)
+                    : undefined
+                }
                 flash={flash}
               />
             );
           })
         )}
-        {streaming &&
-        visible.length > 0 &&
-        visible[visible.length - 1]?.role !== "assistant" ? (
+        {workingPlaceholders().map((agent) => (
           <Incoming
+            key={"working-" + agent.id}
             message={{
-              id: "streaming",
+              id: "working-" + agent.id,
               role: "assistant",
-              from: currentAgent?.id || "",
+              from: agent.id,
               text: "",
               ts: 0,
             }}
-            agent={currentAgent}
-            who={currentAgent?.name || currentAgent?.id || ""}
+            agent={agent}
+            who={agent.name || agent.id}
             agents={agents}
             caret
-            openName={false}
+            openName={selectedKind === "channel"}
             onSelectAgent={openAgent}
           />
-        ) : null}
-        {currentAgent?.status === "blocked" &&
-        onApprove &&
-        !messages.some((m) => m.approval === "pending") ? (
-          <ApprovalCard state="pending" onApprove={onApprove} />
-        ) : null}
+        ))}
+        {blockedCards().map((agent) => (
+          <ApprovalCard
+            key={"block-" + agent.id}
+            state="pending"
+            who={agent.name || agent.id}
+            onApprove={
+              onApprove ? (allow) => onApprove(allow, agent.id) : undefined
+            }
+          />
+        ))}
       </div>
       {away ? (
         <button
@@ -522,9 +555,11 @@ function ToolCardRow({
 
 function ApprovalCard({
   state,
+  who,
   onApprove,
 }: {
   state?: ChatMessage["approval"];
+  who?: string;
   onApprove?: (allow: boolean) => void;
 }) {
   if (!state) return null;
@@ -537,7 +572,9 @@ function ApprovalCard({
   if (!onApprove) return null;
   return (
     <div className="approval-card">
-      <div className="approval-copy">이 작업을 진행할까요?</div>
+      <div className="approval-copy">
+        {who ? `${who} · 이 작업을 진행할까요?` : "이 작업을 진행할까요?"}
+      </div>
       <div className="approval-actions">
         <button type="button" className="approval-allow" onClick={() => onApprove(true)}>
           한 번 허용

@@ -53,13 +53,14 @@ export function App() {
         <ChatHeader
           currentAgent={crew.currentAgent}
           currentChannel={crew.currentChannel}
+          agents={crew.agents}
           onOpenInfo={() => {
             if (crew.selected) crew.openInfo(crew.selected);
           }}
           onOpenRoutines={() => {
             if (crew.selected) crew.openRoutines(crew.selected);
           }}
-          onStop={() => void crew.stopAgent()}
+          onStop={(id) => void crew.stopAgent(id)}
         />
         <ChatThread
           messages={crew.messages}
@@ -77,7 +78,7 @@ export function App() {
               crew.currentAgent?.status === "blocked")
           }
           onSelectAgent={crew.selectAgent}
-          onApprove={(allow) => void crew.approveAgent(allow)}
+          onApprove={(allow, id) => void crew.approveAgent(allow, id)}
           highlightId={crew.highlightId}
           onHighlightDone={crew.clearHighlight}
         />

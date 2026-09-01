@@ -272,6 +272,9 @@ pub struct AgentInfo {
     pub routines: Vec<Routine>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
+    /// Channel this bot is currently working for, if the turn started there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_channel: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

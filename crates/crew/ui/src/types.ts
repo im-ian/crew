@@ -73,6 +73,7 @@ export type AgentInfo = {
   role?: string | null;
   routines: Routine[];
   preview?: string | null;
+  origin_channel?: string | null;
 };
 
 export type ChannelInfo = {

@@ -1,21 +1,31 @@
+import { busyInChannel, isBusyStatus } from "../busy";
 import type { AgentInfo, ChannelInfo } from "../types";
 import { WhoButton } from "./WhoButton";
 
 type Props = {
   currentAgent: AgentInfo | null;
   currentChannel: ChannelInfo | null;
+  agents?: AgentInfo[];
   onOpenInfo: () => void;
   onOpenRoutines: () => void;
-  onStop?: () => void;
+  onStop?: (agentId?: string) => void;
 };
 
 export function ChatHeader({
   currentAgent,
   currentChannel,
+  agents = [],
   onOpenInfo,
   onOpenRoutines,
   onStop,
 }: Props) {
+  const busy = busyInChannel(agents, currentChannel?.id);
+  const stopIds = currentChannel
+    ? busy.filter((a) => a.status === "working").map((a) => a.id)
+    : currentAgent && isBusyStatus(currentAgent.status)
+      ? [currentAgent.id]
+      : [];
+
   let identity = <span className="head-empty">대화를 선택하세요</span>;
   if (currentChannel) {
     identity = (
@@ -42,15 +52,31 @@ export function ChatHeader({
   return (
     <header>
       <div className="head-identity">{identity}</div>
-      {currentAgent &&
-      (currentAgent.status === "working" || currentAgent.status === "blocked") &&
-      onStop ? (
+      {busy.length ? (
+        <div className="head-busy" aria-label="작업 중인 멤버">
+          {busy.slice(0, 6).map((a) => (
+            <WhoButton
+              key={a.id}
+              agent={a}
+              who={a.name || a.id}
+              title={
+                a.status === "blocked"
+                  ? `${a.name || a.id} 확인이 필요합니다`
+                  : `${a.name || a.id} 작업 중`
+              }
+            />
+          ))}
+        </div>
+      ) : null}
+      {stopIds.length && onStop ? (
         <button
           type="button"
           className="head-action"
           title="중지"
           aria-label="중지"
-          onClick={onStop}
+          onClick={() => {
+            for (const id of stopIds) onStop(id);
+          }}
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <rect x="4" y="4" width="8" height="8" rx="1.2" fill="currentColor" />

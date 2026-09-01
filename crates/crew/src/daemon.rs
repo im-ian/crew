@@ -321,14 +321,23 @@ fn approve_agent(id: &str, allow: bool) -> anyhow::Result<()> {
         crate::protocol::ApprovalState::Denied
     };
     crate::transcript::set_approval(id, &msg.id, state);
+    if let Some(channel) = get_origin(id).and_then(|o| o.reply_channel) {
+        let key = format!("ch:{channel}");
+        if let Some(ch_msg) = crate::transcript::pending_approval(&key) {
+            if ch_msg.from == id {
+                crate::transcript::set_approval(&key, &ch_msg.id, state);
+            }
+        }
+    }
     set_live_status(id, AgentStatus::Idle);
     if allow {
+        let origin = get_origin(id).unwrap_or_else(TurnOrigin::user);
         submit_delivery(
             id,
             "User allowed this action. Continue.",
             true,
             None,
-            TurnOrigin::user(),
+            origin,
         )?;
     }
     Ok(())
@@ -1284,6 +1293,7 @@ fn list_agents() -> Vec<AgentInfo> {
                 role: cfg.and_then(|c| c.role.clone()),
                 routines: cfg.map(|c| c.routines.clone()).unwrap_or_default(),
                 preview: None,
+                origin_channel: get_origin(s.id()).and_then(|o| o.reply_channel),
             }
         })
         .collect();
@@ -2193,7 +2203,7 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
     if text.is_empty() {
         return;
     }
-    let Some(origin) = take_origin(agent) else {
+    let Some(origin) = get_origin(agent) else {
         return;
     };
     let targets = targeting::postback_targets(&origin, agent);
@@ -2205,6 +2215,17 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
                 .unwrap_or(false);
             if !dup {
                 crate::transcript::push_channel(&channel, Role::Assistant, agent, &text);
+            }
+            if crate::interrupt::looks_like_judgment_question(&text) {
+                if let Some(ch_msg) = crate::transcript::channel_messages(&channel).last() {
+                    if ch_msg.from == agent {
+                        crate::transcript::set_approval(
+                            &format!("ch:{channel}"),
+                            &ch_msg.id,
+                            crate::protocol::ApprovalState::Pending,
+                        );
+                    }
+                }
             }
         }
     }
@@ -2291,9 +2312,62 @@ mod inbox_tests {
         assert_eq!(last.from, speaker);
         assert_eq!(last.role, Role::Assistant);
         assert_eq!(last.text, "on it");
+        let kept = get_origin(&speaker).expect("origin stays while the turn is this room");
+        assert_eq!(kept.reply_channel.as_deref(), Some(ch.as_str()));
         crate::transcript::drop_channel(&ch);
         channels().lock().unwrap().remove(&ch);
         configs().lock().unwrap().remove(&speaker);
+        take_origin(&speaker);
+    }
+
+    #[test]
+    fn sealed_judgment_marks_channel_approval() {
+        let ch = format!(
+            "room-ask-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let speaker = format!("beta-{ch}");
+        channels().lock().unwrap().insert(
+            ch.clone(),
+            crate::config::Channel::new(ch.clone(), ch.clone(), vec![speaker.clone()]).unwrap(),
+        );
+        configs().lock().unwrap().insert(
+            speaker.clone(),
+            crate::config::AgentConfig::new(
+                speaker.clone(),
+                speaker.clone(),
+                vec!["cat".into()],
+                None,
+            ),
+        );
+        crate::transcript::load_channel(&ch);
+        set_origin(&speaker, TurnOrigin::channel(&ch, "user"));
+        let reply = ChatMessage {
+            id: "ask1".into(),
+            role: Role::Assistant,
+            from: speaker.clone(),
+            text: "이 변경을 실행할까요?".into(),
+            ts: 1,
+            queued: false,
+            kind: None,
+            approval: None,
+        };
+        on_assistant_sealed(&speaker, &reply);
+        let ch_last = crate::transcript::channel_messages(&ch)
+            .last()
+            .cloned()
+            .expect("channel ask");
+        assert_eq!(
+            ch_last.approval,
+            Some(crate::protocol::ApprovalState::Pending)
+        );
+        crate::transcript::drop_channel(&ch);
+        channels().lock().unwrap().remove(&ch);
+        configs().lock().unwrap().remove(&speaker);
+        take_origin(&speaker);
     }
 
     #[test]
