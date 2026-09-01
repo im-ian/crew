@@ -208,9 +208,6 @@ html.rail-resizing * {
 .search-row .search {
   width: auto;
 }
-.search-row .icon-btn {
-  font-size: 16px;
-}
 .icon-btn {
   width: var(--control-h);
   height: var(--control-h);
@@ -225,6 +222,9 @@ html.rail-resizing * {
   padding: 0;
   display: grid;
   place-items: center;
+}
+.icon-btn svg {
+  display: block;
 }
 .icon-btn:hover { background: var(--line); }
 .icon-btn:active { transform: scale(0.94); }
@@ -1207,8 +1207,14 @@ button.channel-who:hover {
   border-radius: var(--radius-pill);
   background: var(--chip);
   color: var(--ink);
-  font: inherit;
   cursor: pointer;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  line-height: 0;
+}
+.attach-btn svg {
+  display: block;
 }
 .search-hits {
   display: flex;
