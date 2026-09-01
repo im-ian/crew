@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import type { AgentInfo, Kind, Skill } from "../types";
@@ -6,6 +6,11 @@ import { api } from "../api";
 import { resolveMention, trimMentionPunct } from "../mentions";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
+
+export type ComposerHandle = {
+  focus: () => void;
+  attach: () => void;
+};
 
 type Props = {
   agents: AgentInfo[];
@@ -25,13 +30,13 @@ type Attach = {
   preview?: string;
 };
 
-export function Composer({
+export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   agents,
   selected,
   selectedKind,
   placeholder,
   onSend,
-}: Props) {
+}, ref) {
   const inputRef = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
   const [mention, setMention] = useState<Mention | null>(null);
@@ -42,6 +47,24 @@ export function Composer({
   const [skills, setSkills] = useState<Skill[]>([]);
   const [attaches, setAttaches] = useState<Attach[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    focus() {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      const sel = window.getSelection();
+      if (!sel) return;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    },
+    attach() {
+      fileRef.current?.click();
+    },
+  }));
 
   const matches = useMemo(() => {
     if (!mention) return [];
@@ -405,7 +428,7 @@ export function Composer({
         <button
           type="button"
           className="attach-btn"
-          title="파일 첨부"
+          title="파일 첨부 ⌘U"
           aria-label="파일 첨부"
           onClick={() => fileRef.current?.click()}
         >
@@ -422,7 +445,7 @@ export function Composer({
       </div>
     </form>
   );
-}
+});
 
 function attachMarkdown(a: Attach): string {
   return a.image ? `![${a.name}](${a.path})` : `[${a.name}](${a.path})`;

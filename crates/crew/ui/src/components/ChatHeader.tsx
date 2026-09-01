@@ -34,7 +34,7 @@ export function ChatHeader({
         who={currentChannel.name || currentChannel.id}
         letter="#"
         fallbackId={currentChannel.id}
-        title="채널 정보"
+        title="채널 정보 ⌘I"
         onClick={onOpenInfo}
       />
     );
@@ -43,7 +43,7 @@ export function ChatHeader({
       <WhoButton
         agent={currentAgent}
         who={currentAgent.name || currentAgent.id}
-        title="봇 정보"
+        title="봇 정보 ⌘I"
         onClick={onOpenInfo}
       />
     );
@@ -72,7 +72,7 @@ export function ChatHeader({
         <button
           type="button"
           className="head-action"
-          title="중지"
+          title="중지 ⌘."
           aria-label="중지"
           onClick={() => {
             for (const id of stopIds) onStop(id);
@@ -87,7 +87,7 @@ export function ChatHeader({
         <button
           type="button"
           className="head-action"
-          title="채널 설정"
+          title="채널 설정 ⌘I"
           aria-label="채널 설정"
           onClick={onOpenInfo}
         >
@@ -107,7 +107,7 @@ export function ChatHeader({
         <button
           type="button"
           className="head-action"
-          title="봇 설정"
+          title="봇 설정 ⌘⇧R"
           aria-label="봇 설정"
           onClick={onOpenRoutines}
         >

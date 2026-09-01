@@ -883,6 +883,7 @@ export function useCrew() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (e.defaultPrevented) return;
       if (e.key !== "Escape") return;
       closeConfirm();
       closePane();

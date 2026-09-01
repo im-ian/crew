@@ -23,6 +23,7 @@ type Props = {
   onApprove?: (allow: boolean, agentId?: string) => void;
   highlightId?: string | null;
   onHighlightDone?: () => void;
+  jumpSeq?: number;
 };
 
 export function ChatThread({
@@ -40,6 +41,7 @@ export function ChatThread({
   onApprove,
   highlightId = null,
   onHighlightDone,
+  jumpSeq = 0,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [away, setAway] = useState(false);
@@ -97,6 +99,11 @@ export function ChatThread({
     if (el && stick && !highlightId) el.scrollTop = el.scrollHeight;
     syncStick();
   }, [messages, stick, selected, selectedKind, streaming, highlightId]);
+
+  useEffect(() => {
+    if (!jumpSeq) return;
+    jumpBottom();
+  }, [jumpSeq]);
 
   useEffect(() => {
     if (!highlightId) return;

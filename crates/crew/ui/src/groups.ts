@@ -136,6 +136,35 @@ export function visibleUngroupedKeys(
   return out;
 }
 
+/** Sidebar order for keyboard next/prev. Collapsed group children are skipped. */
+export function railOrder(
+  groups: Group[],
+  ungrouped: string[],
+  agents: AgentInfo[],
+  channels: ChannelInfo[],
+): { kind: Kind; id: string }[] {
+  const valid = validKeys(agents, channels);
+  const out: { kind: Kind; id: string }[] = [];
+  const used = new Set<string>();
+  for (const g of groups) {
+    if (g.id === UNGROUPED_ID) continue;
+    for (const key of g.items) {
+      if (!valid.has(key) || used.has(key)) continue;
+      used.add(key);
+      if (g.collapsed) continue;
+      const parsed = parseItemKey(key);
+      if (parsed) out.push(parsed);
+    }
+  }
+  for (const key of visibleUngroupedKeys(groups, ungrouped, agents, channels)) {
+    if (used.has(key)) continue;
+    used.add(key);
+    const parsed = parseItemKey(key);
+    if (parsed) out.push(parsed);
+  }
+  return out;
+}
+
 export function moveItem(
   layout: RailLayout,
   key: string,

@@ -1970,6 +1970,54 @@ textarea.textin {
   overflow: auto;
   border-radius: var(--radius-xl);
 }
+.shortcut-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 14px;
+}
+.shortcut-list h4 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.shortcut-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.shortcut-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 28px;
+  font-size: 14px;
+}
+.shortcut-label { min-width: 0; }
+.shortcut-keys {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.shortcut-keys kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5em;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--btn);
+  color: var(--ink);
+  font: 600 12px/1.2 inherit;
+}
 .dialog.wide {
   width: min(520px, calc(100% - 40px));
 }

@@ -1,27 +1,130 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatThread } from "./components/ChatThread";
-import { Composer } from "./components/Composer";
+import { Composer, type ComposerHandle } from "./components/Composer";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ContextMenu, type MenuEntry } from "./components/ContextMenu";
 import { AgentPane } from "./components/AgentPane";
 import { ChannelPane } from "./components/ChannelPane";
 import { NewBotModal } from "./components/NewBotModal";
 import { NewChannelModal } from "./components/NewChannelModal";
+import { ShortcutHelp } from "./components/ShortcutHelp";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
+import { busyInChannel } from "./busy";
+import { railOrder } from "./groups";
+import { isTypingTarget, shortcutId } from "./shortcuts";
 import type { Kind } from "./types";
 import { useCrew } from "./useCrew";
 
 export function App() {
   const crew = useCrew();
+  const crewRef = useRef(crew);
+  crewRef.current = crew;
   const [renameId, setRenameId] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [jumpSeq, setJumpSeq] = useState(0);
   const renamingId = crew.pendingRenameId || renameId;
+  const searchRef = useRef<HTMLInputElement>(null);
+  const composerRef = useRef<ComposerHandle>(null);
 
   function finishRename() {
     crew.clearPendingRename();
     setRenameId(null);
   }
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.isComposing) return;
+      if (helpOpen && e.key === "Escape") {
+        e.preventDefault();
+        setHelpOpen(false);
+        return;
+      }
+      const c = crewRef.current;
+      if (c.confirmOpen) return;
+      const typing = isTypingTarget(e.target);
+      const id = shortcutId(e, typing);
+      if (!id) return;
+      if (helpOpen && id !== "help") return;
+      e.preventDefault();
+      if (id === "help") {
+        setHelpOpen((open) => !open);
+        return;
+      }
+      if (id === "search") {
+        searchRef.current?.focus();
+        searchRef.current?.select();
+        return;
+      }
+      if (id === "composer") {
+        composerRef.current?.focus();
+        return;
+      }
+      if (id === "attach") {
+        composerRef.current?.attach();
+        return;
+      }
+      if (id === "new-bot") {
+        c.openNewBot();
+        return;
+      }
+      if (id === "new-channel") {
+        c.openNewChannel();
+        return;
+      }
+      if (id === "info") {
+        if (c.selected) c.openInfo(c.selected);
+        return;
+      }
+      if (id === "routines") {
+        if (c.selectedKind === "agent" && c.selected) c.openRoutines(c.selected);
+        return;
+      }
+      if (id === "stop") {
+        if (c.selectedKind === "channel" && c.currentChannel) {
+          const working = busyInChannel(c.agents, c.currentChannel.id).filter(
+            (a) => a.status === "working",
+          );
+          for (const a of working) void c.stopAgent(a.id);
+          return;
+        }
+        void c.stopAgent();
+        return;
+      }
+      if (id === "bottom") {
+        setJumpSeq((n) => n + 1);
+        return;
+      }
+      if (id === "prev-chat" || id === "next-chat") {
+        const order = railOrder(c.groups, c.ungrouped, c.agents, c.channels);
+        if (!order.length) return;
+        const i = order.findIndex(
+          (row) => row.kind === c.selectedKind && row.id === c.selected,
+        );
+        const next =
+          id === "next-chat"
+            ? order[(i < 0 ? 0 : i + 1) % order.length]
+            : order[(i < 0 ? order.length - 1 : i - 1 + order.length) % order.length];
+        if (next.kind === "channel") c.selectChannel(next.id);
+        else c.selectAgent(next.id);
+        return;
+      }
+      if (id === "approve" || id === "deny") {
+        const allow = id === "approve";
+        if (c.selectedKind === "agent" && c.currentAgent?.status === "blocked") {
+          void c.approveAgent(allow, c.currentAgent.id);
+          return;
+        }
+        const blocked = busyInChannel(c.agents, c.currentChannel?.id).find(
+          (a) => a.status === "blocked",
+        );
+        if (blocked) void c.approveAgent(allow, blocked.id);
+      }
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [helpOpen]);
 
   return (
     <div className="app">
@@ -48,6 +151,7 @@ export function App() {
         onRenameDone={finishRename}
         onMove={crew.moveToGroup}
         unread={crew.unread}
+        searchRef={searchRef}
       />
       <main>
         <div className="titlebar-align" data-tauri-drag-region />
@@ -82,8 +186,10 @@ export function App() {
           onApprove={(allow, id) => void crew.approveAgent(allow, id)}
           highlightId={crew.highlightId}
           onHighlightDone={crew.clearHighlight}
+          jumpSeq={jumpSeq}
         />
         <Composer
+          ref={composerRef}
           agents={crew.agents}
           selected={crew.selected}
           selectedKind={crew.selectedKind}
@@ -142,6 +248,7 @@ export function App() {
         y={crew.ctx.y}
         items={menuItems(crew, setRenameId)}
       />
+      <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
       <Toast
         text={crew.toast.text}
         show={crew.toast.show}

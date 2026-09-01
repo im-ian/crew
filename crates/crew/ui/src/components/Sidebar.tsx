@@ -6,6 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type Ref,
 } from "react";
 import { createPortal } from "react-dom";
 import { itemKey, parseItemKey } from "../groups";
@@ -199,6 +200,7 @@ type Props = {
   onRenameDone: () => void;
   onMove: (kind: Kind, id: string, groupId: string | null, beforeKey?: string | null) => void;
   unread?: string[];
+  searchRef?: Ref<HTMLInputElement>;
 };
 
 function matches(parts: Array<string | null | undefined>, query: string): boolean {
@@ -270,6 +272,7 @@ export function Sidebar({
   onRenameDone,
   onMove,
   unread = [],
+  searchRef,
 }: Props) {
   const all = toItems(agents, channels).filter((item) => {
     if (item.agent) {
@@ -539,9 +542,11 @@ export function Sidebar({
       <div className="drag-top" data-tauri-drag-region />
       <div className="search-row">
         <input
+          ref={searchRef}
           className="search"
           type="search"
           placeholder="검색"
+          title="검색 ⌘K"
           autoComplete="off"
           spellCheck={false}
           value={query}
