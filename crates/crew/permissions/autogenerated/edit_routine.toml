@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-edit-routine"
+description = "Enables the edit_routine command without any pre-configured scope."
+commands.allow = ["edit_routine"]
+
+[[permission]]
+identifier = "deny-edit-routine"
+description = "Denies the edit_routine command without any pre-configured scope."
+commands.deny = ["edit_routine"]

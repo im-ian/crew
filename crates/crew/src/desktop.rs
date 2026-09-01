@@ -501,6 +501,51 @@ fn set_routine_enabled(agent: String, key: String, enabled: bool) -> Result<(), 
     }
 }
 
+#[tauri::command]
+fn run_routine(agent: String, key: String) -> Result<(), String> {
+    match client::rpc(Request::RunRoutine { agent, key }) {
+        Ok(Event::Ok) | Ok(Event::Agents { .. }) => Ok(()),
+        Ok(Event::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected daemon response".into()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+#[tauri::command]
+fn edit_routine(
+    agent: String,
+    key: String,
+    name: Option<String>,
+    schedule: Option<String>,
+    prompt: Option<String>,
+) -> Result<(), String> {
+    match client::rpc(Request::EditRoutine {
+        agent,
+        key,
+        name,
+        schedule,
+        prompt,
+    }) {
+        Ok(Event::Ok) | Ok(Event::Agents { .. }) => Ok(()),
+        Ok(Event::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected daemon response".into()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+#[tauri::command]
+fn list_routine_runs(
+    agent: String,
+    key: String,
+) -> Result<Vec<crate::routine_log::RoutineRun>, String> {
+    match client::rpc(Request::RoutineRuns { agent, key }) {
+        Ok(Event::RoutineRuns { runs, .. }) => Ok(runs),
+        Ok(Event::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected daemon response".into()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
 pub fn run() -> anyhow::Result<()> {
     client::ensure_daemon()?;
     #[cfg(debug_assertions)]
@@ -537,6 +582,9 @@ pub fn run() -> anyhow::Result<()> {
             add_routine,
             remove_routine,
             set_routine_enabled,
+            run_routine,
+            edit_routine,
+            list_routine_runs,
             get_memory,
             set_memory,
             list_groups,

@@ -462,7 +462,11 @@ export function useCrew() {
     const n = name.trim();
     const s = schedule.trim();
     const p = prompt.trim();
-    if (!n || !s || !p) {
+    if (!s) {
+      showError("이름, 시각, 시킬 일을 모두 입력하세요");
+      return;
+    }
+    if ((!n || !p) && s.trim().split(/\s+/).length === 5 && /^\S+ \S+ \S+ \S+ \S+$/.test(s.trim())) {
       showError("이름, 시각, 시킬 일을 모두 입력하세요");
       return;
     }
@@ -501,6 +505,42 @@ export function useCrew() {
       await api.setMemory(id, text);
     } catch (err) {
       showError(err);
+    }
+  }
+
+  async function runRoutine(r: Routine) {
+    const id = selectedRef.current.id;
+    if (!id || !r) return;
+    try {
+      await api.runRoutine(id, r.id || r.name);
+      await refreshList();
+    } catch (err) {
+      showError(err);
+    }
+  }
+
+  async function editRoutine(
+    r: Routine,
+    fields: { name?: string; schedule?: string; prompt?: string },
+  ) {
+    const id = selectedRef.current.id;
+    if (!id || !r) return;
+    try {
+      await api.editRoutine(id, r.id || r.name, fields);
+      await refreshList();
+    } catch (err) {
+      showError(err);
+    }
+  }
+
+  async function loadRoutineRuns(r: Routine) {
+    const id = selectedRef.current.id;
+    if (!id || !r) return [];
+    try {
+      return await api.listRoutineRuns(id, r.id || r.name);
+    } catch (err) {
+      showError(err);
+      return [];
     }
   }
 
@@ -802,6 +842,9 @@ export function useCrew() {
     addRoutine,
     toggleRoutine,
     deleteRoutine,
+    runRoutine,
+    editRoutine,
+    loadRoutineRuns,
     loadMemory,
     saveMemory,
     showError,

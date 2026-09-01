@@ -7,7 +7,7 @@ import {
   toCron,
   type Repeat,
 } from "../schedule";
-import type { AgentInfo, Routine } from "../types";
+import type { AgentInfo, Routine, RoutineRun } from "../types";
 import { Field } from "./Field";
 import { Seg } from "./Seg";
 
@@ -17,6 +17,12 @@ type Props = {
   onAdd: (name: string, schedule: string, prompt: string) => Promise<void>;
   onToggle: (r: Routine) => Promise<void>;
   onDelete: (r: Routine) => Promise<void>;
+  onRun: (r: Routine) => Promise<void>;
+  onEdit: (
+    r: Routine,
+    fields: { name?: string; schedule?: string; prompt?: string },
+  ) => Promise<void>;
+  onLoadRuns: (r: Routine) => Promise<RoutineRun[]>;
 };
 
 export function RoutinesModal({
@@ -25,6 +31,9 @@ export function RoutinesModal({
   onAdd,
   onToggle,
   onDelete,
+  onRun,
+  onEdit,
+  onLoadRuns,
 }: Props) {
   const [name, setName] = useState("");
   const [repeat, setRepeat] = useState<Repeat>("daily");
@@ -32,6 +41,13 @@ export function RoutinesModal({
   const [time, setTime] = useState("09:00");
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
+  const [nl, setNl] = useState("");
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editPrompt, setEditPrompt] = useState("");
+  const [editSchedule, setEditSchedule] = useState("");
+  const [runsFor, setRunsFor] = useState<string | null>(null);
+  const [runs, setRuns] = useState<RoutineRun[]>([]);
   const nameRef = useRef<HTMLInputElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const routines = (agent && agent.routines) || [];
@@ -44,6 +60,10 @@ export function RoutinesModal({
     setTime("09:00");
     setPrompt("");
     setBusy(false);
+    setNl("");
+    setEditId(null);
+    setRunsFor(null);
+    setRuns([]);
   }, [open, agent?.id]);
 
   function toggleDay(day: number) {
@@ -86,6 +106,43 @@ export function RoutinesModal({
     }
   }
 
+  async function submitNl() {
+    const text = nl.trim();
+    if (!text) return;
+    setBusy(true);
+    try {
+      await onAdd("", text, "");
+      setNl("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveEdit(r: Routine) {
+    setBusy(true);
+    try {
+      await onEdit(r, {
+        name: editName.trim(),
+        schedule: editSchedule.trim(),
+        prompt: editPrompt.trim(),
+      });
+      setEditId(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleRuns(r: Routine) {
+    const key = r.id || r.name;
+    if (runsFor === key) {
+      setRunsFor(null);
+      setRuns([]);
+      return;
+    }
+    setRunsFor(key);
+    setRuns(await onLoadRuns(r));
+  }
+
   return (
     <div className="form-stack">
           <div className="pane-block">
@@ -104,16 +161,113 @@ export function RoutinesModal({
                       </div>
                     </div>
                     <div className="routine-actions">
+                      <button type="button" onClick={() => void onRun(r)}>
+                        지금 실행
+                      </button>
                       <button type="button" onClick={() => void onToggle(r)}>
                         {r.enabled === false ? "켜기" : "끄기"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditId(r.id || r.name);
+                          setEditName(r.name || "");
+                          setEditPrompt(r.prompt || "");
+                          setEditSchedule(r.schedule || "");
+                        }}
+                      >
+                        수정
+                      </button>
+                      <button type="button" onClick={() => void toggleRuns(r)}>
+                        기록
                       </button>
                       <button type="button" onClick={() => void onDelete(r)}>
                         삭제
                       </button>
                     </div>
+                    {editId === (r.id || r.name) ? (
+                      <div className="routine-edit">
+                        <input
+                          className="textin"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          placeholder="이름"
+                        />
+                        <input
+                          className="textin"
+                          value={editSchedule}
+                          onChange={(e) => setEditSchedule(e.target.value)}
+                          placeholder="cron 또는 평일 8시에 브리핑"
+                        />
+                        <textarea
+                          className="textin"
+                          value={editPrompt}
+                          onChange={(e) => setEditPrompt(e.target.value)}
+                          placeholder="시킬 일"
+                        />
+                        <div className="actions">
+                          <button
+                            type="button"
+                            className="primary"
+                            disabled={busy}
+                            onClick={() => void saveEdit(r)}
+                          >
+                            저장
+                          </button>
+                          <button type="button" onClick={() => setEditId(null)}>
+                            취소
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                    {runsFor === (r.id || r.name) ? (
+                      <div className="routine-runs">
+                        {!runs.length ? (
+                          <div className="empty-routines">아직 실행 기록이 없습니다</div>
+                        ) : (
+                          runs
+                            .slice()
+                            .reverse()
+                            .map((run) => (
+                              <div
+                                key={run.ts}
+                                className={"routine-run" + (run.ok ? "" : " is-fail")}
+                              >
+                                {run.ok ? "성공" : "실패"} ·{" "}
+                                {new Date(run.ts).toLocaleString()}
+                                {run.detail && run.detail !== "ok"
+                                  ? ` · ${run.detail}`
+                                  : ""}
+                              </div>
+                            ))
+                        )}
+                      </div>
+                    ) : null}
                   </div>
                 ))
               )}
+            </div>
+          </div>
+          <div className="pane-block">
+            <div className="pane-label">말로 추가</div>
+            <Field label="예: 평일 8시에 브리핑" htmlFor="routine-nl">
+              <textarea
+                id="routine-nl"
+                className="textin"
+                placeholder="Every weekday at 8:00 AM, post a briefing"
+                value={nl}
+                onChange={(e) => setNl(e.target.value)}
+              />
+            </Field>
+            <div className="actions">
+              <button
+                type="button"
+                className="primary"
+                disabled={busy || !nl.trim()}
+                onClick={() => void submitNl()}
+              >
+                만들기
+              </button>
             </div>
           </div>
           <div className="pane-block">

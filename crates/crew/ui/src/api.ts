@@ -1,5 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AgentInfo, ChannelInfo, ChatMessage, Group, ModelList } from "./types";
+import type {
+  AgentInfo,
+  ChannelInfo,
+  ChatMessage,
+  Group,
+  ModelList,
+  RoutineRun,
+} from "./types";
 
 const modelLists = new Map<string, Promise<ModelList>>();
 
@@ -70,6 +77,22 @@ export const api = {
     invoke<void>("remove_routine", { agent, key }),
   setRoutineEnabled: (agent: string, key: string, enabled: boolean) =>
     invoke<void>("set_routine_enabled", { agent, key, enabled }),
+  runRoutine: (agent: string, key: string) =>
+    invoke<void>("run_routine", { agent, key }),
+  editRoutine: (
+    agent: string,
+    key: string,
+    fields: { name?: string | null; schedule?: string | null; prompt?: string | null },
+  ) =>
+    invoke<void>("edit_routine", {
+      agent,
+      key,
+      name: fields.name ?? null,
+      schedule: fields.schedule ?? null,
+      prompt: fields.prompt ?? null,
+    }),
+  listRoutineRuns: (agent: string, key: string) =>
+    invoke<RoutineRun[]>("list_routine_runs", { agent, key }),
   getMemory: (agent: string) => invoke<string>("get_memory", { agent }),
   setMemory: (agent: string, text: string) =>
     invoke<void>("set_memory", { agent, text }),

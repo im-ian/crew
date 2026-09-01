@@ -47,6 +47,10 @@ pub fn rpc(req: Request) -> anyhow::Result<Event> {
             | (Request::RemoveRoutine { .. }, Event::Ok | Event::Agents { .. })
             | (Request::SetRoutineEnabled { .. }, Event::Ok | Event::Agents { .. })
             | (Request::RunRoutine { .. }, Event::Ok | Event::Agents { .. })
+            | (Request::EditRoutine { .. }, Event::Ok | Event::Agents { .. })
+            | (Request::RoutineRuns { .. }, Event::RoutineRuns { .. })
+            | (Request::Interrupt { .. }, Event::Ok)
+            | (Request::Approve { .. }, Event::Ok)
             | (Request::ListChannels, Event::Channels { .. } | Event::Agents { .. })
             | (Request::ChannelMessages { .. }, Event::ChannelMessages { .. })
             | (

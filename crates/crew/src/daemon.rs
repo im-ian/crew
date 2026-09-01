@@ -721,11 +721,13 @@ fn tick_routines() {
         }
         match fire_routine(&agent, &name, &prompt) {
             Ok(()) => {
+                let _ = crate::routine_log::record(&agent, &rid, true, "ok");
                 if let Err(err) = mark_routine_run(&agent, &rid, &key) {
                     eprintln!("[crew] routine last_run {agent}/{name}: {err:#}");
                 }
             }
             Err(err) => {
+                let _ = crate::routine_log::record(&agent, &rid, false, &err.to_string());
                 eprintln!("[crew] routine {agent}/{name}: {err:#}");
             }
         }
@@ -1064,6 +1066,23 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
                 message: err.to_string(),
             }],
         },
+        Request::EditRoutine {
+            agent,
+            key,
+            name,
+            schedule,
+            prompt,
+        } => match edit_routine(&agent, &key, name, schedule, prompt) {
+            Ok(()) => vec![Event::Ok, snapshot_event()],
+            Err(err) => vec![Event::Error {
+                message: err.to_string(),
+            }],
+        },
+        Request::RoutineRuns { agent, key } => vec![Event::RoutineRuns {
+            agent: agent.clone(),
+            key: key.clone(),
+            runs: crate::routine_log::list(&agent, &key),
+        }],
         Request::ListChannels => vec![Event::Channels {
             channels: list_channels(),
         }],
@@ -1579,8 +1598,73 @@ fn clone_agent_cfg(id: &str) -> anyhow::Result<AgentConfig> {
 }
 
 fn add_routine(agent: &str, name: String, schedule: String, prompt: String) -> anyhow::Result<()> {
+    let (name, schedule, prompt) = resolve_routine_fields(name, schedule, prompt)?;
     let mut cfg = clone_agent_cfg(agent)?;
     cfg.routines.push(Routine::new(name, schedule, prompt)?);
+    persist_config(&cfg)
+}
+
+fn resolve_routine_fields(
+    name: String,
+    schedule: String,
+    prompt: String,
+) -> anyhow::Result<(String, String, String)> {
+    if cron::validate(&schedule).is_ok() && !name.trim().is_empty() && !prompt.trim().is_empty() {
+        return Ok((name, schedule, prompt));
+    }
+    let blob = [name.trim(), schedule.trim(), prompt.trim()]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let parsed = crate::nl_routine::parse_nl_routine(&blob)?;
+    let name = if name.trim().is_empty() {
+        parsed.name
+    } else {
+        name
+    };
+    let prompt = if prompt.trim().is_empty() {
+        parsed.prompt
+    } else {
+        prompt
+    };
+    Ok((name, parsed.schedule, prompt))
+}
+
+fn edit_routine(
+    agent: &str,
+    key: &str,
+    name: Option<String>,
+    schedule: Option<String>,
+    prompt: Option<String>,
+) -> anyhow::Result<()> {
+    let mut cfg = clone_agent_cfg(agent)?;
+    let idx = find_routine_index(&cfg.routines, key)
+        .ok_or_else(|| anyhow::anyhow!("unknown routine {key}"))?;
+    if let Some(name) = name {
+        let name = name.trim();
+        if !name.is_empty() {
+            cfg.routines[idx].name = name.to_string();
+        }
+    }
+    if let Some(schedule) = schedule {
+        let schedule = schedule.trim();
+        if !schedule.is_empty() {
+            let resolved = if cron::validate(schedule).is_ok() {
+                schedule.to_string()
+            } else {
+                crate::nl_routine::parse_nl_routine(schedule)?.schedule
+            };
+            cron::validate(&resolved)?;
+            cfg.routines[idx].schedule = resolved;
+        }
+    }
+    if let Some(prompt) = prompt {
+        let prompt = prompt.trim();
+        if !prompt.is_empty() {
+            cfg.routines[idx].prompt = prompt.to_string();
+        }
+    }
     persist_config(&cfg)
 }
 
@@ -1608,7 +1692,15 @@ fn run_routine(agent: &str, key: &str) -> anyhow::Result<()> {
     let name = r.name.clone();
     let prompt = r.prompt.clone();
     let rid = r.id.clone();
-    fire_routine(agent, &name, &prompt)?;
+    match fire_routine(agent, &name, &prompt) {
+        Ok(()) => {
+            let _ = crate::routine_log::record(agent, &rid, true, "ok");
+        }
+        Err(err) => {
+            let _ = crate::routine_log::record(agent, &rid, false, &err.to_string());
+            return Err(err);
+        }
+    }
     let minute_key = cron::now_local()
         .map(|t| t.minute_key())
         .unwrap_or_else(|_| paths::utc_timestamp());

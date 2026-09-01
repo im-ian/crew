@@ -110,6 +110,20 @@ pub enum Request {
         agent: String,
         key: String,
     },
+    EditRoutine {
+        agent: String,
+        key: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        schedule: Option<String>,
+        #[serde(default)]
+        prompt: Option<String>,
+    },
+    RoutineRuns {
+        agent: String,
+        key: String,
+    },
     ListChannels,
     ChannelMessages {
         channel: String,
@@ -201,6 +215,11 @@ pub enum Event {
     ChannelMessage {
         channel: String,
         message: ChatMessage,
+    },
+    RoutineRuns {
+        agent: String,
+        key: String,
+        runs: Vec<crate::routine_log::RoutineRun>,
     },
     Shutdown,
 }

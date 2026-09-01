@@ -13,6 +13,8 @@ mod interrupt;
 mod ui_dev;
 mod memory;
 mod models;
+mod nl_routine;
+mod routine_log;
 mod paths;
 mod protocol;
 mod pty_agent;

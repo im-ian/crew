@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-run-routine"
+description = "Enables the run_routine command without any pre-configured scope."
+commands.allow = ["run_routine"]
+
+[[permission]]
+identifier = "deny-run-routine"
+description = "Denies the run_routine command without any pre-configured scope."
+commands.deny = ["run_routine"]

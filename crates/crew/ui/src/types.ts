@@ -33,6 +33,12 @@ export type Routine = {
   last_run?: string | null;
 };
 
+export type RoutineRun = {
+  ts: number;
+  ok: boolean;
+  detail: string;
+};
+
 export type AgentInfo = {
   id: string;
   name: string;

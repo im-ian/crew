@@ -98,6 +98,9 @@ export function App() {
           onAddRoutine={crew.addRoutine}
           onToggleRoutine={crew.toggleRoutine}
           onDeleteRoutine={crew.deleteRoutine}
+          onRunRoutine={crew.runRoutine}
+          onEditRoutine={crew.editRoutine}
+          onLoadRoutineRuns={crew.loadRoutineRuns}
           onLoadMemory={crew.loadMemory}
           onSaveMemory={crew.saveMemory}
         />

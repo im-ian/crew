@@ -1630,6 +1630,21 @@ textarea.textin {
 }
 .routine-actions button:hover { background: var(--hover); }
 .routine-actions button:active { transform: scale(0.97); }
+.routine-edit,
+.routine-runs {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.routine-run {
+  color: var(--muted);
+  font-size: 12px;
+}
+.routine-run.is-fail {
+  color: var(--blocked);
+}
 .empty-routines {
   color: var(--muted);
   font-size: 13px;
