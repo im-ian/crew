@@ -510,7 +510,10 @@ button.avatar {
   .avatar-face.is-working .avatar-blink,
   .avatar-face.is-blocked .avatar-blink,
   .avatar-face.is-blocked .avatar-eye,
-  .avatar-face.is-tracking .avatar-gaze {
+  .avatar-face.is-tracking .avatar-gaze,
+  .avatar-orbit-ring,
+  .avatar-orbit-dots,
+  .avatar-orbit-dots i {
     animation: none;
     transition: none;
   }
@@ -527,6 +530,91 @@ button.avatar {
 }
 .avatar.has-img .avatar-letter { visibility: hidden; }
 .avatar.has-face .avatar-letter { display: none; }
+.avatar.is-working,
+.avatar.is-blocked {
+  overflow: visible;
+}
+.avatar-orbit {
+  position: absolute;
+  inset: -5px;
+  pointer-events: none;
+  z-index: 3;
+}
+.avatar-orbit-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--working) 22%, transparent);
+  border-top-color: var(--working);
+  animation: avatar-orbit-spin 1.15s linear infinite;
+  animation-delay: calc(var(--avatar-phase, 0) * -0.2s);
+}
+.avatar-orbit.is-blocked .avatar-orbit-ring {
+  border-color: color-mix(in srgb, var(--blocked) 28%, transparent);
+  border-top-color: var(--blocked);
+  animation-duration: 2.4s;
+}
+.avatar-orbit-dots {
+  position: absolute;
+  inset: 0;
+  animation: avatar-orbit-spin 1.35s linear infinite;
+  animation-delay: calc(var(--avatar-phase, 0) * -0.35s);
+}
+.avatar-orbit.is-blocked .avatar-orbit-dots {
+  animation-duration: 2.8s;
+}
+.avatar-orbit-dots i {
+  position: absolute;
+  left: 50%;
+  top: -1px;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: var(--working);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--working) 85%, white);
+}
+.avatar-orbit.is-blocked .avatar-orbit-dots i {
+  background: var(--blocked);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--blocked) 80%, white);
+}
+.avatar-orbit-dots i:nth-child(2) {
+  top: auto;
+  bottom: 2px;
+  left: 14%;
+  width: 3px;
+  height: 3px;
+  margin-left: 0;
+  opacity: 0.75;
+  animation: avatar-orbit-twinkle 1.1s ease-in-out infinite;
+}
+.avatar-orbit-dots i:nth-child(3) {
+  top: 58%;
+  left: auto;
+  right: -1px;
+  width: 3.5px;
+  height: 3.5px;
+  margin-left: 0;
+  opacity: 0.9;
+  animation: avatar-orbit-twinkle 1.4s ease-in-out infinite 0.3s;
+}
+@keyframes avatar-orbit-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes avatar-orbit-twinkle {
+  0%, 100% { opacity: 0.35; transform: scale(0.75); }
+  50% { opacity: 1; transform: scale(1); }
+}
+.mention-chip .avatar-orbit {
+  display: none;
+}
+.who-avatar .avatar-orbit {
+  inset: -3px;
+}
+.who-avatar .avatar-orbit-dots i {
+  width: 3.5px;
+  height: 3.5px;
+}
 .badge {
   position: absolute;
   right: -1px;

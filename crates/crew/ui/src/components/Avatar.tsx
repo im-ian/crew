@@ -1,5 +1,5 @@
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
-import { avatarColor, initialOf, resolveFace } from "../avatar";
+import { avatarColor, avatarPhase, initialOf, resolveFace } from "../avatar";
 import type { AgentStatus } from "../types";
 import { BotFace } from "./BotFace";
 
@@ -31,10 +31,24 @@ function faceStatus(
 }
 
 function statusDot(badge?: string | null) {
-  if (badge === "working" || badge === "blocked" || badge === "exited") {
-    return <span className={`badge ${badge}`} />;
+  if (badge === "exited") {
+    return <span className="badge exited" />;
   }
   return null;
+}
+
+function StatusOrbit({ status }: { status: AgentStatus | null }) {
+  if (status !== "working" && status !== "blocked") return null;
+  return (
+    <span className={`avatar-orbit is-${status}`} aria-hidden>
+      <span className="avatar-orbit-ring" />
+      <span className="avatar-orbit-dots">
+        <i />
+        <i />
+        <i />
+      </span>
+    </span>
+  );
 }
 
 export function Avatar({
@@ -59,8 +73,18 @@ export function Avatar({
   const showImg = !!src && !broken;
   const showFace = !showImg && !letter;
   const face = showFace ? resolveFace(id, shape, color) : null;
+  const live = faceStatus(status, badge);
   const letterBg = id ? avatarColor(id) : "#3a3a3c";
-  const cls = `avatar${showImg ? " has-img" : ""}${showFace ? " has-face" : ""}${className ? ` ${className}` : ""}`;
+  const cls = [
+    "avatar",
+    showImg ? "has-img" : "",
+    showFace ? "has-face" : "",
+    live === "working" ? "is-working" : "",
+    live === "blocked" ? "is-blocked" : "",
+    className,
+  ]
+    .filter(Boolean)
+    .join(" ");
   const body = (
     <>
       {showImg ? (
@@ -76,17 +100,21 @@ export function Avatar({
           id={id}
           shape={face.shape}
           color={face.color}
-          status={faceStatus(status, badge)}
+          status={live}
         />
       ) : null}
       {!showFace ? (
         <span className="avatar-letter">{letter || initialOf(name)}</span>
       ) : null}
+      <StatusOrbit status={live} />
       {statusDot(badge)}
       {overlay}
     </>
   );
-  const style = showFace ? undefined : { background: letterBg };
+  const style = {
+    ...(showFace ? null : { background: letterBg }),
+    ["--avatar-phase" as string]: String(avatarPhase(id)),
+  };
   if (as === "button") {
     return (
       <button
