@@ -41,12 +41,15 @@ pub fn list() -> Vec<Skill> {
 /// Match `/name` or a prefix against skill file stems. Exact stem wins,
 /// then unique prefix, then a heading that equals the query.
 pub fn lookup(query: &str) -> Option<Skill> {
+    lookup_in(query, &list())
+}
+
+pub fn lookup_in(query: &str, skills: &[Skill]) -> Option<Skill> {
     let q = query.trim().trim_start_matches('/').trim();
     if q.is_empty() {
         return None;
     }
     let lower = q.to_lowercase();
-    let skills = list();
     if let Some(hit) = skills.iter().find(|s| s.name.eq_ignore_ascii_case(q)) {
         return Some(hit.clone());
     }
@@ -58,13 +61,13 @@ pub fn lookup(query: &str) -> Option<Skill> {
     if prefixed.len() == 1 {
         return Some(prefixed.into_iter().next().unwrap());
     }
-    skills.into_iter().find(|s| {
+    skills.iter().find(|s| {
         s.body
             .lines()
             .next()
             .map(|l| l.trim().trim_start_matches('#').trim())
             .is_some_and(|h| h.eq_ignore_ascii_case(q))
-    })
+    }).cloned()
 }
 
 pub fn save(name: &str, body: &str) -> anyhow::Result<Skill> {
@@ -104,26 +107,27 @@ fn sanitize_name(name: &str) -> String {
 mod tests {
     use super::*;
 
+    fn skill(name: &str, body: &str) -> Skill {
+        Skill {
+            name: name.into(),
+            body: body.into(),
+        }
+    }
+
     #[test]
     fn lookup_prefers_exact_stem_then_prefix() {
-        let unique = format!(
-            "sk{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        );
-        let a = format!("{unique}-alpha");
-        let b = format!("{unique}-beta");
-        save(&a, "# Alpha\nDo the alpha path.\n").unwrap();
-        save(&b, "# Beta\nDo the beta path.\n").unwrap();
-        let hit = lookup(&a).expect("exact");
-        assert_eq!(hit.name, a);
+        let skills = [
+            skill("weekly-alpha", "# Alpha\nDo the alpha path.\n"),
+            skill("weekly-beta", "# Beta\nDo the beta path.\n"),
+        ];
+        let hit = lookup_in("weekly-alpha", &skills).expect("exact");
+        assert_eq!(hit.name, "weekly-alpha");
         assert!(hit.body.contains("alpha path"));
-        let prefix = lookup(&format!("{unique}-al")).expect("prefix");
-        assert_eq!(prefix.name, a);
-        assert!(lookup("definitely-missing-skill-xyz").is_none());
-        let _ = fs::remove_file(dir().join(format!("{a}.md")));
-        let _ = fs::remove_file(dir().join(format!("{b}.md")));
+        let prefix = lookup_in("weekly-al", &skills).expect("prefix");
+        assert_eq!(prefix.name, "weekly-alpha");
+        let slash = lookup_in("/weekly-beta", &skills).expect("slash");
+        assert_eq!(slash.name, "weekly-beta");
+        assert!(lookup_in("definitely-missing-skill-xyz", &skills).is_none());
+        assert!(lookup_in("weekly-", &skills).is_none());
     }
 }
