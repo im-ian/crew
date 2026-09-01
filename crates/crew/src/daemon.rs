@@ -494,7 +494,19 @@ fn notify_from_frame(ev: &Event) {
         .ok()
         .and_then(|m| m.get(agent).map(|c| c.display_name().to_string()))
         .unwrap_or_else(|| agent.clone());
-    crate::notify::maybe_status_notify(&name, prev, *status);
+    let interrupted = agent_interrupted(agent);
+    crate::notify::maybe_status_notify(&name, prev, *status, interrupted);
+}
+
+fn agent_interrupted(id: &str) -> bool {
+    let map = match agents().lock() {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    match map.get(id) {
+        Some(LiveAgent::Headless(s)) => headless::is_interrupted(s),
+        _ => false,
+    }
 }
 
 fn last_status() -> &'static Mutex<HashMap<String, AgentStatus>> {
@@ -1274,18 +1286,26 @@ fn messages_agent(id: &str) -> anyhow::Result<Event> {
     })
 }
 
-fn send_agent(id: &str, text: &str) -> anyhow::Result<()> {
+fn apply_user_interrupt(id: &str, text: &str) -> anyhow::Result<bool> {
     let status = live_status(id)?;
-    match crate::interrupt::user_send_action(status, text) {
+    match crate::interrupt::member_turn_action(true, status, text) {
         crate::interrupt::UserSendAction::Stop => {
-            crate::transcript::push_user(id, "user", text);
             interrupt_turn(id)?;
-            return Ok(());
+            Ok(false)
         }
         crate::interrupt::UserSendAction::Redirect => {
             interrupt_turn(id)?;
+            Ok(true)
         }
-        crate::interrupt::UserSendAction::Start => {}
+        crate::interrupt::UserSendAction::Start => Ok(true),
+    }
+}
+
+fn send_agent(id: &str, text: &str) -> anyhow::Result<()> {
+    let proceed = apply_user_interrupt(id, text)?;
+    if !proceed {
+        crate::transcript::push_user(id, "user", text);
+        return Ok(());
     }
     ensure_accepts_turn(id)?;
     let roster = roster_vec();
@@ -2021,6 +2041,19 @@ fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
     let mut sent = 0usize;
     let mut last_err: Option<anyhow::Error> = None;
     for to in &targets {
+        if from == "user" {
+            match apply_user_interrupt(to, text) {
+                Ok(false) => {
+                    sent += 1;
+                    continue;
+                }
+                Ok(true) => {}
+                Err(err) => {
+                    last_err = Some(err);
+                    continue;
+                }
+            }
+        }
         if ensure_accepts_turn(to).is_err() {
             continue;
         }

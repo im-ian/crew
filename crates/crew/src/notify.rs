@@ -3,15 +3,19 @@ use std::process::Command;
 use crate::protocol::AgentStatus;
 
 /// Fire a desktop notification when a bot finishes or becomes blocked.
-pub fn should_notify(prev: AgentStatus, next: AgentStatus) -> bool {
-    matches!(
-        (prev, next),
-        (AgentStatus::Working, AgentStatus::Idle) | (AgentStatus::Working, AgentStatus::Blocked)
-    ) || (next == AgentStatus::Blocked && prev != AgentStatus::Blocked)
+/// Explicit stop/interrupt is `interrupted = true` and must not look like a finish.
+pub fn should_notify(prev: AgentStatus, next: AgentStatus, interrupted: bool) -> bool {
+    if next == AgentStatus::Blocked && prev != AgentStatus::Blocked {
+        return true;
+    }
+    if interrupted {
+        return false;
+    }
+    prev == AgentStatus::Working && next == AgentStatus::Idle
 }
 
-pub fn maybe_status_notify(name: &str, prev: AgentStatus, next: AgentStatus) {
-    if !should_notify(prev, next) {
+pub fn maybe_status_notify(name: &str, prev: AgentStatus, next: AgentStatus, interrupted: bool) {
+    if !should_notify(prev, next, interrupted) {
         return;
     }
     let body = if next == AgentStatus::Blocked {
@@ -57,11 +61,13 @@ mod tests {
 
     #[test]
     fn notifies_on_finish_and_blocked_only() {
-        assert!(should_notify(AgentStatus::Working, AgentStatus::Idle));
-        assert!(should_notify(AgentStatus::Idle, AgentStatus::Blocked));
-        assert!(should_notify(AgentStatus::Working, AgentStatus::Blocked));
-        assert!(!should_notify(AgentStatus::Blocked, AgentStatus::Blocked));
-        assert!(!should_notify(AgentStatus::Idle, AgentStatus::Idle));
-        assert!(!should_notify(AgentStatus::Working, AgentStatus::Working));
+        assert!(should_notify(AgentStatus::Working, AgentStatus::Idle, false));
+        assert!(should_notify(AgentStatus::Idle, AgentStatus::Blocked, false));
+        assert!(should_notify(AgentStatus::Working, AgentStatus::Blocked, false));
+        assert!(should_notify(AgentStatus::Idle, AgentStatus::Blocked, true));
+        assert!(!should_notify(AgentStatus::Working, AgentStatus::Idle, true));
+        assert!(!should_notify(AgentStatus::Blocked, AgentStatus::Blocked, false));
+        assert!(!should_notify(AgentStatus::Idle, AgentStatus::Idle, false));
+        assert!(!should_notify(AgentStatus::Working, AgentStatus::Working, false));
     }
 }

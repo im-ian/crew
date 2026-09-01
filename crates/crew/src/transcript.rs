@@ -38,6 +38,8 @@ struct AgentChat {
     hold: bool,
     /// Injected stdin expected to echo on the PTY; stripped from assistant text.
     echo_skip: String,
+    /// begin_turn generation so a cancelled turn cannot seal its successor.
+    turn_gen: u64,
 }
 
 impl AgentChat {
@@ -52,6 +54,7 @@ impl AgentChat {
             utf8_tail: Vec::new(),
             hold: false,
             echo_skip: String::new(),
+            turn_gen: 0,
         }
     }
 }
@@ -106,6 +109,7 @@ fn load_key(key: &str, path: &Path) {
                 utf8_tail: Vec::new(),
                 hold: false,
                 echo_skip: String::new(),
+                turn_gen: 0,
             },
         );
     }
@@ -384,18 +388,37 @@ pub fn cancel_expect(agent: &str) {
     }
 }
 
-pub fn begin_turn(agent: &str) {
+pub fn begin_turn(agent: &str) -> u64 {
     if let Ok(mut map) = chats().lock() {
         let chat = map
             .entry(agent.to_string())
             .or_insert_with(AgentChat::empty);
+        chat.turn_gen = chat.turn_gen.wrapping_add(1);
         chat.expecting = true;
         chat.hold = true;
         chat.last_byte = Instant::now();
+        return chat.turn_gen;
     }
+    0
 }
 
 pub fn end_turn(agent: &str) {
+    end_turn_gen(agent, None);
+}
+
+/// Seal this turn only. `Some(gen)` is a no-op if a newer `begin_turn` already
+/// started, so a cancelled headless thread cannot drop the successor's output.
+pub fn end_turn_gen(agent: &str, gen: Option<u64>) {
+    if let Some(g) = gen {
+        let skip = chats()
+            .lock()
+            .ok()
+            .and_then(|m| m.get(agent).map(|c| c.turn_gen != g))
+            .unwrap_or(true);
+        if skip {
+            return;
+        }
+    }
     if let Ok(mut map) = chats().lock() {
         if let Some(chat) = map.get_mut(agent) {
             chat.hold = false;
@@ -908,6 +931,33 @@ mod tests {
         end_turn(&agent);
         let sealed = messages(&agent);
         assert_eq!(sealed.last().unwrap().text, "hello");
+        drop_agent(&agent);
+    }
+
+    #[test]
+    fn cancelled_end_turn_does_not_drop_successor_output() {
+        let agent = format!(
+            "stale-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        push_user(&agent, "user", "first");
+        let g1 = begin_turn(&agent);
+        on_assistant_delta(&agent, "old");
+        end_turn(&agent);
+        assert_eq!(messages(&agent).last().unwrap().text, "old");
+        push_user(&agent, "user", "second");
+        let g2 = begin_turn(&agent);
+        end_turn_gen(&agent, Some(g1));
+        on_assistant_delta(&agent, "new reply");
+        end_turn_gen(&agent, Some(g2));
+        let sealed = messages(&agent);
+        let last = sealed.last().unwrap();
+        assert_eq!(last.role, Role::Assistant);
+        assert_eq!(last.text, "new reply");
         drop_agent(&agent);
     }
 

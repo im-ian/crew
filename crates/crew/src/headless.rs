@@ -29,6 +29,7 @@ pub struct HeadlessInner {
     pub session_id: Option<String>,
     pub child: Option<std::process::Child>,
     pub generation: u64,
+    pub interrupted: bool,
 }
 
 pub fn open(
@@ -61,6 +62,7 @@ pub fn open(
             session_id,
             child: None,
             generation: 0,
+            interrupted: false,
         }),
     }))
 }
@@ -105,6 +107,7 @@ pub fn interrupt(session: &HeadlessSession) {
             Err(_) => return,
         };
         inner.generation = inner.generation.wrapping_add(1);
+        inner.interrupted = true;
         inner.child.take()
     };
     if let Some(mut child) = child {
@@ -118,6 +121,14 @@ pub fn interrupt(session: &HeadlessSession) {
         inner.seq += 1;
         inner.child = None;
     }
+}
+
+pub fn is_interrupted(session: &HeadlessSession) -> bool {
+    session
+        .inner
+        .lock()
+        .map(|i| i.interrupted)
+        .unwrap_or(false)
 }
 
 pub fn set_status(session: &HeadlessSession, status: AgentStatus) {
@@ -141,6 +152,7 @@ pub fn kick(
         if inner.status == AgentStatus::Working || inner.child.is_some() {
             anyhow::bail!("agent {} is working", session.id);
         }
+        inner.interrupted = false;
         inner.status = AgentStatus::Working;
         inner.last_output = Instant::now();
         inner.seq += 1;
@@ -181,7 +193,7 @@ fn run_turn(
             return;
         }
     }
-    crate::transcript::begin_turn(&session.id);
+    let turn = crate::transcript::begin_turn(&session.id);
 
     let program = cfg.binary_name();
     let stored = session
@@ -233,7 +245,7 @@ fn run_turn(
         .map(|i| i.generation != generation)
         .unwrap_or(true);
     if stale {
-        crate::transcript::end_turn(&session.id);
+        crate::transcript::end_turn_gen(&session.id, Some(turn));
         return;
     }
 
@@ -289,7 +301,7 @@ fn run_turn(
         }
     }
 
-    crate::transcript::end_turn(&session.id);
+    crate::transcript::end_turn_gen(&session.id, Some(turn));
     if let Ok(mut inner) = session.inner.lock() {
         inner.child = None;
         if inner.status != AgentStatus::Exited && inner.status != AgentStatus::Blocked {
