@@ -143,6 +143,14 @@ pub fn messages(agent: &str) -> Vec<ChatMessage> {
         .unwrap_or_default()
 }
 
+pub fn last_ts(key: &str) -> u64 {
+    messages(key).last().map(|m| m.ts).unwrap_or(0)
+}
+
+pub fn channel_last_ts(id: &str) -> u64 {
+    last_ts(&channel_key(id))
+}
+
 pub fn preview(agent: &str) -> Option<String> {
     let msgs = messages(agent);
     let last = msgs.last()?;
@@ -878,6 +886,23 @@ mod tests {
     fn strip_csi_and_cr() {
         let raw = "\u{1b}[31mhello\u{1b}[0m\r\nworld\r";
         assert_eq!(normalize_text(&strip_ansi(raw)), "hello\nworld\n");
+    }
+
+    #[test]
+    fn last_ts_tracks_latest_message() {
+        let agent = format!(
+            "ts-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        assert_eq!(last_ts(&agent), 0);
+        let msg = push_user(&agent, "user", "hi");
+        assert_eq!(last_ts(&agent), msg.ts);
+        assert!(msg.ts > 0);
+        drop_agent(&agent);
     }
 
     #[test]

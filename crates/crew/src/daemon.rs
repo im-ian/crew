@@ -1294,12 +1294,14 @@ fn list_agents() -> Vec<AgentInfo> {
                 routines: cfg.map(|c| c.routines.clone()).unwrap_or_default(),
                 preview: None,
                 origin_channel: get_origin(s.id()).and_then(|o| o.reply_channel),
+                last_ts: 0,
             }
         })
         .collect();
     list.sort_by(|a, b| a.id.cmp(&b.id));
     for a in &mut list {
         a.preview = crate::transcript::preview(&a.id);
+        a.last_ts = crate::transcript::last_ts(&a.id);
     }
     list
 }
@@ -1925,6 +1927,7 @@ fn list_channels() -> Vec<ChannelInfo> {
             members: c.members.clone(),
             brief: c.brief.clone(),
             preview: crate::transcript::channel_preview(&c.id),
+            last_ts: crate::transcript::channel_last_ts(&c.id),
         })
         .collect();
     list.sort_by(|a, b| a.id.cmp(&b.id));

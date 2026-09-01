@@ -198,6 +198,7 @@ type Props = {
   onRenameGroup: (id: string, name: string) => void;
   onRenameDone: () => void;
   onMove: (kind: Kind, id: string, groupId: string | null, beforeKey?: string | null) => void;
+  unread?: string[];
 };
 
 function matches(parts: Array<string | null | undefined>, query: string): boolean {
@@ -268,6 +269,7 @@ export function Sidebar({
   onRenameGroup,
   onRenameDone,
   onMove,
+  unread = [],
 }: Props) {
   const all = toItems(agents, channels).filter((item) => {
     if (item.agent) {
@@ -620,6 +622,7 @@ export function Sidebar({
                         key={item.key}
                         item={item}
                         active={selectedKind === item.kind && selected === item.id}
+                        unread={unread.includes(item.key)}
                         dragging={drag?.key === item.key && drag.armed}
                         onSelect={() => {
                           if (didDrag.current) return;
@@ -648,6 +651,7 @@ export function Sidebar({
                     key={item.key}
                     item={item}
                     active={selectedKind === item.kind && selected === item.id}
+                    unread={unread.includes(item.key)}
                     dragging={drag?.key === item.key && drag.armed}
                     onSelect={() => {
                       if (didDrag.current) return;
@@ -812,6 +816,7 @@ function GroupHead({
 function ItemRow({
   item,
   active,
+  unread,
   dragging,
   ghost,
   onSelect,
@@ -820,6 +825,7 @@ function ItemRow({
 }: {
   item: RailItem;
   active?: boolean;
+  unread?: boolean;
   dragging?: boolean;
   ghost?: boolean;
   onSelect?: () => void;
@@ -843,6 +849,7 @@ function ItemRow({
         <div className="agent-name">{item.name}</div>
         {item.preview ? <div className="agent-preview">{item.preview}</div> : null}
       </div>
+      {unread ? <span className="unread-dot" aria-hidden /> : null}
     </>
   );
   if (ghost) {
@@ -855,7 +862,12 @@ function ItemRow({
   return (
     <button
       type="button"
-      className={"rail-row" + (active ? " active" : "") + (dragging ? " dragging" : "")}
+      className={
+        "rail-row" +
+        (active ? " active" : "") +
+        (unread ? " unread" : "") +
+        (dragging ? " dragging" : "")
+      }
       data-rail-row={item.key}
       onClick={onSelect}
       onContextMenu={(e) => {

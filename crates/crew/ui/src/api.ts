@@ -127,6 +127,7 @@ export const api = {
   peekPendingFocus: () => invoke<FocusTarget | null>("peek_pending_focus"),
   takePendingFocus: () => invoke<FocusTarget | null>("take_pending_focus"),
   openPath: (path: string) => invoke<void>("open_path", { path }),
+  setDockBadge: (count: number) => invoke<void>("set_dock_badge", { count }),
   listModels: (cli: string) => {
     let pending = modelLists.get(cli);
     if (!pending) {

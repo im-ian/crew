@@ -52,6 +52,7 @@
     "allow-save-upload",
     "allow-peek-pending-focus",
     "allow-take-pending-focus",
-    "allow-open-path"
+    "allow-open-path",
+    "allow-set-dock-badge"
   ]
 }

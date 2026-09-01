@@ -1,3 +1,5 @@
+use tauri::Manager;
+
 use crate::client;
 use crate::config::{
     empty_to_none, resolve_add_cmd, unique_agent_id, unique_channel_id, AgentCli, AvatarShape,
@@ -617,6 +619,15 @@ fn take_pending_focus() -> Result<Option<crate::notify::FocusTarget>, String> {
 }
 
 #[tauri::command]
+fn set_dock_badge(app: tauri::AppHandle, count: i32) -> Result<(), String> {
+    let Some(win) = app.get_webview_window("main") else {
+        return Ok(());
+    };
+    let n = if count > 0 { Some(count as i64) } else { None };
+    win.set_badge_count(n).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
     let raw = path.trim();
     if raw.is_empty() {
@@ -703,7 +714,8 @@ pub fn run() -> anyhow::Result<()> {
             save_upload,
             peek_pending_focus,
             take_pending_focus,
-            open_path
+            open_path,
+            set_dock_badge
         ])
         .run(tauri::generate_context!())
         .map_err(|e| anyhow::anyhow!(e))?;

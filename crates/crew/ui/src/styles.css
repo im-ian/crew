@@ -367,6 +367,19 @@ html.rail-dragging {
   border-radius: var(--radius-lg);
   user-select: none;
   -webkit-user-drag: none;
+  position: relative;
+}
+.rail-row.unread .agent-name { font-weight: 700; }
+.unread-dot {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: var(--working);
+  pointer-events: none;
 }
 .rail-row.dragging { opacity: 0.38; }
 .rail-row img,

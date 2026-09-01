@@ -47,6 +47,7 @@ export function App() {
         onRenameGroup={crew.renameGroup}
         onRenameDone={finishRename}
         onMove={crew.moveToGroup}
+        unread={crew.unread}
       />
       <main>
         <div className="titlebar-align" data-tauri-drag-region />

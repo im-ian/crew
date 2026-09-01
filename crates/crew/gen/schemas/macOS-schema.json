@@ -387,6 +387,12 @@
           "markdownDescription": "Enables the set_channel command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_dock_badge command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-dock-badge",
+          "markdownDescription": "Enables the set_dock_badge command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_groups command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-groups",
@@ -631,6 +637,12 @@
           "type": "string",
           "const": "deny-set-channel",
           "markdownDescription": "Denies the set_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_dock_badge command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-dock-badge",
+          "markdownDescription": "Denies the set_dock_badge command without any pre-configured scope."
         },
         {
           "description": "Denies the set_groups command without any pre-configured scope.",

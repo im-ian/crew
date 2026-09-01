@@ -7,6 +7,7 @@ import {
   type MouseEvent,
 } from "react";
 import { api, errMsg } from "./api";
+import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
 import {
   groupIdOf,
   itemKey,
@@ -79,6 +80,7 @@ export function useCrew() {
   const [pendingRenameId, setPendingRenameId] = useState<string | null>(null);
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [readMap, setReadMap] = useState(loadRead);
 
   const selectedRef = useRef({ id: selected, kind: selectedKind });
   selectedRef.current = { id: selected, kind: selectedKind };
@@ -102,6 +104,35 @@ export function useCrew() {
     if (selectedKind !== "channel" || !selected) return null;
     return channels.find((c) => c.id === selected) ?? null;
   }, [channels, selected, selectedKind]);
+
+  const unread = useMemo(
+    () => unreadKeys(readMap, agents, channels, selectedKind, selected),
+    [readMap, agents, channels, selectedKind, selected],
+  );
+
+  useEffect(() => {
+    if (!selected) return;
+    const ts =
+      selectedKind === "channel"
+        ? currentChannel?.last_ts || 0
+        : currentAgent?.last_ts || 0;
+    if (!ts) return;
+    setReadMap((prev) => {
+      const next = markRead(prev, selectedKind, selected, ts);
+      if (next === prev) return prev;
+      saveRead(next);
+      return next;
+    });
+  }, [
+    selected,
+    selectedKind,
+    currentAgent?.last_ts,
+    currentChannel?.last_ts,
+  ]);
+
+  useEffect(() => {
+    void api.setDockBadge(unread.length).catch(() => null);
+  }, [unread.length]);
 
   const placeholder = currentChannel
     ? `+ ${currentChannel.name || currentChannel.id}에 메시지`
@@ -960,6 +991,7 @@ export function useCrew() {
     messages,
     query,
     setQuery,
+    unread,
     searchHits,
     openSearchHit,
     highlightId,

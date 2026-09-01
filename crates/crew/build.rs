@@ -47,6 +47,7 @@ fn main() {
             "peek_pending_focus",
             "take_pending_focus",
             "open_path",
+            "set_dock_badge",
         ])),
     )
     .expect("failed to run tauri build");

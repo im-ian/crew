@@ -275,6 +275,12 @@ pub struct AgentInfo {
     /// Channel this bot is currently working for, if the turn started there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_channel: Option<String>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub last_ts: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -287,6 +293,8 @@ pub struct ChannelInfo {
     pub brief: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub last_ts: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -74,6 +74,7 @@ export type AgentInfo = {
   routines: Routine[];
   preview?: string | null;
   origin_channel?: string | null;
+  last_ts?: number;
 };
 
 export type ChannelInfo = {
@@ -82,6 +83,7 @@ export type ChannelInfo = {
   members: string[];
   brief?: string | null;
   preview?: string | null;
+  last_ts?: number;
 };
 
 export type MessageKind = "sent" | "received" | "routine" | "handoff" | "tool";
