@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 
 mod avatar;
+mod channel_context;
 mod client;
 mod config;
 mod cron;

@@ -141,7 +141,10 @@ export function ChannelPane({ open, channel, agents, onClose, onSave }: Props) {
                 )}
               </div>
             </Field>
-            <p className="apply-note">멤버만 이 방 대화에 참여합니다.</p>
+            <p className="apply-note">
+              멤버만 이 방 대화에 참여합니다. 브리프는 봇을 깨울 때 최근 대화와
+              같이 전달됩니다.
+            </p>
           </div>
         </div>
       </div>

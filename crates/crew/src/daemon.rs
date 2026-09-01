@@ -2068,7 +2068,27 @@ fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
         Role::Assistant
     };
     crate::transcript::push_channel(&ch.id, role, &from, text);
-    let envelope = crate::protocol::channel_envelope(&ch.id, &from, text);
+    let stored = crate::transcript::channel_messages(&ch.id);
+    let recent_text: Vec<String> = stored
+        .iter()
+        .map(|m| crate::rows::display_text(m))
+        .collect();
+    let recent: Vec<_> = stored
+        .iter()
+        .zip(recent_text.iter())
+        .map(|(m, t)| crate::channel_context::WakeLine {
+            from: m.from.as_str(),
+            text: t.as_str(),
+        })
+        .collect();
+    let envelope = crate::channel_context::wake_text(
+        &ch.id,
+        &ch.name,
+        ch.brief.as_deref(),
+        &recent,
+        &from,
+        text,
+    );
     let default_one = from == "user";
     let last = if default_one {
         channel_last_member_speaker(&ch.id, &ch.members)
