@@ -70,6 +70,20 @@ export const api = {
   clearAvatar: (id: string) => invoke<void>("clear_avatar", { id }),
   addChannel: (name: string, members: string[]) =>
     invoke<string>("add_channel", { name, members }),
+  setChannel: (args: {
+    id: string;
+    name?: string | null;
+    brief?: string | null;
+    unsetBrief?: boolean;
+    members?: string[] | null;
+  }) =>
+    invoke<void>("set_channel", {
+      id: args.id,
+      name: args.name ?? null,
+      brief: args.brief ?? null,
+      unsetBrief: args.unsetBrief ?? false,
+      members: args.members ?? null,
+    }),
   leaveChannel: (channel: string, agent?: string | null) =>
     invoke<void>("leave_channel", { channel, agent: agent ?? null }),
   removeChannel: (channel: string) => invoke<void>("remove_channel", { channel }),

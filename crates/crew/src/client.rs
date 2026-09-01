@@ -70,6 +70,10 @@ pub fn rpc(req: Request) -> anyhow::Result<Event> {
                 Request::RemoveChannel { .. },
                 Event::Ok | Event::Channels { .. } | Event::Agents { .. },
             )
+            | (
+                Request::SetChannel { .. },
+                Event::Ok | Event::Channels { .. } | Event::Agents { .. },
+            )
             | (Request::Shutdown, Event::Shutdown | Event::Ok)
             | (_, Event::Error { .. }) => return Ok(ev),
             _ => continue,

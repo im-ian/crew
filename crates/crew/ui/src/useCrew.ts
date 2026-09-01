@@ -171,6 +171,14 @@ export function useCrew() {
   }
 
   function openInfo(id: string) {
+    const ch = channelsRef.current.find((c) => c.id === id);
+    if (ch) {
+      selectedRef.current = { id, kind: "channel" };
+      setSelected(id);
+      setSelectedKind("channel");
+      setPaneOpen(true);
+      return;
+    }
     openPane(id, "info");
   }
 
@@ -372,8 +380,11 @@ export function useCrew() {
     setSelected(sel);
     setSelectedKind(kind);
     if (paneOpenRef.current) {
-      const a = kind === "agent" ? list.find((x) => x.id === sel) : null;
-      if (!a) setPaneOpen(false);
+      const still =
+        kind === "agent"
+          ? list.some((x) => x.id === sel)
+          : (chans || []).some((c) => c.id === sel);
+      if (!still) setPaneOpen(false);
     }
   }, []);
 
@@ -458,6 +469,29 @@ export function useCrew() {
         shape: null,
         color: null,
         name: name || null,
+      });
+      await refreshList();
+    } catch (err) {
+      showError(err);
+    }
+  }
+
+  async function saveChannel(fields: {
+    name: string;
+    brief: string;
+    members: string[];
+  }) {
+    const id = selectedRef.current.id;
+    if (!id || selectedRef.current.kind !== "channel") return;
+    const name = fields.name.trim();
+    const brief = fields.brief.trim();
+    try {
+      await api.setChannel({
+        id,
+        name: name || null,
+        brief,
+        unsetBrief: !brief,
+        members: fields.members,
       });
       await refreshList();
     } catch (err) {
@@ -874,6 +908,7 @@ export function useCrew() {
     stopAgent,
     approveAgent,
     saveAgentInfo,
+    saveChannel,
     saveAgentFace,
     addRoutine,
     toggleRoutine,

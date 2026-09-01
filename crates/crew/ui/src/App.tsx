@@ -5,6 +5,7 @@ import { Composer } from "./components/Composer";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ContextMenu, type MenuEntry } from "./components/ContextMenu";
 import { AgentPane } from "./components/AgentPane";
+import { ChannelPane } from "./components/ChannelPane";
 import { NewBotModal } from "./components/NewBotModal";
 import { NewChannelModal } from "./components/NewChannelModal";
 import { Sidebar } from "./components/Sidebar";
@@ -85,8 +86,15 @@ export function App() {
           placeholder={crew.placeholder}
           onSend={crew.onSend}
         />
+        <ChannelPane
+          open={crew.paneOpen && crew.selectedKind === "channel"}
+          channel={crew.currentChannel}
+          agents={crew.agents}
+          onClose={crew.closePane}
+          onSave={crew.saveChannel}
+        />
         <AgentPane
-          open={crew.paneOpen}
+          open={crew.paneOpen && crew.selectedKind === "agent"}
           tab={crew.paneTab}
           agent={crew.currentAgent}
           onTab={crew.setPaneTab}

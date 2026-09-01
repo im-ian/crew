@@ -13,6 +13,7 @@ fn main() {
             "approve_agent",
             "tell_message",
             "add_channel",
+            "set_channel",
             "leave_channel",
             "remove_channel",
             "channel_send",

@@ -206,6 +206,17 @@ enum ChannelCmd {
     Remove {
         channel: String,
     },
+    Set {
+        channel: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        brief: Option<String>,
+        #[arg(long)]
+        unset_brief: bool,
+        #[arg(long, value_delimiter = ',')]
+        members: Option<Vec<String>>,
+    },
     Send {
         channel: String,
         #[arg(long)]
@@ -709,6 +720,51 @@ fn run_channel(cmd: ChannelCmd) -> anyhow::Result<()> {
                 slot.members.retain(|m| m != &agent);
                 if slot.members.len() == before {
                     anyhow::bail!("{agent} is not a member of channel {channel}");
+                }
+                cfg.save()?;
+                write_roster(&cfg.agents, &cfg.channels)?;
+                Ok(())
+            }
+        }
+        ChannelCmd::Set {
+            channel,
+            name,
+            brief,
+            unset_brief,
+            members,
+        } => {
+            if name.is_none() && brief.is_none() && !unset_brief && members.is_none() {
+                anyhow::bail!("nothing to set; pass --name, --brief, --unset-brief, or --members");
+            }
+            if paths::is_socket_live() {
+                match client::rpc(Request::SetChannel {
+                    id: channel,
+                    name,
+                    brief,
+                    unset_brief,
+                    members,
+                })? {
+                    Event::Error { message } => anyhow::bail!("{message}"),
+                    ev => client::print_event(ev),
+                }
+            } else {
+                let mut cfg = Config::load()?;
+                let known: Vec<String> = cfg.agents.iter().map(|a| a.id.clone()).collect();
+                let slot = cfg
+                    .channels
+                    .iter_mut()
+                    .find(|c| c.id == channel)
+                    .ok_or_else(|| anyhow::anyhow!("unknown channel {channel}"))?;
+                if let Some(name) = name {
+                    slot.set_name(name);
+                }
+                if unset_brief {
+                    slot.set_brief(None);
+                } else if let Some(brief) = brief {
+                    slot.set_brief(Some(brief));
+                }
+                if let Some(members) = members {
+                    slot.set_members(members, &known)?;
                 }
                 cfg.save()?;
                 write_roster(&cfg.agents, &cfg.channels)?;

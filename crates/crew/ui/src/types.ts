@@ -73,6 +73,7 @@ export type ChannelInfo = {
   id: string;
   name: string;
   members: string[];
+  brief?: string | null;
   preview?: string | null;
 };
 

@@ -23,6 +23,8 @@ pub struct Channel {
     pub name: String,
     #[serde(default)]
     pub members: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brief: Option<String>,
 }
 
 impl Channel {
@@ -49,7 +51,41 @@ impl Channel {
             id,
             name,
             members: unique_ids(members),
+            brief: None,
         })
+    }
+
+    pub fn set_name(&mut self, name: String) {
+        let n = name.trim();
+        self.name = if n.is_empty() {
+            self.id.clone()
+        } else {
+            n.to_string()
+        };
+    }
+
+    pub fn set_brief(&mut self, brief: Option<String>) {
+        self.brief = brief.and_then(empty_to_none);
+    }
+
+    pub fn set_members(
+        &mut self,
+        members: Vec<String>,
+        known: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> anyhow::Result<()> {
+        let known: HashSet<String> = known
+            .into_iter()
+            .map(|s| s.as_ref().trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let members = unique_ids(members);
+        for m in &members {
+            if !known.contains(m) {
+                anyhow::bail!("unknown agent {m}");
+            }
+        }
+        self.members = members;
+        Ok(())
     }
 }
 
@@ -944,6 +980,14 @@ pub fn format_roster(agents: &[AgentConfig], channels: &[Channel]) -> String {
                 "- `{}` — {}\n  members: {}\n",
                 c.id, c.name, members
             ));
+            if let Some(brief) = c
+                .brief
+                .as_deref()
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+            {
+                out.push_str(&format!("  brief: {brief}\n"));
+            }
         }
     }
     out
@@ -1272,10 +1316,15 @@ mod tests {
             vec!["alpha".into(), "beta".into()],
         )
         .unwrap();
-        let md = format_roster(&[a], &[ch]);
+        let md = format_roster(&[a.clone()], &[ch.clone()]);
         assert!(md.contains("`alpha` — Alpha — PM"));
         assert!(md.contains("`room` — Room"));
         assert!(md.contains("members: alpha, beta"));
+        assert!(!md.contains("brief:"));
+        let mut with_brief = ch.clone();
+        with_brief.brief = Some("launch notes".into());
+        let md = format_roster(&[a], &[with_brief]);
+        assert!(md.contains("brief: launch notes"));
         assert!(md.contains("crew tell"));
     }
 
@@ -1285,9 +1334,31 @@ mod tests {
         let cfg: Config = serde_json::from_str(raw).unwrap();
         assert_eq!(cfg.channels.len(), 1);
         assert_eq!(cfg.channels[0].members, vec!["a"]);
+        assert!(cfg.channels[0].brief.is_none());
+        let with_brief = r#"{"agents":[{"id":"a","name":"A","cmd":["cat"]}],"channels":[{"id":"room","name":"Room","members":["a"],"brief":"notes"}]}"#;
+        let cfg: Config = serde_json::from_str(with_brief).unwrap();
+        assert_eq!(cfg.channels[0].brief.as_deref(), Some("notes"));
         let old = r#"{"agents":[{"id":"a","name":"A","cmd":["cat"]}]}"#;
         let cfg: Config = serde_json::from_str(old).unwrap();
         assert!(cfg.channels.is_empty());
+    }
+
+    #[test]
+    fn channel_set_name_brief_members() {
+        let mut ch = Channel::new("room".into(), "Room".into(), vec!["a".into()]).unwrap();
+        ch.set_name("  Launch  ".into());
+        assert_eq!(ch.name, "Launch");
+        ch.set_brief(Some("  keep this  ".into()));
+        assert_eq!(ch.brief.as_deref(), Some("keep this"));
+        ch.set_brief(Some("   ".into()));
+        assert!(ch.brief.is_none());
+        ch.set_members(vec!["a".into(), "b".into(), "a".into()], ["a", "b", "c"])
+            .unwrap();
+        assert_eq!(ch.members, vec!["a", "b"]);
+        let err = ch
+            .set_members(vec!["nope".into()], ["a", "b"])
+            .unwrap_err();
+        assert!(err.to_string().contains("unknown agent nope"), "{err}");
     }
 
     #[test]

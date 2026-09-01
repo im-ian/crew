@@ -145,6 +145,17 @@ pub enum Request {
     RemoveChannel {
         channel: String,
     },
+    SetChannel {
+        id: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        brief: Option<String>,
+        #[serde(default)]
+        unset_brief: bool,
+        #[serde(default)]
+        members: Option<Vec<String>>,
+    },
     /// End the in-flight turn. Does not undo already-sealed assistant text.
     Interrupt {
         agent: String,
@@ -265,6 +276,8 @@ pub struct ChannelInfo {
     pub name: String,
     #[serde(default)]
     pub members: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brief: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
 }
@@ -453,6 +466,53 @@ mod tests {
             Request::AddChannel { id, members, .. } => {
                 assert_eq!(id, "room");
                 assert_eq!(members, vec!["alpha", "beta"]);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_channel_roundtrip() {
+        let req = Request::SetChannel {
+            id: "room".into(),
+            name: Some("Room".into()),
+            brief: Some("standup notes".into()),
+            unset_brief: false,
+            members: Some(vec!["alpha".into(), "beta".into()]),
+        };
+        let line = req.to_line().unwrap();
+        assert!(line.contains("\"type\":\"set_channel\""));
+        let back: Request = serde_json::from_str(&line).unwrap();
+        match back {
+            Request::SetChannel {
+                id,
+                name,
+                brief,
+                unset_brief,
+                members,
+            } => {
+                assert_eq!(id, "room");
+                assert_eq!(name.as_deref(), Some("Room"));
+                assert_eq!(brief.as_deref(), Some("standup notes"));
+                assert!(!unset_brief);
+                assert_eq!(members, Some(vec!["alpha".into(), "beta".into()]));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let old = r#"{"type":"set_channel","id":"room"}"#;
+        let back: Request = serde_json::from_str(old).unwrap();
+        match back {
+            Request::SetChannel {
+                name,
+                brief,
+                unset_brief,
+                members,
+                ..
+            } => {
+                assert!(name.is_none());
+                assert!(brief.is_none());
+                assert!(!unset_brief);
+                assert!(members.is_none());
             }
             other => panic!("unexpected {other:?}"),
         }

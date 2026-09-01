@@ -1219,6 +1219,24 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
                 message: err.to_string(),
             }],
         },
+        Request::SetChannel {
+            id,
+            name,
+            brief,
+            unset_brief,
+            members,
+        } => match set_channel(&id, name, brief, unset_brief, members) {
+            Ok(()) => vec![
+                Event::Ok,
+                Event::Channels {
+                    channels: list_channels(),
+                },
+                snapshot_event(),
+            ],
+            Err(err) => vec![Event::Error {
+                message: err.to_string(),
+            }],
+        },
         Request::Shutdown => {
             let _ = shutdown.send(true);
             vec![Event::Shutdown]
@@ -1874,6 +1892,7 @@ fn list_channels() -> Vec<ChannelInfo> {
             id: c.id.clone(),
             name: c.name.clone(),
             members: c.members.clone(),
+            brief: c.brief.clone(),
             preview: crate::transcript::channel_preview(&c.id),
         })
         .collect();
@@ -1942,6 +1961,39 @@ fn join_channel(channel: &str, agent: &str) -> anyhow::Result<()> {
             .with_context(|| format!("unknown channel {channel}"))?;
         if !ch.members.iter().any(|m| m == agent) {
             ch.members.push(agent.to_string());
+        }
+    }
+    save_state()?;
+    Ok(())
+}
+
+fn set_channel(
+    id: &str,
+    name: Option<String>,
+    brief: Option<String>,
+    unset_brief: bool,
+    members: Option<Vec<String>>,
+) -> anyhow::Result<()> {
+    let id = id.trim();
+    if id.is_empty() {
+        anyhow::bail!("channel id is empty");
+    }
+    let known: Vec<String> = roster_vec().into_iter().map(|a| a.id).collect();
+    {
+        let mut chans = channels().lock().expect("channels mutex");
+        let ch = chans
+            .get_mut(id)
+            .with_context(|| format!("unknown channel {id}"))?;
+        if let Some(name) = name {
+            ch.set_name(name);
+        }
+        if unset_brief {
+            ch.set_brief(None);
+        } else if let Some(brief) = brief {
+            ch.set_brief(Some(brief));
+        }
+        if let Some(members) = members {
+            ch.set_members(members, &known)?;
         }
     }
     save_state()?;

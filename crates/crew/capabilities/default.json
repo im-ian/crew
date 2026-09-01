@@ -19,6 +19,7 @@
     "allow-approve-agent",
     "allow-tell-message",
     "allow-add-channel",
+    "allow-set-channel",
     "allow-leave-channel",
     "allow-remove-channel",
     "allow-channel-send",

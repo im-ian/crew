@@ -161,6 +161,33 @@ fn add_channel(name: String, members: Vec<String>) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn set_channel(
+    id: String,
+    name: Option<String>,
+    brief: Option<String>,
+    unset_brief: bool,
+    members: Option<Vec<String>>,
+) -> Result<(), String> {
+    client::ensure_daemon().map_err(|e| e.to_string())?;
+    let id = id.trim().to_string();
+    if id.is_empty() {
+        return Err("channel is required".into());
+    }
+    match client::rpc(Request::SetChannel {
+        id,
+        name: name.and_then(empty_to_none),
+        brief: brief.and_then(empty_to_none),
+        unset_brief,
+        members,
+    }) {
+        Ok(Event::Ok) | Ok(Event::Channels { .. }) | Ok(Event::Agents { .. }) => Ok(()),
+        Ok(Event::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected daemon response".into()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+#[tauri::command]
 fn leave_channel(channel: String, agent: Option<String>) -> Result<(), String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     let channel = channel.trim().to_string();
@@ -602,6 +629,7 @@ pub fn run() -> anyhow::Result<()> {
             approve_agent,
             tell_message,
             add_channel,
+            set_channel,
             leave_channel,
             remove_channel,
             channel_send,

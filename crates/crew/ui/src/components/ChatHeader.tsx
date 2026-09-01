@@ -24,6 +24,8 @@ export function ChatHeader({
         who={currentChannel.name || currentChannel.id}
         letter="#"
         fallbackId={currentChannel.id}
+        title="채널 정보"
+        onClick={onOpenInfo}
       />
     );
   } else if (currentAgent) {
@@ -52,6 +54,26 @@ export function ChatHeader({
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <rect x="4" y="4" width="8" height="8" rx="1.2" fill="currentColor" />
+          </svg>
+        </button>
+      ) : null}
+      {currentChannel ? (
+        <button
+          type="button"
+          className="head-action"
+          title="채널 설정"
+          aria-label="채널 설정"
+          onClick={onOpenInfo}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="8" cy="8" r="6.25" stroke="currentColor" strokeWidth="1.4" />
+            <path
+              d="M8 7.15v4.1"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+            />
+            <circle cx="8" cy="5.2" r="0.85" fill="currentColor" />
           </svg>
         </button>
       ) : null}
