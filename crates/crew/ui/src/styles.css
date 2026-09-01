@@ -256,13 +256,6 @@ html.rail-resizing * {
   color: var(--muted);
 }
 .rail-foot .icon-btn:hover { color: var(--ink); }
-.settings-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 32;
-  grid-column: auto;
-  grid-row: auto;
-}
 .settings-action {
   display: block;
   width: 100%;
