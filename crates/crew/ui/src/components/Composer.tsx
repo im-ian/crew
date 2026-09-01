@@ -17,6 +17,14 @@ type Props = {
 
 type Mention = { start: number; query: string };
 
+type Attach = {
+  id: string;
+  name: string;
+  path: string;
+  image: boolean;
+  preview?: string;
+};
+
 export function Composer({
   agents,
   selected,
@@ -32,6 +40,7 @@ export function Composer({
   const [slash, setSlash] = useState<Mention | null>(null);
   const [slashIdx, setSlashIdx] = useState(0);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [attaches, setAttaches] = useState<Attach[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const matches = useMemo(() => {
@@ -133,16 +142,26 @@ export function Composer({
   }
 
   async function attachFiles(files: FileList | File[]) {
+    const next: Attach[] = [];
     for (const file of Array.from(files)) {
       const data = await readFileData(file);
       const path = await api.saveUpload(file.name, data);
-      const md = file.type.startsWith("image/")
-        ? `![${file.name}](${path})`
-        : `[${file.name}](${path})`;
-      document.execCommand("insertText", false, md + " ");
+      const image = file.type.startsWith("image/");
+      next.push({
+        id: `${Date.now()}-${next.length}-${file.name}`,
+        name: file.name,
+        path,
+        image,
+        preview: image ? data : undefined,
+      });
     }
+    if (next.length) setAttaches((prev) => [...prev, ...next]);
     refreshEmpty();
     fit();
+  }
+
+  function removeAttach(id: string) {
+    setAttaches((prev) => prev.filter((a) => a.id !== id));
   }
 
   useEffect(() => {
@@ -163,20 +182,36 @@ export function Composer({
   return (
     <form
       className="composer"
+      onDragOver={(e) => {
+        if (e.dataTransfer?.types?.includes("Files")) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }
+      }}
+      onDrop={(e) => {
+        const files = e.dataTransfer?.files;
+        if (files && files.length) {
+          e.preventDefault();
+          void attachFiles(files);
+        }
+      }}
       onSubmit={async (e) => {
         e.preventDefault();
         const el = inputRef.current;
         if (!el) return;
-        const raw = serializeEditor(el);
+        const text = serializeEditor(el).trim();
+        const files = attaches.map(attachMarkdown).filter(Boolean);
+        const raw = [text, files.join("\n")].filter(Boolean).join("\n\n");
         if (!raw.trim()) return;
         el.innerHTML = "";
         setMention(null);
+        setAttaches([]);
         setEmpty(true);
         fit();
         await onSend(raw);
       }}
     >
-      <div className="composer-box">
+      <div className={"composer-box" + (attaches.length ? " has-attach" : "")}>
         {slashOpen ? (
           <div className="mention-menu" role="listbox">
             {skillMatches.map((s, i) => (
@@ -228,6 +263,30 @@ export function Composer({
             ))}
           </div>
         ) : null}
+        {attaches.length ? (
+          <div className="attach-row">
+            {attaches.map((a) => (
+              <div key={a.id} className="attach-chip">
+                {a.image && a.preview ? (
+                  <img src={a.preview} alt="" />
+                ) : (
+                  <span className="attach-file">{fileExt(a.name)}</span>
+                )}
+                <span className="attach-name">{a.name}</span>
+                <button
+                  type="button"
+                  className="attach-remove"
+                  title="첨부 빼기"
+                  aria-label={`${a.name} 첨부 빼기`}
+                  onClick={() => removeAttach(a.id)}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <div className="composer-row">
         <div
           ref={inputRef}
           className={"composer-input" + (empty ? " is-empty" : "")}
@@ -352,12 +411,27 @@ export function Composer({
         >
           +
         </button>
-        <button type="submit" aria-label="보내기" disabled={!selected}>
+        <button
+          type="submit"
+          aria-label="보내기"
+          disabled={!selected || (empty && !attaches.length)}
+        >
           ↑
         </button>
+        </div>
       </div>
     </form>
   );
+}
+
+function attachMarkdown(a: Attach): string {
+  return a.image ? `![${a.name}](${a.path})` : `[${a.name}](${a.path})`;
+}
+
+function fileExt(name: string): string {
+  const i = name.lastIndexOf(".");
+  if (i <= 0 || i === name.length - 1) return "FILE";
+  return name.slice(i + 1).slice(0, 4).toUpperCase();
 }
 
 function insertSlashText(editor: HTMLElement | null, body: string): boolean {

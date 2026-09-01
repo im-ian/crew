@@ -1225,12 +1225,81 @@ button.who-btn:focus-visible {
   width: 100%;
   max-width: none;
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   background: var(--field);
   border-radius: var(--radius-pill);
   padding: 6px 6px 6px 14px;
   min-height: 44px;
+}
+.composer-box.has-attach {
+  border-radius: var(--radius-xl);
+  padding-top: 10px;
+}
+.composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+.attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.attach-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  background: var(--active);
+  border-radius: var(--radius-md);
+  padding: 3px 6px 3px 3px;
+}
+.attach-chip img {
+  width: 32px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.attach-file {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  background: var(--field);
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.attach-name {
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attach-remove {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.attach-remove:hover {
+  background: var(--hover);
+  color: var(--ink);
 }
 .mention-menu {
   position: absolute;
