@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AgentInfo, ChannelInfo, ChatMessage, Kind } from "../types";
 import { busyInChannel } from "../busy";
 import { resolveFace } from "../avatar";
+import { splitBubbles } from "../bubbles";
 import { Avatar } from "./Avatar";
 import { MdBody } from "./MdBody";
 import { WhoButton, whoColor } from "./WhoButton";
@@ -477,10 +478,8 @@ function Incoming({
       ? () => onSelectAgent(agent.id)
       : undefined;
   const queued = !!m.queued;
-  const cls =
-    "bubble md incoming" +
-    (caret ? " streaming" : "") +
-    (queued ? " queued" : "");
+  const parts = splitBubbles(m.text || "");
+  const bubbles = parts.length ? parts : [""];
   return (
     <div
       className={
@@ -520,13 +519,32 @@ function Incoming({
             {who}
           </div>
         )}
-        <MdBody
-          className={cls}
-          text={m.text || ""}
-          agents={agents}
-          onMention={onSelectAgent}
-          baseDir={agent?.cwd || undefined}
-        />
+        {bubbles.map((part, i) => {
+          const last = i === bubbles.length - 1;
+          const stack =
+            bubbles.length > 1
+              ? i === 0
+                ? " stack-first"
+                : last
+                  ? " stack-last"
+                  : " stack-mid"
+              : "";
+          return (
+            <MdBody
+              key={m.id + "-" + i}
+              className={
+                "bubble md incoming" +
+                stack +
+                (caret && last ? " streaming" : "") +
+                (queued ? " queued" : "")
+              }
+              text={part}
+              agents={agents}
+              onMention={onSelectAgent}
+              baseDir={agent?.cwd || undefined}
+            />
+          );
+        })}
         {queued ? <QueueWait /> : null}
         <ApprovalCard state={m.approval} onApprove={onApprove} />
       </div>
