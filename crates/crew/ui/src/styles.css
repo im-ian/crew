@@ -580,6 +580,14 @@ header {
   min-width: 0;
   flex: 1;
 }
+header .who-btn {
+  height: var(--chrome-h);
+  padding: 4px 8px 4px 4px;
+}
+header .who-avatar {
+  width: 20px;
+  height: 20px;
+}
 .head-empty {
   color: var(--muted);
   font-size: 14px;
