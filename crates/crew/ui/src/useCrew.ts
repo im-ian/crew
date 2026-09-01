@@ -29,6 +29,7 @@ import type {
   CliKind,
   ConfirmKind,
   CtxKind,
+  FocusTarget,
   Group,
   Kind,
   PaneTab,
@@ -61,7 +62,11 @@ export function useCrew() {
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [newBotOpen, setNewBotOpen] = useState(false);
   const [newChannelOpen, setNewChannelOpen] = useState(false);
-  const [toast, setToast] = useState({ text: "", show: false });
+  const [toast, setToast] = useState<{
+    text: string;
+    show: boolean;
+    target: FocusTarget | null;
+  }>({ text: "", show: false, target: null });
   const [ctx, setCtx] = useState<Ctx>({
     open: false,
     x: 0,
@@ -106,12 +111,12 @@ export function useCrew() {
         ? `+ ${currentAgent.name || currentAgent.id}에게 메시지 (@이름으로 부르기)`
         : "+ 메시지";
 
-  function showToast(text: string) {
-    setToast({ text, show: true });
+  function showToast(text: string, target: FocusTarget | null = null) {
+    setToast({ text, show: true, target });
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => {
       setToast((t) => ({ ...t, show: false }));
-    }, 2500);
+    }, target ? 8000 : 2500);
   }
 
   function showError(err: unknown) {
@@ -860,6 +865,88 @@ export function useCrew() {
     };
   }, []);
 
+  function openFocus(hit: FocusTarget) {
+    void api.takePendingFocus().catch(() => null);
+    if (hit.kind === "channel") selectChannel(hit.id);
+    else selectAgent(hit.id);
+  }
+
+  function clickToast() {
+    const target = toast.target;
+    if (!target) return;
+    setToast((t) => ({ ...t, show: false, target: null }));
+    openFocus(target);
+  }
+
+  useEffect(() => {
+    let last = "";
+    let noticeKey = "";
+    function go(hit: FocusTarget) {
+      void api.takePendingFocus().catch(() => null);
+      if (hit.kind === "channel") selectChannel(hit.id);
+      else selectAgent(hit.id);
+    }
+    function fireNotice(hit: FocusTarget) {
+      const Ctor = window.Notification;
+      if (!Ctor) return;
+      const show = () => {
+        const n = new Ctor("Crew", {
+          body: hit.body,
+          tag: `crew:${hit.kind}:${hit.id}`,
+        });
+        n.onclick = () => {
+          window.focus();
+          go(hit);
+          n.close();
+        };
+      };
+      if (Ctor.permission === "granted") show();
+      else if (Ctor.permission !== "denied") {
+        void Ctor.requestPermission().then((p) => {
+          if (p === "granted") show();
+        });
+      }
+    }
+    async function tick() {
+      const hit = await api.peekPendingFocus().catch(() => null);
+      if (!hit) {
+        last = "";
+        return;
+      }
+      const key = `${hit.kind}:${hit.id}:${hit.body}`;
+      if (document.hidden) {
+        if (noticeKey !== key) {
+          noticeKey = key;
+          fireNotice(hit);
+        }
+        return;
+      }
+      if (last === key) return;
+      last = key;
+      showToast(hit.body, hit);
+    }
+    function onWinFocus() {
+      void api
+        .takePendingFocus()
+        .then((hit) => {
+          if (hit) go(hit);
+        })
+        .catch(() => null);
+    }
+    function onVis() {
+      if (!document.hidden) onWinFocus();
+    }
+    const iv = window.setInterval(() => void tick(), 900);
+    window.addEventListener("focus", onWinFocus);
+    document.addEventListener("visibilitychange", onVis);
+    void tick();
+    return () => {
+      window.clearInterval(iv);
+      window.removeEventListener("focus", onWinFocus);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+
   return {
     agents,
     channels,
@@ -884,6 +971,7 @@ export function useCrew() {
     newBotOpen,
     newChannelOpen,
     toast,
+    clickToast,
     ctx,
     groups,
     ungrouped,

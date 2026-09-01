@@ -32,6 +32,30 @@ pub fn pid_path() -> PathBuf {
     home_dir().join("crew.pid")
 }
 
+pub fn ui_pid_path() -> PathBuf {
+    home_dir().join("ui.pid")
+}
+
+pub fn write_ui_pid() {
+    let _ = fs::write(ui_pid_path(), format!("{}\n", std::process::id()));
+}
+
+pub fn clear_ui_pid() {
+    let _ = fs::remove_file(ui_pid_path());
+}
+
+pub fn ui_is_live() -> bool {
+    let raw = match fs::read_to_string(ui_pid_path()) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let pid: i32 = match raw.trim().parse() {
+        Ok(n) if n > 0 => n,
+        _ => return false,
+    };
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
 pub fn log_path() -> PathBuf {
     home_dir().join("crew.log")
 }

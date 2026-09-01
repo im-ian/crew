@@ -51,6 +51,12 @@ export type SearchHit = {
   snippet: string;
 };
 
+export type FocusTarget = {
+  kind: string;
+  id: string;
+  body: string;
+};
+
 export type AgentInfo = {
   id: string;
   name: string;

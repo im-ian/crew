@@ -44,6 +44,8 @@ fn main() {
             "lookup_skill",
             "save_skill",
             "save_upload",
+            "peek_pending_focus",
+            "take_pending_focus",
         ])),
     )
     .expect("failed to run tauri build");

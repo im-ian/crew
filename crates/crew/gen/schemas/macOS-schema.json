@@ -303,6 +303,12 @@
           "markdownDescription": "Enables the lookup_skill command without any pre-configured scope."
         },
         {
+          "description": "Enables the peek_pending_focus command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-peek-pending-focus",
+          "markdownDescription": "Enables the peek_pending_focus command without any pre-configured scope."
+        },
+        {
           "description": "Enables the remove_agent command without any pre-configured scope.",
           "type": "string",
           "const": "allow-remove-agent",
@@ -397,6 +403,12 @@
           "type": "string",
           "const": "allow-stop-agent",
           "markdownDescription": "Enables the stop_agent command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the take_pending_focus command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-take-pending-focus",
+          "markdownDescription": "Enables the take_pending_focus command without any pre-configured scope."
         },
         {
           "description": "Enables the tell_message command without any pre-configured scope.",
@@ -531,6 +543,12 @@
           "markdownDescription": "Denies the lookup_skill command without any pre-configured scope."
         },
         {
+          "description": "Denies the peek_pending_focus command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-peek-pending-focus",
+          "markdownDescription": "Denies the peek_pending_focus command without any pre-configured scope."
+        },
+        {
           "description": "Denies the remove_agent command without any pre-configured scope.",
           "type": "string",
           "const": "deny-remove-agent",
@@ -625,6 +643,12 @@
           "type": "string",
           "const": "deny-stop-agent",
           "markdownDescription": "Denies the stop_agent command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the take_pending_focus command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-take-pending-focus",
+          "markdownDescription": "Denies the take_pending_focus command without any pre-configured scope."
         },
         {
           "description": "Denies the tell_message command without any pre-configured scope.",

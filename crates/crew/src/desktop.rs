@@ -607,6 +607,16 @@ fn save_skill(name: String, body: String) -> Result<crate::skills::Skill, String
 }
 
 #[tauri::command]
+fn peek_pending_focus() -> Result<Option<crate::notify::FocusTarget>, String> {
+    Ok(crate::notify::peek_focus())
+}
+
+#[tauri::command]
+fn take_pending_focus() -> Result<Option<crate::notify::FocusTarget>, String> {
+    Ok(crate::notify::take_focus())
+}
+
+#[tauri::command]
 fn save_upload(name: String, data: String) -> Result<String, String> {
     let bytes = crate::avatar::decode_input(&data).map_err(|e| e.to_string())?;
     let dir = crate::paths::home_dir().join("uploads");
@@ -624,10 +634,16 @@ pub fn run() -> anyhow::Result<()> {
     crate::ui_dev::ensure_vite()?;
     tauri::Builder::default()
         .setup(|app| {
+            crate::paths::write_ui_pid();
             #[cfg(debug_assertions)]
             crate::ui_dev::attach(app)?;
             let _ = app;
             Ok(())
+        })
+        .on_window_event(|_window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                crate::paths::clear_ui_pid();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             list_agents,
@@ -667,7 +683,9 @@ pub fn run() -> anyhow::Result<()> {
             list_skills,
             lookup_skill,
             save_skill,
-            save_upload
+            save_upload,
+            peek_pending_focus,
+            take_pending_focus
         ])
         .run(tauri::generate_context!())
         .map_err(|e| anyhow::anyhow!(e))?;

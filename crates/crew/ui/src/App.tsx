@@ -140,7 +140,11 @@ export function App() {
         y={crew.ctx.y}
         items={menuItems(crew, setRenameId)}
       />
-      <Toast text={crew.toast.text} show={crew.toast.show} />
+      <Toast
+        text={crew.toast.text}
+        show={crew.toast.show}
+        onClick={crew.toast.target ? crew.clickToast : undefined}
+      />
     </div>
   );
 }

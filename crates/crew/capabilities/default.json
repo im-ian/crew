@@ -49,6 +49,8 @@
     "allow-list-skills",
     "allow-lookup-skill",
     "allow-save-skill",
-    "allow-save-upload"
+    "allow-save-upload",
+    "allow-peek-pending-focus",
+    "allow-take-pending-focus"
   ]
 }

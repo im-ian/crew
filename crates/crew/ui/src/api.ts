@@ -6,6 +6,7 @@ import type {
   Group,
   ModelList,
   RoutineRun,
+  FocusTarget,
   SearchHit,
   Skill,
 } from "./types";
@@ -123,6 +124,8 @@ export const api = {
     invoke<Skill>("save_skill", { name, body }),
   saveUpload: (name: string, data: string) =>
     invoke<string>("save_upload", { name, data }),
+  peekPendingFocus: () => invoke<FocusTarget | null>("peek_pending_focus"),
+  takePendingFocus: () => invoke<FocusTarget | null>("take_pending_focus"),
   listModels: (cli: string) => {
     let pending = modelLists.get(cli);
     if (!pending) {

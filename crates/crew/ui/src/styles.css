@@ -1948,6 +1948,12 @@ textarea.textin {
   border-radius: var(--radius-lg);
 }
 .toast.show { display: block; }
+button.toast {
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.toast.is-action:hover { filter: brightness(1.08); }
 .avatar-file { display: none; }
 @media (prefers-reduced-motion: reduce) {
   button,

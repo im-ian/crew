@@ -495,7 +495,15 @@ fn notify_from_frame(ev: &Event) {
         .and_then(|m| m.get(agent).map(|c| c.display_name().to_string()))
         .unwrap_or_else(|| agent.clone());
     let interrupted = agent_interrupted(agent);
-    crate::notify::maybe_status_notify(&name, prev, *status, interrupted);
+    let channel = get_origin(agent).and_then(|o| o.reply_channel);
+    crate::notify::maybe_status_notify(
+        agent,
+        &name,
+        channel.as_deref(),
+        prev,
+        *status,
+        interrupted,
+    );
 }
 
 fn agent_interrupted(id: &str) -> bool {
