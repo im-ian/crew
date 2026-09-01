@@ -110,7 +110,7 @@ function hitRailTarget(x: number, y: number, dragKey: string): RailDrop | null {
     const groupEl = row.closest("[data-rail-group]");
     const groupId =
       groupEl instanceof HTMLElement ? groupEl.dataset.railGroup || null : null;
-    const inset = groupEl ? 24 : 8;
+    const inset = 8;
     const before = y < rect.top + rect.height * 0.5;
     if (before) {
       return { groupId, beforeKey: key, into: false, line: lineAt(rect, true, inset) };

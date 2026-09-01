@@ -19,13 +19,13 @@
   --working: #0a84ff;
   --blocked: #ff453a;
   --exited: #636366;
-  --titlebar: 36px;
+  --titlebar: 28px;
   --rail-w: 232px;
   --rail-pad: 8px;
   --control-h: 32px;
   --avatar: 36px;
   --content-pad: 24px;
-  --chrome-h: 36px;
+  --chrome-h: 28px;
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 10px;
@@ -130,7 +130,18 @@ html.rail-resizing * {
   align-items: center;
   gap: 8px;
   min-height: var(--chrome-h);
-  padding: 0 var(--rail-pad) 4px;
+  padding: 0 var(--rail-pad);
+}
+.search-row .icon-btn,
+.search-row .search {
+  width: var(--chrome-h);
+  height: var(--chrome-h);
+}
+.search-row .search {
+  width: auto;
+}
+.search-row .icon-btn {
+  font-size: 16px;
 }
 .icon-btn {
   width: var(--control-h);
@@ -174,7 +185,8 @@ html.rail-resizing * {
 .rail-section + .rail-section { margin-top: 8px; }
 .rail-section.grouped .rail-row,
 .rail-section.grouped .empty-rail {
-  padding-left: 24px;
+  margin-left: 12px;
+  width: calc(100% - 12px);
 }
 .rail-head {
   display: flex;
@@ -556,9 +568,10 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   min-height: var(--chrome-h);
-  padding: 0 var(--content-pad) 4px;
+  padding: 0 var(--content-pad);
+  margin-bottom: 8px;
   min-width: 0;
 }
 .head-identity {
@@ -572,8 +585,8 @@ header {
   font-size: 14px;
 }
 .head-action {
-  width: var(--control-h);
-  height: var(--control-h);
+  width: var(--chrome-h);
+  height: var(--chrome-h);
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;
