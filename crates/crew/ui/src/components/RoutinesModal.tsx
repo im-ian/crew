@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { useT } from "../LocaleContext";
+import type { MessageKey } from "../locales";
 import {
-  REPEAT_OPTIONS,
   WEEKDAYS,
   formatSchedule,
   parseTimeValue,
+  repeatOptions,
   toCron,
   type Repeat,
 } from "../schedule";
@@ -35,6 +37,7 @@ export function RoutinesModal({
   onEdit,
   onLoadRuns,
 }: Props) {
+  const t = useT();
   const [name, setName] = useState("");
   const [repeat, setRepeat] = useState<Repeat>("daily");
   const [days, setDays] = useState<number[]>([1]);
@@ -146,26 +149,26 @@ export function RoutinesModal({
   return (
     <div className="form-stack">
           <div className="pane-block">
-            <div className="pane-label">등록된 루틴</div>
+            <div className="pane-label">{t("routine.list")}</div>
             <div className="routine-list">
               {!routines.length ? (
-                <div className="empty-routines">아직 예약된 일이 없습니다</div>
+                <div className="empty-routines">{t("routine.empty")}</div>
               ) : (
                 routines.map((r) => (
                   <div className="routine" key={r.id || r.name}>
                     <div>
                       <div className="routine-name">{r.name || r.id}</div>
                       <div className="routine-meta">
-                        {formatSchedule(r.schedule || "")} ·{" "}
-                        {r.enabled === false ? "꺼짐" : "켜짐"}
+                        {formatSchedule(r.schedule || "", t)} ·{" "}
+                        {r.enabled === false ? t("common.off") : t("common.on")}
                       </div>
                     </div>
                     <div className="routine-actions">
                       <button type="button" onClick={() => void onRun(r)}>
-                        지금 실행
+                        {t("common.runNow")}
                       </button>
                       <button type="button" onClick={() => void onToggle(r)}>
-                        {r.enabled === false ? "켜기" : "끄기"}
+                        {r.enabled === false ? t("common.turnOn") : t("common.turnOff")}
                       </button>
                       <button
                         type="button"
@@ -176,13 +179,13 @@ export function RoutinesModal({
                           setEditSchedule(r.schedule || "");
                         }}
                       >
-                        수정
+                        {t("common.edit")}
                       </button>
                       <button type="button" onClick={() => void toggleRuns(r)}>
-                        기록
+                        {t("routine.history")}
                       </button>
                       <button type="button" onClick={() => void onDelete(r)}>
-                        삭제
+                        {t("common.delete")}
                       </button>
                     </div>
                     {editId === (r.id || r.name) ? (
@@ -191,19 +194,19 @@ export function RoutinesModal({
                           className="textin"
                           value={editName}
                           onChange={(e) => setEditName(e.target.value)}
-                          placeholder="이름"
+                          placeholder={t("field.name")}
                         />
                         <input
                           className="textin"
                           value={editSchedule}
                           onChange={(e) => setEditSchedule(e.target.value)}
-                          placeholder="cron 또는 평일 8시에 브리핑"
+                          placeholder={t("routine.schedulePh")}
                         />
                         <textarea
                           className="textin"
                           value={editPrompt}
                           onChange={(e) => setEditPrompt(e.target.value)}
-                          placeholder="시킬 일"
+                          placeholder={t("routine.prompt")}
                         />
                         <div className="actions">
                           <button
@@ -212,10 +215,10 @@ export function RoutinesModal({
                             disabled={busy}
                             onClick={() => void saveEdit(r)}
                           >
-                            저장
+                            {t("common.save")}
                           </button>
                           <button type="button" onClick={() => setEditId(null)}>
-                            취소
+                            {t("common.cancel")}
                           </button>
                         </div>
                       </div>
@@ -223,7 +226,7 @@ export function RoutinesModal({
                     {runsFor === (r.id || r.name) ? (
                       <div className="routine-runs">
                         {!runs.length ? (
-                          <div className="empty-routines">아직 실행 기록이 없습니다</div>
+                          <div className="empty-routines">{t("routine.runsEmpty")}</div>
                         ) : (
                           runs
                             .slice()
@@ -233,7 +236,7 @@ export function RoutinesModal({
                                 key={run.ts}
                                 className={"routine-run" + (run.ok ? "" : " is-fail")}
                               >
-                                {run.ok ? "성공" : "실패"} ·{" "}
+                                {run.ok ? t("common.ok") : t("common.fail")} ·{" "}
                                 {new Date(run.ts).toLocaleString()}
                                 {run.detail && run.detail !== "ok"
                                   ? ` · ${run.detail}`
@@ -249,12 +252,12 @@ export function RoutinesModal({
             </div>
           </div>
           <div className="pane-block">
-            <div className="pane-label">말로 추가</div>
-            <Field label="예: 평일 8시에 브리핑" htmlFor="routine-nl">
+            <div className="pane-label">{t("routine.nl")}</div>
+            <Field label={t("routine.nlLabel")} htmlFor="routine-nl">
               <textarea
                 id="routine-nl"
                 className="textin"
-                placeholder="Every weekday at 8:00 AM, post a briefing"
+                placeholder={t("routine.nlPh")}
                 value={nl}
                 onChange={(e) => setNl(e.target.value)}
               />
@@ -266,18 +269,18 @@ export function RoutinesModal({
                 disabled={busy || !nl.trim()}
                 onClick={() => void submitNl()}
               >
-                만들기
+                {t("common.create")}
               </button>
             </div>
           </div>
           <div className="pane-block">
-            <div className="pane-label">새로 추가</div>
-        <Field label="이름" htmlFor="routine-name">
+            <div className="pane-label">{t("routine.addNew")}</div>
+        <Field label={t("field.name")} htmlFor="routine-name">
           <input
             id="routine-name"
             ref={nameRef}
             className="textin"
-            placeholder="아침 브리핑"
+            placeholder={t("routine.namePh")}
             autoComplete="off"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -289,11 +292,11 @@ export function RoutinesModal({
             }}
           />
         </Field>
-        <Field label="언제">
-          <Seg value={repeat} options={REPEAT_OPTIONS} onChange={setRepeat} />
+        <Field label={t("routine.when")}>
+          <Seg value={repeat} options={repeatOptions(t)} onChange={setRepeat} />
         </Field>
         {repeat === "weekly" ? (
-          <Field label="요일">
+          <Field label={t("routine.dow")}>
             <div className="dow-row">
               {WEEKDAYS.map((d) => (
                 <button
@@ -301,19 +304,19 @@ export function RoutinesModal({
                   type="button"
                   className={"dow-pick" + (days.includes(d.value) ? " on" : "")}
                   aria-pressed={days.includes(d.value)}
-                  aria-label={d.label}
+                  aria-label={t(`dow.${d.value}` as MessageKey)}
                   onClick={() => toggleDay(d.value)}
                 >
-                  {d.short}
+                  {t(`dow.${d.value}.short` as MessageKey)}
                 </button>
               ))}
             </div>
           </Field>
         ) : null}
         {repeat === "hourly" ? (
-          <p className="apply-note">한 시간마다 정각에 실행합니다.</p>
+          <p className="apply-note">{t("routine.hourlyNote")}</p>
         ) : (
-          <Field label="시각" htmlFor="routine-time">
+          <Field label={t("routine.time")} htmlFor="routine-time">
             <input
               id="routine-time"
               className="textin timein"
@@ -323,12 +326,12 @@ export function RoutinesModal({
             />
           </Field>
         )}
-        <Field label="시킬 일" htmlFor="routine-prompt">
+        <Field label={t("routine.prompt")} htmlFor="routine-prompt">
           <textarea
             id="routine-prompt"
             ref={promptRef}
             className="textin"
-            placeholder="오늘 할 일을 정리해서 알려줘"
+            placeholder={t("routine.promptPh")}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
           />
@@ -340,7 +343,7 @@ export function RoutinesModal({
                 disabled={busy}
                 onClick={() => void submit()}
               >
-                추가
+                {t("common.add")}
               </button>
             </div>
           </div>

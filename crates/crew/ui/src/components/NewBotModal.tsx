@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { hashedFace, type AvatarShape } from "../avatar";
-import { CLIS, EFFORTS } from "../options";
+import { useT } from "../LocaleContext";
+import { CLIS, effortOptions } from "../options";
 import type { CliKind } from "../types";
 import { Avatar } from "./Avatar";
 import { FacePop } from "./FacePicker";
@@ -28,6 +29,7 @@ export function NewBotModal({
   onClose,
   onCreate,
 }: Props) {
+  const t = useT();
   const [name, setName] = useState("");
   const [persona, setPersona] = useState("");
   const [model, setModel] = useState("");
@@ -85,7 +87,7 @@ export function NewBotModal({
   }
 
   return (
-    <Modal open={open} title="새 봇" onClose={onClose}>
+    <Modal open={open} title={t("newBot.title")} onClose={onClose}>
       <div className="form-stack">
         <div className="info-hero">
           <FacePop
@@ -109,12 +111,12 @@ export function NewBotModal({
             />
           </FacePop>
         </div>
-        <Field label="이름" htmlFor="new-name">
+        <Field label={t("field.name")} htmlFor="new-name">
           <input
             id="new-name"
             ref={nameRef}
             className="textin"
-            placeholder="예: 기획 도우미"
+            placeholder={t("info.namePh")}
             autoComplete="off"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -126,16 +128,16 @@ export function NewBotModal({
             }}
           />
         </Field>
-        <Field label="역할 / 설명" htmlFor="new-persona">
+        <Field label={t("field.persona")} htmlFor="new-persona">
           <textarea
             id="new-persona"
             className="textin"
-            placeholder="선택 사항"
+            placeholder={t("newBot.personaPh")}
             value={persona}
             onChange={(e) => setPersona(e.target.value)}
           />
         </Field>
-        <Field label="AI">
+        <Field label={t("field.ai")}>
           <Seg
             value={cli}
             options={CLIS}
@@ -145,7 +147,7 @@ export function NewBotModal({
             }}
           />
         </Field>
-        <Field label="모델" htmlFor="new-model">
+        <Field label={t("field.model")} htmlFor="new-model">
           <ModelSelect
             id="new-model"
             cli={cli}
@@ -154,13 +156,13 @@ export function NewBotModal({
             active={open}
           />
         </Field>
-        <Field label="생각">
-          <Seg value={effort} options={EFFORTS} onChange={setEffort} />
+        <Field label={t("field.effort")}>
+          <Seg value={effort} options={effortOptions(t)} onChange={setEffort} />
         </Field>
       </div>
       <div className="actions spread">
         <button type="button" className="ghost" onClick={onClose}>
-          취소
+          {t("common.cancel")}
         </button>
         <button
           type="button"
@@ -168,7 +170,7 @@ export function NewBotModal({
           disabled={busy}
           onClick={() => void submit()}
         >
-          만들기
+          {t("common.create")}
         </button>
       </div>
     </Modal>

@@ -1,27 +1,28 @@
+export type ShortcutGroup = "general" | "nav" | "create" | "chat";
+
 export type Shortcut = {
   id: string;
   combo: string;
-  group: string;
-  label: string;
+  group: ShortcutGroup;
 };
 
 /** Shown in the help overlay, in order. Combos use Meta for ⌘/Ctrl. */
 export const SHORTCUTS: Shortcut[] = [
-  { id: "help", combo: "Meta+/", group: "일반", label: "단축키 보기" },
-  { id: "settings", combo: "Meta+,", group: "일반", label: "설정" },
-  { id: "search", combo: "Meta+K", group: "이동", label: "검색" },
-  { id: "composer", combo: "Meta+J", group: "이동", label: "입력창" },
-  { id: "prev-chat", combo: "Meta+Alt+ArrowUp", group: "이동", label: "이전 대화" },
-  { id: "next-chat", combo: "Meta+Alt+ArrowDown", group: "이동", label: "다음 대화" },
-  { id: "bottom", combo: "Meta+Shift+ArrowDown", group: "이동", label: "맨 아래로" },
-  { id: "new-bot", combo: "Meta+N", group: "만들기", label: "새 봇" },
-  { id: "new-channel", combo: "Meta+Shift+N", group: "만들기", label: "새 채널" },
-  { id: "info", combo: "Meta+I", group: "대화", label: "정보" },
-  { id: "routines", combo: "Meta+Shift+R", group: "대화", label: "루틴" },
-  { id: "stop", combo: "Meta+.", group: "대화", label: "중지" },
-  { id: "attach", combo: "Meta+U", group: "대화", label: "파일 첨부" },
-  { id: "approve", combo: "Meta+Enter", group: "대화", label: "한 번 허용" },
-  { id: "deny", combo: "Meta+Backspace", group: "대화", label: "거부" },
+  { id: "help", combo: "Meta+/", group: "general" },
+  { id: "settings", combo: "Meta+,", group: "general" },
+  { id: "search", combo: "Meta+K", group: "nav" },
+  { id: "composer", combo: "Meta+J", group: "nav" },
+  { id: "prev-chat", combo: "Meta+Alt+ArrowUp", group: "nav" },
+  { id: "next-chat", combo: "Meta+Alt+ArrowDown", group: "nav" },
+  { id: "bottom", combo: "Meta+Shift+ArrowDown", group: "nav" },
+  { id: "new-bot", combo: "Meta+N", group: "create" },
+  { id: "new-channel", combo: "Meta+Shift+N", group: "create" },
+  { id: "info", combo: "Meta+I", group: "chat" },
+  { id: "routines", combo: "Meta+Shift+R", group: "chat" },
+  { id: "stop", combo: "Meta+.", group: "chat" },
+  { id: "attach", combo: "Meta+U", group: "chat" },
+  { id: "approve", combo: "Meta+Enter", group: "chat" },
+  { id: "deny", combo: "Meta+Backspace", group: "chat" },
 ];
 
 const ALIAS: Record<string, string> = {
@@ -84,7 +85,7 @@ export function shortcutId(e: KeyEventLike, typing: boolean): string | null {
   return id;
 }
 
-export function formatCombo(combo: string): string[] {
+export function formatCombo(combo: string, spaceLabel = "Space"): string[] {
   return combo.split("+").map((part) => {
     switch (part) {
       case "Meta":
@@ -108,15 +109,15 @@ export function formatCombo(combo: string): string[] {
       case "Escape":
         return "Esc";
       case "Space":
-        return "스페이스";
+        return spaceLabel;
       default:
         return part;
     }
   });
 }
 
-export function groupedShortcuts(): { group: string; items: Shortcut[] }[] {
-  const groups: { group: string; items: Shortcut[] }[] = [];
+export function groupedShortcuts(): { group: ShortcutGroup; items: Shortcut[] }[] {
+  const groups: { group: ShortcutGroup; items: Shortcut[] }[] = [];
   for (const s of SHORTCUTS) {
     const last = groups[groups.length - 1];
     if (last && last.group === s.group) last.items.push(s);

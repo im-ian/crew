@@ -9,6 +9,7 @@ import {
   type Ref,
 } from "react";
 import { createPortal } from "react-dom";
+import { useLocale, useT } from "../LocaleContext";
 import { itemKey, parseItemKey } from "../groups";
 import type { AgentInfo, ChannelInfo, Group, Kind, SearchHit } from "../types";
 import { Avatar } from "./Avatar";
@@ -235,7 +236,7 @@ function toItems(agents: AgentInfo[], channels: ChannelInfo[]): RailItem[] {
   return items;
 }
 
-function orderItems(items: RailItem[], order: string[]): RailItem[] {
+function orderItems(items: RailItem[], order: string[], locale: string): RailItem[] {
   const byKey = new Map(items.map((item) => [item.key, item]));
   const out: RailItem[] = [];
   const seen = new Set<string>();
@@ -246,7 +247,7 @@ function orderItems(items: RailItem[], order: string[]): RailItem[] {
     seen.add(key);
   }
   const rest = items.filter((item) => !seen.has(item.key));
-  rest.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  rest.sort((a, b) => a.name.localeCompare(b.name, locale));
   return out.concat(rest);
 }
 
@@ -276,6 +277,8 @@ export function Sidebar({
   searchRef,
   onOpenSettings,
 }: Props) {
+  const t = useT();
+  const { locale } = useLocale();
   const all = toItems(agents, channels).filter((item) => {
     if (item.agent) {
       return matches(
@@ -301,6 +304,7 @@ export function Sidebar({
   const ungroupedItems = orderItems(
     all.filter((item) => !used.has(item.key)),
     ungrouped,
+    locale,
   );
   const searching = !!query.trim();
   const empty = !all.length;
@@ -547,8 +551,8 @@ export function Sidebar({
           ref={searchRef}
           className="search"
           type="search"
-          placeholder="검색"
-          title="검색 ⌘K"
+          placeholder={t("sidebar.search")}
+          title={t("sidebar.searchTitle")}
           autoComplete="off"
           spellCheck={false}
           value={query}
@@ -557,8 +561,8 @@ export function Sidebar({
         <button
           type="button"
           className="icon-btn"
-          title="추가"
-          aria-label="추가"
+          title={t("sidebar.add")}
+          aria-label={t("sidebar.add")}
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -596,7 +600,7 @@ export function Sidebar({
       <div className="rail-lists">
         {empty ? (
           <div className="empty-rail">
-            {agents.length || channels.length ? "검색 결과가 없습니다" : "대화가 없습니다"}
+            {agents.length || channels.length ? t("sidebar.noResults") : t("sidebar.empty")}
           </div>
         ) : (
           <>
@@ -628,7 +632,7 @@ export function Sidebar({
                   />
                   {hidden ? null : showEmpty ? (
                     <div className="empty-rail" data-rail-empty="1">
-                      여기로 끌어다 놓으세요
+                      {t("sidebar.dropHere")}
                     </div>
                   ) : (
                     items.map((item) => (
@@ -679,7 +683,7 @@ export function Sidebar({
                 ))}
                 {!ungroupedItems.length && drag?.armed ? (
                   <div className="empty-rail" data-rail-empty="1">
-                    그룹에서 빼기
+                    {t("sidebar.ungroupDrop")}
                   </div>
                 ) : null}
               </section>
@@ -692,8 +696,8 @@ export function Sidebar({
           <button
             type="button"
             className="icon-btn"
-            title="설정 ⌘,"
-            aria-label="설정"
+            title={t("sidebar.settingsTitle")}
+            aria-label={t("sidebar.settings")}
             onClick={onOpenSettings}
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -712,7 +716,7 @@ export function Sidebar({
         className="rail-resize"
         role="separator"
         aria-orientation="vertical"
-        aria-label="사이드바 너비 조절"
+        aria-label={t("sidebar.resize")}
         aria-valuemin={RAIL_MIN}
         aria-valuemax={RAIL_MAX}
         aria-valuenow={railW}
@@ -776,6 +780,7 @@ function GroupHead({
   onCancelRename: () => void;
   onContextMenu: (e: MouseEvent) => void;
 }) {
+  const t = useT();
   const inputRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(group.name);
 
@@ -815,8 +820,8 @@ function GroupHead({
       <button
         type="button"
         className="group-toggle"
-        title={group.collapsed ? "펼치기" : "접기"}
-        aria-label={group.collapsed ? "펼치기" : "접기"}
+        title={group.collapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+        aria-label={group.collapsed ? t("sidebar.expand") : t("sidebar.collapse")}
         onClick={onToggle}
       >
         <span className="group-chevron">▾</span>

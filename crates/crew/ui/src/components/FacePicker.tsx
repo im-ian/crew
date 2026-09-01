@@ -12,6 +12,7 @@ import {
   resolveFace,
   type AvatarShape,
 } from "../avatar";
+import { useT } from "../LocaleContext";
 import { BotFace } from "./BotFace";
 import { Field } from "./Field";
 
@@ -32,6 +33,7 @@ export function FacePicker({
   onColor,
   onFace,
 }: Props) {
+  const t = useT();
   const resolved = resolveFace(id, shape, color);
   const [hex, setHex] = useState(resolved.color);
 
@@ -64,17 +66,17 @@ export function FacePicker({
     <>
       <div className="field-block">
         <div className="field-head">
-          <label className="field">모양</label>
+          <label className="field">{t("field.shape")}</label>
           <button
             type="button"
             className="field-action"
-            aria-label="랜덤 조합"
+            aria-label={t("face.randomAria")}
             onClick={shuffle}
           >
-            랜덤
+            {t("face.random")}
           </button>
         </div>
-        <div className="shape-picker" role="listbox" aria-label="모양">
+        <div className="shape-picker" role="listbox" aria-label={t("field.shape")}>
           {AVATAR_SHAPES.map((s) => (
             <button
               key={s}
@@ -90,7 +92,7 @@ export function FacePicker({
           ))}
         </div>
       </div>
-      <Field label="색상">
+      <Field label={t("field.color")}>
         <div className="color-row">
           <div className="color-swatches">
             {AVATAR_SWATCHES.map((c) => (
@@ -114,7 +116,7 @@ export function FacePicker({
             spellCheck={false}
             autoComplete="off"
             placeholder="#ff6a00"
-            aria-label="색상 코드"
+            aria-label={t("face.colorCode")}
             onChange={(e) => {
               const raw = e.target.value;
               setHex(raw);
@@ -148,6 +150,7 @@ export function FacePop({
   children,
   ...picker
 }: FacePopProps) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -180,7 +183,7 @@ export function FacePop({
       <button
         type="button"
         className="face-pop-hit"
-        aria-label="아바타 설정"
+        aria-label={t("face.avatar")}
         aria-expanded={open}
         aria-haspopup="dialog"
         onPointerDown={(e) => e.stopPropagation()}
@@ -192,7 +195,7 @@ export function FacePop({
         {children}
       </button>
       {open ? (
-        <div className="face-pop-card" role="dialog" aria-label="아바타 설정">
+        <div className="face-pop-card" role="dialog" aria-label={t("face.avatar")}>
           <FacePicker {...picker} />
         </div>
       ) : null}

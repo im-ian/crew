@@ -1,4 +1,5 @@
 import { busyInChannel, isBusyStatus } from "../busy";
+import { useT } from "../LocaleContext";
 import type { AgentInfo, ChannelInfo } from "../types";
 import { WhoButton } from "./WhoButton";
 
@@ -19,6 +20,7 @@ export function ChatHeader({
   onOpenRoutines,
   onStop,
 }: Props) {
+  const t = useT();
   const busy = busyInChannel(agents, currentChannel?.id);
   const stopIds = currentChannel
     ? busy.filter((a) => a.status === "working").map((a) => a.id)
@@ -26,7 +28,7 @@ export function ChatHeader({
       ? [currentAgent.id]
       : [];
 
-  let identity = <span className="head-empty">대화를 선택하세요</span>;
+  let identity = <span className="head-empty">{t("header.pickChat")}</span>;
   if (currentChannel) {
     identity = (
       <WhoButton
@@ -34,7 +36,7 @@ export function ChatHeader({
         who={currentChannel.name || currentChannel.id}
         letter="#"
         fallbackId={currentChannel.id}
-        title="채널 정보 ⌘I"
+        title={t("header.channelInfo")}
         onClick={onOpenInfo}
       />
     );
@@ -43,7 +45,7 @@ export function ChatHeader({
       <WhoButton
         agent={currentAgent}
         who={currentAgent.name || currentAgent.id}
-        title="봇 정보 ⌘I"
+        title={t("header.botInfo")}
         onClick={onOpenInfo}
       />
     );
@@ -53,7 +55,7 @@ export function ChatHeader({
     <header>
       <div className="head-identity">{identity}</div>
       {busy.length ? (
-        <div className="head-busy" aria-label="작업 중인 멤버">
+        <div className="head-busy" aria-label={t("header.busyMembers")}>
           {busy.slice(0, 6).map((a) => (
             <WhoButton
               key={a.id}
@@ -61,8 +63,8 @@ export function ChatHeader({
               who={a.name || a.id}
               title={
                 a.status === "blocked"
-                  ? `${a.name || a.id} 확인이 필요합니다`
-                  : `${a.name || a.id} 작업 중`
+                  ? t("header.needsReview", { name: a.name || a.id })
+                  : t("header.working", { name: a.name || a.id })
               }
             />
           ))}
@@ -72,8 +74,8 @@ export function ChatHeader({
         <button
           type="button"
           className="head-action is-stop"
-          title="중지 ⌘."
-          aria-label="중지"
+          title={t("header.stopTitle")}
+          aria-label={t("header.stop")}
           onClick={() => {
             for (const id of stopIds) onStop(id);
           }}
@@ -87,8 +89,8 @@ export function ChatHeader({
         <button
           type="button"
           className="head-action"
-          title="채널 설정 ⌘I"
-          aria-label="채널 설정"
+          title={t("header.channelSettingsTitle")}
+          aria-label={t("header.channelSettings")}
           onClick={onOpenInfo}
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -107,8 +109,8 @@ export function ChatHeader({
         <button
           type="button"
           className="head-action"
-          title="봇 설정 ⌘⇧R"
-          aria-label="봇 설정"
+          title={t("header.botSettingsTitle")}
+          aria-label={t("header.botSettings")}
           onClick={onOpenRoutines}
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">

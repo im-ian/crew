@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { useT } from "../LocaleContext";
 import type { CliKind } from "../types";
 
 type Props = {
@@ -17,6 +18,7 @@ export function ModelSelect({
   onChange,
   active = true,
 }: Props) {
+  const t = useT();
   const [models, setModels] = useState<string[]>([]);
   const [fallback, setFallback] = useState<string | null>(null);
 
@@ -44,7 +46,7 @@ export function ModelSelect({
 
   const options = useMemo(() => {
     const out: { value: string; label: string }[] = [
-      { value: "", label: fallback ? `기본값 (${fallback})` : "기본값" },
+      { value: "", label: fallback ? t("model.defaultNamed", { name: fallback }) : t("model.default") },
     ];
     const seen = new Set<string>([""]);
     for (const model of models) {
@@ -56,7 +58,7 @@ export function ModelSelect({
       out.push({ value, label: value });
     }
     return out;
-  }, [models, fallback, value]);
+  }, [models, fallback, value, t]);
 
   return (
     <select

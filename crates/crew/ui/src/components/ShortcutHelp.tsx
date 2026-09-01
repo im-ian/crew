@@ -1,3 +1,5 @@
+import { useT } from "../LocaleContext";
+import type { MessageKey } from "../locales";
 import { formatCombo, groupedShortcuts } from "../shortcuts";
 import { Modal } from "./Modal";
 
@@ -7,18 +9,21 @@ type Props = {
 };
 
 export function ShortcutHelp({ open, onClose }: Props) {
+  const t = useT();
   return (
-    <Modal open={open} title="단축키" onClose={onClose} wide>
+    <Modal open={open} title={t("shortcut.title")} onClose={onClose} wide>
       <div className="shortcut-list">
         {groupedShortcuts().map((g) => (
           <section key={g.group}>
-            <h4>{g.group}</h4>
+            <h4>{t(`shortcut.group.${g.group}` as MessageKey)}</h4>
             <ul>
               {g.items.map((s) => (
                 <li key={s.id}>
-                  <span className="shortcut-label">{s.label}</span>
+                  <span className="shortcut-label">
+                    {t(`shortcut.${s.id}` as MessageKey)}
+                  </span>
                   <span className="shortcut-keys">
-                    {formatCombo(s.combo).map((part, i) => (
+                    {formatCombo(s.combo, t("key.space")).map((part, i) => (
                       <kbd key={s.id + i}>{part}</kbd>
                     ))}
                   </span>
@@ -28,7 +33,7 @@ export function ShortcutHelp({ open, onClose }: Props) {
           </section>
         ))}
       </div>
-      <p className="apply-note">입력 중에도 ⌘ 조합은 동작합니다. ? 는 입력창 밖에서만.</p>
+      <p className="apply-note">{t("shortcut.note")}</p>
     </Modal>
   );
 }

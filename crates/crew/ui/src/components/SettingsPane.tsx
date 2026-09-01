@@ -1,7 +1,9 @@
+import { useLocale, useT } from "../LocaleContext";
+import type { Locale } from "../i18n";
+import type { ThemePref } from "../theme";
 import { Field } from "./Field";
 import { Modal } from "./Modal";
 import { Seg } from "./Seg";
-import type { ThemePref } from "../theme";
 
 type Props = {
   open: boolean;
@@ -11,10 +13,9 @@ type Props = {
   onOpenShortcuts: () => void;
 };
 
-const THEMES: { value: ThemePref; label: string }[] = [
-  { value: "dark", label: "다크" },
-  { value: "light", label: "라이트" },
-  { value: "system", label: "시스템" },
+const LANGS: { value: Locale; label: string }[] = [
+  { value: "ko", label: "한글" },
+  { value: "en", label: "English" },
 ];
 
 export function SettingsPane({
@@ -24,22 +25,34 @@ export function SettingsPane({
   onClose,
   onOpenShortcuts,
 }: Props) {
+  const t = useT();
+  const { locale, setLocale } = useLocale();
+  const themes: { value: ThemePref; label: string }[] = [
+    { value: "dark", label: t("settings.theme.dark") },
+    { value: "light", label: t("settings.theme.light") },
+    { value: "system", label: t("settings.theme.system") },
+  ];
+  const themeNote =
+    theme === "system"
+      ? t("settings.theme.note.system")
+      : theme === "light"
+        ? t("settings.theme.note.light")
+        : t("settings.theme.note.dark");
+
   return (
-    <Modal open={open} title="설정" onClose={onClose}>
+    <Modal open={open} title={t("settings.title")} onClose={onClose}>
       <div className="form-stack">
-        <Field label="모양">
-          <Seg value={theme} options={THEMES} onChange={onTheme} />
+        <Field label={t("settings.appearance")}>
+          <Seg value={theme} options={themes} onChange={onTheme} />
         </Field>
-        <p className="apply-note">
-          {theme === "system"
-            ? "맥 외관 설정을 따릅니다."
-            : theme === "light"
-              ? "밝은 배경으로 표시합니다."
-              : "어두운 배경으로 표시합니다."}
-        </p>
-        <Field label="단축키">
+        <p className="apply-note">{themeNote}</p>
+        <Field label={t("settings.language")}>
+          <Seg value={locale} options={LANGS} onChange={setLocale} />
+        </Field>
+        <p className="apply-note">{t("settings.language.note")}</p>
+        <Field label={t("settings.shortcuts")}>
           <button type="button" className="ghost settings-action" onClick={onOpenShortcuts}>
-            단축키 보기
+            {t("settings.shortcutsOpen")}
           </button>
         </Field>
       </div>

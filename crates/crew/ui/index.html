@@ -17,6 +17,8 @@
           if (resolved !== "light" && resolved !== "dark") resolved = "dark";
           document.documentElement.dataset.theme = resolved;
           document.documentElement.style.colorScheme = resolved;
+          var loc = localStorage.getItem("crew.locale") || "ko";
+          document.documentElement.lang = loc === "en" ? "en" : "ko";
         } catch (e) {}
       })();
     </script>

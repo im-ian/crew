@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
+import { useT } from "../LocaleContext";
 import type { AgentInfo, PaneTab, Routine } from "../types";
 import { Field } from "./Field";
 import { InfoPane } from "./InfoPane";
 import { RoutinesModal } from "./RoutinesModal";
 
-const TABS: { id: PaneTab; label: string }[] = [
-  { id: "info", label: "봇 정보" },
-  { id: "routines", label: "루틴" },
-  { id: "memory", label: "메모리" },
+const TABS: { id: PaneTab; labelKey: "pane.tab.info" | "pane.tab.routines" | "pane.tab.memory" }[] = [
+  { id: "info", labelKey: "pane.tab.info" },
+  { id: "routines", labelKey: "pane.tab.routines" },
+  { id: "memory", labelKey: "pane.tab.memory" },
 ];
 
 type Props = {
@@ -57,6 +58,7 @@ export function AgentPane({
   onLoadMemory,
   onSaveMemory,
 }: Props) {
+  const t = useT();
   return (
     <div
       className={"overlay" + (open ? " open" : "")}
@@ -66,12 +68,12 @@ export function AgentPane({
     >
       <div className="sheet agent-sheet">
         <div className="sheet-head">
-          <h3>{agent?.name || agent?.id || "봇"}</h3>
+          <h3>{agent?.name || agent?.id || t("common.bot")}</h3>
           <button
             type="button"
             className="sheet-close"
-            title="닫기"
-            aria-label="닫기"
+            title={t("common.close")}
+            aria-label={t("common.close")}
             onClick={onClose}
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -85,16 +87,16 @@ export function AgentPane({
           </button>
         </div>
         <div className="pane-tabs" role="tablist">
-          {TABS.map((t) => (
+          {TABS.map((tabDef) => (
             <button
-              key={t.id}
+              key={tabDef.id}
               type="button"
               role="tab"
-              aria-selected={tab === t.id}
-              className={tab === t.id ? "on" : ""}
-              onClick={() => onTab(t.id)}
+              aria-selected={tab === tabDef.id}
+              className={tab === tabDef.id ? "on" : ""}
+              onClick={() => onTab(tabDef.id)}
             >
-              {t.label}
+              {t(tabDef.labelKey)}
             </button>
           ))}
         </div>
@@ -145,6 +147,7 @@ function MemoryTab({
   onLoad: (id: string) => Promise<string>;
   onSave: (text: string) => Promise<void>;
 }) {
+  const t = useT();
   const [memory, setMemory] = useState("");
   const [saved, setSaved] = useState(false);
 
@@ -160,12 +163,12 @@ function MemoryTab({
 
   return (
     <div className="form-stack">
-      <p className="apply-note">이 봇이 대화를 지워도 기억할 내용입니다.</p>
-      <Field label="기억" htmlFor="pane-memory">
+      <p className="apply-note">{t("memory.note")}</p>
+      <Field label={t("memory.label")} htmlFor="pane-memory">
         <textarea
           id="pane-memory"
           className="textin memory"
-          placeholder="이름, 취향, 자주 하는 일처럼 오래 남을 메모"
+          placeholder={t("memory.placeholder")}
           value={memory}
           onChange={(e) => {
             setMemory(e.target.value);
@@ -174,7 +177,7 @@ function MemoryTab({
         />
       </Field>
       <div className="actions spread">
-        <span className="apply-note">{saved ? "저장됨" : "저장해야 반영됩니다"}</span>
+        <span className="apply-note">{saved ? t("memory.saved") : t("memory.unsaved")}</span>
         <button
           type="button"
           className="primary"
@@ -183,7 +186,7 @@ function MemoryTab({
             setSaved(true);
           }}
         >
-          저장
+          {t("common.save")}
         </button>
       </div>
     </div>

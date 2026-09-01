@@ -1,3 +1,5 @@
+import type { TFn } from "./i18n";
+import type { MessageKey } from "./locales";
 import type { CliKind } from "./types";
 
 export const CLIS: { value: CliKind; label: string }[] = [
@@ -6,12 +8,14 @@ export const CLIS: { value: CliKind; label: string }[] = [
   { value: "codex", label: "codex" },
 ];
 
-export const EFFORTS: { value: string; label: string }[] = [
-  { value: "", label: "기본" },
-  { value: "low", label: "가볍게" },
-  { value: "medium", label: "보통" },
-  { value: "high", label: "꼼꼼하게" },
-];
+export const EFFORTS = ["", "low", "medium", "high"] as const;
+
+export function effortOptions(t: TFn): { value: string; label: string }[] {
+  return EFFORTS.map((value) => ({
+    value,
+    label: t((value ? `effort.${value}` : "effort.default") as MessageKey),
+  }));
+}
 
 export function cliFromCmd(cmd?: string[] | null): CliKind | null {
   const raw = cmd?.[0];

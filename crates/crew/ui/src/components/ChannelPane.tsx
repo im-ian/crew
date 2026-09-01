@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useT } from "../LocaleContext";
 import type { AgentInfo, ChannelInfo } from "../types";
 import { Field } from "./Field";
 
@@ -15,6 +16,7 @@ type Props = {
 };
 
 export function ChannelPane({ open, channel, agents, onClose, onSave }: Props) {
+  const t = useT();
   const [name, setName] = useState("");
   const [brief, setBrief] = useState("");
   const [checked, setChecked] = useState<Record<string, boolean>>({});
@@ -73,12 +75,12 @@ export function ChannelPane({ open, channel, agents, onClose, onSave }: Props) {
     >
       <div className="sheet agent-sheet">
         <div className="sheet-head">
-          <h3>{channel?.name || channel?.id || "채널"}</h3>
+          <h3>{channel?.name || channel?.id || t("common.channel")}</h3>
           <button
             type="button"
             className="sheet-close"
-            title="닫기"
-            aria-label="닫기"
+            title={t("common.close")}
+            aria-label={t("common.close")}
             onClick={onClose}
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -93,11 +95,11 @@ export function ChannelPane({ open, channel, agents, onClose, onSave }: Props) {
         </div>
         <div className="sheet-body">
           <div className="form-stack">
-            <Field label="이름" htmlFor="channel-name">
+            <Field label={t("field.name")} htmlFor="channel-name">
               <input
                 id="channel-name"
                 className="textin"
-                placeholder="예: 프론트엔드"
+                placeholder={t("channel.namePh")}
                 value={name}
                 onChange={(e) => {
                   setName(e.target.value);
@@ -106,11 +108,11 @@ export function ChannelPane({ open, channel, agents, onClose, onSave }: Props) {
                 onBlur={() => void flushSave()}
               />
             </Field>
-            <Field label="브리프" htmlFor="channel-brief">
+            <Field label={t("field.brief")} htmlFor="channel-brief">
               <textarea
                 id="channel-brief"
                 className="textin memory"
-                placeholder="이 방에서 봇들이 기억할 일, 규칙, 배경"
+                placeholder={t("channel.briefPh")}
                 value={brief}
                 onChange={(e) => {
                   setBrief(e.target.value);
@@ -119,10 +121,10 @@ export function ChannelPane({ open, channel, agents, onClose, onSave }: Props) {
                 onBlur={() => void flushSave()}
               />
             </Field>
-            <Field label="멤버">
+            <Field label={t("field.members")}>
               <div className="member-list">
                 {!agents.length ? (
-                  <div className="member-empty">봇이 없습니다</div>
+                  <div className="member-empty">{t("channel.noBots")}</div>
                 ) : (
                   agents.map((a) => (
                     <label key={a.id}>
@@ -141,10 +143,7 @@ export function ChannelPane({ open, channel, agents, onClose, onSave }: Props) {
                 )}
               </div>
             </Field>
-            <p className="apply-note">
-              멤버만 이 방 대화에 참여합니다. 브리프는 봇을 깨울 때 최근 대화와
-              같이 전달됩니다.
-            </p>
+            <p className="apply-note">{t("channel.applyNote")}</p>
           </div>
         </div>
       </div>

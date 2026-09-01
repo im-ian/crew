@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import type { AgentInfo, Kind, Skill } from "../types";
 import { api } from "../api";
+import { useT } from "../LocaleContext";
 import { resolveMention, trimMentionPunct } from "../mentions";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
@@ -41,6 +42,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   busy = false,
   onStop,
 }, ref) {
+  const t = useT();
   const inputRef = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
   const [mention, setMention] = useState<Mention | null>(null);
@@ -303,8 +305,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
                 <button
                   type="button"
                   className="attach-remove"
-                  title="첨부 빼기"
-                  aria-label={`${a.name} 첨부 빼기`}
+                  title={t("composer.detach")}
+                  aria-label={t("composer.detachNamed", { name: a.name })}
                   onClick={() => removeAttach(a.id)}
                 >
                   ×
@@ -321,7 +323,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           role="textbox"
           aria-multiline="true"
           data-placeholder={
-            busy ? "작업 중 · 보내면 줄에 서요" : placeholder
+            busy ? t("composer.busyQueue") : placeholder
           }
           onInput={() => {
             refreshEmpty();
@@ -434,8 +436,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         <button
           type="button"
           className="attach-btn"
-          title="파일 첨부 ⌘U"
-          aria-label="파일 첨부"
+          title={t("composer.attachTitle")}
+          aria-label={t("composer.attach")}
           onClick={() => fileRef.current?.click()}
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -451,8 +453,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           <button
             type="button"
             className="stop-btn"
-            title="중지 ⌘."
-            aria-label="중지"
+            title={t("composer.stopTitle")}
+            aria-label={t("composer.stop")}
             onClick={onStop}
           >
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
@@ -462,7 +464,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         ) : null}
         <button
           type="submit"
-          aria-label="보내기"
+          aria-label={t("composer.send")}
           disabled={!selected || (empty && !attaches.length)}
         >
           ↑

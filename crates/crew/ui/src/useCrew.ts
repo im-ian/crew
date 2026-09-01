@@ -7,6 +7,7 @@ import {
   type MouseEvent,
 } from "react";
 import { api, errMsg } from "./api";
+import { useT } from "./LocaleContext";
 import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
 import {
   groupIdOf,
@@ -47,6 +48,7 @@ type Ctx = {
 };
 
 export function useCrew() {
+  const t = useT();
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -55,7 +57,7 @@ export function useCrew() {
   const [query, setQuery] = useState("");
   const [stick, setStick] = useState(true);
   const [connected, setConnected] = useState<boolean | null>(null);
-  const [connDetail, setConnDetail] = useState("데몬 확인 중…");
+  const [connDetail, setConnDetail] = useState(() => t("conn.checking"));
   const [paneOpen, setPaneOpen] = useState(false);
   const [paneTab, setPaneTab] = useState<PaneTab>("info");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -135,12 +137,16 @@ export function useCrew() {
   }, [unread.length]);
 
   const placeholder = currentChannel
-    ? `+ ${currentChannel.name || currentChannel.id}에 메시지`
+    ? t("composer.placeholder.channel", {
+        name: currentChannel.name || currentChannel.id,
+      })
     : currentAgent?.status === "working"
-      ? `+ 보내면 방향을 바꿉니다 · 중지하려면 stop`
+      ? t("composer.placeholder.redirect")
       : currentAgent
-        ? `+ ${currentAgent.name || currentAgent.id}에게 메시지 (@이름으로 부르기)`
-        : "+ 메시지";
+        ? t("composer.placeholder.agent", {
+            name: currentAgent.name || currentAgent.id,
+          })
+        : t("composer.placeholder.generic");
 
   function showToast(text: string, target: FocusTarget | null = null) {
     setToast({ text, show: true, target });
@@ -262,7 +268,7 @@ export function useCrew() {
   function createGroup(withItem?: { kind: Kind; id: string } | null) {
     const current = groupsRef.current;
     const id = newGroupId(current.groups.map((g) => g.id));
-    const name = uniqueGroupName(current.groups);
+    const name = uniqueGroupName(current.groups, t("group.new"));
     const key = withItem ? itemKey(withItem.kind, withItem.id) : null;
     if (!key) {
       persistLayout({
@@ -581,11 +587,11 @@ export function useCrew() {
     const s = schedule.trim();
     const p = prompt.trim();
     if (!s) {
-      showError("이름, 시각, 시킬 일을 모두 입력하세요");
+      showError(t("error.routineFields"));
       return;
     }
     if ((!n || !p) && s.trim().split(/\s+/).length === 5 && /^\S+ \S+ \S+ \S+ \S+$/.test(s.trim())) {
-      showError("이름, 시각, 시킬 일을 모두 입력하세요");
+      showError(t("error.routineFields"));
       return;
     }
     try {
@@ -749,7 +755,7 @@ export function useCrew() {
   }) {
     const name = args.name.trim();
     if (!name) {
-      showError("이름을 입력하세요");
+      showError(t("error.nameRequired"));
       return;
     }
     const persona = args.persona.trim();
@@ -798,7 +804,7 @@ export function useCrew() {
   async function createChannel(name: string, members: string[]) {
     const trimmed = name.trim();
     if (!trimmed) {
-      showError("이름을 입력하세요");
+      showError(t("error.nameRequired"));
       return;
     }
     try {
@@ -848,7 +854,7 @@ export function useCrew() {
         await api.daemonPing();
         if (cancelled) return;
         setConnected(true);
-        setConnDetail("데몬 연결됨");
+        setConnDetail(t("conn.ok"));
         await refreshList();
         if (cancelled) return;
         await refreshMessages();
@@ -879,6 +885,7 @@ export function useCrew() {
     selectedKind,
     currentAgent?.status,
     messages[messages.length - 1]?.role,
+    t,
   ]);
 
   useEffect(() => {

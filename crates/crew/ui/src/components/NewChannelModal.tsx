@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useT } from "../LocaleContext";
 import type { AgentInfo } from "../types";
 import { Field } from "./Field";
 import { Modal } from "./Modal";
@@ -11,6 +12,7 @@ type Props = {
 };
 
 export function NewChannelModal({ open, agents, onClose, onCreate }: Props) {
+  const t = useT();
   const [name, setName] = useState("");
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
@@ -48,14 +50,14 @@ export function NewChannelModal({ open, agents, onClose, onCreate }: Props) {
   }
 
   return (
-    <Modal open={open} title="새 채널" onClose={onClose}>
+    <Modal open={open} title={t("newChannel.title")} onClose={onClose}>
       <div className="form-stack">
-        <Field label="이름" htmlFor="new-channel-name">
+        <Field label={t("field.name")} htmlFor="new-channel-name">
           <input
             id="new-channel-name"
             ref={nameRef}
             className="textin"
-            placeholder="예: 프론트엔드"
+            placeholder={t("channel.namePh")}
             autoComplete="off"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -67,10 +69,10 @@ export function NewChannelModal({ open, agents, onClose, onCreate }: Props) {
             }}
           />
         </Field>
-        <Field label="멤버">
+        <Field label={t("field.members")}>
           <div className="member-list">
             {!agents.length ? (
-              <div className="member-empty">봇이 없습니다</div>
+              <div className="member-empty">{t("channel.noBots")}</div>
             ) : (
               agents.map((a) => (
                 <label key={a.id}>
@@ -90,7 +92,7 @@ export function NewChannelModal({ open, agents, onClose, onCreate }: Props) {
       </div>
       <div className="actions spread">
         <button type="button" className="ghost" onClick={onClose}>
-          취소
+          {t("common.cancel")}
         </button>
         <button
           type="button"
@@ -98,7 +100,7 @@ export function NewChannelModal({ open, agents, onClose, onCreate }: Props) {
           disabled={busy}
           onClick={() => void submit()}
         >
-          만들기
+          {t("common.create")}
         </button>
       </div>
     </Modal>

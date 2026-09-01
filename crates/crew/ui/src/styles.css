@@ -2099,6 +2099,7 @@ textarea.textin {
   border-radius: var(--radius-md);
   overflow: hidden;
 }
+.seg[data-cols="2"] { grid-template-columns: repeat(2, 1fr); }
 .seg[data-cols="3"] { grid-template-columns: repeat(3, 1fr); }
 .seg button {
   background: transparent;

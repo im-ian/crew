@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AvatarShape } from "../avatar";
-import { cliFromCmd, EFFORTS } from "../options";
+import { useT } from "../LocaleContext";
+import { cliFromCmd, effortOptions } from "../options";
 import type { AgentInfo } from "../types";
 import { Avatar } from "./Avatar";
 import { FacePop } from "./FacePicker";
@@ -30,6 +31,7 @@ export function InfoPane({
   onSetFace,
   onSave,
 }: Props) {
+  const t = useT();
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [description, setDescription] = useState("");
@@ -99,11 +101,11 @@ export function InfoPane({
           />
         </FacePop>
       </div>
-      <Field label="이름" htmlFor="info-name">
+      <Field label={t("field.name")} htmlFor="info-name">
         <input
           id="info-name"
           className="textin"
-          placeholder="예: 기획 도우미"
+          placeholder={t("info.namePh")}
           value={name}
           onChange={(e) => {
             setName(e.target.value);
@@ -112,11 +114,11 @@ export function InfoPane({
           onBlur={() => void flushSave()}
         />
       </Field>
-      <Field label="역할" htmlFor="info-role">
+      <Field label={t("field.role")} htmlFor="info-role">
         <input
           id="info-role"
           className="textin"
-          placeholder="예: 계획을 잡고 일을 나눈다"
+          placeholder={t("info.rolePh")}
           value={role}
           onChange={(e) => {
             setRole(e.target.value);
@@ -125,11 +127,11 @@ export function InfoPane({
           onBlur={() => void flushSave()}
         />
       </Field>
-      <Field label="설명" htmlFor="info-description">
+      <Field label={t("field.description")} htmlFor="info-description">
         <textarea
           id="info-description"
           className="textin"
-          placeholder="이 봇을 어떻게 쓸지"
+          placeholder={t("info.descPh")}
           value={description}
           onChange={(e) => {
             setDescription(e.target.value);
@@ -138,7 +140,7 @@ export function InfoPane({
           onBlur={() => void flushSave()}
         />
       </Field>
-      <Field label="모델" htmlFor="model">
+      <Field label={t("field.model")} htmlFor="model">
         <ModelSelect
           id="model"
           cli={cliFromCmd(agent?.cmd)}
@@ -150,11 +152,11 @@ export function InfoPane({
           active={open}
         />
       </Field>
-      <Field label="작업 폴더" htmlFor="info-cwd">
+      <Field label={t("field.cwd")} htmlFor="info-cwd">
         <input
           id="info-cwd"
           className="textin"
-          placeholder="예: ~/Projects/app"
+          placeholder={t("info.cwdPh")}
           value={cwd}
           onChange={(e) => {
             setCwd(e.target.value);
@@ -163,23 +165,20 @@ export function InfoPane({
           onBlur={() => void flushSave()}
         />
       </Field>
-      <Field label="생각">
+      <Field label={t("field.effort")}>
         <Seg
           value={effort}
-          options={EFFORTS}
+          options={effortOptions(t)}
           onChange={(next) => {
             setEffort(next);
             void flushSave({ effort: next });
           }}
         />
       </Field>
-      <p className="apply-note">
-        모델·생각·역할·작업 폴더는 다음 대화부터 적용됩니다. 대화를 지우면 바로
-        새 설정으로 시작됩니다.
-      </p>
+      <p className="apply-note">{t("info.applyNote")}</p>
       <div className="actions">
         <button type="button" className="danger" onClick={onReset}>
-          대화 지우기
+          {t("info.clearChat")}
         </button>
       </div>
     </div>

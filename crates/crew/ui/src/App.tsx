@@ -14,6 +14,8 @@ import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
 import { busyInChannel } from "./busy";
 import { railOrder } from "./groups";
+import { useT } from "./LocaleContext";
+import type { TFn } from "./i18n";
 import { isTypingTarget, shortcutId } from "./shortcuts";
 import {
   applyTheme,
@@ -25,6 +27,7 @@ import type { Kind } from "./types";
 import { useCrew } from "./useCrew";
 
 export function App() {
+  const t = useT();
   const crew = useCrew();
   const crewRef = useRef(crew);
   crewRef.current = crew;
@@ -296,7 +299,7 @@ export function App() {
         open={crew.ctx.open}
         x={crew.ctx.x}
         y={crew.ctx.y}
-        items={menuItems(crew, setRenameId)}
+        items={menuItems(crew, setRenameId, t)}
       />
       <SettingsPane
         open={settingsOpen}
@@ -321,13 +324,14 @@ export function App() {
 function menuItems(
   crew: ReturnType<typeof useCrew>,
   setRenameId: (id: string | null) => void,
+  t: TFn,
 ): MenuEntry[] {
   const { ctx, groups } = crew;
   if (ctx.kind === "create") {
     return [
       {
         type: "action",
-        label: "새 봇",
+        label: t("menu.newBot"),
         onClick: () => {
           crew.hideCtx();
           crew.openNewBot();
@@ -335,7 +339,7 @@ function menuItems(
       },
       {
         type: "action",
-        label: "새 채널",
+        label: t("menu.newChannel"),
         onClick: () => {
           crew.hideCtx();
           crew.openNewChannel();
@@ -343,7 +347,7 @@ function menuItems(
       },
       {
         type: "action",
-        label: "새 그룹",
+        label: t("menu.newGroup"),
         onClick: () => {
           crew.hideCtx();
           crew.createGroup();
@@ -356,7 +360,7 @@ function menuItems(
     return [
       {
         type: "action",
-        label: "이름 변경",
+        label: t("menu.rename"),
         onClick: () => {
           crew.hideCtx();
           if (id) setRenameId(id);
@@ -364,7 +368,7 @@ function menuItems(
       },
       {
         type: "action",
-        label: "그룹 삭제",
+        label: t("menu.deleteGroup"),
         danger: true,
         onClick: () => {
           crew.hideCtx();
@@ -390,7 +394,7 @@ function menuItems(
   if (currentGroup) {
     moveItems.push({
       type: "action",
-      label: "그룹에서 빼기",
+      label: t("menu.leaveGroup"),
       onClick: () => {
         crew.hideCtx();
         if (id) crew.moveToGroup(kind, id, null);
@@ -401,7 +405,7 @@ function menuItems(
   if (!isCh) {
     items.push({
       type: "action",
-      label: "대화 지우기",
+      label: t("menu.clearChat"),
       onClick: () => {
         crew.hideCtx();
         if (id) crew.openConfirm(id, "reset");
@@ -409,7 +413,7 @@ function menuItems(
     });
     items.push({
       type: "action",
-      label: "봇 복제",
+      label: t("menu.cloneBot"),
       onClick: () => {
         crew.hideCtx();
         if (id) void crew.cloneBot(id);
@@ -418,7 +422,7 @@ function menuItems(
   } else {
     items.push({
       type: "action",
-      label: "채널 나가기",
+      label: t("menu.leaveChannel"),
       onClick: () => {
         crew.hideCtx();
         if (id) crew.openConfirm(id, "leave-channel");
@@ -427,11 +431,11 @@ function menuItems(
   }
   items.push({ type: "sep" });
   if (moveItems.length) {
-    items.push({ type: "sub", label: "그룹으로 이동", items: moveItems });
+    items.push({ type: "sub", label: t("menu.moveToGroup"), items: moveItems });
   }
   items.push({
     type: "action",
-    label: "새 그룹으로 이동",
+    label: t("menu.moveToNewGroup"),
     onClick: () => {
       crew.hideCtx();
       if (id) crew.createGroup({ kind, id });
@@ -440,7 +444,7 @@ function menuItems(
   items.push({ type: "sep" });
   items.push({
     type: "action",
-    label: isCh ? "채널 삭제" : "봇 삭제",
+    label: isCh ? t("menu.deleteChannel") : t("menu.deleteBot"),
     danger: true,
     onClick: () => {
       crew.hideCtx();

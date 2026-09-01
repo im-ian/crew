@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useT } from "../LocaleContext";
 import type { AgentInfo, ChannelInfo, ChatMessage, Kind } from "../types";
 import { busyInChannel } from "../busy";
 import { resolveFace } from "../avatar";
@@ -44,6 +45,7 @@ export function ChatThread({
   onHighlightDone,
   jumpSeq = 0,
 }: Props) {
+  const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   const [away, setAway] = useState(false);
   const visible = visibleMessages(messages);
@@ -197,8 +199,8 @@ export function ChatThread({
         <button
           type="button"
           className="jump-bottom"
-          title="맨 아래로"
-          aria-label="맨 아래로"
+          title={t("thread.jumpBottom")}
+          aria-label={t("thread.jumpBottom")}
           onClick={jumpBottom}
         >
           ↓
@@ -215,12 +217,13 @@ function EmptyChat({
   agent: AgentInfo | null;
   channel: ChannelInfo | null;
 }) {
+  const t = useT();
   if (channel) {
     return (
       <div className="empty-chat">
         <Avatar id={channel.id} name={channel.name || channel.id} letter="#" />
         <strong>{channel.name || channel.id}</strong>
-        <span>채널에 메시지를 보내 대화를 시작하세요</span>
+        <span>{t("thread.startChannel")}</span>
       </div>
     );
   }
@@ -236,11 +239,11 @@ function EmptyChat({
           status={agent.status}
         />
         <strong>{agent.name || agent.id}</strong>
-        <span>메시지를 보내 대화를 시작하세요</span>
+        <span>{t("thread.startChat")}</span>
       </div>
     );
   }
-  return <div className="empty-chat">대화를 선택하세요</div>;
+  return <div className="empty-chat">{t("thread.pickChat")}</div>;
 }
 
 function SystemOrIncoming({
@@ -258,6 +261,7 @@ function SystemOrIncoming({
   onSelectAgent?: (id: string) => void;
   flash?: boolean;
 }) {
+  const t = useT();
   if (m.from === "user") {
     return (
       <Bubble
@@ -329,7 +333,7 @@ function SystemOrIncoming({
       className={"sys" + (m.queued ? " queued" : "") + (flash ? " flash" : "")}
       data-msg-id={m.id}
     >
-      <div className="sys-from">{`루틴 · ${m.from || ""}`}</div>
+      <div className="sys-from">{t("thread.routineFrom", { from: m.from || "" })}</div>
       <div className="sys-text">{displayText(m)}</div>
       {m.queued ? <QueueWait /> : null}
     </div>
@@ -360,8 +364,13 @@ function TransferNote({
     : displayWho({ ...m, from: otherId }, agent);
   const open =
     onSelectAgent && agent ? () => onSelectAgent(agent.id) : undefined;
+  const t = useT();
   const label =
-    kind === "sent" ? "보낸 메시지" : kind === "handoff" ? "핸드오프" : "받은 메시지";
+    kind === "sent"
+      ? t("thread.sent")
+      : kind === "handoff"
+        ? t("thread.handoff")
+        : t("thread.received");
   return (
     <div
       className={"xfer" + (m.queued ? " queued" : "") + (flash ? " flash" : "")}
@@ -410,6 +419,7 @@ function XferBody({
   onMention?: (id: string) => void;
   baseDir?: string;
 }) {
+  const t = useT();
   const [expanded, setExpanded] = useState(false);
   const long = isLongXfer(text);
   const clamped = long && !expanded;
@@ -433,7 +443,7 @@ function XferBody({
           aria-expanded={expanded}
           onClick={() => setExpanded((v) => !v)}
         >
-          {expanded ? "접기" : "더 보기"}
+          {expanded ? t("thread.collapse") : t("thread.more")}
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
             <path
               d="M2.2 3.6 5 6.4 7.8 3.6"
@@ -587,25 +597,26 @@ function ApprovalCard({
   who?: string;
   onApprove?: (allow: boolean) => void;
 }) {
+  const t = useT();
   if (!state) return null;
   if (state === "allowed") {
-    return <div className="approval-status">한 번 허용함</div>;
+    return <div className="approval-status">{t("thread.allowed")}</div>;
   }
   if (state === "denied") {
-    return <div className="approval-status is-denied">거부함</div>;
+    return <div className="approval-status is-denied">{t("thread.denied")}</div>;
   }
   if (!onApprove) return null;
   return (
     <div className="approval-card">
       <div className="approval-copy">
-        {who ? `${who} · 이 작업을 진행할까요?` : "이 작업을 진행할까요?"}
+        {who ? t("thread.approveAskWho", { who }) : t("thread.approveAsk")}
       </div>
       <div className="approval-actions">
         <button type="button" className="approval-allow" onClick={() => onApprove(true)}>
-          한 번 허용
+          {t("thread.allowOnce")}
         </button>
         <button type="button" className="approval-deny" onClick={() => onApprove(false)}>
-          거부
+          {t("thread.deny")}
         </button>
       </div>
     </div>
@@ -676,9 +687,10 @@ function Bubble({
 }
 
 function QueueWait() {
+  const t = useT();
   return (
-    <div className="queue-wait" aria-label="줄 서는 중">
-      <span className="queue-wait-text">줄 서는 중</span>
+    <div className="queue-wait" aria-label={t("thread.queueing")}>
+      <span className="queue-wait-text">{t("thread.queueing")}</span>
       <span className="queue-dots" aria-hidden="true">
         <i />
         <i />
