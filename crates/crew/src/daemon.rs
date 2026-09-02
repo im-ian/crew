@@ -364,6 +364,13 @@ fn submit_delivery(
     msg_id: Option<String>,
     origin: TurnOrigin,
 ) -> anyhow::Result<()> {
+    if targeting::relay_exhausted(&origin) {
+        note_relay_stop(id, &origin);
+        anyhow::bail!(
+            "relay limit reached after {} bot-to-bot hops; waiting for the user",
+            targeting::MAX_RELAY_HOPS
+        );
+    }
     if agent_busy(id)? {
         return enqueue_delivery(id, text, newline, msg_id, origin);
     }
@@ -371,6 +378,23 @@ fn submit_delivery(
         Ok(()) => Ok(()),
         Err(err) if is_busy_err(&err) => enqueue_delivery(id, text, newline, msg_id, origin),
         Err(err) => Err(err),
+    }
+}
+
+/// Say once, where the user is looking, that a bot-to-bot chain was cut short.
+fn note_relay_stop(id: &str, origin: &TurnOrigin) {
+    let line = if crate::paths::locale() == "en" {
+        "Bots kept handing this back and forth, so it stopped here. Say something to pick it up."
+    } else {
+        "봇끼리 계속 주고받아서 여기서 멈췄습니다. 말을 걸면 다시 이어집니다."
+    };
+    match origin.reply_channel.as_deref() {
+        Some(channel) if known_channel(channel) => {
+            crate::transcript::push_channel(channel, Role::System, "crew", line);
+        }
+        _ => {
+            crate::transcript::push_system(id, "crew", line);
+        }
     }
 }
 
@@ -2148,7 +2172,10 @@ fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
     if targets.is_empty() {
         return Ok(());
     }
-    let origin = TurnOrigin::channel(&ch.id, &from);
+    // A bot posting to the room continues whatever chain it is already in; a user
+    // post starts a fresh one.
+    let parent = if from == "user" { None } else { get_origin(&from) };
+    let origin = targeting::inherit_origin(parent.as_ref(), TurnOrigin::channel(&ch.id, &from));
     let mut sent = 0usize;
     let mut last_err: Option<anyhow::Error> = None;
     for to in &targets {
@@ -2251,6 +2278,21 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
 #[cfg(test)]
 mod inbox_tests {
     use super::*;
+
+    #[test]
+    fn relay_limit_refuses_the_delivery() {
+        let id = "test-relay-cap";
+        let origin = TurnOrigin {
+            from: "beta".into(),
+            hops: targeting::MAX_RELAY_HOPS + 1,
+            ..TurnOrigin::default()
+        };
+        let err = submit_delivery(id, "again?", true, None, origin)
+            .expect_err("a spent chain must not start another turn");
+        assert!(err.to_string().contains("relay limit"), "{err}");
+        let last = crate::transcript::messages(id);
+        assert_eq!(last.last().map(|m| m.from.as_str()), Some("crew"));
+    }
 
     #[test]
     fn inbox_is_fifo() {

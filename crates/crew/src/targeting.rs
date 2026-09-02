@@ -75,6 +75,11 @@ pub fn one_on_one_tell_targets(
     crate::config::mentioned_teammate_ids(text, self_id, roster)
 }
 
+/// How many bot-to-bot relays a single user message may set off. A bot can call
+/// `crew tell` on its way through a turn, so two bots can hand the same thread
+/// back and forth forever, each hop costing a real CLI turn.
+pub const MAX_RELAY_HOPS: u32 = 4;
+
 /// Where a turn's reply should land after the speaker finishes.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TurnOrigin {
@@ -82,6 +87,8 @@ pub struct TurnOrigin {
     pub reply_channel: Option<String>,
     pub reply_agent: Option<String>,
     pub routine: Option<String>,
+    /// Relays between this turn and the user message that started the chain.
+    pub hops: u32,
 }
 
 impl TurnOrigin {
@@ -167,6 +174,7 @@ fn envelope_from(raw: &str) -> String {
 /// Fold a sender's in-flight origin into a newly parsed envelope origin so a
 /// bot-to-bot tell started from a channel still posts back to that channel.
 pub fn inherit_origin(parent: Option<&TurnOrigin>, mut child: TurnOrigin) -> TurnOrigin {
+    child.hops = parent.map(|p| p.hops + 1).unwrap_or(0);
     if child.reply_channel.is_none() {
         if let Some(ch) = parent.and_then(|p| p.reply_channel.clone()) {
             child.reply_channel = Some(ch);
@@ -211,6 +219,11 @@ pub fn postback_targets(origin: &TurnOrigin, speaker: &str) -> Postback {
     Postback { channel, agent }
 }
 
+/// A turn the user did not ask for, that has already been relayed too far.
+pub fn relay_exhausted(origin: &TurnOrigin) -> bool {
+    origin.hops > MAX_RELAY_HOPS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,6 +238,37 @@ mod tests {
 
     fn members() -> Vec<String> {
         vec!["alpha".into(), "beta".into(), "gamma".into()]
+    }
+
+    fn bot_hop(parent: &TurnOrigin) -> TurnOrigin {
+        inherit_origin(
+            Some(parent),
+            TurnOrigin {
+                from: "beta".into(),
+                ..TurnOrigin::default()
+            },
+        )
+    }
+
+    #[test]
+    fn relay_hops_count_from_the_user_message() {
+        let start = inherit_origin(None, TurnOrigin::user());
+        assert_eq!(start.hops, 0);
+        let mut cur = start;
+        for n in 1..=MAX_RELAY_HOPS {
+            cur = bot_hop(&cur);
+            assert_eq!(cur.hops, n);
+            assert!(!relay_exhausted(&cur), "hop {n} should still run");
+        }
+        assert!(relay_exhausted(&bot_hop(&cur)));
+    }
+
+    #[test]
+    fn a_hop_keeps_the_room_it_started_in() {
+        let start = inherit_origin(None, TurnOrigin::channel("room", "user"));
+        let next = bot_hop(&start);
+        assert_eq!(next.reply_channel.as_deref(), Some("room"));
+        assert_eq!(next.hops, 1);
     }
 
     #[test]

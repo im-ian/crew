@@ -277,6 +277,14 @@ function SystemOrIncoming({
     );
   }
   const from = String(m.from || "");
+  if (from === "crew") {
+    // A note the daemon wrote about the conversation itself, not a bot speaking.
+    return (
+      <div className={"sys-note" + (flash ? " flash" : "")} data-msg-id={m.id}>
+        {displayText(m)}
+      </div>
+    );
+  }
   const classKind = rowClass(m, agents);
   if (classKind === "sent" || sentTarget(from)) {
     return (
