@@ -180,6 +180,8 @@ export const KO = {
   "channel.namePh": "예: 프론트엔드",
   "channel.briefPh": "이 방에서 봇들이 기억할 일, 규칙, 배경",
   "channel.noBots": "봇이 없습니다",
+  "channel.addMember": "봇 추가",
+  "channel.removeMember": "{name} 빼기",
   "channel.routineNote": "정해진 시각에 이 방으로 메시지를 보냅니다. @이름 을 넣으면 그 봇이, 없으면 마지막에 말한 봇이 답합니다.",
   "channel.applyNote":
     "멤버만 이 방 대화에 참여합니다. 브리프는 봇을 깨울 때 최근 대화와 같이 전달됩니다.",
@@ -445,6 +447,8 @@ export const EN: { [K in MessageKey]: string } = {
   "channel.namePh": "e.g. Frontend",
   "channel.briefPh": "Work, rules, and background this room should remember",
   "channel.noBots": "No bots yet",
+  "channel.addMember": "Add bot",
+  "channel.removeMember": "Remove {name}",
   "channel.routineNote": "Posts into this room on a schedule. An @name wakes that bot; without one the bot that spoke last answers.",
   "channel.applyNote":
     "Only members join this room. The brief is sent with recent chat when a bot is woken.",

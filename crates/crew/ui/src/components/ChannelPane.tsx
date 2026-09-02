@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useT } from "../LocaleContext";
 import type { AgentInfo, ChannelInfo, PaneTab, Routine, RoutineRun } from "../types";
 import { Field } from "./Field";
+import { MemberPicker } from "./MemberPicker";
 import { RoutinesModal } from "./RoutinesModal";
 
 type Props = {
@@ -50,25 +51,17 @@ export function ChannelPane({
   const t = useT();
   const [name, setName] = useState("");
   const [brief, setBrief] = useState("");
-  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const [members, setMembers] = useState<string[]>([]);
   const saveTimer = useRef<number | null>(null);
-  const fieldsRef = useRef({ name, brief, checked });
-  fieldsRef.current = { name, brief, checked };
+  const fieldsRef = useRef({ name, brief, members });
+  fieldsRef.current = { name, brief, members };
 
   useEffect(() => {
     if (!open || !channel) return;
     setName(channel.name || channel.id || "");
     setBrief(channel.brief || "");
-    const next: Record<string, boolean> = {};
-    for (const a of agents) next[a.id] = channel.members.includes(a.id);
-    setChecked(next);
+    setMembers(channel.members.slice());
   }, [open, channel?.id, agents.length]);
-
-  function membersOf(map: Record<string, boolean>) {
-    return Object.entries(map)
-      .filter(([, on]) => on)
-      .map(([id]) => id);
-  }
 
   function scheduleSave(next?: Partial<typeof fieldsRef.current>) {
     const merged = { ...fieldsRef.current, ...next };
@@ -78,7 +71,7 @@ export function ChannelPane({
       void onSave({
         name: merged.name,
         brief: merged.brief,
-        members: membersOf(merged.checked),
+        members: merged.members,
       });
     }, 400);
   }
@@ -93,7 +86,7 @@ export function ChannelPane({
     await onSave({
       name: merged.name,
       brief: merged.brief,
-      members: membersOf(merged.checked),
+      members: merged.members,
     });
   }
 
@@ -167,26 +160,14 @@ export function ChannelPane({
               />
             </Field>
             <Field label={t("field.members")}>
-              <div className="member-list">
-                {!agents.length ? (
-                  <div className="member-empty">{t("channel.noBots")}</div>
-                ) : (
-                  agents.map((a) => (
-                    <label key={a.id}>
-                      <input
-                        type="checkbox"
-                        checked={!!checked[a.id]}
-                        onChange={(e) => {
-                          const next = { ...checked, [a.id]: e.target.checked };
-                          setChecked(next);
-                          void flushSave({ checked: next });
-                        }}
-                      />
-                      <span>{a.name || a.id}</span>
-                    </label>
-                  ))
-                )}
-              </div>
+              <MemberPicker
+                agents={agents}
+                selected={members}
+                onChange={(next) => {
+                  setMembers(next);
+                  void flushSave({ members: next });
+                }}
+              />
             </Field>
             <p className="apply-note">{t("channel.applyNote")}</p>
           </div>

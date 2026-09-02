@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useT } from "../LocaleContext";
 import type { AgentInfo } from "../types";
 import { Field } from "./Field";
+import { MemberPicker } from "./MemberPicker";
 import { Modal } from "./Modal";
 
 type Props = {
@@ -14,18 +15,14 @@ type Props = {
 export function NewChannelModal({ open, agents, onClose, onCreate }: Props) {
   const t = useT();
   const [name, setName] = useState("");
-  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const [members, setMembers] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
-  const agentsRef = useRef(agents);
-  agentsRef.current = agents;
 
   useEffect(() => {
     if (!open) return;
     setName("");
-    const next: Record<string, boolean> = {};
-    for (const a of agentsRef.current) next[a.id] = true;
-    setChecked(next);
+    setMembers([]);
     setBusy(false);
     const t = window.setTimeout(() => nameRef.current?.focus(), 0);
     return () => window.clearTimeout(t);
@@ -38,9 +35,6 @@ export function NewChannelModal({ open, agents, onClose, onCreate }: Props) {
       await onCreate("", []);
       return;
     }
-    const members = Object.entries(checked)
-      .filter(([, on]) => on)
-      .map(([id]) => id);
     setBusy(true);
     try {
       await onCreate(trimmed, members);
@@ -70,24 +64,7 @@ export function NewChannelModal({ open, agents, onClose, onCreate }: Props) {
           />
         </Field>
         <Field label={t("field.members")}>
-          <div className="member-list">
-            {!agents.length ? (
-              <div className="member-empty">{t("channel.noBots")}</div>
-            ) : (
-              agents.map((a) => (
-                <label key={a.id}>
-                  <input
-                    type="checkbox"
-                    checked={!!checked[a.id]}
-                    onChange={(e) =>
-                      setChecked((prev) => ({ ...prev, [a.id]: e.target.checked }))
-                    }
-                  />
-                  <span>{a.name || a.id}</span>
-                </label>
-              ))
-            )}
-          </div>
+          <MemberPicker agents={agents} selected={members} onChange={setMembers} />
         </Field>
       </div>
       <div className="actions spread">
