@@ -401,7 +401,7 @@ fn spawn_and_stream(
             Err(err) => return Err(err.into()),
         };
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
-            if let Some(card) = crate::tool_card::from_event(&v) {
+            for card in crate::tool_card::from_events(&v) {
                 crate::transcript::push_tool(&session.id, &card.name, &card.detail);
             }
         }

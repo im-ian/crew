@@ -613,6 +613,7 @@ function ToolCardRow({
   id?: string;
   flash?: boolean;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   return (
     <div
@@ -623,7 +624,11 @@ function ToolCardRow({
         <span className="tool-card-name">{name}</span>
         <span className="tool-card-chevron">{open ? "▾" : "▸"}</span>
       </button>
-      {open && detail ? <div className="tool-card-body">{detail}</div> : null}
+      {open ? (
+        <div className="tool-card-body">
+          {detail.trim() ? detail : t("thread.toolEmpty")}
+        </div>
+      ) : null}
     </div>
   );
 }
