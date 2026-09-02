@@ -416,6 +416,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn status_labels_follow_the_language() {
+        assert_eq!(AgentStatus::Working.label("en"), "working");
+        assert_eq!(AgentStatus::Idle.label("en"), "idle");
+        assert_eq!(AgentStatus::Blocked.label("en"), "blocked");
+        assert_eq!(AgentStatus::Exited.label("en"), "exited");
+        assert_eq!(AgentStatus::Working.label("ko"), "작업 중");
+        assert_eq!(AgentStatus::Exited.label("ko"), "종료됨");
+        // Anything that is not English stays Korean, the daemon's default.
+        assert_eq!(AgentStatus::Idle.label(""), "대기");
+    }
+
+    #[test]
+    fn channel_info_reads_a_file_written_before_routines_existed() {
+        let raw = r#"{"id":"room","name":"방","members":["a1"]}"#;
+        let info: ChannelInfo = serde_json::from_str(raw).expect("old channel info");
+        assert!(info.routines.is_empty());
+        assert_eq!(info.members, vec!["a1".to_string()]);
+    }
+
+    #[test]
     fn tell_envelope_format() {
         assert_eq!(envelope("alpha", "hello"), "[crew from:alpha]\nhello");
         assert_eq!(envelope("  ", "x"), "[crew from:user]\nx");

@@ -59,39 +59,15 @@ fn ensure_parent(path: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use crate::paths::testing::with_home;
 
-    static LOCK: Mutex<()> = Mutex::new(());
-
-    fn with_home<R>(f: impl FnOnce() -> R) -> R {
-        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = std::env::temp_dir().join(format!(
-            "crew-memory-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        let old = std::env::var("CREW_HOME").ok();
-        std::env::set_var("CREW_HOME", &dir);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-        match old {
-            Some(v) => std::env::set_var("CREW_HOME", v),
-            None => std::env::remove_var("CREW_HOME"),
-        }
-        let _ = fs::remove_dir_all(&dir);
-        match result {
-            Ok(r) => r,
-            Err(panic) => std::panic::resume_unwind(panic),
-        }
+    fn with_home_dir<R>(f: impl FnOnce() -> R) -> R {
+        with_home("memory", f)
     }
 
     #[test]
     fn write_read_append_copy_remove() {
-        with_home(|| {
+        with_home_dir(|| {
             assert!(read("alpha").is_empty());
             write("alpha", "one").unwrap();
             assert_eq!(read("alpha"), "one");
@@ -109,7 +85,7 @@ mod tests {
 
     #[test]
     fn path_is_under_memory_dir() {
-        with_home(|| {
+        with_home_dir(|| {
             let p = paths::memory_path("grok");
             assert!(p.ends_with("memory/grok.md"));
             write("weird/id", "x").unwrap();
@@ -120,7 +96,7 @@ mod tests {
 
     #[test]
     fn reset_archive_leaves_memory() {
-        with_home(|| {
+        with_home_dir(|| {
             write("alpha", "keep me").unwrap();
             let dir = paths::home_dir().join("archive-test");
             crate::transcript::archive_and_clear("alpha", &dir).unwrap();
@@ -130,7 +106,7 @@ mod tests {
 
     #[test]
     fn grok_spawn_injects_memory_into_rules() {
-        with_home(|| {
+        with_home_dir(|| {
             write("alpha", "remember the red balloon").unwrap();
             let c = crate::config::AgentConfig::new(
                 "alpha".into(),

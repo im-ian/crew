@@ -310,16 +310,16 @@ pub fn print_routines(
 
 /// One row per routine: host, id, name, schedule, on/off, last run. Channels are
 /// listed as `#room`.
-fn print_routine_rows(
+fn routine_rows(
     hosts: &[(String, Vec<crate::config::Routine>)],
     filter: Option<&str>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Vec<String>> {
     if let Some(id) = filter {
         if !hosts.iter().any(|(host, _)| host == id) {
             bail!("unknown bot or channel {id}");
         }
     }
-    let mut any = false;
+    let mut rows = Vec::new();
     for (host, routines) in hosts {
         if let Some(id) = filter {
             if host != id {
@@ -327,8 +327,7 @@ fn print_routine_rows(
             }
         }
         for r in routines {
-            any = true;
-            println!(
+            rows.push(format!(
                 "{}\t{}\t{}\t{}\t{}\t{}",
                 host,
                 r.id,
@@ -336,11 +335,22 @@ fn print_routine_rows(
                 r.schedule,
                 if r.enabled { "on" } else { "off" },
                 r.last_run.as_deref().unwrap_or("-")
-            );
+            ));
         }
     }
-    if !any {
+    Ok(rows)
+}
+
+fn print_routine_rows(
+    hosts: &[(String, Vec<crate::config::Routine>)],
+    filter: Option<&str>,
+) -> anyhow::Result<()> {
+    let rows = routine_rows(hosts, filter)?;
+    if rows.is_empty() {
         println!("(no routines)");
+    }
+    for row in rows {
+        println!("{row}");
     }
     Ok(())
 }
@@ -400,4 +410,43 @@ pub fn print_routines_from_config(
             .map(|c| (format!("#{}", c.id), c.routines.clone())),
     );
     print_routine_rows(&hosts, filter)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Routine;
+
+    fn routine(name: &str) -> Routine {
+        let mut r = Routine::new(name.into(), "0 9 * * *".into(), "brief".into()).unwrap();
+        r.id = format!("id-{name}");
+        r
+    }
+
+    fn hosts() -> Vec<(String, Vec<Routine>)> {
+        vec![
+            ("alpha".into(), vec![routine("daily")]),
+            ("#room".into(), vec![routine("standup")]),
+            ("beta".into(), Vec::new()),
+        ]
+    }
+
+    #[test]
+    fn rows_cover_bots_and_channels() {
+        let rows = routine_rows(&hosts(), None).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows[0].starts_with("alpha\tid-daily\tdaily\t0 9 * * *\ton\t-"));
+        assert!(rows[1].starts_with("#room\tid-standup\tstandup"));
+    }
+
+    #[test]
+    fn a_filter_picks_one_host_and_rejects_unknown_ones() {
+        let rows = routine_rows(&hosts(), Some("#room")).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].starts_with("#room\t"));
+        // A host with no routines still resolves; it just prints nothing.
+        assert!(routine_rows(&hosts(), Some("beta")).unwrap().is_empty());
+        assert!(routine_rows(&hosts(), Some("room")).is_err());
+        assert!(routine_rows(&hosts(), Some("nope")).is_err());
+    }
 }

@@ -1084,6 +1084,19 @@ mod tests {
     }
 
     #[test]
+    fn channel_reads_a_config_written_before_routines_existed() {
+        let raw = r#"{"id":"room","name":"방","members":["a1","a2"]}"#;
+        let ch: Channel = serde_json::from_str(raw).expect("old channel");
+        assert!(ch.routines.is_empty());
+        let mut ch = ch;
+        ch.routines
+            .push(Routine::new("스탠드업".into(), "0 9 * * *".into(), "brief".into()).unwrap());
+        let back: Channel = serde_json::from_str(&serde_json::to_string(&ch).unwrap()).unwrap();
+        assert_eq!(back.routines.len(), 1);
+        assert_eq!(back.routines[0].name, "스탠드업");
+    }
+
+    #[test]
     fn grok_gets_real_model_and_effort_flags() {
         let argv = cfg(
             &["grok", "--always-approve"],

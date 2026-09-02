@@ -138,6 +138,35 @@ mod tests {
     }
 
     #[test]
+    fn save_list_lookup_remove_roundtrip() {
+        crate::paths::testing::with_home("skills", || {
+            assert!(list().is_empty());
+            let saved = save("주간 보고", "# 주간보고\n이번 주 한 일.").expect("save");
+            assert_eq!(saved.name, "주간-보고", "a Korean name keeps its own stem");
+            save("weekly", "# Weekly\nrecap").expect("save ascii");
+            let names: Vec<_> = list().into_iter().map(|s| s.name).collect();
+            assert_eq!(names, vec!["weekly".to_string(), "주간-보고".to_string()]);
+            let hit = lookup("/주간-보고").expect("lookup by slash name");
+            assert!(hit.body.contains("이번 주"));
+            remove("주간-보고").expect("remove");
+            assert!(lookup("주간-보고").is_none());
+            assert_eq!(list().len(), 1);
+            assert!(remove("주간-보고").is_err(), "removing twice is an error");
+        });
+    }
+
+    #[test]
+    fn two_korean_names_do_not_share_one_file() {
+        crate::paths::testing::with_home("skills-collide", || {
+            save("주간보고", "weekly").expect("save");
+            save("월간보고", "monthly").expect("save");
+            assert_eq!(list().len(), 2);
+            assert_eq!(lookup("주간보고").expect("weekly").body, "weekly");
+            assert_eq!(lookup("월간보고").expect("monthly").body, "monthly");
+        });
+    }
+
+    #[test]
     fn lookup_prefers_exact_stem_then_prefix() {
         let skills = [
             skill("weekly-alpha", "# Alpha\nDo the alpha path.\n"),

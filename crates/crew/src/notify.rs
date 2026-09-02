@@ -50,14 +50,19 @@ pub fn routine_fail_body(routine: &str, lang: &str) -> String {
     }
 }
 
+/// Where clicking the notification should land: the bot's chat, or the room.
+pub fn focus_scope(target: &str) -> (&'static str, &str) {
+    match target.strip_prefix('#') {
+        Some(channel) => ("channel", channel),
+        None => ("agent", target),
+    }
+}
+
 /// A scheduled routine could not start. Same focus + notification path as a status
 /// change. `target` is a bot id, or `#room` for a channel routine.
 pub fn routine_failed(target: &str, routine: &str) {
     let body = routine_fail_body(routine, &paths::locale());
-    let (kind, id) = match target.strip_prefix('#') {
-        Some(channel) => ("channel", channel),
-        None => ("agent", target),
-    };
+    let (kind, id) = focus_scope(target);
     write_focus(kind, id, &body, "routine_failed", routine);
     if paths::ui_is_live() {
         return;
@@ -186,6 +191,13 @@ mod tests {
         assert_eq!(notify_body("에이다", AgentStatus::Idle, "ko"), "에이다 작업을 마쳤습니다");
         assert_eq!(routine_fail_body("brief", "en"), "Routine \"brief\" failed");
         assert!(routine_fail_body("brief", "ko").contains("실패"));
+    }
+
+    #[test]
+    fn a_channel_routine_points_at_the_room() {
+        assert_eq!(focus_scope("#room"), ("channel", "room"));
+        assert_eq!(focus_scope("alpha"), ("agent", "alpha"));
+        assert_eq!(focus_scope("#"), ("channel", ""));
     }
 
     #[test]

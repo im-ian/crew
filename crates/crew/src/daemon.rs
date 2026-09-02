@@ -2346,8 +2346,45 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
 }
 
 #[cfg(test)]
-mod inbox_tests {
+mod daemon_tests {
     use super::*;
+
+    #[test]
+    fn a_hash_prefix_addresses_a_channel() {
+        assert!(matches!(routine_host("alpha"), RoutineHost::Agent(id) if id == "alpha"));
+        assert!(matches!(routine_host("#room"), RoutineHost::Channel(id) if id == "room"));
+        assert!(matches!(routine_host("  #room  "), RoutineHost::Channel(id) if id == "room"));
+        // A bot id cannot start with '#', so there is nothing to disambiguate.
+        assert!(matches!(routine_host(" alpha "), RoutineHost::Agent(id) if id == "alpha"));
+    }
+
+    #[test]
+    fn a_channel_keeps_the_routines_written_to_it() {
+        crate::paths::testing::with_home("channel-routines", || {
+            let id = "test-room";
+            let target = format!("#{id}");
+            channels().lock().unwrap().insert(
+                id.to_string(),
+                crate::config::Channel::new(id.into(), "방".into(), Vec::new()).unwrap(),
+            );
+            assert!(read_routines(&target).unwrap().is_empty());
+            let r = Routine::new("스탠드업".into(), "0 9 * * *".into(), "brief".into()).unwrap();
+            write_routines(&target, vec![r]).unwrap();
+            let back = read_routines(&target).unwrap();
+            assert_eq!(back.len(), 1);
+            assert_eq!(back[0].name, "스탠드업");
+            assert!(list_channels()
+                .iter()
+                .any(|c| c.id == id && c.routines.len() == 1));
+            channels().lock().unwrap().remove(id);
+        });
+    }
+
+    #[test]
+    fn routines_on_an_unknown_host_are_an_error() {
+        assert!(read_routines("#definitely-missing-room").is_err());
+        assert!(read_routines("definitely-missing-bot").is_err());
+    }
 
     #[test]
     fn relay_limit_refuses_the_delivery() {

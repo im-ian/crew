@@ -308,3 +308,61 @@ pub fn cli_sessions_dir() -> PathBuf {
 pub fn cli_session_path(agent_id: &str) -> PathBuf {
     cli_sessions_dir().join(safe_agent_id(agent_id))
 }
+
+#[cfg(test)]
+pub(crate) mod testing {
+    use std::fs;
+    use std::sync::Mutex;
+
+    static LOCK: Mutex<()> = Mutex::new(());
+
+    /// Run `f` with `CREW_HOME` pointed at a fresh temp dir. Serialised across the
+    /// suite, since the env var is process-wide.
+    pub fn with_home<R>(tag: &str, f: impl FnOnce() -> R) -> R {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!(
+            "crew-{tag}-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("temp home");
+        let old = std::env::var("CREW_HOME").ok();
+        std::env::set_var("CREW_HOME", &dir);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        match old {
+            Some(v) => std::env::set_var("CREW_HOME", v),
+            None => std::env::remove_var("CREW_HOME"),
+        }
+        let _ = fs::remove_dir_all(&dir);
+        match result {
+            Ok(r) => r,
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn locale_defaults_to_korean_and_only_accepts_known_tags() {
+        testing::with_home("locale", || {
+            assert_eq!(locale(), "ko");
+            write_locale("en");
+            assert_eq!(locale(), "en");
+            write_locale("ko");
+            assert_eq!(locale(), "ko");
+            write_locale("  en\n");
+            assert_eq!(locale(), "en");
+            write_locale("klingon");
+            assert_eq!(locale(), "ko", "an unknown tag falls back, it does not stick");
+            fs::write(locale_path(), "en").unwrap();
+            assert_eq!(locale(), "en");
+        });
+    }
+}
