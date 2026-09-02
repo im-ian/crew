@@ -108,6 +108,7 @@
     }
     .row.me .mention-chip { background: rgba(0, 0, 0, 0.18); }
     .mention-chip .avatar { width: 16px; height: 16px; }
+    .plus-menu { animation: none; }
   </style>
 </head>
 <body>
@@ -119,7 +120,11 @@
           <div class="drag-top"></div>
           <div class="search-row">
             <input class="search" placeholder="검색" value="" readonly />
-            <button class="icon-btn" type="button">+</button>
+            <button class="icon-btn" type="button" aria-label="추가">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+              </svg>
+            </button>
           </div>
           <div class="rail-lists">
             <div class="rail-section grouped">
@@ -159,7 +164,17 @@
             </div>
           </div>
           <div class="rail-foot">
-            <button class="icon-btn" type="button" title="설정">⚙</button>
+            <button class="icon-btn" type="button" title="설정" aria-label="설정">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <circle cx="8" cy="8" r="2.15" stroke="currentColor" stroke-width="1.4" />
+                <path
+                  d="M8 1.7v1.6M8 12.7v1.6M1.7 8h1.6M12.7 8h1.6M3.4 3.4l1.15 1.15M11.45 11.45l1.15 1.15M3.4 12.6l1.15-1.15M11.45 4.55l1.15-1.15"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
           </div>
         </aside>
         <main>
@@ -214,8 +229,33 @@
           <div class="composer">
             <div class="composer-box">
               <div class="composer-row">
-                <div class="composer-input is-empty" data-placeholder="+ Grok에게 메시지 (@이름으로 부르기)"></div>
-                <button type="button" class="icon-btn">+</button>
+                <div class="plus-wrap">
+                  <div class="plus-menu" role="menu">
+                    <button type="button" role="menuitem">
+                      <span class="plus-menu-icon" aria-hidden="true">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                          <path d="M10.2 4.4L5.15 9.45a2.15 2.15 0 103.04 3.04l5.2-5.2a3.4 3.4 0 10-4.81-4.81L3.4 7.66" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                      </span>
+                      파일 첨부
+                    </button>
+                    <button type="button" role="menuitem">
+                      <span class="plus-menu-icon is-teach" aria-hidden="true">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                          <circle cx="8" cy="8" r="5.4" stroke="currentColor" stroke-width="1.5" />
+                          <circle cx="8" cy="8" r="2.2" fill="currentColor" />
+                        </svg>
+                      </span>
+                      작업 가르치기
+                    </button>
+                  </div>
+                  <button type="button" class="attach-btn is-open" aria-label="추가" aria-expanded="true">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                    </svg>
+                  </button>
+                </div>
+                <div class="composer-input is-empty" data-placeholder="Grok에게 메시지 (@이름으로 부르기)"></div>
                 <button type="submit">↑</button>
               </div>
             </div>
