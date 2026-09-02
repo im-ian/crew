@@ -12,7 +12,7 @@ import { createPortal } from "react-dom";
 import { useLocale, useT } from "../LocaleContext";
 import { itemKey, parseItemKey } from "../groups";
 import type { AgentInfo, ChannelInfo, Group, Kind, SearchHit } from "../types";
-import { Avatar } from "./Avatar";
+import { Avatar, ChannelAvatar } from "./Avatar";
 
 const RAIL_DEFAULT = 232;
 const RAIL_MIN = 176;
@@ -639,6 +639,7 @@ export function Sidebar({
                       <ItemRow
                         key={item.key}
                         item={item}
+                        agents={agents}
                         active={selectedKind === item.kind && selected === item.id}
                         unread={unread.includes(item.key)}
                         dragging={drag?.key === item.key && drag.armed}
@@ -668,6 +669,7 @@ export function Sidebar({
                   <ItemRow
                     key={item.key}
                     item={item}
+                    agents={agents}
                     active={selectedKind === item.kind && selected === item.id}
                     unread={unread.includes(item.key)}
                     dragging={drag?.key === item.key && drag.armed}
@@ -751,7 +753,7 @@ export function Sidebar({
                   ["--ghost-oy" as string]: `${drag.grabY}px`,
                 }}
               >
-                <ItemRow item={drag.item} ghost />
+                <ItemRow item={drag.item} agents={agents} ghost />
               </div>
             </>,
             document.body,
@@ -855,6 +857,7 @@ function GroupHead({
 
 function ItemRow({
   item,
+  agents,
   active,
   unread,
   dragging,
@@ -864,6 +867,7 @@ function ItemRow({
   onPointerDown,
 }: {
   item: RailItem;
+  agents: AgentInfo[];
   active?: boolean;
   unread?: boolean;
   dragging?: boolean;
@@ -873,18 +877,23 @@ function ItemRow({
   onPointerDown?: (e: ReactPointerEvent<HTMLButtonElement>) => void;
 }) {
   const a = item.agent;
-  const inner = (
-    <>
+  const face =
+    item.kind === "channel" && item.channel ? (
+      <ChannelAvatar channel={item.channel} agents={agents} />
+    ) : (
       <Avatar
         id={item.id}
         name={item.name}
         src={a?.avatar}
         shape={a?.avatar_shape}
         color={a?.avatar_color}
-        letter={item.kind === "channel" ? "#" : undefined}
         badge={a?.status || undefined}
         status={a?.status}
       />
+    );
+  const inner = (
+    <>
+      {face}
       <div className="rail-row-text">
         <div className="agent-name">{item.name}</div>
         {item.preview ? <div className="agent-preview">{item.preview}</div> : null}

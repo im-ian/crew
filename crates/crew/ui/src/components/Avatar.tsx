@@ -1,6 +1,6 @@
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import { avatarColor, avatarPhase, initialOf, resolveFace } from "../avatar";
-import type { AgentStatus } from "../types";
+import type { AgentInfo, AgentStatus, ChannelInfo } from "../types";
 import { BotFace } from "./BotFace";
 
 type Props = {
@@ -138,5 +138,50 @@ export function Avatar({
     <Tag className={cls} style={style} title={title} onClick={onClick}>
       {body}
     </Tag>
+  );
+}
+
+export function ChannelAvatar({
+  channel,
+  agents,
+  className,
+}: {
+  channel: ChannelInfo;
+  agents: AgentInfo[];
+  className?: string;
+}) {
+  const members = channel.members
+    .map((id) => agents.find((a) => a.id === id))
+    .filter((a): a is AgentInfo => !!a);
+  if (!members.length) {
+    return (
+      <Avatar
+        className={className}
+        id={channel.id}
+        name={channel.name || channel.id}
+        letter="#"
+      />
+    );
+  }
+  const shown = members.slice(0, 3);
+  return (
+    <span
+      className={"channel-faces" + (className ? " " + className : "")}
+      data-count={shown.length}
+      title={channel.name || channel.id}
+    >
+      {shown.map((a) => (
+        <Avatar
+          key={a.id}
+          as="span"
+          className="channel-face"
+          id={a.id}
+          name={a.name || a.id}
+          src={a.avatar}
+          shape={a.avatar_shape}
+          color={a.avatar_color}
+        />
+      ))}
+    </span>
   );
 }

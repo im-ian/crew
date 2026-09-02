@@ -456,6 +456,55 @@ html.rail-dragging {
   height: 32px;
   font-size: 12px;
 }
+.channel-faces {
+  width: 32px;
+  height: 32px;
+  position: relative;
+  flex-shrink: 0;
+  display: block;
+}
+.channel-faces .channel-face {
+  position: absolute;
+  box-shadow: 0 0 0 1.5px var(--rail);
+}
+.channel-faces[data-count="1"] .channel-face {
+  inset: 0;
+  width: 32px;
+  height: 32px;
+}
+.channel-faces[data-count="2"] .channel-face {
+  width: 22px;
+  height: 22px;
+  font-size: 9px;
+}
+.channel-faces[data-count="2"] .channel-face:nth-child(1) {
+  top: 0;
+  left: 0;
+}
+.channel-faces[data-count="2"] .channel-face:nth-child(2) {
+  right: 0;
+  bottom: 0;
+}
+.channel-faces[data-count="3"] .channel-face {
+  width: 18px;
+  height: 18px;
+  font-size: 8px;
+}
+.channel-faces[data-count="3"] .channel-face:nth-child(1) {
+  top: 0;
+  left: 7px;
+}
+.channel-faces[data-count="3"] .channel-face:nth-child(2) {
+  bottom: 0;
+  left: 0;
+}
+.channel-faces[data-count="3"] .channel-face:nth-child(3) {
+  bottom: 0;
+  right: 0;
+}
+.rail-row.active .channel-faces .channel-face {
+  box-shadow: 0 0 0 1.5px var(--active);
+}
 .avatar {
   width: var(--avatar);
   height: var(--avatar);
