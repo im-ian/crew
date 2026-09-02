@@ -799,26 +799,29 @@ fn tick_routines() {
     };
     let key = now.minute_key();
     for (agent, rid, name, prompt) in due {
-        {
+        let exited = {
             let map = match agents().lock() {
                 Ok(m) => m,
                 Err(_) => return,
             };
             match map.get(&agent) {
-                Some(live) => {
-                    if live.status() == AgentStatus::Exited {
-                        continue;
-                    }
-                }
+                Some(live) => live.status() == AgentStatus::Exited,
                 None => continue,
             }
+        };
+        // The minute is spent either way. Marking only on success let the 15s ticker
+        // retry a failing routine four times inside the same minute.
+        if let Err(err) = mark_routine_run(&agent, &rid, &key) {
+            eprintln!("[crew] routine last_run {agent}/{name}: {err:#}");
         }
-        match fire_routine(&agent, &name, &prompt) {
+        let fired = if exited {
+            Err(anyhow::anyhow!("agent {agent} has exited"))
+        } else {
+            fire_routine(&agent, &name, &prompt)
+        };
+        match fired {
             Ok(()) => {
                 let _ = crate::routine_log::record(&agent, &rid, true, "ok");
-                if let Err(err) = mark_routine_run(&agent, &rid, &key) {
-                    eprintln!("[crew] routine last_run {agent}/{name}: {err:#}");
-                }
             }
             Err(err) => {
                 let _ = crate::routine_log::record(&agent, &rid, false, &err.to_string());
