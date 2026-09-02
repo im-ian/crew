@@ -1331,6 +1331,56 @@ button.channel-who:hover {
   cursor: default;
 }
 .attach-btn:disabled:hover { background: var(--chip); }
+.plus-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+.plus-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  min-width: 168px;
+  max-height: 240px;
+  overflow: auto;
+  background: var(--menu);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 4px;
+  box-shadow: var(--shadow);
+  z-index: 10;
+  transform-origin: bottom left;
+  animation: mention-pop var(--dur) var(--ease-out);
+}
+.plus-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  padding: 8px 10px;
+  border-radius: 14px;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.plus-menu button:hover { background: var(--chip); }
+.plus-menu-icon {
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.plus-menu-icon.is-teach { color: var(--blocked); }
+.plus-menu-empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 8px 10px;
+}
 .member-picker {
   display: flex;
   flex-direction: column;
@@ -2532,6 +2582,7 @@ button.toast {
     transition: none;
   }
   .mention-menu,
+  .plus-menu,
   .composer-input .mention-chip {
     animation: none;
   }

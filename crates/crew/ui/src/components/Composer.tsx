@@ -21,6 +21,7 @@ type Props = {
   onSend: (raw: string) => Promise<void>;
   busy?: boolean;
   onStop?: () => void;
+  onOpenSkills?: () => void;
 };
 
 type Mention = { start: number; query: string };
@@ -43,6 +44,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   onSend,
   busy = false,
   onStop,
+  onOpenSkills,
 }, ref) {
   const t = useT();
   const inputRef = useRef<HTMLDivElement>(null);
@@ -54,7 +56,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   const [slashIdx, setSlashIdx] = useState(0);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [attaches, setAttaches] = useState<Attach[]>([]);
+  const [plusOpen, setPlusOpen] = useState(false);
+  const [plusSkills, setPlusSkills] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const plusRef = useRef<HTMLDivElement>(null);
 
   useImperativeHandle(ref, () => ({
     focus() {
@@ -116,9 +121,33 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   // without a restart.
   const slashOpening = !!slash;
   useEffect(() => {
-    if (!slashOpening) return;
+    if (!slashOpening && !plusSkills) return;
     void api.listSkills().then(setSkills).catch(() => setSkills([]));
-  }, [slashOpening]);
+  }, [slashOpening, plusSkills]);
+
+  function closePlus() {
+    setPlusOpen(false);
+    setPlusSkills(false);
+  }
+
+  useEffect(() => {
+    if (!plusOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (!plusRef.current?.contains(e.target as Node)) closePlus();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closePlus();
+      }
+    }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [plusOpen]);
 
   function fit() {
     const el = inputRef.current;
@@ -170,7 +199,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   }
 
   function pickSkill(skill: Skill) {
-    if (!insertSlashText(inputRef.current, skill.body.trim())) return;
+    if (!insertSkillBody(inputRef.current, skill.body.trim())) return;
     setSlash(null);
     refreshEmpty();
     fit();
@@ -222,6 +251,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     setAttaches(next?.attaches ?? []);
     setMention(null);
     setSlash(null);
+    closePlus();
     refreshEmpty();
     fit();
   }, [chatKey]);
@@ -360,22 +390,115 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
             e.target.value = "";
           }}
         />
-        <button
-          type="button"
-          className="attach-btn"
-          title={t("composer.attachTitle")}
-          aria-label={t("composer.attach")}
-          onClick={() => fileRef.current?.click()}
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path
-              d="M8 3.5v9M3.5 8h9"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-            />
-          </svg>
-        </button>
+        <div className="plus-wrap" ref={plusRef}>
+          {plusOpen ? (
+            <div className="plus-menu" role="menu">
+              {plusSkills ? (
+                <>
+                  {!skills.length ? (
+                    <div className="plus-menu-empty">{t("skills.empty")}</div>
+                  ) : (
+                    skills.map((s) => (
+                      <button
+                        key={s.name}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          pickSkill(s);
+                          closePlus();
+                        }}
+                      >
+                        <span className="mention-name">/{s.name}</span>
+                      </button>
+                    ))
+                  )}
+                  {onOpenSkills ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        closePlus();
+                        onOpenSkills();
+                      }}
+                    >
+                      <span className="plus-menu-icon" aria-hidden="true">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                          <path
+                            d="M8 3.5v9M3.5 8h9"
+                            stroke="currentColor"
+                            strokeWidth="1.4"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      </span>
+                      {t("skills.new")}
+                    </button>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      closePlus();
+                      fileRef.current?.click();
+                    }}
+                  >
+                    <span className="plus-menu-icon" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path
+                          d="M10.2 4.4L5.15 9.45a2.15 2.15 0 103.04 3.04l5.2-5.2a3.4 3.4 0 10-4.81-4.81L3.4 7.66"
+                          stroke="currentColor"
+                          strokeWidth="1.4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </span>
+                    {t("composer.attach")}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => setPlusSkills(true)}
+                  >
+                    <span className="plus-menu-icon is-teach" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <circle cx="8" cy="8" r="5.4" stroke="currentColor" strokeWidth="1.5" />
+                        <circle cx="8" cy="8" r="2.2" fill="currentColor" />
+                      </svg>
+                    </span>
+                    {t("composer.teach")}
+                  </button>
+                </>
+              )}
+            </div>
+          ) : null}
+          <button
+            type="button"
+            className={"attach-btn" + (plusOpen ? " is-open" : "")}
+            title={t("composer.plus")}
+            aria-label={t("composer.plus")}
+            aria-expanded={plusOpen}
+            aria-haspopup="menu"
+            onClick={() => {
+              setPlusOpen((open) => {
+                if (open) setPlusSkills(false);
+                return !open;
+              });
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="M8 3.5v9M3.5 8h9"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        </div>
         <div
           ref={inputRef}
           className={"composer-input" + (empty ? " is-empty" : "")}
@@ -517,6 +640,24 @@ function fileExt(name: string): string {
   const i = name.lastIndexOf(".");
   if (i <= 0 || i === name.length - 1) return "FILE";
   return name.slice(i + 1).slice(0, 4).toUpperCase();
+}
+
+function insertSkillBody(editor: HTMLElement | null, body: string): boolean {
+  if (insertSlashText(editor, body)) return true;
+  if (!editor) return false;
+  editor.focus();
+  const text = body.endsWith(" ") ? body : body + " ";
+  if (document.execCommand("insertText", false, text)) return true;
+  editor.append(document.createTextNode(text));
+  const sel = window.getSelection();
+  if (sel) {
+    sel.removeAllRanges();
+    const after = document.createRange();
+    after.selectNodeContents(editor);
+    after.collapse(false);
+    sel.addRange(after);
+  }
+  return true;
 }
 
 function insertSlashText(editor: HTMLElement | null, body: string): boolean {

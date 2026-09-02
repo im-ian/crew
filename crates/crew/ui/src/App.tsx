@@ -250,6 +250,7 @@ export function App() {
             }
             void crew.stopAgent();
           }}
+          onOpenSkills={() => setSkillsOpen(true)}
         />
         <ChannelPane
           open={crew.paneOpen && crew.selectedKind === "channel"}
