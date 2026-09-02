@@ -11,7 +11,14 @@ use crate::protocol::AgentStatus;
 pub struct FocusTarget {
     pub kind: String,
     pub id: String,
+    /// Ready-made sentence. Used by the native notification and as the UI fallback.
     pub body: String,
+    /// `done` | `blocked` | `routine_failed`. The UI renders these in its own language.
+    #[serde(default)]
+    pub event: String,
+    /// Bot name for `done` / `blocked`, routine name for `routine_failed`.
+    #[serde(default)]
+    pub name: String,
 }
 
 /// Fire a desktop notification when a bot finishes or becomes blocked.
@@ -26,12 +33,31 @@ pub fn should_notify(prev: AgentStatus, next: AgentStatus, interrupted: bool) ->
     prev == AgentStatus::Working && next == AgentStatus::Idle
 }
 
-pub fn notify_body(name: &str, next: AgentStatus) -> String {
-    if next == AgentStatus::Blocked {
-        format!("{name} 확인이 필요합니다")
-    } else {
-        format!("{name} 작업을 마쳤습니다")
+pub fn notify_body(name: &str, next: AgentStatus, lang: &str) -> String {
+    match (next == AgentStatus::Blocked, lang == "en") {
+        (true, true) => format!("{name} needs a look"),
+        (true, false) => format!("{name} 확인이 필요합니다"),
+        (false, true) => format!("{name} finished"),
+        (false, false) => format!("{name} 작업을 마쳤습니다"),
     }
+}
+
+pub fn routine_fail_body(routine: &str, lang: &str) -> String {
+    if lang == "en" {
+        format!("Routine \"{routine}\" failed")
+    } else {
+        format!("루틴 \"{routine}\" 실행에 실패했습니다")
+    }
+}
+
+/// A scheduled routine could not start. Same focus + notification path as a status change.
+pub fn routine_failed(agent_id: &str, routine: &str) {
+    let body = routine_fail_body(routine, &paths::locale());
+    write_focus("agent", agent_id, &body, "routine_failed", routine);
+    if paths::ui_is_live() {
+        return;
+    }
+    notify("Crew", &body);
 }
 
 pub fn maybe_status_notify(
@@ -45,12 +71,13 @@ pub fn maybe_status_notify(
     if !should_notify(prev, next, interrupted) {
         return;
     }
-    let body = notify_body(name, next);
+    let body = notify_body(name, next, &paths::locale());
     let (kind, id) = match channel.map(str::trim).filter(|s| !s.is_empty()) {
         Some(ch) => ("channel", ch),
         None => ("agent", agent_id),
     };
-    write_focus(kind, id, &body);
+    let event = if next == AgentStatus::Blocked { "blocked" } else { "done" };
+    write_focus(kind, id, &body, event, name);
     if paths::ui_is_live() {
         return;
     }
@@ -61,13 +88,15 @@ pub fn focus_path() -> PathBuf {
     paths::home_dir().join("pending-focus.json")
 }
 
-pub fn write_focus(kind: &str, id: &str, body: &str) {
+pub fn write_focus(kind: &str, id: &str, body: &str, event: &str, name: &str) {
     write_focus_at(
         &focus_path(),
         &FocusTarget {
             kind: kind.to_string(),
             id: id.to_string(),
             body: body.to_string(),
+            event: event.to_string(),
+            name: name.to_string(),
         },
     );
 }
@@ -146,6 +175,15 @@ mod tests {
     }
 
     #[test]
+    fn bodies_follow_the_language() {
+        assert_eq!(notify_body("Ada", AgentStatus::Idle, "en"), "Ada finished");
+        assert_eq!(notify_body("Ada", AgentStatus::Blocked, "en"), "Ada needs a look");
+        assert_eq!(notify_body("에이다", AgentStatus::Idle, "ko"), "에이다 작업을 마쳤습니다");
+        assert_eq!(routine_fail_body("brief", "en"), "Routine \"brief\" failed");
+        assert!(routine_fail_body("brief", "ko").contains("실패"));
+    }
+
+    #[test]
     fn focus_file_roundtrips_and_take_consumes() {
         let dir = std::env::temp_dir().join(format!(
             "crew-focus-{}-{}",
@@ -163,6 +201,8 @@ mod tests {
                 kind: "channel".into(),
                 id: "room".into(),
                 body: "춘식이 작업을 마쳤습니다".into(),
+                event: "done".into(),
+                name: "춘식이".into(),
             },
         );
         let peek = peek_focus_at(&path).expect("peek");

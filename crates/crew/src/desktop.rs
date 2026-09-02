@@ -627,6 +627,13 @@ fn set_dock_badge(app: tauri::AppHandle, count: i32) -> Result<(), String> {
     win.set_badge_count(n).map_err(|e| e.to_string())
 }
 
+/// Mirror the UI language so daemon-side strings (notifications, CLI) match it.
+#[tauri::command]
+fn set_locale(locale: String) -> Result<(), String> {
+    crate::paths::write_locale(&locale);
+    Ok(())
+}
+
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
     let raw = path.trim();
@@ -715,7 +722,8 @@ pub fn run() -> anyhow::Result<()> {
             peek_pending_focus,
             take_pending_focus,
             open_path,
-            set_dock_badge
+            set_dock_badge,
+            set_locale
         ])
         .run(tauri::generate_context!())
         .map_err(|e| anyhow::anyhow!(e))?;

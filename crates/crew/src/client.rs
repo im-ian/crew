@@ -203,6 +203,7 @@ fn cleanup() {
 pub fn print_event(ev: Event) -> anyhow::Result<()> {
     match ev {
         Event::Agents { agents, .. } => {
+            let lang = crate::paths::locale();
             if agents.is_empty() {
                 println!("(no agents)");
             }
@@ -216,7 +217,7 @@ pub fn print_event(ev: Event) -> anyhow::Result<()> {
                     "{:<12} {:<12} {:<8} {:<16} {:<8} {}  {}",
                     a.id,
                     a.name,
-                    a.status.ko_label(),
+                    a.status.label(&lang),
                     model,
                     effort,
                     a.cwd,
@@ -240,7 +241,7 @@ pub fn print_event(ev: Event) -> anyhow::Result<()> {
             status,
             ..
         } => {
-            println!("# {agent} ({})", status.ko_label());
+            println!("# {agent} ({})", status.label(&crate::paths::locale()));
             print!("{text}");
             if !text.ends_with('\n') {
                 println!();

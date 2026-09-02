@@ -148,6 +148,21 @@ export function useCrew() {
           })
         : t("composer.placeholder.generic");
 
+  const tRef = useRef(t);
+  tRef.current = t;
+
+  // The daemon ships a ready-made Korean sentence for the case where no window is
+  // open; when the UI is up it renders the event in the language the user picked.
+  function focusBody(hit: FocusTarget): string {
+    const name = hit.name || "";
+    if (hit.event === "done") return tRef.current("notify.done", { name });
+    if (hit.event === "blocked") return tRef.current("notify.blocked", { name });
+    if (hit.event === "routine_failed") {
+      return tRef.current("notify.routineFailed", { name });
+    }
+    return hit.body;
+  }
+
   function showToast(text: string, target: FocusTarget | null = null) {
     setToast({ text, show: true, target });
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
@@ -935,7 +950,7 @@ export function useCrew() {
       if (!Ctor) return;
       const show = () => {
         const n = new Ctor("Crew", {
-          body: hit.body,
+          body: focusBody(hit),
           tag: `crew:${hit.kind}:${hit.id}`,
         });
         n.onclick = () => {
@@ -967,7 +982,7 @@ export function useCrew() {
       }
       if (last === key) return;
       last = key;
-      showToast(hit.body, hit);
+      showToast(focusBody(hit), hit);
     }
     function onWinFocus() {
       void api

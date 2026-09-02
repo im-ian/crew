@@ -28,6 +28,25 @@ pub fn groups_path() -> PathBuf {
     home_dir().join("groups.json")
 }
 
+pub fn locale_path() -> PathBuf {
+    home_dir().join("locale")
+}
+
+/// Language for daemon-side strings (desktop notifications, CLI labels).
+/// The desktop app mirrors its UI language here. Korean when unset.
+pub fn locale() -> String {
+    match fs::read_to_string(locale_path()) {
+        Ok(s) if s.trim() == "en" => "en".into(),
+        _ => "ko".into(),
+    }
+}
+
+pub fn write_locale(locale: &str) {
+    let value = if locale.trim() == "en" { "en" } else { "ko" };
+    let _ = fs::create_dir_all(home_dir());
+    let _ = fs::write(locale_path(), value);
+}
+
 pub fn pid_path() -> PathBuf {
     home_dir().join("crew.pid")
 }

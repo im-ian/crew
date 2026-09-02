@@ -128,6 +128,7 @@ export const api = {
   takePendingFocus: () => invoke<FocusTarget | null>("take_pending_focus"),
   openPath: (path: string) => invoke<void>("open_path", { path }),
   setDockBadge: (count: number) => invoke<void>("set_dock_badge", { count }),
+  setLocale: (locale: string) => invoke<void>("set_locale", { locale }),
   listModels: (cli: string) => {
     let pending = modelLists.get(cli);
     if (!pending) {

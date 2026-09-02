@@ -822,6 +822,7 @@ fn tick_routines() {
             }
             Err(err) => {
                 let _ = crate::routine_log::record(&agent, &rid, false, &err.to_string());
+                crate::notify::routine_failed(&agent, &name);
                 eprintln!("[crew] routine {agent}/{name}: {err:#}");
             }
         }

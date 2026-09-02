@@ -235,6 +235,10 @@ export const KO = {
 
   "error.routineFields": "이름, 시각, 시킬 일을 모두 입력하세요",
   "error.nameRequired": "이름을 입력하세요",
+  "notify.done": "{name} 작업을 마쳤습니다",
+  "notify.blocked": "{name} 확인이 필요합니다",
+  "notify.routineFailed": "루틴 \"{name}\" 실행에 실패했습니다",
+
   "conn.checking": "데몬 확인 중…",
   "conn.ok": "데몬 연결됨",
   "group.new": "새 그룹",
@@ -479,6 +483,10 @@ export const EN: { [K in MessageKey]: string } = {
 
   "error.routineFields": "Enter a name, time, and task",
   "error.nameRequired": "Enter a name",
+  "notify.done": "{name} finished",
+  "notify.blocked": "{name} needs a look",
+  "notify.routineFailed": "Routine \"{name}\" failed",
+
   "conn.checking": "Checking daemon…",
   "conn.ok": "Daemon connected",
   "group.new": "New group",

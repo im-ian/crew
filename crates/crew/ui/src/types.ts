@@ -55,6 +55,8 @@ export type FocusTarget = {
   kind: string;
   id: string;
   body: string;
+  event?: string;
+  name?: string;
 };
 
 export type AgentInfo = {

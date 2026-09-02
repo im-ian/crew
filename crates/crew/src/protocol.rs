@@ -358,12 +358,13 @@ pub enum AgentStatus {
 }
 
 impl AgentStatus {
-    pub fn ko_label(self) -> &'static str {
+    pub fn label(self, lang: &str) -> &'static str {
+        let en = lang == "en";
         match self {
-            AgentStatus::Working => "작업 중",
-            AgentStatus::Idle => "대기",
-            AgentStatus::Blocked => "차단됨",
-            AgentStatus::Exited => "종료됨",
+            AgentStatus::Working => if en { "working" } else { "작업 중" },
+            AgentStatus::Idle => if en { "idle" } else { "대기" },
+            AgentStatus::Blocked => if en { "blocked" } else { "차단됨" },
+            AgentStatus::Exited => if en { "exited" } else { "종료됨" },
         }
     }
 }

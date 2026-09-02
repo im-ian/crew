@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { api } from "./api";
 import {
   applyLocale,
   loadLocale,
@@ -32,6 +33,9 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     saveLocale(locale);
     applyLocale(locale);
+    // The daemon writes notifications while the window is closed, so it needs the
+    // same language.
+    void api.setLocale(locale).catch(() => {});
   }, [locale]);
 
   const t = useCallback<TFn>(
