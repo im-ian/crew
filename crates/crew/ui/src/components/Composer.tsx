@@ -112,9 +112,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
       .slice(0, 8);
   }, [skills, slash]);
 
+  // Refetched whenever a `/` menu opens, so a skill written in Settings shows up
+  // without a restart.
+  const slashOpening = !!slash;
   useEffect(() => {
+    if (!slashOpening) return;
     void api.listSkills().then(setSkills).catch(() => setSkills([]));
-  }, []);
+  }, [slashOpening]);
 
   function fit() {
     const el = inputRef.current;

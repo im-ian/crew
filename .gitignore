@@ -5,3 +5,4 @@ crew.log
 /*.md
 node_modules/
 /crates/crew/ui/dist
+.playwright-mcp

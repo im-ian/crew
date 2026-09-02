@@ -11,6 +11,7 @@ type Props = {
   onTheme: (theme: ThemePref) => void;
   onClose: () => void;
   onOpenShortcuts: () => void;
+  onOpenSkills: () => void;
 };
 
 const LANGS: { value: Locale; label: string }[] = [
@@ -24,6 +25,7 @@ export function SettingsPane({
   onTheme,
   onClose,
   onOpenShortcuts,
+  onOpenSkills,
 }: Props) {
   const t = useT();
   const { locale, setLocale } = useLocale();
@@ -50,6 +52,12 @@ export function SettingsPane({
           <Seg value={locale} options={LANGS} onChange={setLocale} />
         </Field>
         <p className="apply-note">{t("settings.language.note")}</p>
+        <Field label={t("settings.skills")}>
+          <button type="button" className="ghost settings-action" onClick={onOpenSkills}>
+            {t("settings.skillsOpen")}
+          </button>
+        </Field>
+        <p className="apply-note">{t("settings.skills.note")}</p>
         <Field label={t("settings.shortcuts")}>
           <button type="button" className="ghost settings-action" onClick={onOpenShortcuts}>
             {t("settings.shortcutsOpen")}

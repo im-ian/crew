@@ -49,6 +49,7 @@
     "allow-list-skills",
     "allow-lookup-skill",
     "allow-save-skill",
+    "allow-remove-skill",
     "allow-save-upload",
     "allow-peek-pending-focus",
     "allow-take-pending-focus",

@@ -85,13 +85,28 @@ pub fn save(name: &str, body: &str) -> anyhow::Result<Skill> {
     })
 }
 
+pub fn remove(name: &str) -> anyhow::Result<()> {
+    let name = sanitize_name(name);
+    if name.is_empty() {
+        anyhow::bail!("skill name is empty");
+    }
+    let path = dir().join(format!("{name}.md"));
+    if !path.exists() {
+        anyhow::bail!("unknown skill {name}");
+    }
+    fs::remove_file(&path)?;
+    Ok(())
+}
+
 fn sanitize_name(name: &str) -> String {
     let s: String = name
         .trim()
         .trim_start_matches('/')
         .chars()
         .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+            // Unicode-aware: a Korean skill name has to survive as its own file
+            // stem, or every one of them collapses to the same run of underscores.
+            if c.is_alphanumeric() || c == '-' || c == '_' {
                 c
             } else if c.is_whitespace() {
                 '-'
@@ -106,6 +121,14 @@ fn sanitize_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_become_safe_file_stems() {
+        assert_eq!(sanitize_name("/주간 보고"), "주간-보고");
+        assert_eq!(sanitize_name("  weekly report "), "weekly-report");
+        assert_eq!(sanitize_name("a/b"), "a_b");
+        assert!(sanitize_name("   ").is_empty());
+    }
 
     fn skill(name: &str, body: &str) -> Skill {
         Skill {

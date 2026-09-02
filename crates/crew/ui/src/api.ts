@@ -122,6 +122,7 @@ export const api = {
   lookupSkill: (query: string) => invoke<Skill | null>("lookup_skill", { query }),
   saveSkill: (name: string, body: string) =>
     invoke<Skill>("save_skill", { name, body }),
+  removeSkill: (name: string) => invoke<void>("remove_skill", { name }),
   saveUpload: (name: string, data: string) =>
     invoke<string>("save_upload", { name, data }),
   peekPendingFocus: () => invoke<FocusTarget | null>("peek_pending_focus"),

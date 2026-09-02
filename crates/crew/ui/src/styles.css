@@ -2187,6 +2187,49 @@ textarea.textin {
 .routine-run.is-fail {
   color: var(--blocked);
 }
+.skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 190px;
+  overflow: auto;
+}
+.skill-row {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.skill-row:hover { background: var(--hover); }
+.skill-row.is-open { border-color: var(--field-focus); background: var(--hover); }
+.skill-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.skill-peek {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+textarea.textin.skill-body {
+  min-height: 150px;
+}
+.apply-note.is-error {
+  color: var(--blocked);
+}
 .empty-routines {
   color: var(--muted);
   font-size: 13px;

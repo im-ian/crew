@@ -43,6 +43,7 @@ fn main() {
             "list_skills",
             "lookup_skill",
             "save_skill",
+            "remove_skill",
             "save_upload",
             "peek_pending_focus",
             "take_pending_focus",

@@ -333,6 +333,12 @@
           "markdownDescription": "Enables the remove_routine command without any pre-configured scope."
         },
         {
+          "description": "Enables the remove_skill command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remove-skill",
+          "markdownDescription": "Enables the remove_skill command without any pre-configured scope."
+        },
+        {
           "description": "Enables the reset_agent command without any pre-configured scope.",
           "type": "string",
           "const": "allow-reset-agent",
@@ -589,6 +595,12 @@
           "type": "string",
           "const": "deny-remove-routine",
           "markdownDescription": "Denies the remove_routine command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remove_skill command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remove-skill",
+          "markdownDescription": "Denies the remove_skill command without any pre-configured scope."
         },
         {
           "description": "Denies the reset_agent command without any pre-configured scope.",

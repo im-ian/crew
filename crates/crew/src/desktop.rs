@@ -609,6 +609,11 @@ fn save_skill(name: String, body: String) -> Result<crate::skills::Skill, String
 }
 
 #[tauri::command]
+fn remove_skill(name: String) -> Result<(), String> {
+    crate::skills::remove(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn peek_pending_focus() -> Result<Option<crate::notify::FocusTarget>, String> {
     Ok(crate::notify::peek_focus())
 }
@@ -718,6 +723,7 @@ pub fn run() -> anyhow::Result<()> {
             list_skills,
             lookup_skill,
             save_skill,
+            remove_skill,
             save_upload,
             peek_pending_focus,
             take_pending_focus,

@@ -9,6 +9,7 @@ import { ChannelPane } from "./components/ChannelPane";
 import { NewBotModal } from "./components/NewBotModal";
 import { NewChannelModal } from "./components/NewChannelModal";
 import { SettingsPane } from "./components/SettingsPane";
+import { SkillsPane } from "./components/SkillsPane";
 import { ShortcutHelp } from "./components/ShortcutHelp";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
@@ -34,6 +35,7 @@ export function App() {
   const [renameId, setRenameId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [skillsOpen, setSkillsOpen] = useState(false);
   const [theme, setTheme] = useState<ThemePref>(loadThemePref);
   const [jumpSeq, setJumpSeq] = useState(0);
   const renamingId = crew.pendingRenameId || renameId;
@@ -310,7 +312,12 @@ export function App() {
           setSettingsOpen(false);
           setHelpOpen(true);
         }}
+        onOpenSkills={() => {
+          setSettingsOpen(false);
+          setSkillsOpen(true);
+        }}
       />
+      <SkillsPane open={skillsOpen} onClose={() => setSkillsOpen(false)} />
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
       <Toast
         text={crew.toast.text}
