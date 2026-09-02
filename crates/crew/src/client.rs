@@ -291,24 +291,46 @@ pub fn print_event(ev: Event) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn print_routines(agents: &[AgentInfo], filter: Option<&str>) -> anyhow::Result<()> {
+pub fn print_routines(
+    agents: &[AgentInfo],
+    channels: &[ChannelInfo],
+    filter: Option<&str>,
+) -> anyhow::Result<()> {
+    let mut hosts: Vec<(String, Vec<crate::config::Routine>)> = agents
+        .iter()
+        .map(|a| (a.id.clone(), a.routines.clone()))
+        .collect();
+    hosts.extend(
+        channels
+            .iter()
+            .map(|c| (format!("#{}", c.id), c.routines.clone())),
+    );
+    print_routine_rows(&hosts, filter)
+}
+
+/// One row per routine: host, id, name, schedule, on/off, last run. Channels are
+/// listed as `#room`.
+fn print_routine_rows(
+    hosts: &[(String, Vec<crate::config::Routine>)],
+    filter: Option<&str>,
+) -> anyhow::Result<()> {
     if let Some(id) = filter {
-        if !agents.iter().any(|a| a.id == id) {
-            anyhow::bail!("unknown agent {id}");
+        if !hosts.iter().any(|(host, _)| host == id) {
+            bail!("unknown bot or channel {id}");
         }
     }
     let mut any = false;
-    for a in agents {
+    for (host, routines) in hosts {
         if let Some(id) = filter {
-            if a.id != id {
+            if host != id {
                 continue;
             }
         }
-        for r in &a.routines {
+        for r in routines {
             any = true;
             println!(
                 "{}\t{}\t{}\t{}\t{}\t{}",
-                a.id,
+                host,
                 r.id,
                 r.name,
                 r.schedule,
@@ -365,35 +387,17 @@ pub fn print_channels_from_config(channels: &[Channel]) -> anyhow::Result<()> {
 
 pub fn print_routines_from_config(
     agents: &[AgentConfig],
+    channels: &[Channel],
     filter: Option<&str>,
 ) -> anyhow::Result<()> {
-    if let Some(id) = filter {
-        if !agents.iter().any(|a| a.id == id) {
-            anyhow::bail!("unknown agent {id}");
-        }
-    }
-    let mut any = false;
-    for a in agents {
-        if let Some(id) = filter {
-            if a.id != id {
-                continue;
-            }
-        }
-        for r in &a.routines {
-            any = true;
-            println!(
-                "{}\t{}\t{}\t{}\t{}\t{}",
-                a.id,
-                r.id,
-                r.name,
-                r.schedule,
-                if r.enabled { "on" } else { "off" },
-                r.last_run.as_deref().unwrap_or("-")
-            );
-        }
-    }
-    if !any {
-        println!("(no routines)");
-    }
-    Ok(())
+    let mut hosts: Vec<(String, Vec<crate::config::Routine>)> = agents
+        .iter()
+        .map(|a| (a.id.clone(), a.routines.clone()))
+        .collect();
+    hosts.extend(
+        channels
+            .iter()
+            .map(|c| (format!("#{}", c.id), c.routines.clone())),
+    );
+    print_routine_rows(&hosts, filter)
 }

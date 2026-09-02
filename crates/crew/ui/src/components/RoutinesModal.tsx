@@ -9,13 +9,16 @@ import {
   toCron,
   type Repeat,
 } from "../schedule";
-import type { AgentInfo, Routine, RoutineRun } from "../types";
+import type { Routine, RoutineRun } from "../types";
 import { Field } from "./Field";
 import { Seg } from "./Seg";
 
+/// A bot, or a channel addressed as `#room` — both keep a routine list.
+export type RoutineHost = { id: string; routines?: Routine[] };
+
 type Props = {
   open: boolean;
-  agent: AgentInfo | null;
+  agent: RoutineHost | null;
   onAdd: (name: string, schedule: string, prompt: string) => Promise<void>;
   onToggle: (r: Routine) => Promise<void>;
   onDelete: (r: Routine) => Promise<void>;

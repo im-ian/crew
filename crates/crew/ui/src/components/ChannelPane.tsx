@@ -1,21 +1,52 @@
 import { useEffect, useRef, useState } from "react";
 import { useT } from "../LocaleContext";
-import type { AgentInfo, ChannelInfo } from "../types";
+import type { AgentInfo, ChannelInfo, PaneTab, Routine, RoutineRun } from "../types";
 import { Field } from "./Field";
+import { RoutinesModal } from "./RoutinesModal";
 
 type Props = {
   open: boolean;
+  tab: PaneTab;
   channel: ChannelInfo | null;
   agents: AgentInfo[];
+  onTab: (tab: PaneTab) => void;
   onClose: () => void;
   onSave: (fields: {
     name: string;
     brief: string;
     members: string[];
   }) => Promise<void>;
+  onAddRoutine: (name: string, schedule: string, prompt: string) => Promise<void>;
+  onToggleRoutine: (r: Routine) => Promise<void>;
+  onDeleteRoutine: (r: Routine) => Promise<void>;
+  onRunRoutine: (r: Routine) => Promise<void>;
+  onEditRoutine: (
+    r: Routine,
+    fields: { name?: string; schedule?: string; prompt?: string },
+  ) => Promise<void>;
+  onLoadRoutineRuns: (r: Routine) => Promise<RoutineRun[]>;
 };
 
-export function ChannelPane({ open, channel, agents, onClose, onSave }: Props) {
+const TABS: { id: PaneTab; labelKey: "pane.tab.channel" | "pane.tab.routines" }[] = [
+  { id: "info", labelKey: "pane.tab.channel" },
+  { id: "routines", labelKey: "pane.tab.routines" },
+];
+
+export function ChannelPane({
+  open,
+  tab,
+  channel,
+  agents,
+  onTab,
+  onClose,
+  onSave,
+  onAddRoutine,
+  onToggleRoutine,
+  onDeleteRoutine,
+  onRunRoutine,
+  onEditRoutine,
+  onLoadRoutineRuns,
+}: Props) {
   const t = useT();
   const [name, setName] = useState("");
   const [brief, setBrief] = useState("");
@@ -93,8 +124,22 @@ export function ChannelPane({ open, channel, agents, onClose, onSave }: Props) {
             </svg>
           </button>
         </div>
+        <div className="pane-tabs" role="tablist">
+          {TABS.map((tabDef) => (
+            <button
+              key={tabDef.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === tabDef.id}
+              className={tab === tabDef.id ? "on" : ""}
+              onClick={() => onTab(tabDef.id)}
+            >
+              {t(tabDef.labelKey)}
+            </button>
+          ))}
+        </div>
         <div className="sheet-body">
-          <div className="form-stack">
+          <div className="form-stack" hidden={tab !== "info"}>
             <Field label={t("field.name")} htmlFor="channel-name">
               <input
                 id="channel-name"
@@ -144,6 +189,19 @@ export function ChannelPane({ open, channel, agents, onClose, onSave }: Props) {
               </div>
             </Field>
             <p className="apply-note">{t("channel.applyNote")}</p>
+          </div>
+          <div hidden={tab !== "routines"}>
+            <p className="apply-note">{t("channel.routineNote")}</p>
+            <RoutinesModal
+              open={open}
+              agent={channel ? { id: channel.id, routines: channel.routines } : null}
+              onAdd={onAddRoutine}
+              onToggle={onToggleRoutine}
+              onDelete={onDeleteRoutine}
+              onRun={onRunRoutine}
+              onEdit={onEditRoutine}
+              onLoadRuns={onLoadRoutineRuns}
+            />
           </div>
         </div>
       </div>

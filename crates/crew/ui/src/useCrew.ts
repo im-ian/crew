@@ -236,6 +236,7 @@ export function useCrew() {
       selectedRef.current = { id, kind: "channel" };
       setSelected(id);
       setSelectedKind("channel");
+      setPaneTab("info");
       setPaneOpen(true);
       return;
     }
@@ -243,6 +244,15 @@ export function useCrew() {
   }
 
   function openRoutines(id: string) {
+    const ch = channelsRef.current.find((c) => c.id === id);
+    if (ch) {
+      selectedRef.current = { id, kind: "channel" };
+      setSelected(id);
+      setSelectedKind("channel");
+      setPaneTab("routines");
+      setPaneOpen(true);
+      return;
+    }
     openPane(id, "routines");
   }
 
@@ -595,8 +605,15 @@ export function useCrew() {
     }
   }
 
+  // Channels host routines too; the daemon addresses them as `#room`.
+  function routineTarget(): string | null {
+    const { id, kind } = selectedRef.current;
+    if (!id) return null;
+    return kind === "channel" ? `#${id}` : id;
+  }
+
   async function addRoutine(name: string, schedule: string, prompt: string) {
-    const id = selectedRef.current.id;
+    const id = routineTarget();
     if (!id) return;
     const n = name.trim();
     const s = schedule.trim();
@@ -618,7 +635,7 @@ export function useCrew() {
   }
 
   async function toggleRoutine(r: Routine) {
-    const id = selectedRef.current.id;
+    const id = routineTarget();
     if (!id || !r) return;
     try {
       await api.setRoutineEnabled(id, r.id || r.name, r.enabled === false);
@@ -648,7 +665,7 @@ export function useCrew() {
   }
 
   async function runRoutine(r: Routine) {
-    const id = selectedRef.current.id;
+    const id = routineTarget();
     if (!id || !r) return;
     try {
       await api.runRoutine(id, r.id || r.name);
@@ -662,7 +679,7 @@ export function useCrew() {
     r: Routine,
     fields: { name?: string; schedule?: string; prompt?: string },
   ) {
-    const id = selectedRef.current.id;
+    const id = routineTarget();
     if (!id || !r) return;
     try {
       await api.editRoutine(id, r.id || r.name, fields);
@@ -673,7 +690,7 @@ export function useCrew() {
   }
 
   async function loadRoutineRuns(r: Routine) {
-    const id = selectedRef.current.id;
+    const id = routineTarget();
     if (!id || !r) return [];
     try {
       return await api.listRoutineRuns(id, r.id || r.name);
@@ -684,7 +701,7 @@ export function useCrew() {
   }
 
   async function deleteRoutine(r: Routine) {
-    const id = selectedRef.current.id;
+    const id = routineTarget();
     if (!id || !r) return;
     try {
       await api.removeRoutine(id, r.id || r.name);

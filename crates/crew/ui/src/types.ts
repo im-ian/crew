@@ -83,6 +83,7 @@ export type ChannelInfo = {
   id: string;
   name: string;
   members: string[];
+  routines?: Routine[];
   brief?: string | null;
   preview?: string | null;
   last_ts?: number;

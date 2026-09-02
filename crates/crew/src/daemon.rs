@@ -801,16 +801,16 @@ fn tick_routines() {
             return;
         }
     };
-    let due: Vec<(String, String, String, String)> = {
+    let mut due: Vec<(String, String, String, String)> = Vec::new();
+    {
         let cfgs = match configs().lock() {
             Ok(c) => c,
             Err(_) => return,
         };
-        let mut jobs = Vec::new();
         for cfg in cfgs.values() {
             for r in &cfg.routines {
                 if r.is_due(&now) {
-                    jobs.push((
+                    due.push((
                         cfg.id.clone(),
                         r.id.clone(),
                         r.name.clone(),
@@ -819,38 +819,58 @@ fn tick_routines() {
                 }
             }
         }
-        jobs
-    };
+    }
+    {
+        let chans = match channels().lock() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        for ch in chans.values() {
+            for r in &ch.routines {
+                if r.is_due(&now) {
+                    due.push((
+                        format!("#{}", ch.id),
+                        r.id.clone(),
+                        r.name.clone(),
+                        r.prompt.clone(),
+                    ));
+                }
+            }
+        }
+    }
     let key = now.minute_key();
-    for (agent, rid, name, prompt) in due {
-        let exited = {
-            let map = match agents().lock() {
-                Ok(m) => m,
-                Err(_) => return,
-            };
-            match map.get(&agent) {
-                Some(live) => live.status() == AgentStatus::Exited,
-                None => continue,
+    for (target, rid, name, prompt) in due {
+        let exited = match routine_host(&target) {
+            RoutineHost::Channel(_) => false,
+            RoutineHost::Agent(id) => {
+                let map = match agents().lock() {
+                    Ok(m) => m,
+                    Err(_) => return,
+                };
+                match map.get(&id) {
+                    Some(live) => live.status() == AgentStatus::Exited,
+                    None => continue,
+                }
             }
         };
         // The minute is spent either way. Marking only on success let the 15s ticker
         // retry a failing routine four times inside the same minute.
-        if let Err(err) = mark_routine_run(&agent, &rid, &key) {
-            eprintln!("[crew] routine last_run {agent}/{name}: {err:#}");
+        if let Err(err) = mark_routine_run(&target, &rid, &key) {
+            eprintln!("[crew] routine last_run {target}/{name}: {err:#}");
         }
         let fired = if exited {
-            Err(anyhow::anyhow!("agent {agent} has exited"))
+            Err(anyhow::anyhow!("agent {target} has exited"))
         } else {
-            fire_routine(&agent, &name, &prompt)
+            fire_for_target(&target, &name, &prompt)
         };
         match fired {
             Ok(()) => {
-                let _ = crate::routine_log::record(&agent, &rid, true, "ok");
+                let _ = crate::routine_log::record(&target, &rid, true, "ok");
             }
             Err(err) => {
-                let _ = crate::routine_log::record(&agent, &rid, false, &err.to_string());
-                crate::notify::routine_failed(&agent, &name);
-                eprintln!("[crew] routine {agent}/{name}: {err:#}");
+                let _ = crate::routine_log::record(&target, &rid, false, &err.to_string());
+                crate::notify::routine_failed(&target, &name);
+                eprintln!("[crew] routine {target}/{name}: {err:#}");
             }
         }
     }
@@ -871,17 +891,12 @@ fn fire_routine(agent: &str, name: &str, prompt: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn mark_routine_run(agent: &str, key: &str, minute_key: &str) -> anyhow::Result<()> {
-    let mut cfg = {
-        let cfgs = configs().lock().expect("configs mutex");
-        cfgs.get(agent)
-            .cloned()
-            .with_context(|| format!("unknown agent {agent}"))?
-    };
-    let idx = find_routine_index(&cfg.routines, key)
+fn mark_routine_run(target: &str, key: &str, minute_key: &str) -> anyhow::Result<()> {
+    let mut routines = read_routines(target)?;
+    let idx = find_routine_index(&routines, key)
         .ok_or_else(|| anyhow::anyhow!("unknown routine {key}"))?;
-    cfg.routines[idx].last_run = Some(minute_key.to_string());
-    persist_config(&cfg)
+    routines[idx].last_run = Some(minute_key.to_string());
+    write_routines(target, routines)
 }
 
 fn shutdown_agents() {
@@ -1757,6 +1772,60 @@ fn set_agent(
     Ok(())
 }
 
+/// A routine list hangs off a bot, or off a channel addressed as `#room`.
+enum RoutineHost {
+    Agent(String),
+    Channel(String),
+}
+
+fn routine_host(target: &str) -> RoutineHost {
+    match target.trim().strip_prefix('#') {
+        Some(channel) => RoutineHost::Channel(channel.trim().to_string()),
+        None => RoutineHost::Agent(target.trim().to_string()),
+    }
+}
+
+fn read_routines(target: &str) -> anyhow::Result<Vec<Routine>> {
+    match routine_host(target) {
+        RoutineHost::Agent(id) => Ok(clone_agent_cfg(&id)?.routines),
+        RoutineHost::Channel(id) => {
+            let chans = channels().lock().expect("channels mutex");
+            chans
+                .get(&id)
+                .map(|c| c.routines.clone())
+                .with_context(|| format!("unknown channel {id}"))
+        }
+    }
+}
+
+fn write_routines(target: &str, routines: Vec<Routine>) -> anyhow::Result<()> {
+    match routine_host(target) {
+        RoutineHost::Agent(id) => {
+            let mut cfg = clone_agent_cfg(&id)?;
+            cfg.routines = routines;
+            persist_config(&cfg)
+        }
+        RoutineHost::Channel(id) => {
+            {
+                let mut chans = channels().lock().expect("channels mutex");
+                let ch = chans
+                    .get_mut(&id)
+                    .with_context(|| format!("unknown channel {id}"))?;
+                ch.routines = routines;
+            }
+            save_state()
+        }
+    }
+}
+
+/// Run one routine now: a bot gets a turn, a channel gets the post.
+fn fire_for_target(target: &str, name: &str, prompt: &str) -> anyhow::Result<()> {
+    match routine_host(target) {
+        RoutineHost::Agent(id) => fire_routine(&id, name, prompt),
+        RoutineHost::Channel(id) => send_channel(&id, "user", prompt),
+    }
+}
+
 fn clone_agent_cfg(id: &str) -> anyhow::Result<AgentConfig> {
     let cfgs = configs().lock().expect("configs mutex");
     cfgs.get(id)
@@ -1764,11 +1833,11 @@ fn clone_agent_cfg(id: &str) -> anyhow::Result<AgentConfig> {
         .with_context(|| format!("unknown agent {id}"))
 }
 
-fn add_routine(agent: &str, name: String, schedule: String, prompt: String) -> anyhow::Result<()> {
+fn add_routine(target: &str, name: String, schedule: String, prompt: String) -> anyhow::Result<()> {
     let (name, schedule, prompt) = resolve_routine_fields(name, schedule, prompt)?;
-    let mut cfg = clone_agent_cfg(agent)?;
-    cfg.routines.push(Routine::new(name, schedule, prompt)?);
-    persist_config(&cfg)
+    let mut routines = read_routines(target)?;
+    routines.push(Routine::new(name, schedule, prompt)?);
+    write_routines(target, routines)
 }
 
 fn resolve_routine_fields(
@@ -1799,19 +1868,19 @@ fn resolve_routine_fields(
 }
 
 fn edit_routine(
-    agent: &str,
+    target: &str,
     key: &str,
     name: Option<String>,
     schedule: Option<String>,
     prompt: Option<String>,
 ) -> anyhow::Result<()> {
-    let mut cfg = clone_agent_cfg(agent)?;
-    let idx = find_routine_index(&cfg.routines, key)
+    let mut routines = read_routines(target)?;
+    let idx = find_routine_index(&routines, key)
         .ok_or_else(|| anyhow::anyhow!("unknown routine {key}"))?;
     if let Some(name) = name {
         let name = name.trim();
         if !name.is_empty() {
-            cfg.routines[idx].name = name.to_string();
+            routines[idx].name = name.to_string();
         }
     }
     if let Some(schedule) = schedule {
@@ -1823,55 +1892,55 @@ fn edit_routine(
                 crate::nl_routine::parse_nl_routine(schedule)?.schedule
             };
             cron::validate(&resolved)?;
-            cfg.routines[idx].schedule = resolved;
+            routines[idx].schedule = resolved;
         }
     }
     if let Some(prompt) = prompt {
         let prompt = prompt.trim();
         if !prompt.is_empty() {
-            cfg.routines[idx].prompt = prompt.to_string();
+            routines[idx].prompt = prompt.to_string();
         }
     }
-    persist_config(&cfg)
+    write_routines(target, routines)
 }
 
-fn remove_routine(agent: &str, key: &str) -> anyhow::Result<()> {
-    let mut cfg = clone_agent_cfg(agent)?;
-    let idx = find_routine_index(&cfg.routines, key)
+fn remove_routine(target: &str, key: &str) -> anyhow::Result<()> {
+    let mut routines = read_routines(target)?;
+    let idx = find_routine_index(&routines, key)
         .ok_or_else(|| anyhow::anyhow!("unknown routine {key}"))?;
-    cfg.routines.remove(idx);
-    persist_config(&cfg)
+    routines.remove(idx);
+    write_routines(target, routines)
 }
 
-fn set_routine_enabled(agent: &str, key: &str, enabled: bool) -> anyhow::Result<()> {
-    let mut cfg = clone_agent_cfg(agent)?;
-    let idx = find_routine_index(&cfg.routines, key)
+fn set_routine_enabled(target: &str, key: &str, enabled: bool) -> anyhow::Result<()> {
+    let mut routines = read_routines(target)?;
+    let idx = find_routine_index(&routines, key)
         .ok_or_else(|| anyhow::anyhow!("unknown routine {key}"))?;
-    cfg.routines[idx].enabled = enabled;
-    persist_config(&cfg)
+    routines[idx].enabled = enabled;
+    write_routines(target, routines)
 }
 
-fn run_routine(agent: &str, key: &str) -> anyhow::Result<()> {
-    let cfg = clone_agent_cfg(agent)?;
-    let idx = find_routine_index(&cfg.routines, key)
+fn run_routine(target: &str, key: &str) -> anyhow::Result<()> {
+    let routines = read_routines(target)?;
+    let idx = find_routine_index(&routines, key)
         .ok_or_else(|| anyhow::anyhow!("unknown routine {key}"))?;
-    let r = &cfg.routines[idx];
+    let r = &routines[idx];
     let name = r.name.clone();
     let prompt = r.prompt.clone();
     let rid = r.id.clone();
-    match fire_routine(agent, &name, &prompt) {
+    match fire_for_target(target, &name, &prompt) {
         Ok(()) => {
-            let _ = crate::routine_log::record(agent, &rid, true, "ok");
+            let _ = crate::routine_log::record(target, &rid, true, "ok");
         }
         Err(err) => {
-            let _ = crate::routine_log::record(agent, &rid, false, &err.to_string());
+            let _ = crate::routine_log::record(target, &rid, false, &err.to_string());
             return Err(err);
         }
     }
     let minute_key = cron::now_local()
         .map(|t| t.minute_key())
         .unwrap_or_else(|_| paths::utc_timestamp());
-    mark_routine_run(agent, &rid, &minute_key)
+    mark_routine_run(target, &rid, &minute_key)
 }
 
 fn reset_agent(id: &str, drop_routines: bool) -> anyhow::Result<String> {
@@ -1954,6 +2023,7 @@ fn list_channels() -> Vec<ChannelInfo> {
             id: c.id.clone(),
             name: c.name.clone(),
             members: c.members.clone(),
+            routines: c.routines.clone(),
             brief: c.brief.clone(),
             preview: crate::transcript::channel_preview(&c.id),
             last_ts: crate::transcript::channel_last_ts(&c.id),

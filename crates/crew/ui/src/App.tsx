@@ -253,10 +253,18 @@ export function App() {
         />
         <ChannelPane
           open={crew.paneOpen && crew.selectedKind === "channel"}
+          tab={crew.paneTab}
           channel={crew.currentChannel}
           agents={crew.agents}
+          onTab={crew.setPaneTab}
           onClose={crew.closePane}
           onSave={crew.saveChannel}
+          onAddRoutine={crew.addRoutine}
+          onToggleRoutine={crew.toggleRoutine}
+          onDeleteRoutine={crew.deleteRoutine}
+          onRunRoutine={crew.runRoutine}
+          onEditRoutine={crew.editRoutine}
+          onLoadRoutineRuns={crew.loadRoutineRuns}
         />
         <AgentPane
           open={crew.paneOpen && crew.selectedKind === "agent"}

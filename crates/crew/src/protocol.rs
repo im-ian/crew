@@ -289,6 +289,8 @@ pub struct ChannelInfo {
     pub name: String,
     #[serde(default)]
     pub members: Vec<String>,
+    #[serde(default)]
+    pub routines: Vec<Routine>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brief: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

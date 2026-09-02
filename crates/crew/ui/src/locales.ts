@@ -143,6 +143,7 @@ export const KO = {
   "menu.deleteBot": "봇 삭제",
 
   "pane.tab.info": "봇 정보",
+  "pane.tab.channel": "채널 정보",
   "pane.tab.routines": "루틴",
   "pane.tab.memory": "메모리",
   "memory.note": "이 봇이 대화를 지워도 기억할 내용입니다.",
@@ -179,6 +180,7 @@ export const KO = {
   "channel.namePh": "예: 프론트엔드",
   "channel.briefPh": "이 방에서 봇들이 기억할 일, 규칙, 배경",
   "channel.noBots": "봇이 없습니다",
+  "channel.routineNote": "정해진 시각에 이 방으로 메시지를 보냅니다. @이름 을 넣으면 그 봇이, 없으면 마지막에 말한 봇이 답합니다.",
   "channel.applyNote":
     "멤버만 이 방 대화에 참여합니다. 브리프는 봇을 깨울 때 최근 대화와 같이 전달됩니다.",
   "newBot.title": "새 봇",
@@ -406,6 +408,7 @@ export const EN: { [K in MessageKey]: string } = {
   "menu.deleteBot": "Delete bot",
 
   "pane.tab.info": "Bot info",
+  "pane.tab.channel": "Channel",
   "pane.tab.routines": "Routines",
   "pane.tab.memory": "Memory",
   "memory.note": "Kept even if this bot’s chat is cleared.",
@@ -442,6 +445,7 @@ export const EN: { [K in MessageKey]: string } = {
   "channel.namePh": "e.g. Frontend",
   "channel.briefPh": "Work, rules, and background this room should remember",
   "channel.noBots": "No bots yet",
+  "channel.routineNote": "Posts into this room on a schedule. An @name wakes that bot; without one the bot that spoke last answers.",
   "channel.applyNote":
     "Only members join this room. The brief is sent with recent chat when a bot is woken.",
   "newBot.title": "New bot",

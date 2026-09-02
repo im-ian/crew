@@ -81,7 +81,7 @@ enum Cmd {
     /// Manage agents
     #[command(subcommand)]
     Agent(AgentCmd),
-    /// Manage per-agent scheduled routines
+    /// Scheduled routines for a bot, or for a channel addressed as `#room`
     #[command(subcommand)]
     Routine(RoutineCmd),
     /// Group channels
@@ -881,15 +881,15 @@ fn run_routine(cmd: RoutineCmd) -> anyhow::Result<()> {
         RoutineCmd::List { agent } => {
             if paths::is_socket_live() {
                 match client::rpc(Request::List)? {
-                    Event::Agents { agents, .. } => {
-                        client::print_routines(&agents, agent.as_deref())
+                    Event::Agents { agents, channels } => {
+                        client::print_routines(&agents, &channels, agent.as_deref())
                     }
                     Event::Error { message } => anyhow::bail!("{message}"),
                     ev => client::print_event(ev),
                 }
             } else {
                 let cfg = Config::load()?;
-                client::print_routines_from_config(&cfg.agents, agent.as_deref())
+                client::print_routines_from_config(&cfg.agents, &cfg.channels, agent.as_deref())
             }
         }
         RoutineCmd::Add {

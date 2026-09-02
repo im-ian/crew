@@ -50,10 +50,15 @@ pub fn routine_fail_body(routine: &str, lang: &str) -> String {
     }
 }
 
-/// A scheduled routine could not start. Same focus + notification path as a status change.
-pub fn routine_failed(agent_id: &str, routine: &str) {
+/// A scheduled routine could not start. Same focus + notification path as a status
+/// change. `target` is a bot id, or `#room` for a channel routine.
+pub fn routine_failed(target: &str, routine: &str) {
     let body = routine_fail_body(routine, &paths::locale());
-    write_focus("agent", agent_id, &body, "routine_failed", routine);
+    let (kind, id) = match target.strip_prefix('#') {
+        Some(channel) => ("channel", channel),
+        None => ("agent", target),
+    };
+    write_focus(kind, id, &body, "routine_failed", routine);
     if paths::ui_is_live() {
         return;
     }

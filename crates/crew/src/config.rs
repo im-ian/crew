@@ -25,6 +25,9 @@ pub struct Channel {
     pub members: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brief: Option<String>,
+    /// Scheduled posts into the room. Same shape as a bot's routines.
+    #[serde(default)]
+    pub routines: Vec<Routine>,
 }
 
 impl Channel {
@@ -52,6 +55,7 @@ impl Channel {
             name,
             members: unique_ids(members),
             brief: None,
+            routines: Vec::new(),
         })
     }
 
