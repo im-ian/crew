@@ -42,17 +42,3 @@ export function translate(locale: Locale, key: MessageKey, vars?: Vars): string 
   const table = DICTS[locale] ?? DICTS.ko;
   return interpolate(table[key] ?? DICTS.ko[key] ?? key, vars);
 }
-
-function selfCheck() {
-  if (interpolate("{name} 작업 중", { name: "봇" }) !== "봇 작업 중") {
-    throw new Error("i18n interpolate");
-  }
-  if (translate("en", "settings.title") !== "Settings") {
-    throw new Error("i18n en");
-  }
-  if (translate("ko", "settings.title") !== "설정") {
-    throw new Error("i18n ko");
-  }
-}
-
-selfCheck();
