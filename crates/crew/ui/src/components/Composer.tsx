@@ -25,6 +25,8 @@ type Props = {
 
 type Mention = { start: number; query: string };
 
+type Draft = { html: string; attaches: Attach[] };
+
 type Attach = {
   id: string;
   name: string;
@@ -193,6 +195,33 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     setAttaches((prev) => prev.filter((a) => a.id !== id));
   }
 
+  // One editor serves every chat, so its text has to move aside when the chat does.
+  // ponytail: in memory only — a draft dies with the window.
+  const drafts = useRef(new Map<string, Draft>());
+  const attachRef = useRef(attaches);
+  attachRef.current = attaches;
+  const chatKey = selected ? `${selectedKind}:${selected}` : "";
+  const prevKey = useRef(chatKey);
+
+  useEffect(() => {
+    if (prevKey.current === chatKey) return;
+    const from = prevKey.current;
+    prevKey.current = chatKey;
+    const el = inputRef.current;
+    if (from && el) {
+      const held = attachRef.current;
+      if (isEditorEmpty(el) && !held.length) drafts.current.delete(from);
+      else drafts.current.set(from, { html: el.innerHTML, attaches: held });
+    }
+    const next = chatKey ? drafts.current.get(chatKey) : undefined;
+    if (el) el.innerHTML = next?.html ?? "";
+    setAttaches(next?.attaches ?? []);
+    setMention(null);
+    setSlash(null);
+    refreshEmpty();
+    fit();
+  }, [chatKey]);
+
   useEffect(() => {
     fit();
   }, [placeholder]);
@@ -233,6 +262,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         const raw = [text, files.join("\n")].filter(Boolean).join("\n\n");
         if (!raw.trim()) return;
         el.innerHTML = "";
+        drafts.current.delete(chatKey);
         setMention(null);
         setAttaches([]);
         setEmpty(true);
