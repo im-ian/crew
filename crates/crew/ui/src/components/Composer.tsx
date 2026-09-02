@@ -350,6 +350,32 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           </div>
         ) : null}
         <div className="composer-row">
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files?.length) void attachFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <button
+          type="button"
+          className="attach-btn"
+          title={t("composer.attachTitle")}
+          aria-label={t("composer.attach")}
+          onClick={() => fileRef.current?.click()}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path
+              d="M8 3.5v9M3.5 8h9"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
         <div
           ref={inputRef}
           className={"composer-input" + (empty ? " is-empty" : "")}
@@ -457,32 +483,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
             }
           }}
         />
-        <input
-          ref={fileRef}
-          type="file"
-          multiple
-          hidden
-          onChange={(e) => {
-            if (e.target.files?.length) void attachFiles(e.target.files);
-            e.target.value = "";
-          }}
-        />
-        <button
-          type="button"
-          className="attach-btn"
-          title={t("composer.attachTitle")}
-          aria-label={t("composer.attach")}
-          onClick={() => fileRef.current?.click()}
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path
-              d="M8 3.5v9M3.5 8h9"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-            />
-          </svg>
-        </button>
         {busy && onStop ? (
           <button
             type="button"

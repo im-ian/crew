@@ -1560,7 +1560,7 @@ button.who-btn:focus-visible {
   gap: 6px;
   background: var(--field);
   border-radius: var(--radius-pill);
-  padding: 6px 6px 6px 14px;
+  padding: 6px;
   min-height: 44px;
 }
 .composer-box.has-attach {
@@ -1760,7 +1760,7 @@ button.mention-chip:active {
   background: transparent;
   border: 0;
   color: var(--ink);
-  padding: 5px 4px 5px 0;
+  padding: 5px 4px;
   font-size: 15px;
   line-height: 1.4;
   outline: none;
