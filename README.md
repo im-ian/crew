@@ -12,6 +12,14 @@
   <img src="docs/readme/window.png" alt="Crew 채팅 창 — 봇과 채널, @멘션, 핸드오프" width="920">
 </p>
 
+<p align="center">
+  <img src="docs/readme/new-bot.png" alt="새 봇 만들기 — 이름, 역할, Grok/Claude/Codex, 모델, 아바타" width="920">
+</p>
+
+<p align="center">
+  <img src="docs/readme/routines.png" alt="루틴 설정 — 예약된 일, 말로 추가, 매일·평일·매주 피커" width="920">
+</p>
+
 ---
 
 ## 만든 이유

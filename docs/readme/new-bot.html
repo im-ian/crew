@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>Crew — 새 봇</title>
+  <link rel="stylesheet" href="../../crates/crew/ui/src/styles.css" />
+  <style>
+    html, body {
+      margin: 0;
+      width: 1280px;
+      height: 860px;
+      overflow: hidden;
+      background:
+        radial-gradient(ellipse 50% 60% at 20% 40%, rgba(255, 90, 90, 0.14), transparent 60%),
+        radial-gradient(ellipse 40% 50% at 80% 70%, rgba(155, 125, 255, 0.12), transparent 55%),
+        #12151f;
+    }
+    .stage {
+      width: 1280px;
+      height: 860px;
+      display: grid;
+      place-items: center;
+    }
+    .window {
+      width: 1120px;
+      height: 740px;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow:
+        0 40px 80px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(255, 255, 255, 0.06);
+      position: relative;
+    }
+    .window .drag-top,
+    .window .titlebar-align {
+      height: 40px;
+    }
+    .traffic {
+      position: absolute;
+      top: 14px;
+      left: 16px;
+      z-index: 40;
+      display: flex;
+      gap: 8px;
+      pointer-events: none;
+    }
+    .traffic i {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      display: block;
+    }
+    .traffic .r { background: #ff5f57; }
+    .traffic .y { background: #febc2e; }
+    .traffic .g { background: #28c840; }
+    .avatar.has-face img {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .hash-face {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      background: #3a3a3c;
+      color: #f0f0f0;
+      display: grid;
+      place-items: center;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .who-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 0;
+      background: transparent;
+      color: var(--ink);
+      padding: 4px 8px 4px 4px;
+      border-radius: 8px;
+      font: inherit;
+    }
+    .who-name { font-weight: 600; font-size: 14px; }
+    .modal {
+      position: absolute;
+    }
+    textarea.textin { resize: none; }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <div class="window">
+      <div class="traffic"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+      <div class="app">
+        <aside>
+          <div class="drag-top"></div>
+          <div class="search-row">
+            <input class="search" placeholder="검색" value="" readonly />
+            <button class="icon-btn" type="button" aria-label="추가">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+              </svg>
+            </button>
+          </div>
+          <div class="rail-lists">
+            <div class="rail-section grouped">
+              <div class="group-head">
+                <button class="group-toggle" type="button"><span class="group-chevron">▾</span></button>
+                <button class="group-name" type="button">팀</button>
+              </div>
+              <button class="rail-row active" type="button">
+                <span class="avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
+                <span class="rail-row-text">
+                  <span class="agent-name">Grok</span>
+                  <span class="agent-preview">반영함. 표 밑에 권한 범위 문장 하나.</span>
+                </span>
+              </button>
+              <button class="rail-row" type="button">
+                <span class="avatar has-face"><img src="face-square.svg" alt="" /></span>
+                <span class="rail-row-text">
+                  <span class="agent-name">Claude</span>
+                  <span class="agent-preview">한 단락으로 줄이자.</span>
+                </span>
+              </button>
+              <button class="rail-row" type="button">
+                <span class="avatar has-face"><img src="face-circle.svg" alt="" /></span>
+                <span class="rail-row-text">
+                  <span class="agent-name">Codex</span>
+                  <span class="agent-preview">예시 로스터는 agents.example.json</span>
+                </span>
+              </button>
+              <button class="rail-row unread" type="button">
+                <span class="avatar"><span class="hash-face">#</span></span>
+                <span class="rail-row-text">
+                  <span class="agent-name">출시</span>
+                  <span class="agent-preview">오늘 README 초안 리뷰하자</span>
+                </span>
+                <span class="unread-dot"></span>
+              </button>
+            </div>
+          </div>
+          <div class="rail-foot">
+            <button class="icon-btn" type="button" title="설정" aria-label="설정">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <circle cx="8" cy="8" r="2.15" stroke="currentColor" stroke-width="1.4" />
+                <path
+                  d="M8 1.7v1.6M8 12.7v1.6M1.7 8h1.6M12.7 8h1.6M3.4 3.4l1.15 1.15M11.45 11.45l1.15 1.15M3.4 12.6l1.15-1.15M11.45 4.55l1.15-1.15"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+          </div>
+        </aside>
+        <main>
+          <div class="titlebar-align"></div>
+          <header>
+            <div class="head-identity">
+              <button class="who-btn" type="button">
+                <span class="avatar who-avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
+                <span class="who-name">Grok</span>
+              </button>
+            </div>
+          </header>
+          <div class="thread-wrap">
+            <div class="thread">
+              <div class="row me">
+                <div class="me-msg">
+                  <div class="bubble">README 설치 섹션, clone 빌드랑 cargo install --git 둘 다 넣을까?</div>
+                </div>
+              </div>
+              <div class="row them">
+                <span class="avatar msg-avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
+                <div class="bubble incoming">둘 다 적어. clone은 고치기 쉽고, <code>cargo install --git</code>은 PATH에 바로 올라가.</div>
+              </div>
+            </div>
+          </div>
+          <div class="composer">
+            <div class="composer-box">
+              <div class="composer-row">
+                <button type="button" class="attach-btn" aria-label="추가">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                  </svg>
+                </button>
+                <div class="composer-input is-empty" data-placeholder="Grok에게 메시지 (@이름으로 부르기)"></div>
+                <button type="submit">↑</button>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+      <div class="modal open">
+        <div class="dialog">
+          <h3>새 봇</h3>
+          <div class="form-stack">
+            <div class="info-hero">
+              <span class="avatar new-avatar has-face">
+                <img src="face-triangle.svg" alt="" />
+              </span>
+            </div>
+            <div class="field-block">
+              <label class="field" for="new-name">이름</label>
+              <input id="new-name" class="textin" value="리뷰어" readonly />
+            </div>
+            <div class="field-block">
+              <label class="field" for="new-persona">역할 / 설명</label>
+              <textarea id="new-persona" class="textin" readonly>패치를 짧게 리뷰하고, 막히는 지점만 짚는다.</textarea>
+            </div>
+            <div class="field-block">
+              <label class="field">AI</label>
+              <div class="seg" data-cols="3">
+                <button type="button" class="on">grok</button>
+                <button type="button">claude</button>
+                <button type="button">codex</button>
+              </div>
+            </div>
+            <div class="field-block">
+              <label class="field" for="new-model">모델</label>
+              <select id="new-model" class="textin">
+                <option selected>기본값 (grok-4)</option>
+              </select>
+            </div>
+            <div class="field-block">
+              <label class="field">생각</label>
+              <div class="seg" data-cols="4">
+                <button type="button" class="on">기본</button>
+                <button type="button">가볍게</button>
+                <button type="button">보통</button>
+                <button type="button">꼼꼼하게</button>
+              </div>
+            </div>
+          </div>
+          <div class="actions spread">
+            <button type="button" class="ghost">취소</button>
+            <button type="button" class="primary">만들기</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
