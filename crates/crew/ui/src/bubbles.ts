@@ -75,15 +75,26 @@ export function splitBubbles(text: string): string[] {
       continue;
     }
     if (!code && !bold && isSentenceEnd(text[i])) {
-      const next = text[i + 1];
+      let j = i + 1;
+      while (text[j] === " ") j += 1;
+      const next = text[j];
       const prev = lastContentChar(text, i);
       const afterHangul = /[가-힣]/.test(prev);
-      if (
+      if (next === "\n") {
+        while (text[j] === "\n") j += 1;
+        if (text[j] && isNewStart(text[j])) {
+          flush(i + 1, j);
+          i = j;
+          continue;
+        }
+      } else if (
         next &&
-        (isNewStart(next) || (afterHangul && /[a-z*]/.test(next)))
+        ((j === i + 1 &&
+          (isNewStart(next) || (afterHangul && /[a-z*]/.test(next)))) ||
+          (j > i + 1 && /[가-힣]/.test(next)))
       ) {
-        flush(i + 1, i + 1);
-        i += 1;
+        flush(i + 1, j);
+        i = j;
         continue;
       }
     }

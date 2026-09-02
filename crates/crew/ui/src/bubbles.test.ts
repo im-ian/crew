@@ -23,6 +23,24 @@ describe("splitBubbles", () => {
     ]);
   });
 
+  it("splits a Korean sentence that has a space after the period", () => {
+    expect(splitBubbles("확인했어요. 이제 고칠게요.")).toEqual([
+      "확인했어요.",
+      "이제 고칠게요.",
+    ]);
+  });
+
+  it("splits a sentence that continues on the next line", () => {
+    expect(splitBubbles("확인했어요.\n이제 고칠게요.")).toEqual([
+      "확인했어요.",
+      "이제 고칠게요.",
+    ]);
+  });
+
+  it("does not split an English abbreviation on the same line", () => {
+    expect(splitBubbles("Mr. Smith arrived")).toEqual(["Mr. Smith arrived"]);
+  });
+
   it("leaves a decimal or an ellipsis inside one bubble", () => {
     expect(splitBubbles("버전 1.5 입니다")).toEqual(["버전 1.5 입니다"]);
   });
