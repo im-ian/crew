@@ -218,6 +218,7 @@ export function App() {
               crew.currentAgent?.status === "blocked")
           }
           onSelectAgent={crew.selectAgent}
+          onSelectChannel={crew.selectChannel}
           onApprove={(allow, id) => void crew.approveAgent(allow, id)}
           highlightId={crew.highlightId}
           onHighlightDone={crew.clearHighlight}
@@ -226,6 +227,7 @@ export function App() {
         <Composer
           ref={composerRef}
           agents={crew.agents}
+          channels={crew.channels}
           selected={crew.selected}
           selectedKind={crew.selectedKind}
           placeholder={crew.placeholder}

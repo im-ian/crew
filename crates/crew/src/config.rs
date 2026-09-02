@@ -696,6 +696,9 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         "When the user writes @id or @display-name, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend.\n",
     );
     s.push_str(
+        "When the user writes #id or #display-name, they are naming a channel. Stay in this session. To post there, run `crew channel send <id> <text>` or `crew tell --channel <id> <text>`.\n",
+    );
+    s.push_str(
         "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew channel:…]` / `[crew system]` are real messages.\n",
     );
     s.push_str("Live roster: $CREW_HOME/roster.md\n");
@@ -730,6 +733,7 @@ pub fn roster_update_text(agent: &AgentConfig, roster: &[AgentConfig]) -> String
         body.push('.');
     }
     body.push_str(" When the user writes @id or @display-name they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>`. Do not ask the user to switch chats. Do not pretend.");
+    body.push_str(" When the user writes #id or #display-name they are naming a channel. To post there, run `crew channel send <id> <text>`.");
     body
 }
 
@@ -748,23 +752,73 @@ pub fn mentioned_teammate_ids(text: &str, self_id: &str, roster: &[AgentConfig])
 }
 
 /// Prompt for the CLI: raw user text, plus a short `[crew system]` hint when
-/// the user @mentioned teammates. Transcript should keep the raw message.
-pub fn with_mention_hint(text: &str, self_id: &str, roster: &[AgentConfig]) -> String {
+/// the user @mentioned teammates or #mentioned channels. Transcript keeps the raw message.
+pub fn with_mention_hint(
+    text: &str,
+    self_id: &str,
+    roster: &[AgentConfig],
+    channels: &[Channel],
+) -> String {
     let ids = mentioned_teammate_ids(text, self_id, roster);
-    if ids.is_empty() {
+    let rooms = mentioned_channel_ids(text, channels);
+    if ids.is_empty() && rooms.is_empty() {
         return text.to_string();
     }
-    format!(
-        "{text}\n\n[crew system]\nUser already messaged teammates via crew: {}. They have this request. Stay in this session. Do not ask the user to switch chats. Do not pretend.",
-        ids.join(", ")
-    )
+    let mut note = String::new();
+    if !ids.is_empty() {
+        note.push_str(&format!(
+            "User already messaged teammates via crew: {}. They have this request. Stay in this session. Do not ask the user to switch chats. Do not pretend.",
+            ids.join(", ")
+        ));
+    }
+    if !rooms.is_empty() {
+        if !note.is_empty() {
+            note.push(' ');
+        }
+        note.push_str(&format!(
+            "User named channel(s): {}. To post there, run `crew channel send <id> <text>`. Stay in this session.",
+            rooms.join(", ")
+        ));
+    }
+    format!("{text}\n\n[crew system]\n{note}")
+}
+
+pub fn mentioned_channel_ids(text: &str, channels: &[Channel]) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut seen = HashSet::new();
+    for token in sigil_tokens(text, '#') {
+        if let Some(id) = resolve_channel_mention(&token, channels) {
+            if seen.insert(id.clone()) {
+                found.push(id);
+            }
+        }
+    }
+    found
+}
+
+pub(crate) fn resolve_channel_mention(token: &str, channels: &[Channel]) -> Option<String> {
+    let raw = token.strip_prefix('#').unwrap_or(token);
+    let lower = raw.to_lowercase();
+    channels
+        .iter()
+        .find(|c| {
+            c.id == raw
+                || c.name == raw
+                || c.id.to_lowercase() == lower
+                || c.name.to_lowercase() == lower
+        })
+        .map(|c| c.id.clone())
 }
 
 pub(crate) fn mention_tokens(text: &str) -> Vec<String> {
+    sigil_tokens(text, '@')
+}
+
+fn sigil_tokens(text: &str, sigil: char) -> Vec<String> {
     let mut out = Vec::new();
     let mut prev_ws = true;
     for (idx, ch) in text.char_indices() {
-        if ch == '@' && prev_ws {
+        if ch == sigil && prev_ws {
             let rest = &text[idx + ch.len_utf8()..];
             let raw: String = rest.chars().take_while(|c| !c.is_whitespace()).collect();
             let token = raw.trim_end_matches(is_mention_punct);
@@ -1576,15 +1630,38 @@ mod tests {
             Vec::<String>::new()
         );
 
-        let hinted = with_mention_hint("ping @Beta please", "alpha", &roster);
+        let hinted = with_mention_hint("ping @Beta please", "alpha", &roster, &[]);
         assert!(hinted.starts_with("ping @Beta please"));
         assert!(hinted.contains("[crew system]"));
         assert!(hinted.contains("beta"));
         assert!(hinted.contains("already messaged teammates"));
         assert_eq!(
-            with_mention_hint("no mentions", "alpha", &roster),
+            with_mention_hint("no mentions", "alpha", &roster, &[]),
             "no mentions"
         );
+    }
+
+    #[test]
+    fn hash_tokens_resolve_channels() {
+        let room = Channel::new("ship".into(), "출시".into(), vec!["alpha".into()]).unwrap();
+        assert_eq!(
+            mentioned_channel_ids("post in #출시 please", &[room.clone()]),
+            vec!["ship".to_string()]
+        );
+        assert_eq!(
+            mentioned_channel_ids("see #ship.", &[room.clone()]),
+            vec!["ship".to_string()]
+        );
+        assert!(mentioned_channel_ids("color #ff6a00", &[room]).is_empty());
+        let alpha = AgentConfig::new("alpha".into(), "Alpha".into(), vec!["cat".into()], None);
+        let hinted = with_mention_hint(
+            "drop this in #출시",
+            "alpha",
+            &[alpha],
+            &[Channel::new("ship".into(), "출시".into(), vec!["alpha".into()]).unwrap()],
+        );
+        assert!(hinted.contains("ship"));
+        assert!(hinted.contains("channel send"));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import type { AgentInfo } from "./types";
+import type { AgentInfo, ChannelInfo } from "./types";
 
 const SKIP_TAGS = new Set(["CODE", "PRE", "A"]);
 const BLOCK_TAGS = new Set([
@@ -18,6 +18,10 @@ export function mentionLabel(agent: AgentInfo): string {
   return agent.name || agent.id;
 }
 
+export function channelLabel(channel: ChannelInfo): string {
+  return channel.name || channel.id;
+}
+
 export function resolveMention(
   token: string,
   agents: readonly AgentInfo[],
@@ -29,6 +33,21 @@ export function resolveMention(
       a.name === token ||
       a.id.toLowerCase() === lower ||
       mentionLabel(a).toLowerCase() === lower,
+  );
+}
+
+export function resolveChannel(
+  token: string,
+  channels: readonly ChannelInfo[],
+): ChannelInfo | undefined {
+  const raw = token.replace(/^#/, "");
+  const lower = raw.toLowerCase();
+  return channels.find(
+    (c) =>
+      c.id === raw ||
+      c.name === raw ||
+      c.id.toLowerCase() === lower ||
+      channelLabel(c).toLowerCase() === lower,
   );
 }
 
@@ -46,8 +65,9 @@ function attr(s: string): string {
 export function injectMentionChips(
   html: string,
   agents: readonly AgentInfo[],
+  channels: readonly ChannelInfo[] = [],
 ): string {
-  if (!agents.length) return html;
+  if (!agents.length && !channels.length) return html;
   let out = "";
   let i = 0;
   let prevWs = true;
@@ -91,6 +111,17 @@ export function injectMentionChips(
       const agent = token ? resolveMention(token, agents) : undefined;
       if (agent) {
         out += `<span class="mention-chip" data-mention="${attr(agent.id)}"></span>`;
+        i += 1 + token.length;
+        prevWs = false;
+        continue;
+      }
+    }
+    if (html[i] === "#" && prevWs) {
+      const raw = (html.slice(i + 1).match(/^[^\s<]+/) || [""])[0];
+      const token = trimMentionPunct(raw);
+      const channel = token ? resolveChannel(token, channels) : undefined;
+      if (channel) {
+        out += `<span class="mention-chip" data-channel="${attr(channel.id)}"></span>`;
         i += 1 + token.length;
         prevWs = false;
         continue;

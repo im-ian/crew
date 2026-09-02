@@ -1,12 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { injectMentionChips, resolveMention, trimMentionPunct } from "./mentions";
-import type { AgentInfo } from "./types";
+import {
+  injectMentionChips,
+  resolveChannel,
+  resolveMention,
+  trimMentionPunct,
+} from "./mentions";
+import type { AgentInfo, ChannelInfo } from "./types";
 
 function agent(id: string, name: string): AgentInfo {
   return { id, name, status: "idle", cmd: ["cat"], cwd: "/tmp", routines: [] };
 }
 
 const agents = [agent("alpha", "Alpha"), agent("gamma", "춘식이")];
+const channels: ChannelInfo[] = [
+  { id: "ship", name: "출시", members: ["alpha"] },
+];
 
 describe("resolveMention", () => {
   it("matches an id or a display name, either case", () => {
@@ -14,6 +22,14 @@ describe("resolveMention", () => {
     expect(resolveMention("ALPHA", agents)?.id).toBe("alpha");
     expect(resolveMention("춘식이", agents)?.id).toBe("gamma");
     expect(resolveMention("nobody", agents)).toBeUndefined();
+  });
+});
+
+describe("resolveChannel", () => {
+  it("matches an id or a display name, with or without a leading hash", () => {
+    expect(resolveChannel("ship", channels)?.id).toBe("ship");
+    expect(resolveChannel("#출시", channels)?.id).toBe("ship");
+    expect(resolveChannel("nobody", channels)).toBeUndefined();
   });
 });
 
@@ -64,5 +80,17 @@ describe("injectMentionChips", () => {
 
   it("returns the html untouched when there is no roster", () => {
     expect(injectMentionChips("<p>@alpha</p>", [])).toBe("<p>@alpha</p>");
+  });
+
+  it("turns a known channel into a chip", () => {
+    expect(injectMentionChips("<p>#출시 올려</p>", agents, channels)).toBe(
+      '<p><span class="mention-chip" data-channel="ship"></span> 올려</p>',
+    );
+  });
+
+  it("leaves an unknown hash as written", () => {
+    expect(injectMentionChips("<p>#nobody</p>", agents, channels)).toBe(
+      "<p>#nobody</p>",
+    );
   });
 });

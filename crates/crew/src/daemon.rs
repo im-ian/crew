@@ -1399,7 +1399,12 @@ fn send_agent(id: &str, text: &str) -> anyhow::Result<()> {
     let roster = roster_vec();
     let msg = crate::transcript::push_user(id, "user", text);
     let mentions = targeting::one_on_one_tell_targets(text, id, &roster);
-    let delivered = crate::config::with_mention_hint(text, id, &roster);
+    let rooms: Vec<Channel> = channels()
+        .lock()
+        .ok()
+        .map(|m| m.values().cloned().collect())
+        .unwrap_or_default();
+    let delivered = crate::config::with_mention_hint(text, id, &roster, &rooms);
     submit_delivery(id, &delivered, true, Some(msg.id), TurnOrigin::user())?;
     for to in mentions {
         let origin = TurnOrigin::mention_tell(id);

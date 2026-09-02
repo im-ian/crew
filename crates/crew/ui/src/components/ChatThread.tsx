@@ -23,6 +23,7 @@ type Props = {
   onStick: (stick: boolean) => void;
   streaming?: boolean;
   onSelectAgent?: (id: string) => void;
+  onSelectChannel?: (id: string) => void;
   onApprove?: (allow: boolean, agentId?: string) => void;
   highlightId?: string | null;
   onHighlightDone?: () => void;
@@ -41,6 +42,7 @@ export function ChatThread({
   onStick,
   streaming = false,
   onSelectAgent,
+  onSelectChannel,
   onApprove,
   highlightId = null,
   onHighlightDone,
@@ -143,6 +145,7 @@ export function ChatThread({
                   channels={channels}
                   selectedKind={selectedKind}
                   onSelectAgent={openAgent}
+                  onSelectChannel={onSelectChannel}
                   flash={flash}
                 />
               );
@@ -152,11 +155,13 @@ export function ChatThread({
                 key={m.id}
                 message={m}
                 agents={agents}
+                channels={channels}
                 selected={selected}
                 selectedKind={selectedKind}
                 currentAgent={currentAgent}
                 caret={caret}
                 onSelectAgent={openAgent}
+                onSelectChannel={onSelectChannel}
                 onApprove={
                   onApprove
                     ? (allow) => onApprove(allow, m.from)
@@ -180,9 +185,11 @@ export function ChatThread({
             agent={agent}
             who={agent.name || agent.id}
             agents={agents}
+            channels={channels}
             caret
             openName={selectedKind === "channel"}
             onSelectAgent={openAgent}
+            onSelectChannel={onSelectChannel}
           />
         ))}
         {blockedCards().map((agent) => (
@@ -253,6 +260,7 @@ function SystemOrIncoming({
   channels,
   selectedKind,
   onSelectAgent,
+  onSelectChannel,
   flash = false,
 }: {
   message: ChatMessage;
@@ -260,6 +268,7 @@ function SystemOrIncoming({
   channels: ChannelInfo[];
   selectedKind: Kind;
   onSelectAgent?: (id: string) => void;
+  onSelectChannel?: (id: string) => void;
   flash?: boolean;
 }) {
   const t = useT();
@@ -268,10 +277,12 @@ function SystemOrIncoming({
       <Bubble
         message={{ ...m, role: "user" }}
         agents={agents}
+        channels={channels}
         selected={null}
         selectedKind={selectedKind}
         currentAgent={null}
         onSelectAgent={onSelectAgent}
+        onSelectChannel={onSelectChannel}
         flash={flash}
       />
     );
@@ -295,6 +306,7 @@ function SystemOrIncoming({
         agents={agents}
         channels={channels}
         onSelectAgent={onSelectAgent}
+        onSelectChannel={onSelectChannel}
         flash={flash}
       />
     );
@@ -318,6 +330,7 @@ function SystemOrIncoming({
         agents={agents}
         channels={channels}
         onSelectAgent={onSelectAgent}
+        onSelectChannel={onSelectChannel}
         flash={flash}
       />
     );
@@ -333,6 +346,7 @@ function SystemOrIncoming({
         agents={agents}
         channels={channels}
         onSelectAgent={onSelectAgent}
+        onSelectChannel={onSelectChannel}
         flash={flash}
       />
     );
@@ -356,6 +370,7 @@ function TransferNote({
   agents,
   channels,
   onSelectAgent,
+  onSelectChannel,
   flash = false,
 }: {
   kind: "sent" | "received" | "handoff";
@@ -364,6 +379,7 @@ function TransferNote({
   agents: AgentInfo[];
   channels: ChannelInfo[];
   onSelectAgent?: (id: string) => void;
+  onSelectChannel?: (id: string) => void;
   flash?: boolean;
 }) {
   const fromChannel = otherId.startsWith("#");
@@ -399,7 +415,9 @@ function TransferNote({
         <XferBody
           text={m.text}
           agents={agents}
+          channels={channels}
           onMention={onSelectAgent}
+          onChannel={onSelectChannel}
           baseDir={agent?.cwd || undefined}
         />
       ) : null}
@@ -420,12 +438,16 @@ function isLongXfer(text: string): boolean {
 function XferBody({
   text,
   agents,
+  channels = [],
   onMention,
+  onChannel,
   baseDir,
 }: {
   text: string;
   agents: AgentInfo[];
+  channels?: ChannelInfo[];
   onMention?: (id: string) => void;
+  onChannel?: (id: string) => void;
   baseDir?: string;
 }) {
   const t = useT();
@@ -441,7 +463,9 @@ function XferBody({
           className="xfer-text md"
           text={text}
           agents={agents}
+          channels={channels}
           onMention={onMention}
+          onChannel={onChannel}
           baseDir={baseDir}
         />
       )}
@@ -473,9 +497,11 @@ function Incoming({
   agent,
   who,
   agents,
+  channels = [],
   caret = false,
   openName = true,
   onSelectAgent,
+  onSelectChannel,
   onApprove,
   flash = false,
 }: {
@@ -483,9 +509,11 @@ function Incoming({
   agent: AgentInfo | null;
   who: string;
   agents: AgentInfo[];
+  channels?: ChannelInfo[];
   caret?: boolean;
   openName?: boolean;
   onSelectAgent?: (id: string) => void;
+  onSelectChannel?: (id: string) => void;
   onApprove?: (allow: boolean) => void;
   flash?: boolean;
 }) {
@@ -559,7 +587,9 @@ function Incoming({
               }
               text={part}
               agents={agents}
+              channels={channels}
               onMention={onSelectAgent}
+              onChannel={onSelectChannel}
               baseDir={agent?.cwd || undefined}
             />
           );
@@ -636,21 +666,25 @@ function ApprovalCard({
 function Bubble({
   message: m,
   agents,
+  channels = [],
   selected,
   selectedKind,
   currentAgent,
   caret = false,
   onSelectAgent,
+  onSelectChannel,
   onApprove,
   flash = false,
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
+  channels?: ChannelInfo[];
   selected: string | null;
   selectedKind: Kind;
   currentAgent: AgentInfo | null;
   caret?: boolean;
   onSelectAgent?: (id: string) => void;
+  onSelectChannel?: (id: string) => void;
   onApprove?: (allow: boolean) => void;
   flash?: boolean;
 }) {
@@ -666,9 +700,11 @@ function Bubble({
         agent={agent}
         who={displayWho(m, agent)}
         agents={agents}
+        channels={channels}
         caret={caret}
         openName={!self}
         onSelectAgent={onSelectAgent}
+        onSelectChannel={onSelectChannel}
         onApprove={onApprove}
         flash={flash}
       />
@@ -687,7 +723,9 @@ function Bubble({
           className={cls}
           text={text}
           agents={agents}
+          channels={channels}
           onMention={onSelectAgent}
+          onChannel={onSelectChannel}
           baseDir={currentAgent?.cwd || undefined}
         />
         {queued ? <QueueWait /> : null}

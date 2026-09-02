@@ -1,10 +1,10 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import type { AgentInfo, Kind, Skill } from "../types";
+import type { AgentInfo, ChannelInfo, Kind, Skill } from "../types";
 import { api } from "../api";
 import { useT } from "../LocaleContext";
-import { resolveMention, trimMentionPunct } from "../mentions";
+import { resolveChannel, resolveMention, trimMentionPunct } from "../mentions";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
 
@@ -15,6 +15,7 @@ export type ComposerHandle = {
 
 type Props = {
   agents: AgentInfo[];
+  channels?: ChannelInfo[];
   selected: string | null;
   selectedKind: Kind;
   placeholder: string;
@@ -38,6 +39,7 @@ type Attach = {
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   agents,
+  channels = [],
   selected,
   selectedKind,
   placeholder,
@@ -51,6 +53,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   const composing = useRef(false);
   const [mention, setMention] = useState<Mention | null>(null);
   const [mentionIdx, setMentionIdx] = useState(0);
+  const [hash, setHash] = useState<Mention | null>(null);
+  const [hashIdx, setHashIdx] = useState(0);
   const [empty, setEmpty] = useState(true);
   const [slash, setSlash] = useState<Mention | null>(null);
   const [slashIdx, setSlashIdx] = useState(0);
@@ -108,6 +112,20 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     out.push(...bots);
     return out.slice(0, 8);
   }, [agents, mention, selected, selectedKind]);
+
+  const hashMatches = useMemo(() => {
+    if (!hash) return [];
+    const q = hash.query.toLowerCase();
+    return channels
+      .filter((c) => {
+        if (!q) return true;
+        return (
+          c.id.toLowerCase().includes(q) ||
+          (c.name || "").toLowerCase().includes(q)
+        );
+      })
+      .slice(0, 8);
+  }, [channels, hash]);
 
   const skillMatches = useMemo(() => {
     if (!slash) return [];
@@ -178,6 +196,18 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     } else {
       setSlash(null);
     }
+    const hashM = before.match(/(^|[\s])#(\S*)$/);
+    if (hashM) {
+      const query = hashM[2];
+      const start = before.length - query.length - 1;
+      setMention(null);
+      setHash((prev) => {
+        if (prev && prev.start === start && prev.query === query) return prev;
+        return { start, query };
+      });
+      return;
+    }
+    setHash(null);
     const m = before.match(/(^|[\s])@(\S*)$/);
     if (!m) {
       setMention(null);
@@ -192,8 +222,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   }
 
   function pickMention(agent: AgentInfo) {
-    if (!insertChip(inputRef.current, agent)) return;
+    if (!insertChip(inputRef.current, "@", () => renderChip(<MentionChip agent={agent} />))) return;
     setMention(null);
+    refreshEmpty();
+    fit();
+  }
+
+  function pickChannel(channel: ChannelInfo) {
+    if (!insertChip(inputRef.current, "#", () => renderChip(<MentionChip channel={channel} />))) return;
+    setHash(null);
     refreshEmpty();
     fit();
   }
@@ -250,6 +287,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     if (el) el.innerHTML = next?.html ?? "";
     setAttaches(next?.attaches ?? []);
     setMention(null);
+    setHash(null);
     setSlash(null);
     closePlus();
     refreshEmpty();
@@ -268,7 +306,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     if (mentionIdx >= matches.length) setMentionIdx(0);
   }, [mentionIdx, matches.length]);
 
+  useEffect(() => {
+    setHashIdx(0);
+  }, [hash?.start, hash?.query]);
+
+  useEffect(() => {
+    if (hashIdx >= hashMatches.length) setHashIdx(0);
+  }, [hashIdx, hashMatches.length]);
+
   const mentionOpen = !!mention && matches.length > 0;
+  const hashOpen = !!hash && hashMatches.length > 0;
   const slashOpen = !!slash && skillMatches.length > 0;
 
   return (
@@ -351,6 +398,34 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
                 <span className="mention-name">{a.name || a.id}</span>
                 {a.name && a.name !== a.id ? (
                   <span className="mention-id">{a.id}</span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {hashOpen ? (
+          <div className="mention-menu" role="listbox">
+            {hashMatches.map((c, i) => (
+              <button
+                key={c.id}
+                type="button"
+                role="option"
+                aria-selected={i === hashIdx}
+                className={"mention-item" + (i === hashIdx ? " active" : "")}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  pickChannel(c);
+                }}
+              >
+                <Avatar
+                  className="mention-avatar"
+                  id={c.id}
+                  name={c.name || c.id}
+                  letter="#"
+                />
+                <span className="mention-name">{c.name || c.id}</span>
+                {c.name && c.name !== c.id ? (
+                  <span className="mention-id">#{c.id}</span>
                 ) : null}
               </button>
             ))}
@@ -580,6 +655,29 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
                 return;
               }
             }
+            if (hashOpen) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setHashIdx((i) => (i + 1) % hashMatches.length);
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setHashIdx((i) => (i - 1 + hashMatches.length) % hashMatches.length);
+                return;
+              }
+              if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                e.preventDefault();
+                const channel = hashMatches[hashIdx] ?? hashMatches[0];
+                if (channel) pickChannel(channel);
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setHash(null);
+                return;
+              }
+            }
             if (e.key === "Enter" && e.shiftKey) {
               e.preventDefault();
               document.execCommand("insertLineBreak");
@@ -594,12 +692,22 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
             if (e.key === " " && !composing.current) {
               const ctx = caretTextContext(inputRef.current);
               const before = ctx?.node.textContent?.slice(0, ctx.offset) ?? "";
-              const m = before.match(/(^|[\s])@(\S+)$/);
-              const token = m ? trimMentionPunct(m[2]) : "";
+              const at = before.match(/(^|[\s])@(\S+)$/);
+              const token = at ? trimMentionPunct(at[2]) : "";
               const agent = token ? resolveMention(token, agents) : undefined;
-              if (agent && insertChip(inputRef.current, agent)) {
+              if (agent && insertChip(inputRef.current, "@", () => renderChip(<MentionChip agent={agent} />))) {
                 e.preventDefault();
                 setMention(null);
+                refreshEmpty();
+                fit();
+                return;
+              }
+              const hashTok = before.match(/(^|[\s])#(\S+)$/);
+              const chToken = hashTok ? trimMentionPunct(hashTok[2]) : "";
+              const channel = chToken ? resolveChannel(chToken, channels) : undefined;
+              if (channel && insertChip(inputRef.current, "#", () => renderChip(<MentionChip channel={channel} />))) {
+                e.preventDefault();
+                setHash(null);
                 refreshEmpty();
                 fit();
               }
@@ -693,18 +801,23 @@ function readFileData(file: File): Promise<string> {
   });
 }
 
-function insertChip(editor: HTMLElement | null, agent: AgentInfo): boolean {
+function insertChip(
+  editor: HTMLElement | null,
+  sigil: "@" | "#",
+  make: () => HTMLElement,
+): boolean {
   const ctx = caretTextContext(editor);
   if (!ctx) return false;
   const prefix = ctx.node.textContent?.slice(0, ctx.offset) ?? "";
-  const m = prefix.match(/(^|[\s])@(\S*)$/);
+  const re = sigil === "@" ? /(^|[\s])@(\S*)$/ : /(^|[\s])#(\S*)$/;
+  const m = prefix.match(re);
   if (!m) return false;
   const start = prefix.length - m[2].length - 1;
   const range = document.createRange();
   range.setStart(ctx.node, start);
   range.setEnd(ctx.node, ctx.offset);
   range.deleteContents();
-  const chip = renderChip(agent);
+  const chip = make();
   range.insertNode(chip);
   const space = document.createTextNode("\u00a0");
   chip.after(space);
@@ -719,11 +832,11 @@ function insertChip(editor: HTMLElement | null, agent: AgentInfo): boolean {
   return true;
 }
 
-function renderChip(agent: AgentInfo): HTMLElement {
+function renderChip(node: ReactNode): HTMLElement {
   const box = document.createElement("div");
   const root = createRoot(box);
   flushSync(() => {
-    root.render(<MentionChip agent={agent} />);
+    root.render(node);
   });
   const html = box.innerHTML;
   root.unmount();
@@ -732,7 +845,7 @@ function renderChip(agent: AgentInfo): HTMLElement {
 }
 
 function isEditorEmpty(el: HTMLElement): boolean {
-  if (el.querySelector("[data-mention]")) return false;
+  if (el.querySelector("[data-mention], [data-channel]")) return false;
   return !el.innerText.replace(/\u00a0/g, " ").trim();
 }
 
@@ -747,6 +860,10 @@ function serializeEditor(root: HTMLElement): string {
     const el = node as HTMLElement;
     if (el.dataset.mention) {
       s += "@" + el.dataset.mention;
+      return;
+    }
+    if (el.dataset.channel) {
+      s += "#" + el.dataset.channel;
       return;
     }
     if (el.tagName === "BR") {
