@@ -3,6 +3,7 @@
 *.rs.bk
 crew.log
 /*.md
+!README.md
 node_modules/
 /crates/crew/ui/dist
 .playwright-mcp

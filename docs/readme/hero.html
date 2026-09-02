@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>Crew</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 1600px;
+      height: 720px;
+      overflow: hidden;
+      background: #1a1f36;
+      color: #f4f4f8;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+        "Helvetica Neue", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .stage {
+      position: relative;
+      width: 1600px;
+      height: 720px;
+      background:
+        radial-gradient(ellipse 42% 58% at 22% 48%, rgba(255, 90, 90, 0.22), transparent 62%),
+        radial-gradient(ellipse 38% 52% at 78% 38%, rgba(155, 125, 255, 0.20), transparent 58%),
+        radial-gradient(ellipse 36% 44% at 58% 88%, rgba(46, 196, 182, 0.16), transparent 55%),
+        radial-gradient(ellipse 28% 36% at 70% 70%, rgba(20, 195, 142, 0.12), transparent 50%),
+        #1a1f36;
+    }
+    .icon {
+      position: absolute;
+      left: 132px;
+      top: 148px;
+      width: 424px;
+      height: 424px;
+      border-radius: 96px;
+      box-shadow:
+        0 40px 80px rgba(0, 0, 0, 0.45),
+        0 0 0 1px rgba(255, 255, 255, 0.06);
+    }
+    .copy {
+      position: absolute;
+      left: 640px;
+      top: 214px;
+      width: 820px;
+    }
+    .mark {
+      margin: 0;
+      font-size: 112px;
+      font-weight: 700;
+      letter-spacing: -0.06em;
+      line-height: 0.92;
+    }
+    .tag {
+      margin: 28px 0 0;
+      font-size: 34px;
+      font-weight: 500;
+      letter-spacing: -0.03em;
+      color: rgba(244, 244, 248, 0.86);
+      line-height: 1.25;
+    }
+    .sub {
+      margin: 16px 0 0;
+      font-size: 22px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      color: rgba(244, 244, 248, 0.48);
+    }
+    .crew {
+      position: absolute;
+      left: 640px;
+      bottom: 148px;
+      display: flex;
+      gap: 18px;
+      align-items: center;
+    }
+    .crew img {
+      width: 72px;
+      height: 72px;
+      filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.35));
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <img class="icon" src="../../crates/crew/icons/icon.png" alt="" />
+    <div class="copy">
+      <p class="mark">Crew</p>
+      <p class="tag">로컬에서 돌아가는 멀티 에이전트 데스크톱</p>
+      <p class="sub">grok · claude · codex</p>
+    </div>
+    <div class="crew">
+      <img src="face-circle.svg" alt="" />
+      <img src="face-triangle.svg" alt="" />
+      <img src="face-cloud.svg" alt="" />
+      <img src="face-square.svg" alt="" />
+    </div>
+  </div>
+</body>
+</html>
