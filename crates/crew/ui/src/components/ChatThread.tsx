@@ -5,6 +5,7 @@ import { busyInChannel } from "../busy";
 import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { Avatar } from "./Avatar";
+import { CopyButton } from "./CopyButton";
 import { MdBody } from "./MdBody";
 import { WhoButton, whoColor } from "./WhoButton";
 
@@ -557,6 +558,7 @@ function Incoming({
         })}
         {queued ? <QueueWait /> : null}
         <ApprovalCard state={m.approval} onApprove={onApprove} />
+        {m.text.trim() ? <CopyButton text={m.text.trim()} className="msg-copy" /> : null}
       </div>
     </div>
   );
@@ -681,6 +683,7 @@ function Bubble({
           baseDir={currentAgent?.cwd || undefined}
         />
         {queued ? <QueueWait /> : null}
+        {text.trim() ? <CopyButton text={text.trim()} className="msg-copy" /> : null}
       </div>
     </div>
   );

@@ -13,6 +13,8 @@ export const KO = {
   "common.turnOff": "끄기",
   "common.edit": "수정",
   "common.runNow": "지금 실행",
+  "common.copy": "복사",
+  "common.copied": "복사됨",
   "common.ok": "성공",
   "common.fail": "실패",
 
@@ -261,6 +263,8 @@ export const EN: { [K in MessageKey]: string } = {
   "common.turnOff": "Turn off",
   "common.edit": "Edit",
   "common.runNow": "Run now",
+  "common.copy": "Copy",
+  "common.copied": "Copied",
   "common.ok": "OK",
   "common.fail": "Failed",
 

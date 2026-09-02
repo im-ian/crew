@@ -3,6 +3,7 @@ import { injectMentionChips } from "../mentions";
 import { isLocalHref, mediaSrc, renderMarkdown, resolveLocalPath } from "../markdown";
 import { api } from "../api";
 import type { AgentInfo } from "../types";
+import { CopyButton } from "./CopyButton";
 import { MentionChip } from "./MentionChip";
 
 const TAGS = new Set([
@@ -95,6 +96,14 @@ function nodeToReact(
   if (tag === "BR") return <br key={key} />;
   const kids = nodesToReact(el.childNodes, agents, key, onMention, baseDir);
   if (!TAGS.has(tag)) return kids;
+  if (tag === "PRE") {
+    return (
+      <div key={key} className="code-wrap">
+        <pre>{kids}</pre>
+        <CopyButton text={el.textContent || ""} className="code-copy" />
+      </div>
+    );
+  }
   if (tag === "IMG") {
     const raw = el.getAttribute("src") || "";
     return (

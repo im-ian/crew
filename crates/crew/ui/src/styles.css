@@ -1075,6 +1075,7 @@ textarea.textin.memory {
   word-break: break-word;
 }
 .channel-msg {
+  position: relative;
   min-width: 0;
   max-width: min(72%, calc(100% - 42px));
   display: flex;
@@ -1137,6 +1138,7 @@ button.channel-who:hover {
   opacity: 0.88;
 }
 .me-msg {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -1146,6 +1148,53 @@ button.channel-who:hover {
 .row.me .me-msg .bubble {
   max-width: 100%;
 }
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.copy-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.copy-btn.is-done {
+  color: var(--idle);
+  opacity: 1;
+}
+/* Parked outside the message column so revealing it never reflows the thread. */
+.msg-copy {
+  position: absolute;
+  bottom: 0;
+}
+.row.them .msg-copy { right: -22px; }
+.row.me .msg-copy { left: -22px; }
+.row:hover .msg-copy,
+.copy-btn:focus-visible {
+  opacity: 1;
+}
+.code-wrap {
+  position: relative;
+}
+.code-copy {
+  position: absolute;
+  top: 9px;
+  right: 8px;
+  background: var(--pre-bg);
+}
+.row.me .code-copy { background: var(--pre-me-bg); }
+.code-wrap:hover .code-copy { opacity: 1; }
+
 .queue-wait {
   display: inline-flex;
   align-items: center;
