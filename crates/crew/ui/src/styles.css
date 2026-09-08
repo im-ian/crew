@@ -1401,7 +1401,9 @@ button.channel-who:hover {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-6);
+  /* Same air above and below as the transfer notes it sits among. */
+  padding: var(--space-8) 0;
+  gap: var(--space-8);
 }
 .tool-run-head {
   display: inline-flex;
