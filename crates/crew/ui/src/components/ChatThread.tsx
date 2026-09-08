@@ -615,29 +615,24 @@ function ToolGroup({
   const hit = items.some((m) => m.id === highlightId);
   // A search hit inside a folded run has to be on screen to be highlighted.
   const show = open || hit;
-  const names = Array.from(new Set(items.map((m) => m.from || "tool")));
-  const single = items.length === 1;
   return (
     <div className="tool-run">
-      {single ? null : (
-        <button
-          type="button"
-          className="tool-run-head"
-          aria-expanded={show}
-          onClick={() => setOpen(!show)}
-        >
-          <span className="tool-caret">{show ? "\u25be" : "\u25b8"}</span>
-          <span className="tool-run-count">
-            {t("thread.toolGroup", { n: items.length })}
-          </span>
-          <span className="tool-run-names">{names.join(", ")}</span>
-        </button>
-      )}
-      {single || show
-        ? items.map((m) => (
+      <button
+        type="button"
+        className="tool-run-head"
+        aria-expanded={show}
+        onClick={() => setOpen(!show)}
+      >
+        <span className="tool-caret">{show ? "\u25be" : "\u25b8"}</span>
+        {t("thread.toolUsed", { n: items.length })}
+      </button>
+      {show ? (
+        <div className="tool-run-list">
+          {items.map((m) => (
             <ToolRow key={m.id} message={m} flash={highlightId === m.id} />
-          ))
-        : null}
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

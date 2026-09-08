@@ -1370,20 +1370,46 @@ button.channel-who:hover {
   color: var(--blocked);
 }
 .tool-run {
-  align-self: flex-start;
-  /* The thread is a column flex box: `overflow: hidden` drops this card's
-     automatic minimum size, so without this it squashes to its own borders
-     once the thread scrolls. */
-  flex: 0 0 auto;
-  max-width: 72%;
+  align-self: center;
+  max-width: 92%;
   min-width: 0;
-  margin: 0 24px;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.tool-run-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  padding: 4px 10px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tool-run-head:hover {
+  color: var(--ink);
+  background: var(--chip);
+}
+.tool-run-list {
+  width: 34em;
+  max-width: 100%;
+  min-width: 0;
+  /* The card clips its corners, so it needs its minimum size spelled out or a
+     column flex parent squashes it to its own borders. */
+  flex: 0 0 auto;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--elevated);
   overflow: hidden;
 }
-.tool-run-head,
 .tool-row-head {
   display: flex;
   gap: 8px;
@@ -1400,13 +1426,8 @@ button.channel-who:hover {
   cursor: pointer;
   text-align: left;
 }
-.tool-run-head:hover,
 .tool-row-head:hover {
   background: var(--chip-hover);
-}
-/* Only while the list is open: a folded run must not carry a second bottom edge. */
-.tool-run-head[aria-expanded="true"] {
-  border-bottom: 1px solid var(--line);
 }
 .tool-row + .tool-row {
   border-top: 1px solid var(--line);
@@ -1416,12 +1437,6 @@ button.channel-who:hover {
   font-size: 9px;
   color: var(--muted);
 }
-.tool-run-count {
-  font-weight: 600;
-  color: var(--ink);
-  white-space: nowrap;
-}
-.tool-run-names,
 .tool-row-summary {
   min-width: 0;
   flex: 1 1 auto;
