@@ -14,6 +14,13 @@ const BLOCK_TAGS = new Set([
   "BR",
 ]);
 
+/** @everyone and its aliases address the room, not a bot with a face. */
+const BROADCAST = new Set(["everyone", "all", "here", "channel"]);
+
+export function isBroadcast(id: string): boolean {
+  return BROADCAST.has(id.toLowerCase());
+}
+
 export function mentionLabel(agent: AgentInfo): string {
   return agent.name || agent.id;
 }

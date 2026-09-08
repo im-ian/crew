@@ -1,5 +1,5 @@
 import type { AgentInfo, ChannelInfo } from "../types";
-import { channelLabel, mentionLabel } from "../mentions";
+import { channelLabel, isBroadcast, mentionLabel } from "../mentions";
 import { Avatar } from "./Avatar";
 
 type Props = {
@@ -17,7 +17,7 @@ export function MentionChip({ agent, channel, onClick }: Props) {
       return (
         <button
           type="button"
-          className="mention-chip is-channel"
+          className="mention-chip is-plain"
           contentEditable={false}
           data-channel={channel.id}
           title={"#" + label}
@@ -33,7 +33,7 @@ export function MentionChip({ agent, channel, onClick }: Props) {
     }
     return (
       <span
-        className="mention-chip is-channel"
+        className="mention-chip is-plain"
         contentEditable={false}
         data-channel={channel.id}
       >
@@ -43,7 +43,10 @@ export function MentionChip({ agent, channel, onClick }: Props) {
   }
   if (!agent) return null;
   const label = mentionLabel(agent);
-  const inner = (
+  const plain = isBroadcast(agent.id);
+  const inner = plain ? (
+    <span className="mention-chip-name">@{label}</span>
+  ) : (
     <>
       <Avatar
         as="span"
@@ -57,11 +60,12 @@ export function MentionChip({ agent, channel, onClick }: Props) {
       <span className="mention-chip-name">{label}</span>
     </>
   );
+  const cls = "mention-chip" + (plain ? " is-plain" : "");
   if (onClick) {
     return (
       <button
         type="button"
-        className="mention-chip"
+        className={cls}
         contentEditable={false}
         data-mention={agent.id}
         title={label}
@@ -76,7 +80,7 @@ export function MentionChip({ agent, channel, onClick }: Props) {
     );
   }
   return (
-    <span className="mention-chip" contentEditable={false} data-mention={agent.id}>
+    <span className={cls} contentEditable={false} data-mention={agent.id}>
       {inner}
     </span>
   );

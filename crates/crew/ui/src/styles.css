@@ -2189,7 +2189,7 @@ button.mention-chip:active {
     transform: scale(1);
   }
 }
-.mention-chip.is-channel {
+.mention-chip.is-plain {
   padding-left: var(--space-8);
 }
 .mention-chip-avatar {

@@ -4,7 +4,12 @@ import { flushSync } from "react-dom";
 import type { AgentInfo, ChannelInfo, Kind, Skill } from "../types";
 import { api } from "../api";
 import { useT } from "../LocaleContext";
-import { resolveChannel, resolveMention, trimMentionPunct } from "../mentions";
+import {
+  isBroadcast,
+  resolveChannel,
+  resolveMention,
+  trimMentionPunct,
+} from "../mentions";
 import { oneLine, wrapReply, type ReplyTarget } from "../reply";
 import { Avatar, ChannelAvatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
@@ -417,15 +422,19 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
                   pickMention(a);
                 }}
               >
-                <Avatar
-                  className="mention-avatar"
-                  id={a.id}
-                  name={a.name || a.id}
-                  src={a.avatar}
-                  shape={a.avatar_shape}
-                  color={a.avatar_color}
-                />
-                <span className="mention-name">{a.name || a.id}</span>
+                {isBroadcast(a.id) ? null : (
+                  <Avatar
+                    className="mention-avatar"
+                    id={a.id}
+                    name={a.name || a.id}
+                    src={a.avatar}
+                    shape={a.avatar_shape}
+                    color={a.avatar_color}
+                  />
+                )}
+                <span className="mention-name">
+                  {isBroadcast(a.id) ? "@" + a.id : a.name || a.id}
+                </span>
                 {a.name && a.name !== a.id ? (
                   <span className="mention-id">{a.id}</span>
                 ) : null}
