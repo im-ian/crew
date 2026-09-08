@@ -881,14 +881,8 @@ export function useCrew() {
 
   useEffect(() => {
     let cancelled = false;
-    async function tick() {
+    async function tickMessages() {
       try {
-        await api.daemonPing();
-        if (cancelled) return;
-        setConnected(true);
-        setConnDetail(t("conn.ok"));
-        await refreshList();
-        if (cancelled) return;
         await refreshMessages();
       } catch (err) {
         if (!cancelled) {
@@ -897,7 +891,22 @@ export function useCrew() {
         }
       }
     }
-    void tick();
+    async function tickList() {
+      try {
+        await api.daemonPing();
+        if (cancelled) return;
+        setConnected(true);
+        setConnDetail(t("conn.ok"));
+        await refreshList();
+      } catch (err) {
+        if (!cancelled) {
+          setConnected(false);
+          setConnDetail(errMsg(err));
+        }
+      }
+    }
+    void tickList();
+    void tickMessages();
     const working =
       selectedKind === "agent" &&
       !!currentAgent &&
@@ -905,11 +914,15 @@ export function useCrew() {
         currentAgent.status === "blocked");
     const lastRole = messages[messages.length - 1]?.role;
     const expecting = lastRole === "user";
-    const ms = working || expecting ? 200 : 400;
-    const id = window.setInterval(() => void tick(), ms);
+    const hot = working || expecting;
+    const msgMs = hot ? 200 : 2000;
+    const listMs = hot ? 1000 : 2000;
+    const msgId = window.setInterval(() => void tickMessages(), msgMs);
+    const listId = window.setInterval(() => void tickList(), listMs);
     return () => {
       cancelled = true;
-      window.clearInterval(id);
+      window.clearInterval(msgId);
+      window.clearInterval(listId);
     };
   }, [
     refreshList,

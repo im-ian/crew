@@ -125,31 +125,37 @@ impl TurnOrigin {
 }
 
 /// Parse the first `[crew …]` marker of an injected envelope.
+/// Handoff / system blocks that may sit under the marker are skipped.
 pub fn origin_from_envelope(text: &str) -> TurnOrigin {
-    let first = text.lines().next().unwrap_or("").trim();
-    let Some(inner) = first
-        .strip_prefix("[crew ")
-        .and_then(|s| s.strip_suffix(']'))
-    else {
-        return TurnOrigin::user();
-    };
-    if let Some(rest) = inner.strip_prefix("channel:") {
-        let (channel, from) = split_channel_from(rest);
-        return TurnOrigin {
-            from,
-            reply_channel: Some(channel),
-            ..TurnOrigin::default()
+    for line in text.lines() {
+        let line = line.trim();
+        let Some(inner) = line
+            .strip_prefix("[crew ")
+            .and_then(|s| s.strip_suffix(']'))
+        else {
+            continue;
         };
-    }
-    if let Some(from) = inner.strip_prefix("from:") {
-        let from = envelope_from(from);
-        return TurnOrigin {
-            from,
-            ..TurnOrigin::default()
-        };
-    }
-    if let Some(name) = inner.strip_prefix("routine:") {
-        return TurnOrigin::routine(name.trim());
+        if inner.starts_with("handoff") || inner.starts_with("system") {
+            continue;
+        }
+        if let Some(rest) = inner.strip_prefix("channel:") {
+            let (channel, from) = split_channel_from(rest);
+            return TurnOrigin {
+                from,
+                reply_channel: Some(channel),
+                ..TurnOrigin::default()
+            };
+        }
+        if let Some(from) = inner.strip_prefix("from:") {
+            let from = envelope_from(from);
+            return TurnOrigin {
+                from,
+                ..TurnOrigin::default()
+            };
+        }
+        if let Some(name) = inner.strip_prefix("routine:") {
+            return TurnOrigin::routine(name.trim());
+        }
     }
     TurnOrigin::user()
 }
@@ -362,6 +368,13 @@ mod tests {
         );
         let o = origin_from_envelope("[crew routine:brief]\nstandup");
         assert_eq!(o.routine.as_deref(), Some("brief"));
+        let o = origin_from_envelope(
+            "[crew from:user]\n[crew handoff from:beta]\nok\nhello",
+        );
+        assert_eq!(o.from, "user");
+        assert!(o.reply_agent.is_none());
+        let o = origin_from_envelope("[crew handoff from:beta]\nok\nplease continue");
+        assert_eq!(o, TurnOrigin::user());
     }
 
     #[test]

@@ -24,6 +24,7 @@ use crate::targeting::{self, TurnOrigin};
 const DEFAULT_COLS: u16 = 100;
 const DEFAULT_ROWS: u16 = 32;
 const MAX_INBOX: usize = 32;
+const MAX_PENDING_HANDOFFS: usize = 3;
 
 #[derive(Clone)]
 enum LiveAgent {
@@ -166,12 +167,133 @@ static CONFIGS: OnceLock<Mutex<HashMap<String, AgentConfig>>> = OnceLock::new();
 static CHANNELS: OnceLock<Mutex<HashMap<String, Channel>>> = OnceLock::new();
 static INBOX: OnceLock<Mutex<HashMap<String, VecDeque<PendingDelivery>>>> = OnceLock::new();
 static ORIGINS: OnceLock<Mutex<HashMap<String, TurnOrigin>>> = OnceLock::new();
+static WAKE_SEEN: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+static PENDING_HANDOFFS: OnceLock<Mutex<HashMap<String, Vec<PendingHandoff>>>> = OnceLock::new();
 
 struct PendingDelivery {
     text: String,
     newline: bool,
     msg_id: Option<String>,
     origin: TurnOrigin,
+}
+
+struct PendingHandoff {
+    from: String,
+    text: String,
+}
+
+fn wake_key(agent: &str, channel: &str) -> String {
+    format!("{agent}\x1f{channel}")
+}
+
+fn wake_seen() -> &'static Mutex<HashMap<String, String>> {
+    WAKE_SEEN.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn last_wake_id(agent: &str, channel: &str) -> Option<String> {
+    wake_seen()
+        .lock()
+        .ok()?
+        .get(&wake_key(agent, channel))
+        .cloned()
+}
+
+fn set_wake_id(agent: &str, channel: &str, id: &str) {
+    if let Ok(mut map) = wake_seen().lock() {
+        map.insert(wake_key(agent, channel), id.to_string());
+    }
+}
+
+fn clear_agent_context(id: &str) {
+    if let Ok(mut map) = wake_seen().lock() {
+        let prefix = format!("{id}\x1f");
+        map.retain(|k, _| !k.starts_with(&prefix));
+    }
+    if let Ok(mut map) = pending_handoffs().lock() {
+        map.remove(id);
+    }
+}
+
+fn pending_handoffs() -> &'static Mutex<HashMap<String, Vec<PendingHandoff>>> {
+    PENDING_HANDOFFS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn enqueue_handoff(peer: &str, from: &str, text: &str) {
+    let text = crate::protocol::clip_chars(text.trim(), crate::protocol::HANDOFF_CLIP);
+    if text.is_empty() || peer == from {
+        return;
+    }
+    if let Ok(mut map) = pending_handoffs().lock() {
+        let q = map.entry(peer.to_string()).or_default();
+        q.retain(|h| h.from != from);
+        q.push(PendingHandoff {
+            from: from.to_string(),
+            text,
+        });
+    }
+}
+
+fn drop_pending_from(peer: &str, from: &str) {
+    if let Ok(mut map) = pending_handoffs().lock() {
+        if let Some(q) = map.get_mut(peer) {
+            q.retain(|h| h.from != from);
+            if q.is_empty() {
+                map.remove(peer);
+            }
+        }
+    }
+}
+
+fn take_handoffs(agent: &str) -> Vec<PendingHandoff> {
+    let mut map = match pending_handoffs().lock() {
+        Ok(m) => m,
+        Err(_) => return Vec::new(),
+    };
+    map.remove(agent).unwrap_or_default()
+}
+
+fn restore_handoffs(agent: &str, mut items: Vec<PendingHandoff>) {
+    if items.is_empty() {
+        return;
+    }
+    if let Ok(mut map) = pending_handoffs().lock() {
+        let q = map.entry(agent.to_string()).or_default();
+        items.append(q);
+        *q = items;
+    }
+}
+
+fn flush_handoffs(agent: &str, prompt: &str) -> String {
+    let items = take_handoffs(agent);
+    if items.is_empty() {
+        return prompt.to_string();
+    }
+    crate::protocol::attach_after_marker(prompt, &render_handoffs(&items))
+}
+
+fn render_handoffs(items: &[PendingHandoff]) -> String {
+    let omitted = items.len().saturating_sub(MAX_PENDING_HANDOFFS);
+    let keep = if items.len() > MAX_PENDING_HANDOFFS {
+        &items[items.len() - MAX_PENDING_HANDOFFS..]
+    } else {
+        items
+    };
+    let mut out = String::new();
+    if omitted > 0 {
+        out.push_str(&crate::protocol::system_envelope(&format!(
+            "{omitted} earlier replies omitted"
+        )));
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+    }
+    for h in keep {
+        out.push_str(&crate::protocol::handoff_envelope(&h.from, &h.text));
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+    }
+    out
 }
 
 fn origins() -> &'static Mutex<HashMap<String, TurnOrigin>> {
@@ -345,11 +467,18 @@ fn approve_agent(id: &str, allow: bool) -> anyhow::Result<()> {
 }
 
 fn start_delivery(id: &str, text: &str, newline: bool, origin: TurnOrigin) -> anyhow::Result<()> {
-    crate::transcript::expect_echo(id, text);
+    let pending = take_handoffs(id);
+    let text = if pending.is_empty() {
+        text.to_string()
+    } else {
+        crate::protocol::attach_after_marker(text, &render_handoffs(&pending))
+    };
+    crate::transcript::expect_echo(id, &text);
     set_origin(id, origin);
-    match deliver(id, text, newline) {
+    match deliver(id, &text, newline) {
         Ok(()) => Ok(()),
         Err(err) => {
+            restore_handoffs(id, pending);
             crate::transcript::cancel_expect(id);
             take_origin(id);
             Err(err)
@@ -764,7 +893,7 @@ fn spawn_transcript_ticker() {
     std::thread::Builder::new()
         .name("crew-transcript".into())
         .spawn(|| loop {
-            std::thread::sleep(Duration::from_millis(50));
+            std::thread::sleep(Duration::from_millis(150));
             crate::transcript::tick();
             if EVENTS.get().is_none() {
                 return;
@@ -1468,6 +1597,9 @@ fn tell_agent_origin(
         }
     }
     let from = from_id(from);
+    if from != "user" && from != to {
+        drop_pending_from(to, &from);
+    }
     ensure_accepts_turn(to)?;
     let msg = crate::transcript::push_system(to, &from, text);
     let envelope = crate::protocol::envelope(&from, text);
@@ -1660,6 +1792,7 @@ fn remove_agent(id: &str) -> anyhow::Result<()> {
     crate::transcript::drop_agent(id);
     crate::headless::clear_session(id);
     clear_inbox(id);
+    clear_agent_context(id);
     session.kill();
     if let Ok(mut chans) = channels().lock() {
         for ch in chans.values_mut() {
@@ -2007,6 +2140,7 @@ fn reset_agent(id: &str, drop_routines: bool) -> anyhow::Result<String> {
     let roster = roster_vec();
     crate::headless::clear_session(id);
     clear_inbox(id);
+    clear_agent_context(id);
     let new_session = open_agent(&cfg, cols, rows, true, &roster)?;
     {
         let mut map = agents().lock().expect("agents mutex");
@@ -2216,18 +2350,12 @@ fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
         .iter()
         .zip(recent_text.iter())
         .map(|(m, t)| crate::channel_context::WakeLine {
+            id: m.id.as_str(),
             from: m.from.as_str(),
             text: t.as_str(),
         })
         .collect();
-    let envelope = crate::channel_context::wake_text(
-        &ch.id,
-        &ch.name,
-        ch.brief.as_deref(),
-        &recent,
-        &from,
-        text,
-    );
+    let last_id = stored.last().map(|m| m.id.clone());
     let default_one = from == "user";
     let last = if default_one {
         channel_last_member_speaker(&ch.id, &ch.members)
@@ -2271,9 +2399,23 @@ fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
         if ensure_accepts_turn(to).is_err() {
             continue;
         }
+        let envelope = crate::channel_context::wake_text(
+            &ch.id,
+            &ch.name,
+            ch.brief.as_deref(),
+            &recent,
+            last_wake_id(to, &ch.id).as_deref(),
+            &from,
+            text,
+        );
         let msg = crate::transcript::push_system(to, &format!("#{channel}"), text);
         match submit_delivery(to, &envelope, true, Some(msg.id), origin.clone()) {
-            Ok(()) => sent += 1,
+            Ok(()) => {
+                if let Some(id) = last_id.as_deref() {
+                    set_wake_id(to, &ch.id, id);
+                }
+                sent += 1;
+            }
             Err(err) => last_err = Some(err),
         }
     }
@@ -2343,6 +2485,7 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
     if let Some(peer) = targets.agent {
         if known_agent(&peer) {
             crate::transcript::push_handoff(&peer, agent, &text);
+            enqueue_handoff(&peer, agent, &text);
         }
     }
     if crate::interrupt::looks_like_judgment_question(&text) {
@@ -2565,7 +2708,39 @@ mod daemon_tests {
         assert_eq!(last.from, speaker);
         assert_eq!(last.kind, Some(crate::protocol::MessageKind::Handoff));
         assert_eq!(last.text, "reviewed");
+        let next = flush_handoffs(&peer, "please continue");
+        assert!(
+            next.starts_with("[crew handoff from:"),
+            "{next}"
+        );
+        assert!(next.contains("reviewed"), "{next}");
+        assert!(next.contains("please continue"), "{next}");
+        assert_eq!(flush_handoffs(&peer, "please continue"), "please continue");
         crate::transcript::drop_agent(&peer);
         configs().lock().unwrap().remove(&peer);
+        clear_agent_context(&peer);
+    }
+
+    #[test]
+    fn a_direct_tell_drops_that_peer_pending_handoff() {
+        enqueue_handoff("caller", "review", "stale review");
+        enqueue_handoff("caller", "impl", "still relevant");
+        drop_pending_from("caller", "review");
+        let next = flush_handoffs("caller", "hello");
+        assert!(!next.contains("stale review"), "{next}");
+        assert!(next.contains("still relevant"), "{next}");
+        clear_agent_context("caller");
+    }
+
+    #[test]
+    fn extra_pending_handoffs_are_omitted() {
+        for i in 0..5 {
+            enqueue_handoff("caller", &format!("bot{i}"), &format!("reply {i}"));
+        }
+        let next = flush_handoffs("caller", "go");
+        assert!(next.contains("2 earlier replies omitted"), "{next}");
+        assert!(!next.contains("reply 0"), "{next}");
+        assert!(next.contains("reply 4"), "{next}");
+        clear_agent_context("caller");
     }
 }
