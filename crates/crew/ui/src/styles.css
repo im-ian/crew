@@ -51,6 +51,29 @@
   --radius-lg: 10px;
   --radius-xl: 14px;
   --radius-pill: 24px;
+  /* Spacing rhythm. Odd one-off nudges (1/3/5/7px) stay literal. */
+  --space-2: 2px;
+  --space-4: 4px;
+  --space-6: 6px;
+  --space-8: 8px;
+  --space-10: 10px;
+  --space-12: 12px;
+  --space-14: 14px;
+  --space-16: 16px;
+  --space-18: 18px;
+  --space-20: 20px;
+  --space-22: 22px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-40: 40px;
+  /* UI text ladder. Avatar sizing and a few optical half-steps stay literal. */
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 14px;
+  --text-xl: 15px;
+  --text-2xl: 16px;
+  --text-3xl: 18px;
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
   --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
