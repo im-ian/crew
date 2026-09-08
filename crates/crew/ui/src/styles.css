@@ -568,8 +568,20 @@ html.rail-dragging {
   bottom: 0;
   right: 0;
 }
-.rail-row.active .channel-faces .channel-face {
-  box-shadow: 0 0 0 1.5px var(--active);
+/* The ring is the surface showing between faces, so it tracks the row it
+   sits on — every state, or it reads as a black outline. */
+.rail-row:hover .channel-faces {
+  --faces-ring: var(--hover);
+}
+.rail-row.active .channel-faces {
+  --faces-ring: var(--active);
+}
+.mention-item .channel-faces {
+  --faces-ring: var(--menu);
+}
+.mention-item.active .channel-faces,
+.mention-item:hover .channel-faces {
+  --faces-ring: var(--chip);
 }
 .avatar {
   width: var(--avatar);
@@ -2117,7 +2129,6 @@ button.who-btn:focus-visible {
   width: 22px;
   height: 22px;
   font-size: 10px;
-  --faces-ring: var(--menu);
 }
 .mention-name {
   min-width: 0;
