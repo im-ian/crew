@@ -1369,36 +1369,103 @@ button.channel-who:hover {
 .approval-status.is-denied {
   color: var(--blocked);
 }
-.tool-card {
+.tool-run {
   align-self: flex-start;
-  margin: 4px 24px;
+  max-width: 72%;
+  min-width: 0;
+  margin: 0 24px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--elevated);
-  max-width: 72%;
+  overflow: hidden;
 }
-.tool-card-head {
+.tool-run-head,
+.tool-row-head {
   display: flex;
   gap: 8px;
-  align-items: center;
+  align-items: baseline;
   width: 100%;
+  min-width: 0;
   border: 0;
   background: transparent;
   color: var(--muted);
   font: inherit;
   font-size: 12px;
-  padding: 6px 10px;
+  line-height: 1.5;
+  padding: 7px 12px;
   cursor: pointer;
+  text-align: left;
 }
-.tool-card-name {
+.tool-run-head:hover,
+.tool-row-head:hover {
+  background: var(--chip-hover);
+}
+.tool-run-head {
+  border-bottom: 1px solid var(--line);
+}
+.tool-row + .tool-row {
+  border-top: 1px solid var(--line);
+}
+.tool-caret {
+  flex: 0 0 auto;
+  font-size: 9px;
+  color: var(--muted);
+}
+.tool-run-count {
   font-weight: 600;
   color: var(--ink);
+  white-space: nowrap;
 }
-.tool-card-body {
-  padding: 0 10px 8px;
-  color: var(--muted);
+.tool-run-names,
+.tool-row-summary {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tool-row-name {
+  flex: 0 0 auto;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  font-size: 11.5px;
+}
+.tool-row-summary {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  font-size: 11.5px;
+  opacity: 0.75;
+}
+.tool-args {
+  margin: 0;
+  padding: 2px 12px 10px 27px;
+  display: grid;
+  gap: 6px;
   font-size: 12px;
+}
+.tool-arg {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+}
+.tool-arg dt {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.tool-arg dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  font-size: 11.5px;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tool-arg dd.is-empty {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-style: italic;
 }
 .attach-btn {
   flex: 0 0 auto;
@@ -1568,7 +1635,7 @@ button.channel-who:hover {
 .row.flash .bubble,
 .xfer.flash .xfer-body,
 .sys.flash,
-.tool-card.flash {
+.tool-row.flash {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--working) 70%, transparent);
   animation: msg-flash 1.5s var(--ease-out);
 }

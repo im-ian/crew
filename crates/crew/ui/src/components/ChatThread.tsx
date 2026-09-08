@@ -4,6 +4,7 @@ import type { AgentInfo, ChannelInfo, ChatMessage, Kind } from "../types";
 import { busyInChannel } from "../busy";
 import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
+import { threadRows, toolArgs, toolSummary } from "../tools";
 import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
 import { MdBody } from "./MdBody";
@@ -130,11 +131,21 @@ export function ChatThread({
         {!messages.length ? (
           <EmptyChat agent={currentAgent} channel={currentChannel} />
         ) : (
-          visible.map((m, i, list) => {
+          threadRows(visible).map((row) => {
+            if (row.kind === "tools") {
+              return (
+                <ToolGroup
+                  key={row.msgs[0].id}
+                  items={row.msgs}
+                  highlightId={highlightId}
+                />
+              );
+            }
+            const m = row.msg;
             const caret =
               streaming &&
               m.role === "assistant" &&
-              i === list.length - 1;
+              m.id === lastVisible?.id;
             const flash = highlightId === m.id;
             if (m.role === "system") {
               return (
@@ -307,16 +318,6 @@ function SystemOrIncoming({
         channels={channels}
         onSelectAgent={onSelectAgent}
         onSelectChannel={onSelectChannel}
-        flash={flash}
-      />
-    );
-  }
-  if (classKind === "tool" || m.kind === "tool") {
-    return (
-      <ToolCardRow
-        name={from || "tool"}
-        detail={displayText(m)}
-        id={m.id}
         flash={flash}
       />
     );
@@ -602,32 +603,88 @@ function Incoming({
   );
 }
 
-function ToolCardRow({
-  name,
-  detail,
-  id,
+function ToolGroup({
+  items,
+  highlightId = null,
+}: {
+  items: ChatMessage[];
+  highlightId?: string | null;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const hit = items.some((m) => m.id === highlightId);
+  // A search hit inside a folded run has to be on screen to be highlighted.
+  const show = open || hit;
+  const names = Array.from(new Set(items.map((m) => m.from || "tool")));
+  const single = items.length === 1;
+  return (
+    <div className="tool-run">
+      {single ? null : (
+        <button
+          type="button"
+          className="tool-run-head"
+          aria-expanded={show}
+          onClick={() => setOpen(!show)}
+        >
+          <span className="tool-caret">{show ? "\u25be" : "\u25b8"}</span>
+          <span className="tool-run-count">
+            {t("thread.toolGroup", { n: items.length })}
+          </span>
+          <span className="tool-run-names">{names.join(", ")}</span>
+        </button>
+      )}
+      {single || show
+        ? items.map((m) => (
+            <ToolRow key={m.id} message={m} flash={highlightId === m.id} />
+          ))
+        : null}
+    </div>
+  );
+}
+
+function ToolRow({
+  message,
   flash = false,
 }: {
-  name: string;
-  detail: string;
-  id?: string;
+  message: ChatMessage;
   flash?: boolean;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const name = message.from || "tool";
+  const detail = displayText(message).trim();
+  const args = toolArgs(detail);
+  const summary = toolSummary(detail);
   return (
     <div
-      className={"tool-card" + (flash ? " flash" : "")}
-      data-msg-id={id}
+      className={"tool-row" + (flash ? " flash" : "")}
+      data-msg-id={message.id}
     >
-      <button type="button" className="tool-card-head" onClick={() => setOpen((v) => !v)}>
-        <span className="tool-card-name">{name}</span>
-        <span className="tool-card-chevron">{open ? "▾" : "▸"}</span>
+      <button
+        type="button"
+        className="tool-row-head"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="tool-caret">{open ? "\u25be" : "\u25b8"}</span>
+        <span className="tool-row-name">{name}</span>
+        <span className="tool-row-summary">{open ? "" : summary}</span>
       </button>
       {open ? (
-        <div className="tool-card-body">
-          {detail.trim() ? detail : t("thread.toolEmpty")}
-        </div>
+        <dl className="tool-args">
+          {args.length ? (
+            args.map((a, i) => (
+              <div className="tool-arg" key={a.key || i}>
+                {a.key ? <dt>{a.key}</dt> : null}
+                <dd>{a.value}</dd>
+              </div>
+            ))
+          ) : (
+            <div className="tool-arg">
+              <dd className="is-empty">{t("thread.toolEmpty")}</dd>
+            </div>
+          )}
+        </dl>
       ) : null}
     </div>
   );
