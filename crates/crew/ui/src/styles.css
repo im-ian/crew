@@ -51,6 +51,7 @@
   --radius-lg: 10px;
   --radius-xl: 14px;
   --radius-pill: 24px;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
   --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --dur-fast: 0.12s;
@@ -1080,7 +1081,7 @@ button.msg-avatar {
 .bubble.md a { color: var(--link); }
 .row.me .bubble.md a { color: var(--link-me); }
 .bubble.md code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  font-family: var(--mono);
   font-size: 0.86em;
   background: var(--code-bg);
   padding: 0.12em 0.38em;
@@ -1447,11 +1448,11 @@ button.channel-who:hover {
 .tool-row-name {
   flex: 0 0 auto;
   color: var(--ink);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  font-family: var(--mono);
   font-size: 11.5px;
 }
 .tool-row-summary {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  font-family: var(--mono);
   font-size: 11.5px;
   opacity: 0.75;
 }
@@ -1477,7 +1478,7 @@ button.channel-who:hover {
   margin: 0;
   min-width: 0;
   color: var(--ink);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  font-family: var(--mono);
   font-size: 11.5px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
