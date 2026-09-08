@@ -1143,7 +1143,18 @@ button.msg-avatar {
   color: var(--muted);
 }
 .code-wrap.md-out > .md-mark {
-  margin-top: calc(0.45em + var(--space-10));
+  margin-top: calc(var(--space-6) + var(--space-10));
+}
+/* The block belongs to the command, so it sits closer to it than to the rest. */
+.bubble.md p.md-cmd {
+  margin-bottom: 0;
+}
+.bubble.md .code-wrap.md-out > pre {
+  margin-top: var(--space-6);
+}
+/* A trailing block would otherwise add its margin to the bubble's padding. */
+.bubble.md .code-wrap:last-child > pre {
+  margin-bottom: 0;
 }
 .bubble.streaming p:last-child::after,
 .bubble.streaming:empty::after,
