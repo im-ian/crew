@@ -1400,7 +1400,8 @@ button.channel-who:hover {
 .tool-row-head:hover {
   background: var(--chip-hover);
 }
-.tool-run-head {
+/* Only while the list is open: a folded run must not carry a second bottom edge. */
+.tool-run-head[aria-expanded="true"] {
   border-bottom: 1px solid var(--line);
 }
 .tool-row + .tool-row {
