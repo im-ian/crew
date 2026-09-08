@@ -1458,7 +1458,7 @@ button.channel-who:hover {
 .tool-row + .tool-row {
   border-top: 1px solid var(--line);
 }
-.tool-caret {
+.note-caret {
   flex: 0 0 auto;
   font-size: 9px;
   color: var(--muted);
@@ -1709,6 +1709,22 @@ button.channel-who:hover {
   padding-top: 1px;
   padding-bottom: 1px;
 }
+.xfer-label.is-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  padding: var(--space-2) var(--space-8);
+  margin: 0 calc(-1 * var(--space-8));
+  cursor: pointer;
+  font: inherit;
+}
+.xfer-label.is-toggle:hover {
+  color: var(--ink);
+  background: var(--chip);
+}
 .xfer-label {
   color: var(--muted);
   font-size: var(--text-md);
@@ -1782,51 +1798,6 @@ button.who-btn:focus-visible {
   text-align: center;
   max-width: 100%;
   word-break: break-word;
-}
-.xfer-text.is-clamped {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
-  white-space: pre-wrap;
-}
-.xfer-text p { margin: 0 0 0.4em; }
-.xfer-text p:last-child { margin-bottom: 0; }
-.xfer-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  margin: 0;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--faint);
-  font: inherit;
-  font-size: var(--text-sm);
-  font-weight: 550;
-  line-height: 1.2;
-  cursor: pointer;
-  letter-spacing: -0.01em;
-}
-.xfer-toggle svg {
-  display: block;
-  transition: transform var(--dur-fast) var(--ease-out);
-}
-.xfer-toggle[aria-expanded="true"] svg {
-  transform: rotate(180deg);
-}
-.xfer-toggle:hover,
-.xfer-toggle:focus-visible {
-  color: var(--muted);
-}
-.xfer-toggle:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--muted) 45%, transparent);
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-.xfer-toggle:active {
-  transform: scale(0.97);
 }
 .xfer .queue-wait {
   margin-top: 0;

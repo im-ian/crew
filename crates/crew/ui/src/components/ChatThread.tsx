@@ -391,19 +391,34 @@ function TransferNote({
   const open =
     onSelectAgent && agent ? () => onSelectAgent(agent.id) : undefined;
   const t = useT();
+  const [openBody, setOpenBody] = useState(false);
   const label =
     kind === "sent"
       ? t("thread.sent")
       : kind === "handoff"
         ? t("thread.handoff")
         : t("thread.received");
+  // A search hit has to be readable without a click.
+  const show = openBody || flash;
   return (
     <div
       className={"xfer" + (m.queued ? " queued" : "") + (flash ? " flash" : "")}
       data-msg-id={m.id}
     >
       <div className="xfer-chip">
-        <span className="xfer-label">{label}</span>
+        {m.text ? (
+          <button
+            type="button"
+            className="xfer-label is-toggle"
+            aria-expanded={show}
+            onClick={() => setOpenBody(!show)}
+          >
+            <span className="note-caret">{show ? "\u25be" : "\u25b8"}</span>
+            {label}
+          </button>
+        ) : (
+          <span className="xfer-label">{label}</span>
+        )}
         <WhoButton
           agent={agent}
           who={who}
@@ -412,7 +427,7 @@ function TransferNote({
           onClick={open}
         />
       </div>
-      {m.text ? (
+      {m.text && show ? (
         <XferBody
           text={m.text}
           agents={agents}
@@ -425,15 +440,6 @@ function TransferNote({
       {m.queued ? <QueueWait /> : null}
     </div>
   );
-}
-
-const XFER_CLAMP_CHARS = 110;
-const XFER_CLAMP_LINES = 2;
-
-function isLongXfer(text: string): boolean {
-  const trimmed = text.trim();
-  if (trimmed.length > XFER_CLAMP_CHARS) return true;
-  return trimmed.split(/\n+/).filter(Boolean).length > XFER_CLAMP_LINES;
 }
 
 function XferBody({
@@ -451,44 +457,17 @@ function XferBody({
   onChannel?: (id: string) => void;
   baseDir?: string;
 }) {
-  const t = useT();
-  const [expanded, setExpanded] = useState(false);
-  const long = isLongXfer(text);
-  const clamped = long && !expanded;
   return (
     <div className="xfer-body">
-      {clamped ? (
-        <div className="xfer-text is-clamped">{text.trim()}</div>
-      ) : (
-        <MdBody
-          className="xfer-text md"
-          text={text}
-          agents={agents}
-          channels={channels}
-          onMention={onMention}
-          onChannel={onChannel}
-          baseDir={baseDir}
-        />
-      )}
-      {long ? (
-        <button
-          type="button"
-          className="xfer-toggle"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((v) => !v)}
-        >
-          {expanded ? t("thread.collapse") : t("thread.more")}
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
-            <path
-              d="M2.2 3.6 5 6.4 7.8 3.6"
-              stroke="currentColor"
-              strokeWidth="1.3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
-      ) : null}
+      <MdBody
+        className="xfer-text md"
+        text={text}
+        agents={agents}
+        channels={channels}
+        onMention={onMention}
+        onChannel={onChannel}
+        baseDir={baseDir}
+      />
     </div>
   );
 }
@@ -623,7 +602,7 @@ function ToolGroup({
         aria-expanded={show}
         onClick={() => setOpen(!show)}
       >
-        <span className="tool-caret">{show ? "\u25be" : "\u25b8"}</span>
+        <span className="note-caret">{show ? "\u25be" : "\u25b8"}</span>
         {t("thread.toolUsed", { n: items.length })}
       </button>
       {show ? (
@@ -661,7 +640,7 @@ function ToolRow({
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="tool-caret">{open ? "\u25be" : "\u25b8"}</span>
+        <span className="note-caret">{open ? "\u25be" : "\u25b8"}</span>
         <span className="tool-row-name">{name}</span>
         <span className="tool-row-summary">{open ? "" : summary}</span>
       </button>
