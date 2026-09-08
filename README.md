@@ -6,7 +6,7 @@
 
 이미 쓰고 있는 [Grok](https://grok.com) / [Claude Code](https://docs.anthropic.com/en/docs/claude-code) / [Codex](https://github.com/openai/codex) CLI를 하나의 창 안에 봇으로 모아 주는 맥 앱이에요. 모델 API를 새로 붙이는 대신, CLI를 헤드리스로 실행하고 그 답변만 말풍선으로 보여줘요.
 
-GitHub Releases의 `.dmg`로 설치할 수 있고, 설치된 앱은 새 버전이 나오면 직접 업데이트해요.
+설치 스크립트나 GitHub Releases의 `.dmg`로 설치할 수 있고, 설치된 앱은 새 버전이 나오면 직접 업데이트해요.
 
 <p align="center">
   <img src="docs/readme/window.png" alt="Crew 채팅 창 — 봇과 채널, @멘션, 핸드오프" width="920">
@@ -130,12 +130,9 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 | 항목 | 내용 |
 | --- | --- |
 | OS | macOS (Unix 소켓, `~/Library/Application Support`, 트래픽 라이트 타이틀바) |
-| Rust | stable (`rustup`). rustc 1.95에서 빌드를 확인했어요 |
-| Node.js | UI 빌드에 필요해요. npm이 `PATH`에 있으면 돼요 (Node 20+) |
-| Xcode CLT | Tauri 2 / WKWebView. `xcode-select --install` |
 | 에이전트 CLI | `grok`, `claude`, `codex` 중 쓸 것만. Crew는 모델을 내장하지 않아요 |
 
-바이너리는 아래 경로에서도 찾아요.
+에이전트 CLI 바이너리는 아래 경로에서도 찾아요.
 
 `~/.grok/bin`, `~/.local/bin`, `~/.cargo/bin`, `/opt/homebrew/bin`, `/usr/local/bin`
 
@@ -143,22 +140,22 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 
 ## 설치
 
-### macOS 앱
+한 줄로 설치할 수 있어요. 최신 릴리스 DMG를 받아 `/Applications/Crew.app`에 복사하고 quarantine 속성을 제거해요.
 
-#### 설치 스크립트
+### 설치 스크립트
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/im-ian/crew/main/scripts/install-macos.sh | bash
 ```
 
-최신 릴리스 DMG를 내려받아 `/Applications/Crew.app`에 복사하고 quarantine 속성을 제거해요. `~/.local/bin/crew`에 CLI 심볼릭 링크도 만들어 줘요. 위치를 바꾸려면 `CREW_INSTALL_DIR`를 지정:
+`~/.local/bin/crew`에 CLI 심볼릭 링크도 만들어 줘요. 위치를 바꾸려면 `CREW_INSTALL_DIR`를 지정:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/im-ian/crew/main/scripts/install-macos.sh \
   | CREW_INSTALL_DIR="$HOME/Applications" bash
 ```
 
-#### 수동 DMG
+### 수동 DMG
 
 [Releases](https://github.com/im-ian/crew/releases/latest)에서 `Crew_*_aarch64.dmg`(Apple Silicon) 또는 `Crew_*_x64.dmg`(Intel)를 받아 `Applications`로 복사한 뒤 quarantine 속성 제거:
 
@@ -170,11 +167,13 @@ xattr -dr com.apple.quarantine /Applications/Crew.app
 
 설치된 앱은 시작 시와 설정에서 업데이트를 확인해요. 새 버전은 사용자가 설치를 고른 뒤에만 받아 다시 실행합니다.
 
-### 소스에서 빌드
+---
 
-미리 빌드된 앱 대신 저장소를 받아서 직접 빌드할 수도 있어요.
+## 소스에서 빌드
 
-#### 1. 도구
+미리 빌드된 앱 대신 저장소를 받아서 직접 빌드할 수도 있어요. 요구사항은 **Rust** stable (`rustup`, rustc 1.95에서 확인), **Node.js** 20+, **Xcode Command Line Tools**예요.
+
+### 1. 도구
 
 ```bash
 # Rust
@@ -186,7 +185,7 @@ xcode-select --install
 
 Node는 [nodejs.org](https://nodejs.org)에서 받거나 `brew install node`로 설치하면 돼요.
 
-#### 2. 에이전트 CLI (필요한 것만)
+### 2. 에이전트 CLI (필요한 것만)
 
 각 도구의 공식 설치 방법을 따른 뒤, 터미널에서 해당 명령이 실행되는지만 확인하면 돼요.
 
@@ -196,7 +195,7 @@ claude --version
 codex --version
 ```
 
-#### 3. Crew 빌드
+### 3. Crew 빌드
 
 **저장소에서 빌드**
 
@@ -232,7 +231,7 @@ cargo install --git https://github.com/im-ian/crew.git --locked crew
 
 두 방법 모두 `build.rs`가 `crates/crew/ui`에서 `npm install`과 `npm run build`를 실행해요. 첫 빌드는 Node 의존성 때문에 시간이 좀 더 걸려요.
 
-#### 4. 실행
+### 4. 실행
 
 ```bash
 crew
