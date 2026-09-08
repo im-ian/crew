@@ -47,7 +47,22 @@ describe("splitBubbles", () => {
 
   it("never splits inside a fenced block", () => {
     const text = "이거 봐.\n\n```rust\nfn a() {}\n\nfn b() {}\n```";
-    expect(splitBubbles(text)).toEqual(["이거 봐.", "```rust\nfn a() {}\n\nfn b() {}\n```"]);
+    expect(splitBubbles(text)).toEqual([text]);
+  });
+
+  it("keeps a command and its output in one balloon", () => {
+    const text = "`echo hi`\n\n```\nhi\n```\n\n`ls -1`\n\n```\n```";
+    expect(splitBubbles(text)).toEqual([
+      "`echo hi`\n\n```\nhi\n```",
+      "`ls -1`\n\n```\n```",
+    ]);
+  });
+
+  it("still starts a new balloon after a block ends", () => {
+    expect(splitBubbles("```\nout\n```\n\n끝났어요.")).toEqual([
+      "```\nout\n```",
+      "끝났어요.",
+    ]);
   });
 
   it("never splits inside inline code", () => {

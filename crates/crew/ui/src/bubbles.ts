@@ -28,6 +28,13 @@ function maybeSplitAfterMarkup(
   }
 }
 
+/** A fenced block is the answer to the line above it, so they share a balloon. */
+function fenceFollows(text: string, i: number): boolean {
+  let j = i;
+  while (text[j] === "\n") j += 1;
+  return text.startsWith("```", j);
+}
+
 /** Split one assistant turn into chat balloons (blank lines, or glued sentences). */
 export function splitBubbles(text: string): string[] {
   if (!text) return [];
@@ -69,6 +76,10 @@ export function splitBubbles(text: string): string[] {
       continue;
     }
     if (!code && !bold && text[i] === "\n" && text[i + 1] === "\n") {
+      if (fenceFollows(text, i)) {
+        i += 1;
+        continue;
+      }
       flush(i, i);
       while (text[i] === "\n") i += 1;
       start = i;
@@ -82,7 +93,7 @@ export function splitBubbles(text: string): string[] {
       const afterHangul = /[가-힣]/.test(prev);
       if (next === "\n") {
         while (text[j] === "\n") j += 1;
-        if (text[j] && isNewStart(text[j])) {
+        if (text[j] && isNewStart(text[j]) && !text.startsWith("```", j)) {
           flush(i + 1, j);
           i = j;
           continue;
