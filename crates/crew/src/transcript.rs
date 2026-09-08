@@ -1130,6 +1130,31 @@ mod tests {
     }
 
     #[test]
+    fn deltas_starting_with_a_newline_keep_it() {
+        // grok streams "\n\n" as its own chunk; swallowing it flattened whole
+        // replies into one line and broke every ``` fence in them.
+        assert_eq!(strip_crew_markers("\n"), "\n");
+        assert_eq!(strip_crew_markers("\n\n**ls -1**"), "\n\n**ls -1**");
+        let agent = format!(
+            "nl-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        push_user(&agent, "user", "hi");
+        on_assistant_delta(&agent, "```sh");
+        on_assistant_delta(&agent, "\n");
+        on_assistant_delta(&agent, "ls -1\n```");
+        assert_eq!(
+            messages(&agent).last().unwrap().text,
+            "```sh\nls -1\n```"
+        );
+        drop_agent(&agent);
+    }
+
+    #[test]
     fn consume_echo_skips_injected_envelope() {
         let mut pending = "[crew from:user]\n안녕?\n".to_string();
         assert_eq!(consume_echo(&mut pending, "[crew from:"), "");

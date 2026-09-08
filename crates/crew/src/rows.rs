@@ -27,17 +27,12 @@ pub fn is_crew_marker_line(line: &str) -> bool {
 }
 
 pub fn strip_crew_markers(s: &str) -> String {
-    let mut out = String::new();
-    for line in s.split('\n') {
-        if is_crew_marker_line(line) {
-            continue;
-        }
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        out.push_str(line);
-    }
-    out
+    // Blank lines are content: this runs on every streamed delta, and dropping
+    // the newlines a chunk starts with flattens the reply into one line.
+    s.split('\n')
+        .filter(|line| !is_crew_marker_line(line))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub fn display_text(msg: &ChatMessage) -> String {
