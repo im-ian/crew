@@ -1,6 +1,7 @@
 import { useLocale, useT } from "../LocaleContext";
 import type { Locale } from "../i18n";
 import type { ThemePref } from "../theme";
+import type { UpdaterApi } from "../updater";
 import { Field } from "./Field";
 import { Modal } from "./Modal";
 import { Seg } from "./Seg";
@@ -12,6 +13,7 @@ type Props = {
   onClose: () => void;
   onOpenShortcuts: () => void;
   onOpenSkills: () => void;
+  updater: UpdaterApi;
 };
 
 const LANGS: { value: Locale; label: string }[] = [
@@ -26,6 +28,7 @@ export function SettingsPane({
   onClose,
   onOpenShortcuts,
   onOpenSkills,
+  updater,
 }: Props) {
   const t = useT();
   const { locale, setLocale } = useLocale();
@@ -52,6 +55,45 @@ export function SettingsPane({
           <Seg value={locale} options={LANGS} onChange={setLocale} />
         </Field>
         <p className="apply-note">{t("settings.language.note")}</p>
+        <Field label={t("settings.update")}>
+          <div className="update-actions">
+            <button
+              type="button"
+              className="ghost settings-action"
+              disabled={updater.busy}
+              onClick={() => void updater.check(true)}
+            >
+              {updater.busy
+                ? t("settings.update.checking")
+                : t("settings.update.check")}
+            </button>
+            {updater.available ? (
+              <button
+                type="button"
+                className="primary settings-action"
+                disabled={updater.busy}
+                onClick={() => void updater.install()}
+              >
+                {updater.busy
+                  ? t("update.installing")
+                  : t("settings.update.install")}
+              </button>
+            ) : null}
+          </div>
+        </Field>
+        <p className={"apply-note" + (updater.error ? " is-error" : "")}>
+          {updater.error
+            ? updater.error
+            : updater.available
+              ? t("settings.update.available", {
+                  version: updater.available.version,
+                })
+              : updater.currentVersion
+                ? t("settings.update.current", {
+                    version: updater.currentVersion,
+                  })
+                : t("settings.update.note")}
+        </p>
         <Field label={t("settings.skills")}>
           <button type="button" className="ghost settings-action" onClick={onOpenSkills}>
             {t("settings.skillsOpen")}

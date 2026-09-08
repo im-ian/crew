@@ -673,6 +673,8 @@ pub fn run() -> anyhow::Result<()> {
     #[cfg(debug_assertions)]
     crate::ui_dev::ensure_vite()?;
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             crate::paths::write_ui_pid();
             #[cfg(debug_assertions)]

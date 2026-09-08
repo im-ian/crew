@@ -55,6 +55,11 @@
     "allow-take-pending-focus",
     "allow-open-path",
     "allow-set-dock-badge",
-    "allow-set-locale"
+    "allow-set-locale",
+    "updater:allow-check",
+    "updater:allow-download",
+    "updater:allow-install",
+    "updater:allow-download-and-install",
+    "process:allow-restart"
   ]
 }

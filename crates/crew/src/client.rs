@@ -109,16 +109,28 @@ pub fn tell_from(explicit: Option<String>) -> String {
         .unwrap_or_else(|| "user".into())
 }
 
-pub fn ensure_daemon() -> anyhow::Result<()> {
-    if paths::is_socket_live() {
-        return Ok(());
-    }
-    if std::env::var("CREW_AGENT_ID")
+fn running_as_agent() -> bool {
+    std::env::var("CREW_AGENT_ID")
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .is_some()
-    {
+}
+
+pub fn ensure_daemon() -> anyhow::Result<()> {
+    if paths::is_socket_live() {
+        if paths::daemon_version_matches(env!("CARGO_PKG_VERSION")) {
+            return Ok(());
+        }
+        // A packaged update replaces Crew.app in place. Agent children must
+        // keep talking to the still-running daemon; the desktop/CLI process
+        // restarts it so the new binary takes over.
+        if running_as_agent() {
+            return Ok(());
+        }
+        let _ = stop_daemon();
+    }
+    if running_as_agent() {
         bail!(
             "daemon is not running ({}); agent processes will not start one",
             paths::socket_path().display()
@@ -198,6 +210,7 @@ fn wait_dead(timeout: Duration) {
 fn cleanup() {
     paths::remove_stale_socket();
     paths::remove_pid();
+    paths::remove_daemon_version();
 }
 
 pub fn print_event(ev: Event) -> anyhow::Result<()> {

@@ -265,6 +265,47 @@ html.rail-resizing * {
   width: 100%;
   text-align: center;
 }
+.update-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--working) 12%, var(--bg));
+  font-size: 13px;
+  line-height: 1.35;
+}
+.update-banner-msg {
+  flex: 1;
+  min-width: 0;
+}
+.update-banner-ver {
+  font-weight: 650;
+}
+.update-banner-error {
+  color: var(--blocked);
+}
+.update-banner .primary,
+.update-banner .ghost {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+button.linkish {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
 .rail-section + .rail-section { margin-top: 8px; }
 .rail-section.grouped .rail-row,
 .rail-section.grouped .empty-rail {
@@ -836,12 +877,15 @@ button.avatar {
 }
 main {
   display: grid;
-  grid-template-rows: var(--titlebar) auto minmax(0, 1fr) auto;
+  grid-template-rows: var(--titlebar) auto auto minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   background: var(--bg);
   position: relative;
+}
+.update-banner-slot {
+  min-height: 0;
 }
 .titlebar-align {
   height: var(--titlebar);

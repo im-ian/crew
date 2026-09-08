@@ -672,6 +672,7 @@ pub async fn run() -> anyhow::Result<()> {
     let listener = UnixListener::bind(paths::socket_path())
         .with_context(|| format!("bind {}", paths::socket_path().display()))?;
     paths::write_pid(std::process::id())?;
+    paths::write_daemon_version(env!("CARGO_PKG_VERSION"))?;
     eprintln!(
         "[crew] daemon listening on {}",
         paths::socket_path().display()

@@ -1,4 +1,5 @@
 {
+  "$schema": "https://schema.tauri.app/config/2",
   "productName": "Crew",
   "version": "0.1.0",
   "identifier": "dev.jthefloor.crew",
@@ -17,7 +18,7 @@
         "hiddenTitle": true,
         "titleBarStyle": "Overlay",
         "trafficLightPosition": { "x": 16, "y": 18 },
-        "theme": "dark"
+        "theme": "Dark"
       }
     ],
     "security": {
@@ -29,7 +30,28 @@
     }
   },
   "bundle": {
-    "active": false,
-    "icon": ["icons/icon.png"]
+    "active": true,
+    "targets": ["app", "dmg"],
+    "createUpdaterArtifacts": true,
+    "category": "DeveloperTool",
+    "shortDescription": "Local multi-agent desktop for grok/claude/codex CLIs",
+    "macOS": {
+      "signingIdentity": "-"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.png"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/im-ian/crew/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE1NDY4MkVGMTk4NjZBNgpSV1NtWnBqeExtaFVDdW5saitqOW5RNGRQQlRqSExad284bXRiejdyamgrOTlVcldURit5WW8vZgo="
+    }
   }
 }

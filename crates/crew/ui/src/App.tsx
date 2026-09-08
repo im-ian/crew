@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatThread } from "./components/ChatThread";
 import { Composer, type ComposerHandle } from "./components/Composer";
@@ -26,6 +27,7 @@ import {
 } from "./theme";
 import type { Kind } from "./types";
 import { useCrew } from "./useCrew";
+import { useUpdater } from "./updater";
 
 export function App() {
   const t = useT();
@@ -38,6 +40,7 @@ export function App() {
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [theme, setTheme] = useState<ThemePref>(loadThemePref);
   const [jumpSeq, setJumpSeq] = useState(0);
+  const updater = useUpdater();
   const renamingId = crew.pendingRenameId || renameId;
   const searchRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<ComposerHandle>(null);
@@ -46,6 +49,16 @@ export function App() {
     crew.clearPendingRename();
     setRenameId(null);
   }
+
+  useEffect(() => {
+    void updater.init();
+    void updater.check();
+    const interval = window.setInterval(
+      () => void updater.check(),
+      24 * 60 * 60 * 1000,
+    );
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     applyTheme(theme);
@@ -190,6 +203,15 @@ export function App() {
       />
       <main>
         <div className="titlebar-align" data-tauri-drag-region />
+        <UpdateBanner
+          visible={updater.shouldNotify}
+          version={updater.available?.version}
+          busy={updater.busy}
+          error={updater.error}
+          onInstall={() => void updater.install()}
+          onLater={updater.dismiss}
+          onClearError={updater.clearError}
+        />
         <ChatHeader
           currentAgent={crew.currentAgent}
           currentChannel={crew.currentChannel}
@@ -327,6 +349,7 @@ export function App() {
           setSettingsOpen(false);
           setSkillsOpen(true);
         }}
+        updater={updater}
       />
       <SkillsPane open={skillsOpen} onClose={() => setSkillsOpen(false)} />
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />

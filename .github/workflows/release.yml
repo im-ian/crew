@@ -1,0 +1,378 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0). Must already exist on origin/main."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  frontend:
+    name: Build shared frontend bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      release_commit: ${{ steps.release_source.outputs.commit }}
+      release_tag: ${{ steps.release_source.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/crew/ui/package-lock.json
+
+      - name: Validate release version
+        id: release_source
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            tag="$INPUT_TAG"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          node scripts/validate-release-version.mjs "$tag"
+          tag_commit=$(git rev-parse --verify "refs/tags/${tag}^{commit}")
+          head_commit=$(git rev-parse --verify HEAD)
+          if [[ "$head_commit" != "$tag_commit" ]]; then
+            echo "checked out $head_commit, but $tag resolves to $tag_commit" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$head_commit" refs/remotes/origin/main; then
+            echo "release commit $head_commit is not reachable from origin/main" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "commit=$head_commit" >> "$GITHUB_OUTPUT"
+
+      - name: Install JS deps
+        run: npm ci
+        working-directory: crates/crew/ui
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: crates/crew/ui
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frontend-dist
+          path: crates/crew/ui/dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  build:
+    name: Build macOS bundles + updater signatures
+    runs-on: macos-latest
+    needs: frontend
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.frontend.outputs.release_commit }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/crew/ui/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Install JS deps
+        run: npm ci
+        working-directory: crates/crew/ui
+
+      - name: Download shared frontend bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: frontend-dist
+          path: crates/crew/ui/dist/
+
+      - name: Build bundle + updater signature
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          CARGO_INCREMENTAL: "0"
+          SKIP_UI_BUILD: "1"
+        run: |
+          set -euo pipefail
+          if [[ -z "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY is required for macOS updater artifacts" >&2
+            exit 1
+          fi
+          cd crates/crew
+          npm exec --prefix ui -- tauri build --target "$BUILD_TARGET" --bundles app dmg -- --locked
+
+      - name: Stage release artifacts
+        id: stage
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          out=staged
+          mkdir -p "$out"
+          target="$BUILD_TARGET"
+          bundle_dir="target/${target}/release/bundle"
+          if [[ ! -d "$bundle_dir" ]]; then
+            bundle_dir="crates/crew/target/${target}/release/bundle"
+          fi
+
+          case "$target" in
+            aarch64-*) suffix="aarch64" ;;
+            x86_64-*)  suffix="x86_64"  ;;
+            *)         suffix="$target" ;;
+          esac
+
+          node scripts/release-artifacts.mjs stage "$bundle_dir" "$out" "$suffix"
+          ls -la "$out/"
+          echo "dir=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Upload bundle artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bundles-${{ matrix.target }}
+          path: ${{ steps.stage.outputs.dir }}/**
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish GitHub Release + latest.json
+    needs: [frontend, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.frontend.outputs.release_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify pinned release source
+        env:
+          EXPECTED_COMMIT: ${{ needs.frontend.outputs.release_commit }}
+          TAG: ${{ needs.frontend.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags origin \
+            "+refs/tags/${TAG}:refs/tags/${TAG}" \
+            "+refs/heads/main:refs/remotes/origin/main"
+          head_commit=$(git rev-parse --verify HEAD)
+          tag_commit=$(git rev-parse --verify "refs/tags/${TAG}^{commit}")
+          if [[ "$head_commit" != "$EXPECTED_COMMIT" || "$tag_commit" != "$EXPECTED_COMMIT" ]]; then
+            echo "release source moved: expected $EXPECTED_COMMIT, HEAD=$head_commit, $TAG=$tag_commit" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$EXPECTED_COMMIT" refs/remotes/origin/main; then
+            echo "release commit $EXPECTED_COMMIT is not reachable from origin/main" >&2
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Download all bundles
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: bundles
+          pattern: bundles-*
+          merge-multiple: true
+
+      - name: Inspect updater artifacts
+        run: |
+          set -euo pipefail
+          node scripts/release-artifacts.mjs inspect bundles > artifact-set.json
+          cat artifact-set.json
+
+      - name: List downloaded artifacts
+        run: ls -la bundles/
+
+      - name: Resolve tag + version
+        id: meta
+        env:
+          TAG: ${{ needs.frontend.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          version=$(node scripts/validate-release-version.mjs "$TAG")
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse existing release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          error_file=$(mktemp)
+          if ! release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" 2>"$error_file"); then
+            if grep -q "HTTP 404" "$error_file"; then
+              exit 0
+            fi
+            cat "$error_file" >&2
+            exit 1
+          fi
+          asset_count=$(jq '.assets | length' <<<"$release_json")
+          if [[ "$asset_count" != "0" ]]; then
+            echo "release $TAG already has $asset_count asset(s); refusing a mutable or mixed rerun" >&2
+            exit 1
+          fi
+
+      - name: Enforce latest release order
+        id: latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ "$TAG" == *-* ]]; then
+            echo "value=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          error_file=$(mktemp)
+          if ! current_tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>"$error_file"); then
+            if grep -q "HTTP 404" "$error_file"; then
+              echo "value=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            cat "$error_file" >&2
+            exit 1
+          fi
+          node scripts/validate-release-version.mjs --assert-newer "$TAG" "$current_tag"
+          echo "value=true" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Crew ${VERSION}"
+            echo
+            echo '> [!WARNING]'
+            echo '> These artifacts carry Crew updater signatures but are not signed with an Apple Developer ID. Confirm this official release page before running a download. Ad-hoc builds need `xattr -dr com.apple.quarantine` after a browser download.'
+          } > release_notes.md
+
+      - name: Generate latest.json manifest
+        env:
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          arm_tar=$(jq -r .armTar artifact-set.json)
+          arm_sig=$(jq -r .armSignature artifact-set.json)
+          x64_tar=$(jq -r .x64Tar artifact-set.json)
+          x64_sig=$(jq -r .x64Signature artifact-set.json)
+
+          base="https://github.com/${REPO}/releases/download/${TAG}"
+          arm_url="${base}/$(basename "$arm_tar")"
+          x64_url="${base}/$(basename "$x64_tar")"
+          arm_sig_value=$(cat "$arm_sig")
+          x64_sig_value=$(cat "$x64_sig")
+
+          jq -n \
+            --arg version "$VERSION" \
+            --rawfile notes release_notes.md \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg arm_url "$arm_url" \
+            --arg arm_sig "$arm_sig_value" \
+            --arg x64_url "$x64_url" \
+            --arg x64_sig "$x64_sig_value" \
+            '{
+               version: $version,
+               notes: $notes,
+               pub_date: $pub_date,
+               platforms: {
+                 "darwin-aarch64": { signature: $arm_sig, url: $arm_url },
+                 "darwin-x86_64":  { signature: $x64_sig, url: $x64_url }
+               }
+             }' > latest.json
+
+          jq -e \
+            --arg version "$VERSION" \
+            --arg arm_url "$arm_url" \
+            --arg arm_sig "$arm_sig_value" \
+            --arg x64_url "$x64_url" \
+            --arg x64_sig "$x64_sig_value" \
+            '.version == $version and
+             (.platforms | keys == ["darwin-aarch64", "darwin-x86_64"]) and
+             .platforms["darwin-aarch64"] == { signature: $arm_sig, url: $arm_url } and
+             .platforms["darwin-x86_64"] == { signature: $x64_sig, url: $x64_url } and
+             ([.platforms[] | (.signature | type == "string" and length > 0)] | all) and
+             ([.platforms[] | (.url | type == "string" and startswith("https://github.com/"))] | all)' \
+            latest.json > /dev/null
+
+          cat latest.json
+
+      - name: Verify release tag did not move
+        env:
+          EXPECTED_COMMIT: ${{ needs.frontend.outputs.release_commit }}
+          TAG: ${{ needs.frontend.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags origin "+refs/tags/${TAG}:refs/tags/${TAG}"
+          tag_commit=$(git rev-parse --verify "refs/tags/${TAG}^{commit}")
+          if [[ "$tag_commit" != "$EXPECTED_COMMIT" ]]; then
+            echo "release tag moved: expected $TAG at $EXPECTED_COMMIT, found $tag_commit" >&2
+            exit 1
+          fi
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
+          body_path: release_notes.md
+          files: |
+            bundles/*.dmg
+            bundles/*.app.tar.gz
+            bundles/*.app.tar.gz.sig
+            latest.json
+          fail_on_unmatched_files: true
+          overwrite_files: false
+          make_latest: ${{ steps.latest.outputs.value }}
+          prerelease: ${{ contains(steps.meta.outputs.tag, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

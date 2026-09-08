@@ -189,6 +189,35 @@ pub fn remove_pid() {
     let _ = fs::remove_file(pid_path());
 }
 
+pub fn daemon_version_path() -> PathBuf {
+    home_dir().join("daemon.version")
+}
+
+pub fn write_daemon_version(version: &str) -> anyhow::Result<()> {
+    ensure_home()?;
+    fs::write(daemon_version_path(), format!("{version}\n"))?;
+    Ok(())
+}
+
+pub fn read_daemon_version() -> Option<String> {
+    let raw = fs::read_to_string(daemon_version_path()).ok()?;
+    let version = raw.trim();
+    if version.is_empty() {
+        None
+    } else {
+        Some(version.to_string())
+    }
+}
+
+pub fn remove_daemon_version() {
+    let _ = fs::remove_file(daemon_version_path());
+}
+
+/// True when the live daemon was started by this same package version.
+pub fn daemon_version_matches(current: &str) -> bool {
+    read_daemon_version().as_deref() == Some(current)
+}
+
 pub fn create_cwd(path: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(path)?;
     Ok(())
@@ -363,6 +392,21 @@ mod tests {
             assert_eq!(locale(), "ko", "an unknown tag falls back, it does not stick");
             fs::write(locale_path(), "en").unwrap();
             assert_eq!(locale(), "en");
+        });
+    }
+
+    #[test]
+    fn daemon_version_roundtrip_and_match() {
+        testing::with_home("daemon-version", || {
+            assert!(
+                !daemon_version_matches("0.1.0"),
+                "a missing file is treated as a stale daemon"
+            );
+            write_daemon_version("0.1.0").unwrap();
+            assert!(daemon_version_matches("0.1.0"));
+            assert!(!daemon_version_matches("0.2.0"));
+            remove_daemon_version();
+            assert!(!daemon_version_matches("0.1.0"));
         });
     }
 }

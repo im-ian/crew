@@ -6,7 +6,7 @@
 
 이미 쓰고 있는 [Grok](https://grok.com) / [Claude Code](https://docs.anthropic.com/en/docs/claude-code) / [Codex](https://github.com/openai/codex) CLI를 하나의 창 안에 봇으로 모아 주는 맥 앱이에요. 모델 API를 새로 붙이는 대신, CLI를 헤드리스로 실행하고 그 답변만 말풍선으로 보여줘요.
 
-아직은 소스 빌드만 지원해요. GitHub Releases에 올라간 `.app`은 없어요.
+GitHub Releases의 `.dmg`로 설치할 수 있고, 설치된 앱은 새 버전이 나오면 직접 업데이트해요.
 
 <p align="center">
   <img src="docs/readme/window.png" alt="Crew 채팅 창 — 봇과 채널, @멘션, 핸드오프" width="920">
@@ -121,6 +121,7 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 - 한국어 / English
 - 다크 / 라이트 / 시스템 (맥 외관 설정)
 - 단축키 오버레이 (`⌘/`, 또는 입력창 밖에서 `?`)
+- macOS 자동 업데이트 — 새 버전을 알려 주고, 적용 시점은 설정에서 고를 수 있어요
 
 ---
 
@@ -142,9 +143,38 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 
 ## 설치
 
-미리 빌드된 설치 파일은 아직 없어요. 저장소를 받아서 직접 빌드하면 돼요.
+### macOS 앱
 
-### 1. 도구
+#### 설치 스크립트
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/im-ian/crew/main/scripts/install-macos.sh | bash
+```
+
+최신 릴리스 DMG를 내려받아 `/Applications/Crew.app`에 복사하고 quarantine 속성을 제거해요. `~/.local/bin/crew`에 CLI 심볼릭 링크도 만들어 줘요. 위치를 바꾸려면 `CREW_INSTALL_DIR`를 지정:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/im-ian/crew/main/scripts/install-macos.sh \
+  | CREW_INSTALL_DIR="$HOME/Applications" bash
+```
+
+#### 수동 DMG
+
+[Releases](https://github.com/im-ian/crew/releases/latest)에서 `Crew_*_aarch64.dmg`(Apple Silicon) 또는 `Crew_*_x64.dmg`(Intel)를 받아 `Applications`로 복사한 뒤 quarantine 속성 제거:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Crew.app
+```
+
+> Crew는 Apple Developer ID로 서명·공증되지 않은 ad-hoc 빌드입니다. 위 명령은 Gatekeeper의 quarantine 플래그만 떼는 단계로 앱 무결성에는 영향이 없습니다.
+
+설치된 앱은 시작 시와 설정에서 업데이트를 확인해요. 새 버전은 사용자가 설치를 고른 뒤에만 받아 다시 실행합니다.
+
+### 소스에서 빌드
+
+미리 빌드된 앱 대신 저장소를 받아서 직접 빌드할 수도 있어요.
+
+#### 1. 도구
 
 ```bash
 # Rust
@@ -156,7 +186,7 @@ xcode-select --install
 
 Node는 [nodejs.org](https://nodejs.org)에서 받거나 `brew install node`로 설치하면 돼요.
 
-### 2. 에이전트 CLI (필요한 것만)
+#### 2. 에이전트 CLI (필요한 것만)
 
 각 도구의 공식 설치 방법을 따른 뒤, 터미널에서 해당 명령이 실행되는지만 확인하면 돼요.
 
@@ -166,7 +196,7 @@ claude --version
 codex --version
 ```
 
-### 3. Crew 빌드
+#### 3. Crew 빌드
 
 **저장소에서 빌드**
 
@@ -177,6 +207,12 @@ cargo build --release -p crew
 ```
 
 바이너리: `target/release/crew`
+
+macOS `.app` / `.dmg`는 다음으로 만들어요. 서명 키가 없으면 업데이터 아티팩트 없이 호스트 아키텍처 번들만 나와요.
+
+```bash
+./scripts/build-macos.sh
+```
 
 PATH에 넣으려면:
 
@@ -196,7 +232,7 @@ cargo install --git https://github.com/im-ian/crew.git --locked crew
 
 두 방법 모두 `build.rs`가 `crates/crew/ui`에서 `npm install`과 `npm run build`를 실행해요. 첫 빌드는 Node 의존성 때문에 시간이 좀 더 걸려요.
 
-### 4. 실행
+#### 4. 실행
 
 ```bash
 crew
@@ -355,6 +391,8 @@ cargo test -p crew
 crates/crew/src/     Rust: CLI, 데몬, 헤드리스/PTY, Tauri 커맨드
 crates/crew/ui/src/  React 19 UI
 ```
+
+GitHub에 `vX.Y.Z` 태그를 올리면 Release 워크플로가 Apple Silicon·Intel DMG와 업데이터 `latest.json`을 게시해요. `Cargo.toml`, `crates/crew/tauri.conf.json`, `crates/crew/ui/package.json`의 버전이 태그와 같아야 해요. 업데이터 서명을 쓰려면 저장소 Secrets에 `TAURI_SIGNING_PRIVATE_KEY`가 있어야 해요.
 
 핵심은 데몬이에요. 데스크톱 앱과 `crew` CLI가 Unix 소켓으로 JSON 요청을 보내면, 데몬이 에이전트 프로세스를 실행해요.
 
