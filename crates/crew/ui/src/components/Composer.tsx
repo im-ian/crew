@@ -6,7 +6,7 @@ import { api } from "../api";
 import { useT } from "../LocaleContext";
 import { resolveChannel, resolveMention, trimMentionPunct } from "../mentions";
 import { oneLine, wrapReply, type ReplyTarget } from "../reply";
-import { Avatar } from "./Avatar";
+import { Avatar, ChannelAvatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
 import { CircleDot, Paperclip, Plus, StopSquare, X } from "../icons";
 
@@ -447,11 +447,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
                   pickChannel(c);
                 }}
               >
-                <Avatar
+                <ChannelAvatar
                   className="mention-avatar"
-                  id={c.id}
-                  name={c.name || c.id}
-                  letter="#"
+                  channel={c}
+                  agents={agents}
                 />
                 <span className="mention-name">{c.name || c.id}</span>
                 {c.name && c.name !== c.id ? (

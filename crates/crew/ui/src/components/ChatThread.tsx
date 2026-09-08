@@ -9,7 +9,7 @@ import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { threadRows, toolArgs, toolSummary } from "../tools";
 import { Reply } from "../icons";
-import { Avatar } from "./Avatar";
+import { Avatar, ChannelAvatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
 import { MdBody } from "./MdBody";
 import { WhoButton, whoColor } from "./WhoButton";
@@ -137,7 +137,7 @@ export function ChatThread({
     <div className="thread-wrap">
       <div className="thread" ref={ref} onScroll={syncStick}>
         {!messages.length ? (
-          <EmptyChat agent={currentAgent} channel={currentChannel} />
+          <EmptyChat agent={currentAgent} channel={currentChannel} agents={agents} />
         ) : (
           threadRows(visible).map((row) => {
             if (row.kind === "tools") {
@@ -244,15 +244,17 @@ export function ChatThread({
 function EmptyChat({
   agent,
   channel,
+  agents,
 }: {
   agent: AgentInfo | null;
   channel: ChannelInfo | null;
+  agents: AgentInfo[];
 }) {
   const t = useT();
   if (channel) {
     return (
       <div className="empty-chat">
-        <Avatar id={channel.id} name={channel.name || channel.id} letter="#" />
+        <ChannelAvatar channel={channel} agents={agents} />
         <strong>{channel.name || channel.id}</strong>
         <span>{t("thread.startChannel")}</span>
       </div>
