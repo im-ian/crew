@@ -402,7 +402,12 @@ fn spawn_and_stream(
         };
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
             for card in crate::tool_card::from_events(&v) {
-                crate::transcript::push_tool(&session.id, &card.name, &card.detail);
+                crate::transcript::push_tool(
+                    &session.id,
+                    card.id.as_deref(),
+                    &card.name,
+                    &card.detail,
+                );
             }
         }
         if let Some(chunk) = ingest_line(cli, &line, &mut state) {

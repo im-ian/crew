@@ -40,6 +40,8 @@ struct AgentChat {
     echo_skip: String,
     /// begin_turn generation so a cancelled turn cannot seal its successor.
     turn_gen: u64,
+    /// CLI tool-call id -> message id, so repeat events update one card.
+    tool_ids: HashMap<String, String>,
 }
 
 impl AgentChat {
@@ -55,6 +57,7 @@ impl AgentChat {
             hold: false,
             echo_skip: String::new(),
             turn_gen: 0,
+            tool_ids: HashMap::new(),
         }
     }
 }
@@ -110,6 +113,7 @@ fn load_key(key: &str, path: &Path) {
                 hold: false,
                 echo_skip: String::new(),
                 turn_gen: 0,
+                tool_ids: HashMap::new(),
             },
         );
     }
@@ -204,8 +208,10 @@ pub fn push_handoff(agent: &str, from: &str, text: &str) -> ChatMessage {
     )
 }
 
-pub fn push_tool(agent: &str, name: &str, detail: &str) -> ChatMessage {
-    let msg = ChatMessage {
+/// One row per tool call. `call_id` is the CLI's id for the call: later events
+/// for the same id fill the same card in instead of stacking another row.
+pub fn push_tool(agent: &str, call_id: Option<&str>, name: &str, detail: &str) -> ChatMessage {
+    let mut msg = ChatMessage {
         id: new_id(),
         role: Role::System,
         from: name.to_string(),
@@ -219,13 +225,32 @@ pub fn push_tool(agent: &str, name: &str, detail: &str) -> ChatMessage {
         let chat = map
             .entry(agent.to_string())
             .or_insert_with(AgentChat::empty);
-        if let Some(idx) = chat.pending_idx {
-            chat.messages.insert(idx, msg.clone());
-            chat.pending_idx = Some(idx + 1);
+        let call_id = call_id.filter(|id| !id.is_empty());
+        let known = call_id
+            .and_then(|id| chat.tool_ids.get(id).cloned())
+            .and_then(|mid| chat.messages.iter().position(|m| m.id == mid));
+        if let Some(idx) = known {
+            let row = &mut chat.messages[idx];
+            if !name.is_empty() {
+                row.from = name.to_string();
+            }
+            if !detail.is_empty() {
+                row.text = detail.to_string();
+            }
+            msg = row.clone();
+            persist(agent, chat);
         } else {
-            chat.messages.push(msg.clone());
+            if let Some(id) = call_id {
+                chat.tool_ids.insert(id.to_string(), msg.id.clone());
+            }
+            if let Some(idx) = chat.pending_idx {
+                chat.messages.insert(idx, msg.clone());
+                chat.pending_idx = Some(idx + 1);
+            } else {
+                chat.messages.push(msg.clone());
+            }
+            persist(agent, chat);
         }
-        persist(agent, chat);
     }
     emit(agent, msg.clone());
     msg
@@ -402,6 +427,7 @@ pub fn begin_turn(agent: &str) -> u64 {
             .entry(agent.to_string())
             .or_insert_with(AgentChat::empty);
         chat.turn_gen = chat.turn_gen.wrapping_add(1);
+        chat.tool_ids.clear();
         chat.expecting = true;
         chat.hold = true;
         chat.last_byte = Instant::now();
@@ -902,6 +928,42 @@ mod tests {
         let msg = push_user(&agent, "user", "hi");
         assert_eq!(last_ts(&agent), msg.ts);
         assert!(msg.ts > 0);
+        drop_agent(&agent);
+    }
+
+    #[test]
+    fn tool_events_sharing_a_call_id_stay_one_row() {
+        let agent = format!(
+            "tool-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        begin_turn(&agent);
+        let opened = push_tool(&agent, Some("call-1"), "Read", "");
+        push_tool(&agent, Some("call-1"), "", "{\"file_path\":\"/tmp/a.rs\"}");
+        push_tool(&agent, Some("call-2"), "Bash", "{\"command\":\"ls\"}");
+        let rows: Vec<_> = messages(&agent)
+            .into_iter()
+            .filter(|m| m.kind == Some(MessageKind::Tool))
+            .collect();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].id, opened.id);
+        assert_eq!(rows[0].from, "Read");
+        assert!(rows[0].text.contains("/tmp/a.rs"));
+        assert_eq!(rows[1].from, "Bash");
+        // A new turn must not fold into the previous turn's card.
+        begin_turn(&agent);
+        push_tool(&agent, Some("call-1"), "Read", "{}");
+        assert_eq!(
+            messages(&agent)
+                .iter()
+                .filter(|m| m.kind == Some(MessageKind::Tool))
+                .count(),
+            3
+        );
         drop_agent(&agent);
     }
 

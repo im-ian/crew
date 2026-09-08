@@ -2,6 +2,9 @@ use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolCard {
+    /// The CLI's own call id. Every event for one call repeats it, so the
+    /// transcript can keep updating a single card instead of stacking rows.
+    pub id: Option<String>,
     pub name: String,
     pub detail: String,
 }
@@ -32,18 +35,11 @@ fn grok_tool(v: &Value) -> Option<ToolCard> {
     if ty != "tool_call" && ty != "tool_call_update" {
         return None;
     }
-    let name = first_str(v, &["toolName", "tool_name", "name", "title"]).unwrap_or("tool");
-    let detail = v
-        .get("content")
-        .map(value_detail)
-        .filter(|s| !s.is_empty())
-        .or_else(|| v.get("input").map(value_detail).filter(|s| !s.is_empty()))
-        .or_else(|| first_str(v, &["title", "kind"]).map(|s| s.to_string()))
-        .unwrap_or_default();
-    Some(ToolCard {
-        name: name.to_string(),
-        detail,
-    })
+    card(
+        first_str(v, &["toolCallId", "tool_call_id", "id"]),
+        first_str(v, &["toolName", "tool_name", "name", "title"]),
+        args_detail(v),
+    )
 }
 
 fn claude_block_tools(v: &Value) -> Vec<ToolCard> {
@@ -70,47 +66,56 @@ fn tool_use_card(block: &Value) -> Option<ToolCard> {
     if block.get("type").and_then(Value::as_str) != Some("tool_use") {
         return None;
     }
-    let name = block
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or("tool");
-    let detail = block
-        .get("input")
-        .map(value_detail)
-        .unwrap_or_default();
-    if detail.is_empty() {
-        return None;
-    }
-    Some(ToolCard {
-        name: name.to_string(),
-        detail,
-    })
+    card(
+        first_str(block, &["id"]),
+        first_str(block, &["name"]),
+        args_detail(block),
+    )
 }
 
 fn item_tools(v: &Value) -> Vec<ToolCard> {
-    if v.get("type").and_then(Value::as_str) != Some("item")
-        && v.get("type").and_then(Value::as_str) != Some("item.completed")
-        && v.get("type").and_then(Value::as_str) != Some("item.started")
-    {
+    let ty = v.get("type").and_then(Value::as_str).unwrap_or("");
+    if ty != "item" && ty != "item.completed" && ty != "item.started" {
         return Vec::new();
     }
     let item = v.get("item").unwrap_or(v);
-    let ty = item.get("type").and_then(Value::as_str).unwrap_or("");
-    if ty != "tool" && ty != "command" && ty != "mcp_tool_call" {
+    let kind = item.get("type").and_then(Value::as_str).unwrap_or("");
+    if kind != "tool" && kind != "command" && kind != "mcp_tool_call" {
         return Vec::new();
     }
-    let name = first_str(item, &["name", "command", "tool"]).unwrap_or("tool");
-    let detail = item
-        .get("input")
-        .map(value_detail)
-        .filter(|s| !s.is_empty())
-        .or_else(|| item.get("arguments").map(value_detail).filter(|s| !s.is_empty()))
-        .or_else(|| first_str(item, &["command", "status"]).map(|s| s.to_string()))
-        .unwrap_or_default();
-    vec![ToolCard {
-        name: name.to_string(),
+    let detail = if args_detail(item).is_empty() {
+        first_str(item, &["command", "status"]).unwrap_or("").to_string()
+    } else {
+        args_detail(item)
+    };
+    card(
+        first_str(item, &["id"]),
+        first_str(item, &["name", "tool"]).or(Some(kind)),
         detail,
-    }]
+    )
+    .into_iter()
+    .collect()
+}
+
+/// Cards are the call's arguments, not its output: the point of the row is
+/// "which tool, called how". A later event for the same id fills in blanks.
+fn args_detail(v: &Value) -> String {
+    ["rawInput", "raw_input", "input", "arguments", "args"]
+        .iter()
+        .find_map(|k| v.get(*k).map(value_detail).filter(|s| !s.is_empty()))
+        .unwrap_or_default()
+}
+
+fn card(id: Option<&str>, name: Option<&str>, detail: String) -> Option<ToolCard> {
+    let name = name.unwrap_or_default().to_string();
+    if name.is_empty() && detail.is_empty() {
+        return None;
+    }
+    Some(ToolCard {
+        id: id.map(str::to_string),
+        name,
+        detail,
+    })
 }
 
 fn first_str<'a>(v: &'a Value, keys: &[&str]) -> Option<&'a str> {
@@ -134,33 +139,57 @@ mod tests {
     use super::*;
 
     #[test]
-    fn grok_tool_call_becomes_card() {
+    fn grok_tool_call_keeps_id_and_args() {
         let v: Value = serde_json::from_str(
-            r#"{"type":"tool_call","toolCallId":"1","title":"Read file","toolName":"read_file"}"#,
+            r#"{"type":"tool_call","toolCallId":"call-1","title":"Run","toolName":"run_terminal_command","rawInput":{"command":"echo hi"}}"#,
         )
         .unwrap();
         let card = from_events(&v).into_iter().next().expect("card");
-        assert_eq!(card.name, "read_file");
-        assert_eq!(card.detail, "Read file");
+        assert_eq!(card.id.as_deref(), Some("call-1"));
+        assert_eq!(card.name, "run_terminal_command");
+        assert!(card.detail.contains("echo hi"));
+    }
+
+    #[test]
+    fn grok_update_without_args_is_dropped() {
+        // grok repeats an update per output chunk; each one used to become a
+        // nameless "tool" row of its own.
+        let v: Value = serde_json::from_str(
+            r#"{"type":"tool_call_update","toolCallId":"call-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"hi\n"}}]}"#,
+        )
+        .unwrap();
+        assert!(from_events(&v).is_empty());
     }
 
     #[test]
     fn claude_assistant_tool_use_keeps_input() {
         let v: Value = serde_json::from_str(
-            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/a.rs"}}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"/tmp/a.rs"}}]}}"#,
         )
         .unwrap();
         let card = from_events(&v).into_iter().next().expect("card");
+        assert_eq!(card.id.as_deref(), Some("toolu_1"));
         assert_eq!(card.name, "Read");
         assert!(card.detail.contains("/tmp/a.rs"));
     }
 
     #[test]
-    fn claude_empty_tool_start_is_skipped() {
+    fn claude_tool_start_opens_the_card_the_args_land_in() {
         let v: Value = serde_json::from_str(
-            r#"{"type":"content_block_start","content_block":{"type":"tool_use","name":"Read","input":{}}}"#,
+            r#"{"type":"content_block_start","content_block":{"type":"tool_use","id":"toolu_1","name":"Read","input":{}}}"#,
         )
         .unwrap();
+        let card = from_events(&v).into_iter().next().expect("card");
+        assert_eq!(card.id.as_deref(), Some("toolu_1"));
+        assert_eq!(card.name, "Read");
+        assert!(card.detail.is_empty());
+    }
+
+    #[test]
+    fn nameless_empty_block_is_not_a_card() {
+        let v: Value =
+            serde_json::from_str(r#"{"type":"content_block_start","content_block":{"type":"tool_use","input":{}}}"#)
+                .unwrap();
         assert!(from_events(&v).is_empty());
     }
 
