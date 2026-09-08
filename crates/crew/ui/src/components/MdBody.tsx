@@ -153,7 +153,10 @@ function nodeToReact(
   if (!TAGS.has(tag)) return kids;
   if (tag === "PRE") {
     return (
-      <div key={key} className="code-wrap">
+      <div
+        key={key}
+        className={"code-wrap" + (el.classList.contains("md-out") ? " md-out" : "")}
+      >
         <pre>{kids}</pre>
         <CopyButton text={el.textContent || ""} className="code-copy" />
       </div>
@@ -197,5 +200,10 @@ function nodeToReact(
       </a>
     );
   }
-  return createElement(tag.toLowerCase(), { key }, ...kids);
+  const cls = el.getAttribute("class");
+  return createElement(
+    tag.toLowerCase(),
+    cls ? { key, className: cls } : { key },
+    ...kids,
+  );
 }

@@ -34,7 +34,16 @@ export function renderMarkdown(raw: string): string {
     const line = lines[i];
     const fence = line.match(/^%%FENCE(\d+)%%$/);
     if (fence) {
-      out.push(fences[Number(fence[1])] || "");
+      const block = fences[Number(fence[1])] || "";
+      const prev = out[out.length - 1];
+      // A line that is nothing but inline code, directly above a block, is the
+      // command that produced it; mark the pair so the bubble can label them.
+      if (prev && /^<p><code>[^<]*<\/code><\/p>$/.test(prev)) {
+        out[out.length - 1] = prev.replace("<p>", '<p class="md-cmd">');
+        out.push(block.replace("<pre>", '<pre class="md-out">'));
+      } else {
+        out.push(block);
+      }
       i += 1;
       continue;
     }

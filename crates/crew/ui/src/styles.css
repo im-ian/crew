@@ -1126,6 +1126,28 @@ button.msg-avatar {
   font-size: 12.5px;
   line-height: 1.45;
 }
+/* A command and the block under it read as a terminal exchange. */
+.bubble.md p.md-cmd::before {
+  content: "\276f";
+  margin-right: var(--space-6);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.86em;
+}
+.code-wrap.md-out {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+.code-wrap.md-out::before {
+  content: "\21b3";
+  padding-top: calc(0.45em + var(--space-10));
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.86em;
+  line-height: 1.45;
+}
 .bubble.streaming p:last-child::after,
 .bubble.streaming:empty::after,
 .bubble.streaming:not(:has(p, pre, ul, ol, h1, h2, h3))::after {

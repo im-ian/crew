@@ -69,3 +69,22 @@ describe("resolveLocalPath", () => {
     expect(isLocalHref("/tmp/a.png")).toBe(true);
   });
 });
+
+describe("command and output", () => {
+  it("marks an inline-code line that introduces a block", () => {
+    const html = renderMarkdown("`echo hi`\n\n```\nhi\n```");
+    expect(html).toContain('<p class="md-cmd"><code>echo hi</code></p>');
+    expect(html).toContain('<pre class="md-out">');
+  });
+
+  it("leaves a block that follows prose alone", () => {
+    const html = renderMarkdown("결과예요.\n\n```\nhi\n```");
+    expect(html).not.toContain("md-cmd");
+    expect(html).not.toContain("md-out");
+  });
+
+  it("leaves a block that follows a sentence with code in it alone", () => {
+    const html = renderMarkdown("`ls` 를 돌렸어요.\n\n```\nhi\n```");
+    expect(html).not.toContain("md-cmd");
+  });
+});
