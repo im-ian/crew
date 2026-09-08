@@ -1152,6 +1152,10 @@ button.msg-avatar {
 .bubble.md .code-wrap.md-out > pre {
   margin-top: var(--space-6);
 }
+.bubble.md .md-empty {
+  color: var(--muted);
+  font-style: italic;
+}
 /* A trailing block would otherwise add its margin to the bubble's padding. */
 .bubble.md .code-wrap:last-child > pre {
   margin-bottom: 0;
