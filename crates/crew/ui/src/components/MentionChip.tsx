@@ -11,23 +11,13 @@ type Props = {
 export function MentionChip({ agent, channel, onClick }: Props) {
   if (channel) {
     const label = channelLabel(channel);
-    const inner = (
-      <>
-        <Avatar
-          as="span"
-          className="mention-chip-avatar"
-          id={channel.id}
-          name={label}
-          letter="#"
-        />
-        <span className="mention-chip-name">{label}</span>
-      </>
-    );
+    // A room reads as "#name"; a face for it would just be its members again.
+    const inner = <span className="mention-chip-name">#{label}</span>;
     if (onClick) {
       return (
         <button
           type="button"
-          className="mention-chip"
+          className="mention-chip is-channel"
           contentEditable={false}
           data-channel={channel.id}
           title={"#" + label}
@@ -42,7 +32,11 @@ export function MentionChip({ agent, channel, onClick }: Props) {
       );
     }
     return (
-      <span className="mention-chip" contentEditable={false} data-channel={channel.id}>
+      <span
+        className="mention-chip is-channel"
+        contentEditable={false}
+        data-channel={channel.id}
+      >
         {inner}
       </span>
     );

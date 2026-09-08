@@ -2189,6 +2189,9 @@ button.mention-chip:active {
     transform: scale(1);
   }
 }
+.mention-chip.is-channel {
+  padding-left: var(--space-8);
+}
 .mention-chip-avatar {
   width: 16px;
   height: 16px;

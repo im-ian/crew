@@ -453,7 +453,6 @@ function TransferNote({
         <WhoButton
           agent={agent}
           who={who}
-          letter={fromChannel ? "#" : undefined}
           fallbackId={otherId}
           onClick={open}
         />
