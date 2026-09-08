@@ -1371,6 +1371,10 @@ button.channel-who:hover {
 }
 .tool-run {
   align-self: flex-start;
+  /* The thread is a column flex box: `overflow: hidden` drops this card's
+     automatic minimum size, so without this it squashes to its own borders
+     once the thread scrolls. */
+  flex: 0 0 auto;
   max-width: 72%;
   min-width: 0;
   margin: 0 24px;
@@ -1383,7 +1387,7 @@ button.channel-who:hover {
 .tool-row-head {
   display: flex;
   gap: 8px;
-  align-items: baseline;
+  align-items: center;
   width: 100%;
   min-width: 0;
   border: 0;
