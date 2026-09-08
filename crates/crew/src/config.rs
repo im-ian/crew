@@ -698,7 +698,7 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         "When the user writes #id or #display-name, they are naming a channel. Stay in this session. To post there, run `crew channel send <id> <text>` or `crew tell --channel <id> <text>`.\n",
     );
     s.push_str(
-        "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew channel:…]` / `[crew system]` / `[crew handoff from:…]` are real messages. A handoff is a teammate's finished reply; do not crew tell them that same text back.\n",
+        "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew channel:…]` / `[crew system]` / `[crew handoff from:…]` / `[crew reply:…]` are real messages. A `[crew reply:…]` line is the user answering an earlier message; the next line is the quote, then their new text. A handoff is a teammate's finished reply; do not crew tell them that same text back.\n",
     );
     s
 }
@@ -754,8 +754,9 @@ pub fn with_mention_hint(
     roster: &[AgentConfig],
     channels: &[Channel],
 ) -> String {
-    let ids = mentioned_teammate_ids(text, self_id, roster);
-    let rooms = mentioned_channel_ids(text, channels);
+    let scan = crate::rows::reply_body(text);
+    let ids = mentioned_teammate_ids(scan, self_id, roster);
+    let rooms = mentioned_channel_ids(scan, channels);
     if ids.is_empty() && rooms.is_empty() {
         return text.to_string();
     }
@@ -1646,6 +1647,10 @@ mod tests {
             with_mention_hint("no mentions", "alpha", &roster, &[]),
             "no mentions"
         );
+        let quoted = "[crew reply:1-2 from:beta]\nask @beta later\n\njust thinking";
+        assert_eq!(with_mention_hint(quoted, "alpha", &roster, &[]), quoted);
+        let body_mention = "[crew reply:1-2 from:alice]\nhello\n\nask @beta";
+        assert!(with_mention_hint(body_mention, "alpha", &roster, &[]).contains("[crew system]"));
     }
 
     #[test]
@@ -1681,6 +1686,7 @@ mod tests {
         assert!(rules.contains("crew tell"));
         assert!(rules.contains("Do not ask the user to switch chats"));
         assert!(rules.contains("[crew handoff from:"));
+        assert!(rules.contains("[crew reply:"));
         assert!(!rules.contains("roster.md"));
         assert!(!rules.contains("crew memory show"));
     }

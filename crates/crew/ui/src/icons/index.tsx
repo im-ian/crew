@@ -90,6 +90,15 @@ export function X(props: Props) {
   );
 }
 
+export function Reply(props: Props) {
+  return (
+    <Icon {...props}>
+      <path d="M9 17 4 12 9 7" />
+      <path d="M20 18v-2a4 4 0 0 0-4-4H4" />
+    </Icon>
+  );
+}
+
 export function Copy(props: Props) {
   return (
     <Icon {...props}>

@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useT } from "../LocaleContext";
+import type { TFn } from "../i18n";
+import type { ReplyTarget } from "../reply";
+import { splitReply } from "../reply";
 import type { AgentInfo, ChannelInfo, ChatMessage, Kind } from "../types";
 import { busyInChannel } from "../busy";
 import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { threadRows, toolArgs, toolSummary } from "../tools";
+import { Reply } from "../icons";
 import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
 import { MdBody } from "./MdBody";
@@ -29,6 +33,8 @@ type Props = {
   highlightId?: string | null;
   onHighlightDone?: () => void;
   jumpSeq?: number;
+  onReply?: (target: ReplyTarget) => void;
+  onJump?: (id: string) => void;
 };
 
 export function ChatThread({
@@ -48,6 +54,8 @@ export function ChatThread({
   highlightId = null,
   onHighlightDone,
   jumpSeq = 0,
+  onReply,
+  onJump,
 }: Props) {
   const t = useT();
   const ref = useRef<HTMLDivElement>(null);
@@ -157,6 +165,8 @@ export function ChatThread({
                   selectedKind={selectedKind}
                   onSelectAgent={openAgent}
                   onSelectChannel={onSelectChannel}
+                  onReply={onReply}
+                  onJump={onJump}
                   flash={flash}
                 />
               );
@@ -178,6 +188,8 @@ export function ChatThread({
                     ? (allow) => onApprove(allow, m.from)
                     : undefined
                 }
+                onReply={onReply}
+                onJump={onJump}
                 flash={flash}
               />
             );
@@ -272,6 +284,8 @@ function SystemOrIncoming({
   selectedKind,
   onSelectAgent,
   onSelectChannel,
+  onReply,
+  onJump,
   flash = false,
 }: {
   message: ChatMessage;
@@ -280,6 +294,8 @@ function SystemOrIncoming({
   selectedKind: Kind;
   onSelectAgent?: (id: string) => void;
   onSelectChannel?: (id: string) => void;
+  onReply?: (target: ReplyTarget) => void;
+  onJump?: (id: string) => void;
   flash?: boolean;
 }) {
   const t = useT();
@@ -294,6 +310,8 @@ function SystemOrIncoming({
         currentAgent={null}
         onSelectAgent={onSelectAgent}
         onSelectChannel={onSelectChannel}
+        onReply={onReply}
+        onJump={onJump}
         flash={flash}
       />
     );
@@ -318,6 +336,8 @@ function SystemOrIncoming({
         channels={channels}
         onSelectAgent={onSelectAgent}
         onSelectChannel={onSelectChannel}
+        onReply={onReply}
+        onJump={onJump}
         flash={flash}
       />
     );
@@ -332,6 +352,8 @@ function SystemOrIncoming({
         channels={channels}
         onSelectAgent={onSelectAgent}
         onSelectChannel={onSelectChannel}
+        onReply={onReply}
+        onJump={onJump}
         flash={flash}
       />
     );
@@ -348,6 +370,8 @@ function SystemOrIncoming({
         channels={channels}
         onSelectAgent={onSelectAgent}
         onSelectChannel={onSelectChannel}
+        onReply={onReply}
+        onJump={onJump}
         flash={flash}
       />
     );
@@ -372,6 +396,8 @@ function TransferNote({
   channels,
   onSelectAgent,
   onSelectChannel,
+  onReply,
+  onJump,
   flash = false,
 }: {
   kind: "sent" | "received" | "handoff";
@@ -381,6 +407,8 @@ function TransferNote({
   channels: ChannelInfo[];
   onSelectAgent?: (id: string) => void;
   onSelectChannel?: (id: string) => void;
+  onReply?: (target: ReplyTarget) => void;
+  onJump?: (id: string) => void;
   flash?: boolean;
 }) {
   const fromChannel = otherId.startsWith("#");
@@ -398,6 +426,7 @@ function TransferNote({
       : kind === "handoff"
         ? t("thread.handoff")
         : t("thread.received");
+  const { reply, body } = splitReply(m.text || "");
   // A search hit has to be readable without a click.
   const show = openBody || flash;
   return (
@@ -427,9 +456,10 @@ function TransferNote({
           onClick={open}
         />
       </div>
-      {m.text && show ? (
+      {show && reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
+      {body && show ? (
         <XferBody
-          text={m.text}
+          text={body}
           agents={agents}
           channels={channels}
           onMention={onSelectAgent}
@@ -438,6 +468,13 @@ function TransferNote({
         />
       ) : null}
       {m.queued ? <QueueWait /> : null}
+      <MsgActions
+        onReply={
+          onReply && body.trim()
+            ? () => onReply(makeReply({ ...m, from: otherId, text: body }, agents, t))
+            : undefined
+        }
+      />
     </div>
   );
 }
@@ -483,6 +520,8 @@ function Incoming({
   onSelectAgent,
   onSelectChannel,
   onApprove,
+  onReply,
+  onJump,
   flash = false,
 }: {
   message: ChatMessage;
@@ -495,6 +534,8 @@ function Incoming({
   onSelectAgent?: (id: string) => void;
   onSelectChannel?: (id: string) => void;
   onApprove?: (allow: boolean) => void;
+  onReply?: (target: ReplyTarget) => void;
+  onJump?: (id: string) => void;
   flash?: boolean;
 }) {
   const color = agent
@@ -504,8 +545,10 @@ function Incoming({
     openName && onSelectAgent && agent
       ? () => onSelectAgent(agent.id)
       : undefined;
+  const t = useT();
   const queued = !!m.queued;
-  const parts = splitBubbles(m.text || "");
+  const { reply, body } = splitReply(m.text || "");
+  const parts = splitBubbles(body);
   const bubbles = parts.length ? parts : [""];
   return (
     <div
@@ -546,6 +589,7 @@ function Incoming({
             {who}
           </div>
         )}
+        {reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
         {bubbles.map((part, i) => {
           const last = i === bubbles.length - 1;
           const stack =
@@ -576,7 +620,14 @@ function Incoming({
         })}
         {queued ? <QueueWait /> : null}
         <ApprovalCard state={m.approval} onApprove={onApprove} />
-        {m.text.trim() ? <CopyButton text={m.text.trim()} className="msg-copy" /> : null}
+        <MsgActions
+          copy={body.trim()}
+          onReply={
+            onReply && body.trim()
+              ? () => onReply(makeReply({ ...m, text: body }, agents, t))
+              : undefined
+          }
+        />
       </div>
     </div>
   );
@@ -710,6 +761,8 @@ function Bubble({
   onSelectAgent,
   onSelectChannel,
   onApprove,
+  onReply,
+  onJump,
   flash = false,
 }: {
   message: ChatMessage;
@@ -722,8 +775,11 @@ function Bubble({
   onSelectAgent?: (id: string) => void;
   onSelectChannel?: (id: string) => void;
   onApprove?: (allow: boolean) => void;
+  onReply?: (target: ReplyTarget) => void;
+  onJump?: (id: string) => void;
   flash?: boolean;
 }) {
+  const t = useT();
   const text =
     m.role === "assistant" ? stripCrewMarkers(m.text || "") : m.text || "";
   if (m.role !== "user") {
@@ -742,11 +798,14 @@ function Bubble({
         onSelectAgent={onSelectAgent}
         onSelectChannel={onSelectChannel}
         onApprove={onApprove}
+        onReply={onReply}
+        onJump={onJump}
         flash={flash}
       />
     );
   }
   const queued = !!m.queued;
+  const { reply, body } = splitReply(text);
   const cls =
     "bubble md" + (caret ? " streaming" : "") + (queued ? " queued" : "");
   return (
@@ -755,17 +814,27 @@ function Bubble({
       data-msg-id={m.id}
     >
       <div className="me-msg">
-        <MdBody
-          className={cls}
-          text={text}
-          agents={agents}
-          channels={channels}
-          onMention={onSelectAgent}
-          onChannel={onSelectChannel}
-          baseDir={currentAgent?.cwd || undefined}
-        />
+        {reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
+        {body.trim() ? (
+          <MdBody
+            className={cls}
+            text={body}
+            agents={agents}
+            channels={channels}
+            onMention={onSelectAgent}
+            onChannel={onSelectChannel}
+            baseDir={currentAgent?.cwd || undefined}
+          />
+        ) : null}
         {queued ? <QueueWait /> : null}
-        {text.trim() ? <CopyButton text={text.trim()} className="msg-copy" /> : null}
+        <MsgActions
+          copy={body.trim()}
+          onReply={
+            onReply && body.trim()
+              ? () => onReply(makeReply({ ...m, text: body }, agents, t))
+              : undefined
+          }
+        />
       </div>
     </div>
   );
@@ -782,6 +851,84 @@ function QueueWait() {
         <i />
       </span>
     </div>
+  );
+}
+
+function makeReply(m: ChatMessage, agents: AgentInfo[], t: TFn): ReplyTarget {
+  const text = splitReply(m.text || "").body.trim();
+  const agent = agents.find((a) => a.id === m.from) ?? null;
+  const who =
+    m.role === "user" || m.from === "user"
+      ? t("thread.you")
+      : displayWho(m, agent);
+  return { id: m.id, from: m.from || "user", who, text };
+}
+
+function quoteWho(from: string, agents: AgentInfo[], t: TFn): string {
+  if (from === "user") return t("thread.you");
+  const sent = sentTarget(from);
+  if (sent) {
+    const agent = agents.find((a) => a.id === sent);
+    return agent ? agent.name || agent.id : sent;
+  }
+  const agent = agents.find((a) => a.id === from);
+  return agent ? agent.name || agent.id : from;
+}
+
+function ReplyQuote({
+  reply,
+  agents,
+  onJump,
+}: {
+  reply: { id: string; from: string; snippet: string };
+  agents: AgentInfo[];
+  onJump?: (id: string) => void;
+}) {
+  const t = useT();
+  return (
+    <button
+      type="button"
+      className="reply-quote"
+      title={t("thread.jumpToReply")}
+      onClick={() => onJump?.(reply.id)}
+    >
+      <span className="reply-quote-who">{quoteWho(reply.from, agents, t)}</span>
+      <span className="reply-quote-text">{reply.snippet}</span>
+    </button>
+  );
+}
+
+function MsgActions({
+  copy,
+  onReply,
+}: {
+  copy?: string;
+  onReply?: () => void;
+}) {
+  if (!copy && !onReply) return null;
+  return (
+    <div className="msg-actions">
+      {onReply ? <ReplyButton onClick={onReply} /> : null}
+      {copy ? <CopyButton text={copy} /> : null}
+    </div>
+  );
+}
+
+function ReplyButton({ onClick }: { onClick: () => void }) {
+  const t = useT();
+  return (
+    <button
+      type="button"
+      className="copy-btn"
+      title={t("thread.reply")}
+      aria-label={t("thread.reply")}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+    >
+      <Reply size={13} />
+    </button>
   );
 }
 

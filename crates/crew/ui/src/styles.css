@@ -1312,15 +1312,86 @@ button.channel-who:hover {
   opacity: 1;
 }
 /* Parked outside the message column so revealing it never reflows the thread. */
-.msg-copy {
+.msg-actions {
   position: absolute;
   bottom: 0;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 1px;
 }
-.row.them .msg-copy { right: -22px; }
-.row.me .msg-copy { left: -22px; }
-.row:hover .msg-copy,
+.row.them .msg-actions { right: -22px; }
+.row.me .msg-actions { left: -22px; }
+.xfer .msg-actions {
+  right: -22px;
+  left: auto;
+}
+.row:hover .msg-actions .copy-btn,
+.xfer:hover .msg-actions .copy-btn,
 .copy-btn:focus-visible {
   opacity: 1;
+}
+.reply-quote {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  max-width: 100%;
+  margin: 0 0 4px;
+  padding: 6px 10px;
+  border: 0;
+  border-left: 2px solid color-mix(in srgb, var(--muted) 70%, transparent);
+  border-radius: 4px 10px 10px 4px;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.row.me .reply-quote {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  border-left-color: color-mix(in srgb, var(--ink) 28%, transparent);
+}
+.xfer .reply-quote {
+  align-self: center;
+  max-width: 28em;
+}
+.reply-quote:hover,
+.reply-quote:focus-visible {
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+}
+.row.me .reply-quote:hover,
+.row.me .reply-quote:focus-visible {
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+}
+.reply-quote:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--working) 55%, transparent);
+  outline-offset: 2px;
+}
+.reply-quote-who {
+  color: var(--ink);
+  font-size: 11.5px;
+  font-weight: 650;
+  line-height: 1.25;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row.me .reply-quote-who {
+  color: var(--bubble-me-ink);
+}
+.reply-quote-text {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row.me .reply-quote-text {
+  color: color-mix(in srgb, var(--bubble-me-ink) 70%, transparent);
 }
 .code-wrap {
   position: relative;
@@ -1714,6 +1785,7 @@ button.channel-who:hover {
   border-radius: var(--radius-md);
 }
 .row.flash .bubble,
+.row.flash .reply-quote,
 .xfer.flash .xfer-body,
 .sys.flash,
 .tool-row.flash {
@@ -1725,6 +1797,7 @@ button.channel-who:hover {
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 .xfer {
+  position: relative;
   align-self: center;
   display: flex;
   flex-direction: column;
@@ -1855,9 +1928,78 @@ button.who-btn:focus-visible {
   padding: var(--space-6);
   min-height: 44px;
 }
-.composer-box.has-attach {
+.composer-box.has-attach,
+.composer-box.has-reply {
   border-radius: var(--radius-xl);
   padding-top: var(--space-10);
+}
+.reply-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px 0 10px;
+  min-width: 0;
+}
+.reply-bar-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  padding: 2px 8px 2px 8px;
+  border: 0;
+  border-left: 2px solid color-mix(in srgb, var(--working) 70%, transparent);
+  border-radius: 0 6px 6px 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.reply-bar-main:hover,
+.reply-bar-main:focus-visible {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+.reply-bar-who {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reply-bar-snippet {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reply-bar-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+.reply-bar-close:hover,
+.reply-bar-close:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
 }
 .composer-row {
   display: flex;

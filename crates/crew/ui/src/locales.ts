@@ -109,6 +109,8 @@ export const KO = {
   "composer.placeholder.redirect": "보내면 방향을 바꿉니다 · 중지하려면 stop",
   "composer.placeholder.agent": "{name}에게 메시지 (@이름으로 부르기)",
   "composer.placeholder.generic": "메시지",
+  "composer.replyTo": "{who}에게 답장",
+  "composer.replyCancel": "답장 취소",
 
   "thread.jumpBottom": "맨 아래로",
   "thread.startChannel": "채널에 메시지를 보내 대화를 시작하세요",
@@ -128,6 +130,9 @@ export const KO = {
   "thread.allowOnce": "한 번 허용",
   "thread.deny": "거부",
   "thread.queueing": "줄 서는 중",
+  "thread.reply": "답장",
+  "thread.you": "나",
+  "thread.jumpToReply": "원문 보기",
 
   "confirm.reset.title": "대화를 지울까요?",
   "confirm.reset.body": "봇 설정은 그대로 두고, 지금까지의 대화만 지웁니다.",
@@ -391,6 +396,8 @@ export const EN: { [K in MessageKey]: string } = {
   "composer.placeholder.redirect": "Send to redirect · stop to halt",
   "composer.placeholder.agent": "Message {name} (@name to mention)",
   "composer.placeholder.generic": "Message",
+  "composer.replyTo": "Replying to {who}",
+  "composer.replyCancel": "Cancel reply",
 
   "thread.jumpBottom": "Jump to bottom",
   "thread.startChannel": "Send a message to start this channel",
@@ -410,6 +417,9 @@ export const EN: { [K in MessageKey]: string } = {
   "thread.allowOnce": "Allow once",
   "thread.deny": "Deny",
   "thread.queueing": "In queue",
+  "thread.reply": "Reply",
+  "thread.you": "You",
+  "thread.jumpToReply": "Show original",
 
   "confirm.reset.title": "Clear this chat?",
   "confirm.reset.body": "Bot settings stay. Only the conversation is cleared.",

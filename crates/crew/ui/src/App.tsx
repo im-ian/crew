@@ -245,6 +245,8 @@ export function App() {
           highlightId={crew.highlightId}
           onHighlightDone={crew.clearHighlight}
           jumpSeq={jumpSeq}
+          onReply={(target) => composerRef.current?.replyTo(target)}
+          onJump={crew.highlightMessage}
         />
         <Composer
           ref={composerRef}
@@ -254,6 +256,7 @@ export function App() {
           selectedKind={crew.selectedKind}
           placeholder={crew.placeholder}
           onSend={crew.onSend}
+          onJump={crew.highlightMessage}
           busy={
             (crew.selectedKind === "agent" &&
               (crew.currentAgent?.status === "working" ||

@@ -4,6 +4,7 @@
 crew.log
 /*.md
 !README.md
+!AGENTS.md
 node_modules/
 /crates/crew/ui/dist
 .playwright-mcp

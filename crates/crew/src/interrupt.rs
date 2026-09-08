@@ -12,7 +12,7 @@ pub enum UserSendAction {
 }
 
 pub fn is_stop_command(text: &str) -> bool {
-    let t = text
+    let t = crate::rows::reply_body(text)
         .trim()
         .trim_end_matches(['.', '!', '?', '。', '！'])
         .to_lowercase();
@@ -71,7 +71,7 @@ const JUDGMENT_MARKERS: &[&str] = &[
 /// A question that should surface as an allow-once / deny card, not a
 /// generic bubble. Ordinary factual questions do not match.
 pub fn looks_like_judgment_question(text: &str) -> bool {
-    let trimmed = text.trim();
+    let trimmed = crate::rows::reply_body(text).trim();
     if trimmed.is_empty() {
         return false;
     }
@@ -146,6 +146,12 @@ mod tests {
         assert!(is_stop_command("중지해"));
         assert!(!is_stop_command("please stop the build later"));
         assert!(!is_stop_command(""));
+        assert!(is_stop_command(
+            "[crew reply:1-2 from:alice]\nkeep going\n\nstop"
+        ));
+        assert!(!is_stop_command(
+            "[crew reply:1-2 from:alice]\nstop\n\nkeep going"
+        ));
     }
 
     #[test]

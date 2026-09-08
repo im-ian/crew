@@ -158,7 +158,10 @@ pub fn channel_last_ts(id: &str) -> u64 {
 pub fn preview(agent: &str) -> Option<String> {
     let msgs = messages(agent);
     let last = msgs.last()?;
-    let t: String = last.text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let t: String = crate::rows::display_text(last)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     if t.is_empty() {
         return None;
     }

@@ -36,7 +36,54 @@ pub fn strip_crew_markers(s: &str) -> String {
 }
 
 pub fn display_text(msg: &ChatMessage) -> String {
-    strip_crew_markers(&msg.text).trim().to_string()
+    reply_body(&strip_crew_markers(&msg.text))
+        .trim()
+        .to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplyHead {
+    pub id: String,
+    pub from: String,
+    pub snippet: String,
+}
+
+/// Pull a `[crew reply:id from:name]` wrapper off a user message, if present.
+pub fn split_reply(text: &str) -> (Option<ReplyHead>, &str) {
+    let Some(rest) = text.strip_prefix("[crew reply:") else {
+        return (None, text);
+    };
+    let Some(id_end) = rest.find(" from:") else {
+        return (None, text);
+    };
+    let id = &rest[..id_end];
+    if id.is_empty() || id.contains(']') || id.contains(char::is_whitespace) {
+        return (None, text);
+    }
+    let after_from = &rest[id_end + " from:".len()..];
+    let Some(bracket) = after_from.find("]\n") else {
+        return (None, text);
+    };
+    let from = &after_from[..bracket];
+    if from.is_empty() || from.contains(']') {
+        return (None, text);
+    }
+    let after_marker = &after_from[bracket + 2..];
+    let Some(split_at) = after_marker.find("\n\n") else {
+        return (None, text);
+    };
+    (
+        Some(ReplyHead {
+            id: id.to_string(),
+            from: from.to_string(),
+            snippet: after_marker[..split_at].to_string(),
+        }),
+        &after_marker[split_at + 2..],
+    )
+}
+
+pub fn reply_body(text: &str) -> &str {
+    split_reply(text).1
 }
 
 fn leaked_or_echo(msg: &ChatMessage, prev: Option<&ChatMessage>) -> bool {
@@ -244,5 +291,31 @@ mod tests {
         assert_eq!(display_text(&m), "keep this\nand this");
         let sent = msg(Role::System, "to:beta", "[crew from:user]\nplease look");
         assert_eq!(display_text(&sent), "please look");
+        let reply = msg(
+            Role::User,
+            "user",
+            "[crew reply:1-2 from:alice]\nplease look\n\ngot it",
+        );
+        assert_eq!(display_text(&reply), "got it");
+    }
+
+    #[test]
+    fn split_reply_roundtrip() {
+        let raw = "[crew reply:171-2 from:alice]\nplease review the hero\n\ngot it";
+        let (head, body) = split_reply(raw);
+        assert_eq!(
+            head,
+            Some(ReplyHead {
+                id: "171-2".into(),
+                from: "alice".into(),
+                snippet: "please review the hero".into(),
+            })
+        );
+        assert_eq!(body, "got it");
+        assert_eq!(split_reply("hello"), (None, "hello"));
+        let colon = "[crew reply:2-1 from:to:beta]\nping\n\non it";
+        let (head, body) = split_reply(colon);
+        assert_eq!(head.unwrap().from, "to:beta");
+        assert_eq!(body, "on it");
     }
 }

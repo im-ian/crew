@@ -1528,7 +1528,7 @@ fn send_agent(id: &str, text: &str) -> anyhow::Result<()> {
     ensure_accepts_turn(id)?;
     let roster = roster_vec();
     let msg = crate::transcript::push_user(id, "user", text);
-    let mentions = targeting::one_on_one_tell_targets(text, id, &roster);
+    let mentions = targeting::one_on_one_tell_targets(crate::rows::reply_body(text), id, &roster);
     let rooms: Vec<Channel> = channels()
         .lock()
         .ok()
@@ -2367,7 +2367,7 @@ fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
         pool.retain(|m| m != &from);
     }
     let targets = targeting::channel_wake_targets(
-        text,
+        crate::rows::reply_body(text),
         &pool,
         &roster_vec(),
         last.as_deref(),

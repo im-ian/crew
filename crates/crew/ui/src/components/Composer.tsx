@@ -5,13 +5,15 @@ import type { AgentInfo, ChannelInfo, Kind, Skill } from "../types";
 import { api } from "../api";
 import { useT } from "../LocaleContext";
 import { resolveChannel, resolveMention, trimMentionPunct } from "../mentions";
+import { oneLine, wrapReply, type ReplyTarget } from "../reply";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
-import { CircleDot, Paperclip, Plus, StopSquare } from "../icons";
+import { CircleDot, Paperclip, Plus, StopSquare, X } from "../icons";
 
 export type ComposerHandle = {
   focus: () => void;
   attach: () => void;
+  replyTo: (target: ReplyTarget) => void;
 };
 
 type Props = {
@@ -24,11 +26,12 @@ type Props = {
   busy?: boolean;
   onStop?: () => void;
   onOpenSkills?: () => void;
+  onJump?: (id: string) => void;
 };
 
 type Mention = { start: number; query: string };
 
-type Draft = { html: string; attaches: Attach[] };
+type Draft = { html: string; attaches: Attach[]; reply: ReplyTarget | null };
 
 type Attach = {
   id: string;
@@ -48,6 +51,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   busy = false,
   onStop,
   onOpenSkills,
+  onJump,
 }, ref) {
   const t = useT();
   const inputRef = useRef<HTMLDivElement>(null);
@@ -63,24 +67,31 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   const [attaches, setAttaches] = useState<Attach[]>([]);
   const [plusOpen, setPlusOpen] = useState(false);
   const [plusSkills, setPlusSkills] = useState(false);
+  const [reply, setReply] = useState<ReplyTarget | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const plusRef = useRef<HTMLDivElement>(null);
 
+  function focusEditor() {
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    const sel = window.getSelection();
+    if (!sel) return;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
   useImperativeHandle(ref, () => ({
-    focus() {
-      const el = inputRef.current;
-      if (!el) return;
-      el.focus();
-      const sel = window.getSelection();
-      if (!sel) return;
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      range.collapse(false);
-      sel.removeAllRanges();
-      sel.addRange(range);
-    },
+    focus: focusEditor,
     attach() {
       fileRef.current?.click();
+    },
+    replyTo(target: ReplyTarget) {
+      setReply(target);
+      queueMicrotask(focusEditor);
     },
   }));
 
@@ -271,6 +282,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   const drafts = useRef(new Map<string, Draft>());
   const attachRef = useRef(attaches);
   attachRef.current = attaches;
+  const replyRef = useRef(reply);
+  replyRef.current = reply;
   const chatKey = selected ? `${selectedKind}:${selected}` : "";
   const prevKey = useRef(chatKey);
 
@@ -281,12 +294,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     const el = inputRef.current;
     if (from && el) {
       const held = attachRef.current;
-      if (isEditorEmpty(el) && !held.length) drafts.current.delete(from);
-      else drafts.current.set(from, { html: el.innerHTML, attaches: held });
+      const heldReply = replyRef.current;
+      if (isEditorEmpty(el) && !held.length && !heldReply) drafts.current.delete(from);
+      else drafts.current.set(from, { html: el.innerHTML, attaches: held, reply: heldReply });
     }
     const next = chatKey ? drafts.current.get(chatKey) : undefined;
     if (el) el.innerHTML = next?.html ?? "";
     setAttaches(next?.attaches ?? []);
+    setReply(next?.reply ?? null);
     setMention(null);
     setHash(null);
     setSlash(null);
@@ -341,18 +356,32 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         if (!el) return;
         const text = serializeEditor(el).trim();
         const files = attaches.map(attachMarkdown).filter(Boolean);
-        const raw = [text, files.join("\n")].filter(Boolean).join("\n\n");
+        let raw = [text, files.join("\n")].filter(Boolean).join("\n\n");
         if (!raw.trim()) return;
+        if (reply) {
+          raw = wrapReply(raw, {
+            id: reply.id,
+            from: reply.from,
+            snippet: reply.text,
+          });
+        }
         el.innerHTML = "";
         drafts.current.delete(chatKey);
         setMention(null);
         setAttaches([]);
+        setReply(null);
         setEmpty(true);
         fit();
         await onSend(raw);
       }}
     >
-      <div className={"composer-box" + (attaches.length ? " has-attach" : "")}>
+      <div
+        className={
+          "composer-box" +
+          (attaches.length ? " has-attach" : "") +
+          (reply ? " has-reply" : "")
+        }
+      >
         {slashOpen ? (
           <div className="mention-menu" role="listbox">
             {skillMatches.map((s, i) => (
@@ -430,6 +459,29 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
                 ) : null}
               </button>
             ))}
+          </div>
+        ) : null}
+        {reply ? (
+          <div className="reply-bar">
+            <button
+              type="button"
+              className="reply-bar-main"
+              onClick={() => onJump?.(reply.id)}
+            >
+              <span className="reply-bar-who">
+                {t("composer.replyTo", { who: reply.who })}
+              </span>
+              <span className="reply-bar-snippet">{oneLine(reply.text)}</span>
+            </button>
+            <button
+              type="button"
+              className="reply-bar-close"
+              title={t("composer.replyCancel")}
+              aria-label={t("composer.replyCancel")}
+              onClick={() => setReply(null)}
+            >
+              <X size={14} />
+            </button>
           </div>
         ) : null}
         {attaches.length ? (
@@ -653,6 +705,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
                 setHash(null);
                 return;
               }
+            }
+            if (e.key === "Escape" && reply) {
+              e.preventDefault();
+              setReply(null);
+              return;
             }
             if (e.key === "Enter" && e.shiftKey) {
               e.preventDefault();

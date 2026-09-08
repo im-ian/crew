@@ -1049,6 +1049,10 @@ export function useCrew() {
     openSearchHit,
     highlightId,
     clearHighlight: () => setHighlightId(null),
+    highlightMessage: (id: string) => {
+      setStick(false);
+      setHighlightId(id);
+    },
     stick,
     setStick,
     connected,
