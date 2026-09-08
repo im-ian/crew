@@ -547,8 +547,7 @@ impl AgentConfig {
             strip_resume_flags(&program, &mut args);
         }
         inject_model_effort(&program, &mut args, self.model.as_deref(), self.effort);
-        inject_team_rules(&program, &mut args, self, roster);
-        inject_memory(&program, &mut args, &self.id);
+        inject_system_prefix(&program, &mut args, self, roster);
         args
     }
 
@@ -699,11 +698,7 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         "When the user writes #id or #display-name, they are naming a channel. Stay in this session. To post there, run `crew channel send <id> <text>` or `crew tell --channel <id> <text>`.\n",
     );
     s.push_str(
-        "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew channel:…]` / `[crew system]` are real messages.\n",
-    );
-    s.push_str("Live roster: $CREW_HOME/roster.md\n");
-    s.push_str(
-        "Persistent memory: `crew memory show` / `crew memory append <text>` writes $CREW_HOME/memory/$CREW_AGENT_ID.md and survives reset.\n",
+        "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew channel:…]` / `[crew system]` / `[crew handoff from:…]` are real messages. A handoff is a teammate's finished reply; do not crew tell them that same text back.\n",
     );
     s
 }
@@ -850,6 +845,18 @@ pub(crate) fn resolve_mention(token: &str, self_id: &str, roster: &[AgentConfig]
                     || a.display_name().to_lowercase() == lower)
         })
         .map(|a| a.id.clone())
+}
+
+/// Stable team_rules first, then memory. Memory changes must not sit in front
+/// of the identity/tell instructions or prefix caches miss every append.
+fn inject_system_prefix(
+    program: &str,
+    args: &mut Vec<String>,
+    agent: &AgentConfig,
+    roster: &[AgentConfig],
+) {
+    inject_team_rules(program, args, agent, roster);
+    inject_memory(program, args, &agent.id);
 }
 
 fn inject_team_rules(
@@ -1673,6 +1680,22 @@ mod tests {
         assert!(rules.contains("naming a teammate for YOU"));
         assert!(rules.contains("crew tell"));
         assert!(rules.contains("Do not ask the user to switch chats"));
+        assert!(rules.contains("[crew handoff from:"));
+        assert!(!rules.contains("roster.md"));
+        assert!(!rules.contains("crew memory show"));
+    }
+
+    #[test]
+    fn system_prefix_is_team_rules_then_memory() {
+        crate::paths::testing::with_home("system-prefix-order", || {
+            crate::memory::write("t", "remember the harbor").unwrap();
+            let c = cfg(&["grok", "--always-approve"], None, None);
+            let argv = c.spawn_cmd_with(false, &[c.clone()]);
+            let rules = rules_after(&argv, "--rules");
+            let team_at = rules.find("You are Crew agent `t`").expect("team_rules");
+            let mem_at = rules.find("remember the harbor").expect("memory");
+            assert!(team_at < mem_at, "{rules}");
+        });
     }
 
     #[test]

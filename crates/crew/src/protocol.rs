@@ -411,6 +411,40 @@ pub fn system_envelope(text: &str) -> String {
     format!("[crew system]\n{text}")
 }
 
+/// Teammate reply copied into the caller's next prompt (does not start a turn).
+pub fn handoff_envelope(from: &str, text: &str) -> String {
+    let from = from.trim();
+    let from = if from.is_empty() { "user" } else { from };
+    format!("[crew handoff from:{from}]\n{text}")
+}
+
+pub const HANDOFF_CLIP: usize = 800;
+
+pub fn clip_chars(s: &str, n: usize) -> String {
+    let mut chars = s.chars();
+    let out: String = chars.by_ref().take(n).collect();
+    if chars.next().is_some() {
+        format!("{out}…")
+    } else {
+        out.to_string()
+    }
+}
+
+/// Stick `extra` after the first `[crew …]` marker line so origin parsing
+/// still sees the envelope first. Bare prompts get `extra` prepended.
+pub fn attach_after_marker(prompt: &str, extra: &str) -> String {
+    if extra.is_empty() {
+        return prompt.to_string();
+    }
+    if prompt.starts_with("[crew ") {
+        if let Some((first, rest)) = prompt.split_once('\n') {
+            return format!("{first}\n{extra}{rest}");
+        }
+        return format!("{prompt}\n{extra}");
+    }
+    format!("{extra}{prompt}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -439,6 +473,18 @@ mod tests {
     fn tell_envelope_format() {
         assert_eq!(envelope("alpha", "hello"), "[crew from:alpha]\nhello");
         assert_eq!(envelope("  ", "x"), "[crew from:user]\nx");
+        assert_eq!(
+            handoff_envelope("beta", "ok"),
+            "[crew handoff from:beta]\nok"
+        );
+        assert_eq!(
+            attach_after_marker("[crew from:user]\nhello", "[crew handoff from:beta]\nok\n"),
+            "[crew from:user]\n[crew handoff from:beta]\nok\nhello"
+        );
+        assert_eq!(
+            attach_after_marker("hello", "[crew handoff from:beta]\nok\n"),
+            "[crew handoff from:beta]\nok\nhello"
+        );
     }
 
     #[test]
