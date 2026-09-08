@@ -7,6 +7,7 @@ import { useT } from "../LocaleContext";
 import { resolveChannel, resolveMention, trimMentionPunct } from "../mentions";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
+import { CircleDot, Paperclip, Plus, StopSquare } from "../icons";
 
 export type ComposerHandle = {
   focus: () => void;
@@ -497,14 +498,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
                       }}
                     >
                       <span className="plus-menu-icon" aria-hidden="true">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                          <path
-                            d="M8 3.5v9M3.5 8h9"
-                            stroke="currentColor"
-                            strokeWidth="1.4"
-                            strokeLinecap="round"
-                          />
-                        </svg>
+                        <Plus />
                       </span>
                       {t("skills.new")}
                     </button>
@@ -521,15 +515,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
                     }}
                   >
                     <span className="plus-menu-icon" aria-hidden="true">
-                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                        <path
-                          d="M10.2 4.4L5.15 9.45a2.15 2.15 0 103.04 3.04l5.2-5.2a3.4 3.4 0 10-4.81-4.81L3.4 7.66"
-                          stroke="currentColor"
-                          strokeWidth="1.4"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
+                      <Paperclip />
                     </span>
                     {t("composer.attach")}
                   </button>
@@ -539,10 +525,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
                     onClick={() => setPlusSkills(true)}
                   >
                     <span className="plus-menu-icon is-teach" aria-hidden="true">
-                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                        <circle cx="8" cy="8" r="5.4" stroke="currentColor" strokeWidth="1.5" />
-                        <circle cx="8" cy="8" r="2.2" fill="currentColor" />
-                      </svg>
+                      <CircleDot />
                     </span>
                     {t("composer.teach")}
                   </button>
@@ -564,14 +547,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
               });
             }}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path
-                d="M8 3.5v9M3.5 8h9"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-              />
-            </svg>
+            <Plus />
           </button>
         </div>
         <div
@@ -722,9 +698,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
             aria-label={t("composer.stop")}
             onClick={onStop}
           >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <rect x="2" y="2" width="8" height="8" rx="1.2" fill="currentColor" />
-            </svg>
+            <StopSquare size={12} />
           </button>
         ) : null}
         <button

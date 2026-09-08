@@ -3,6 +3,7 @@ import { mentionLabel } from "../mentions";
 import { useT } from "../LocaleContext";
 import type { AgentInfo } from "../types";
 import { Avatar } from "./Avatar";
+import { Plus } from "../icons";
 
 type Props = {
   agents: AgentInfo[];
@@ -59,14 +60,7 @@ export function MemberPicker({ agents, selected, onChange }: Props) {
           disabled={!rest.length}
           onClick={() => setOpen((v) => !v)}
         >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path
-              d="M8 3.5v9M3.5 8h9"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-            />
-          </svg>
+          <Plus />
         </button>
         {picked.length ? (
           picked.map((a) => {

@@ -4,6 +4,7 @@ import type { AgentInfo, ChannelInfo, PaneTab, Routine, RoutineRun } from "../ty
 import { Field } from "./Field";
 import { MemberPicker } from "./MemberPicker";
 import { RoutinesModal } from "./RoutinesModal";
+import { X } from "../icons";
 
 type Props = {
   open: boolean;
@@ -107,14 +108,7 @@ export function ChannelPane({
             aria-label={t("common.close")}
             onClick={onClose}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path
-                d="M4 4l8 8M12 4l-8 8"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            </svg>
+            <X />
           </button>
         </div>
         <div className="pane-tabs" role="tablist">

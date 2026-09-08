@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useT } from "../LocaleContext";
+import { Check, Copy } from "../icons";
 
 export async function copyText(text: string): Promise<boolean> {
   try {
@@ -43,35 +44,7 @@ export function CopyButton({ text, className }: { text: string; className?: stri
         timer.current = window.setTimeout(() => setDone(false), 1200);
       }}
     >
-      <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-        {done ? (
-          <path
-            d="M2.8 7.4 5.6 10.2 11.2 4"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        ) : (
-          <>
-            <rect
-              x="4.6"
-              y="1.6"
-              width="7.8"
-              height="7.8"
-              rx="2"
-              stroke="currentColor"
-              strokeWidth="1.3"
-            />
-            <path
-              d="M9.4 11.1v.3a2 2 0 0 1-2 2H3.6a2 2 0 0 1-2-2V7.6a2 2 0 0 1 2-2h.3"
-              stroke="currentColor"
-              strokeWidth="1.3"
-              strokeLinecap="round"
-            />
-          </>
-        )}
-      </svg>
+      {done ? <Check size={13} /> : <Copy size={13} />}
     </button>
   );
 }

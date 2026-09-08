@@ -4,6 +4,7 @@ import type { AgentInfo, PaneTab, Routine } from "../types";
 import { Field } from "./Field";
 import { InfoPane } from "./InfoPane";
 import { RoutinesModal } from "./RoutinesModal";
+import { X } from "../icons";
 
 const TABS: { id: PaneTab; labelKey: "pane.tab.info" | "pane.tab.routines" | "pane.tab.memory" }[] = [
   { id: "info", labelKey: "pane.tab.info" },
@@ -76,14 +77,7 @@ export function AgentPane({
             aria-label={t("common.close")}
             onClick={onClose}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path
-                d="M4 4l8 8M12 4l-8 8"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            </svg>
+            <X />
           </button>
         </div>
         <div className="pane-tabs" role="tablist">

@@ -2,6 +2,7 @@ import { busyInChannel, isBusyStatus } from "../busy";
 import { useT } from "../LocaleContext";
 import type { AgentInfo, ChannelInfo } from "../types";
 import { WhoButton } from "./WhoButton";
+import { Info, StopSquare } from "../icons";
 
 type Props = {
   currentAgent: AgentInfo | null;
@@ -80,9 +81,7 @@ export function ChatHeader({
             for (const id of stopIds) onStop(id);
           }}
         >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <rect x="4" y="4" width="8" height="8" rx="1.2" fill="currentColor" />
-          </svg>
+          <StopSquare />
         </button>
       ) : null}
       {currentChannel ? (
@@ -93,16 +92,7 @@ export function ChatHeader({
           aria-label={t("header.channelSettings")}
           onClick={onOpenInfo}
         >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <circle cx="8" cy="8" r="6.25" stroke="currentColor" strokeWidth="1.4" />
-            <path
-              d="M8 7.15v4.1"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-            />
-            <circle cx="8" cy="5.2" r="0.85" fill="currentColor" />
-          </svg>
+          <Info />
         </button>
       ) : null}
       {currentAgent ? (
@@ -113,16 +103,7 @@ export function ChatHeader({
           aria-label={t("header.botSettings")}
           onClick={onOpenRoutines}
         >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <circle cx="8" cy="8" r="6.25" stroke="currentColor" strokeWidth="1.4" />
-            <path
-              d="M8 7.15v4.1"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-            />
-            <circle cx="8" cy="5.2" r="0.85" fill="currentColor" />
-          </svg>
+          <Info />
         </button>
       ) : null}
     </header>

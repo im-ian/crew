@@ -13,6 +13,7 @@ import { useLocale, useT } from "../LocaleContext";
 import { itemKey, parseItemKey } from "../groups";
 import type { AgentInfo, ChannelInfo, Group, Kind, SearchHit } from "../types";
 import { Avatar, ChannelAvatar } from "./Avatar";
+import { Plus, Settings } from "../icons";
 
 const RAIL_DEFAULT = 232;
 const RAIL_MIN = 176;
@@ -569,14 +570,7 @@ export function Sidebar({
             onCreateMenu(e);
           }}
         >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path
-              d="M8 3.5v9M3.5 8h9"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-            />
-          </svg>
+          <Plus />
         </button>
       </div>
       {searchHits.length ? (
@@ -702,15 +696,7 @@ export function Sidebar({
             aria-label={t("sidebar.settings")}
             onClick={onOpenSettings}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <circle cx="8" cy="8" r="2.15" stroke="currentColor" strokeWidth="1.4" />
-              <path
-                d="M8 1.7v1.6M8 12.7v1.6M1.7 8h1.6M12.7 8h1.6M3.4 3.4l1.15 1.15M11.45 11.45l1.15 1.15M3.4 12.6l1.15-1.15M11.45 4.55l1.15-1.15"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-              />
-            </svg>
+            <Settings />
           </button>
         </div>
       ) : null}

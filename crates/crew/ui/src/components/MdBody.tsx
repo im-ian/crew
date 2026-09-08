@@ -156,7 +156,7 @@ function nodeToReact(
     const isOut = el.classList.contains("md-out");
     return (
       <div key={key} className={"code-wrap" + (isOut ? " md-out" : "")}>
-        {isOut ? <CornerDownRight className="md-mark" /> : null}
+        {isOut ? <CornerDownRight className="md-mark" size={14} /> : null}
         <pre>{kids}</pre>
         <CopyButton text={el.textContent || ""} className="code-copy" />
       </div>
@@ -204,7 +204,7 @@ function nodeToReact(
   if (cls === "md-cmd") {
     return (
       <p key={key} className={cls}>
-        <Terminal className="md-mark" />
+        <Terminal className="md-mark" size={14} />
         {kids}
       </p>
     );
