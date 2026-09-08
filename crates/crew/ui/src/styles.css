@@ -1127,12 +1127,10 @@ button.msg-avatar {
   line-height: 1.45;
 }
 /* A command and the block under it read as a terminal exchange. */
-.bubble.md p.md-cmd::before {
-  content: "\276f";
-  margin-right: var(--space-6);
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 0.86em;
+.bubble.md p.md-cmd {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
 }
 .code-wrap.md-out {
   display: grid;
@@ -1140,13 +1138,12 @@ button.msg-avatar {
   gap: var(--space-6);
   align-items: start;
 }
-.code-wrap.md-out::before {
-  content: "\21b3";
-  padding-top: calc(0.45em + var(--space-10));
+.md-mark {
+  flex: 0 0 auto;
   color: var(--muted);
-  font-family: var(--mono);
-  font-size: 0.86em;
-  line-height: 1.45;
+}
+.code-wrap.md-out > .md-mark {
+  margin-top: calc(0.45em + var(--space-10));
 }
 .bubble.streaming p:last-child::after,
 .bubble.streaming:empty::after,

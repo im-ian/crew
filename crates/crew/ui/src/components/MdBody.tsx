@@ -3,6 +3,7 @@ import { injectMentionChips } from "../mentions";
 import { isLocalHref, mediaSrc, renderMarkdown, resolveLocalPath } from "../markdown";
 import { api } from "../api";
 import type { AgentInfo, ChannelInfo } from "../types";
+import { CornerDownRight, Terminal } from "../icons";
 import { CopyButton } from "./CopyButton";
 import { MentionChip } from "./MentionChip";
 
@@ -152,11 +153,10 @@ function nodeToReact(
   );
   if (!TAGS.has(tag)) return kids;
   if (tag === "PRE") {
+    const isOut = el.classList.contains("md-out");
     return (
-      <div
-        key={key}
-        className={"code-wrap" + (el.classList.contains("md-out") ? " md-out" : "")}
-      >
+      <div key={key} className={"code-wrap" + (isOut ? " md-out" : "")}>
+        {isOut ? <CornerDownRight className="md-mark" /> : null}
         <pre>{kids}</pre>
         <CopyButton text={el.textContent || ""} className="code-copy" />
       </div>
@@ -201,6 +201,14 @@ function nodeToReact(
     );
   }
   const cls = el.getAttribute("class");
+  if (cls === "md-cmd") {
+    return (
+      <p key={key} className={cls}>
+        <Terminal className="md-mark" />
+        {kids}
+      </p>
+    );
+  }
   return createElement(
     tag.toLowerCase(),
     cls ? { key, className: cls } : { key },
