@@ -14,6 +14,7 @@ import { useLocale, useT } from "../LocaleContext";
 import { itemKey, parseItemKey } from "../groups";
 import type { AgentInfo, ChannelInfo, Group, Kind, SearchHit } from "../types";
 import { mentionLabel, mentionRuns, mentionText, resolveMention } from "../mentions";
+import { numberDuplicateNames } from "../rail";
 import { Avatar, ChannelAvatar } from "./Avatar";
 import { Plus, Settings } from "../icons";
 
@@ -57,6 +58,8 @@ type RailItem = {
   id: string;
   name: string;
   preview?: string | null;
+  /** Set only when another item shares this name. */
+  ordinal?: number;
   agent?: AgentInfo;
   channel?: ChannelInfo;
 };
@@ -245,6 +248,7 @@ function toItems(agents: AgentInfo[], channels: ChannelInfo[]): RailItem[] {
       channel: c,
     });
   }
+  numberDuplicateNames(items);
   return items;
 }
 
@@ -918,7 +922,14 @@ function ItemRow({
     <>
       {face}
       <div className="rail-row-text">
-        <div className="agent-name">{item.name}</div>
+        <div className="agent-name">
+          {item.name}
+          {item.ordinal ? (
+            <span className="name-ordinal" aria-label={`${item.name} ${item.ordinal}`}>
+              {item.ordinal}
+            </span>
+          ) : null}
+        </div>
         {item.preview ? (
           <div className="agent-preview">
             {previewRuns.map((run, i) => (

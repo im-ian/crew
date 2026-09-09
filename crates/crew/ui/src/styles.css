@@ -918,6 +918,18 @@ button.avatar {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Only drawn when a name repeats, so it has to read as a tag on the name
+   rather than part of it. */
+.name-ordinal {
+  margin-left: var(--space-4);
+  padding: 0 var(--space-4);
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--faint);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  vertical-align: 1px;
+}
 /* A handle inside a preview: the chip's colour cue without its pill, which
    would not fit a 12.5px row. */
 .preview-mention {
