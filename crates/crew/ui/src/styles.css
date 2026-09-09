@@ -233,7 +233,7 @@ html.rail-resizing * {
   align-items: center;
   gap: var(--space-8);
   min-height: var(--chrome-h);
-  padding: 0 var(--rail-pad);
+  padding: 0 var(--space-12);
 }
 .search-row .icon-btn,
 .search-row .search {
