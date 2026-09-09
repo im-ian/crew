@@ -138,6 +138,8 @@ export function ChatThread({
     jumpBottom();
   }, [jumpSeq]);
 
+  // Bring the hit on screen. `messages` is a dependency because the row may
+  // not be mounted yet when the id arrives.
   useEffect(() => {
     if (!highlightId) return;
     const root = ref.current;
@@ -147,9 +149,18 @@ export function ChatThread({
     ) as HTMLElement | null;
     if (!el) return;
     el.scrollIntoView({ block: "center", behavior: "smooth" });
-    const t = window.setTimeout(() => onHighlightDone?.(), 1600);
+  }, [highlightId, messages]);
+
+  // Expiry is its own effect on its own clock. Sharing the one above meant a
+  // streaming thread re-armed the timer on every tick, so a flashed note never
+  // stopped flashing and the scroll kept snapping back.
+  const doneRef = useRef(onHighlightDone);
+  doneRef.current = onHighlightDone;
+  useEffect(() => {
+    if (!highlightId) return;
+    const t = window.setTimeout(() => doneRef.current?.(), 1600);
     return () => window.clearTimeout(t);
-  }, [highlightId, messages, onHighlightDone]);
+  }, [highlightId]);
 
   return (
     <div className="thread-wrap">
@@ -474,7 +485,7 @@ function TransferNote({
             type="button"
             className="xfer-label is-toggle"
             aria-expanded={show}
-            onClick={() => setOpenBody(!show)}
+            onClick={() => setOpenBody(!openBody)}
           >
             <span className="note-caret">{show ? "\u25be" : "\u25b8"}</span>
             {label}
@@ -489,38 +500,43 @@ function TransferNote({
           onClick={open}
         />
       </div>
-      {show && reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
-      {body && show ? (
-        <XferBody
-          text={body}
-          agents={agents}
-          channels={channels}
-          onMention={onSelectAgent}
-          onChannel={onSelectChannel}
-          baseDir={agent?.cwd || undefined}
-        />
-      ) : null}
-      {show && onPeek && agent ? (
-        <button
-          type="button"
-          className="xfer-peek"
-          onClick={() => onPeek(agent.id)}
-        >
-          {t("thread.viewFull")}
-        </button>
+      {show ? (
+        <>
+          {/* `.msg-actions` is absolutely positioned, so it leads here to sit
+              early in the tab order rather than behind every link in the body. */}
+          <MsgActions
+            copy={body.trim()}
+            onReply={
+              onReply && body.trim()
+                ? () => onReply(makeReply({ ...m, from: otherId }, agents, t))
+                : undefined
+            }
+          />
+          {reply ? (
+            <ReplyQuote reply={reply} agents={agents} onJump={onJump} />
+          ) : null}
+          {body ? (
+            <XferBody
+              text={body}
+              agents={agents}
+              channels={channels}
+              onMention={onSelectAgent}
+              onChannel={onSelectChannel}
+              baseDir={agent?.cwd || undefined}
+            />
+          ) : null}
+          {onPeek && agent ? (
+            <button
+              type="button"
+              className="xfer-peek"
+              onClick={() => onPeek(agent.id)}
+            >
+              {t("thread.viewFull")}
+            </button>
+          ) : null}
+        </>
       ) : null}
       {m.queued ? <QueueWait /> : null}
-      {show ? (
-        // Folded, the note is one line and the body is not on screen, so a
-        // reply button floats in the margin beside nothing.
-        <MsgActions
-          onReply={
-            onReply && body.trim()
-              ? () => onReply(makeReply({ ...m, from: otherId, text: body }, agents, t))
-              : undefined
-          }
-        />
-      ) : null}
     </div>
   );
 }
