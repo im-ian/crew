@@ -72,7 +72,15 @@ export const api = {
     name?: string | null;
     cwd?: string | null;
     unsetCwd?: boolean;
-  }) => invoke<void>("set_agent", args),
+  }) =>
+    invoke<void>("set_agent", {
+      ...args,
+      shape: args.shape ?? null,
+      color: args.color ?? null,
+      name: args.name ?? null,
+      cwd: args.cwd ?? null,
+      unsetCwd: args.unsetCwd ?? false,
+    }),
   addAgent: (args: {
     name: string;
     cli: string;
