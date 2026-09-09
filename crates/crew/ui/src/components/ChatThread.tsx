@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { useT } from "../LocaleContext";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocale, useT } from "../LocaleContext";
 import type { TFn } from "../i18n";
 import type { ReplyTarget } from "../reply";
 import { splitReply } from "../reply";
@@ -16,6 +16,7 @@ import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { sentTarget } from "../peek";
 import { threadRows, toolArgs, toolSummary } from "../tools";
+import { clockLabels } from "../clock";
 import { ChevronDown, Reply, X } from "../icons";
 import { Avatar, ChannelAvatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
@@ -75,10 +76,34 @@ export function ChatThread({
   onJump,
   onPeek,
 }: Props) {
-  const t = useT();
+  const { locale, t } = useLocale();
   const ref = useRef<HTMLDivElement>(null);
   const [away, setAway] = useState(false);
   const visible = visibleMessages(messages);
+  const rows = threadRows(visible);
+  // Keyed by message id, not by row index: a filter or an inserted row would
+  // slide a parallel array one place and stamp every message with its
+  // neighbour's time, silently.
+  const clocks = useMemo(() => {
+    // Only balloons carry a clock; a tool run or a folded note passes 0 so it
+    // cannot swallow the stamp of the minute it sits in. The daemon writes a
+    // human's `crew tell` as a system row from `user`, and that still draws as
+    // a balloon.
+    const stamped = rows.map((r) =>
+      r.kind === "msg" && (r.msg.role !== "system" || r.msg.from === "user")
+        ? r.msg
+        : null,
+    );
+    const labels = clockLabels(
+      stamped.map((m) => m?.ts ?? 0),
+      locale,
+    );
+    const map = new Map<string, string>();
+    stamped.forEach((m, i) => {
+      if (m && labels[i]) map.set(m.id, labels[i]);
+    });
+    return map;
+  }, [rows, locale]);
   const openAgent =
     onSelectAgent &&
     ((id: string) => {
@@ -168,7 +193,7 @@ export function ChatThread({
         {!messages.length ? (
           <EmptyChat agent={currentAgent} channel={currentChannel} agents={agents} />
         ) : (
-          threadRows(visible).map((row) => {
+          rows.map((row) => {
             if (row.kind === "tools") {
               return (
                 <ToolGroup
@@ -184,7 +209,7 @@ export function ChatThread({
               m.role === "assistant" &&
               m.id === lastVisible?.id;
             const flash = highlightId === m.id;
-            if (m.role === "system") {
+            if (m.role === "system" && m.from !== "user") {
               return (
                 <SystemOrIncoming
                   key={m.id}
@@ -204,6 +229,7 @@ export function ChatThread({
             return (
               <Bubble
                 key={m.id}
+                clock={clocks.get(m.id)}
                 message={m}
                 agents={agents}
                 channels={channels}
@@ -586,6 +612,7 @@ function Incoming({
   onReply,
   onJump,
   flash = false,
+  clock,
 }: {
   message: ChatMessage;
   agent: AgentInfo | null;
@@ -605,6 +632,7 @@ function Incoming({
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
   flash?: boolean;
+  clock?: string;
 }) {
   const color = agent
     ? whoColor(resolveFace(agent.id, agent.avatar_shape, agent.avatar_color).color)
@@ -719,6 +747,11 @@ function Incoming({
           }
         />
       </div>
+      {clock ? (
+        <time className="msg-clock" dateTime={new Date(m.ts).toISOString()}>
+          {clock}
+        </time>
+      ) : null}
     </div>
   );
 }
@@ -1107,6 +1140,7 @@ function Bubble({
   onReply,
   onJump,
   flash = false,
+  clock,
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
@@ -1126,6 +1160,7 @@ function Bubble({
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
   flash?: boolean;
+  clock?: string;
 }) {
   const t = useT();
   const text =
@@ -1150,6 +1185,7 @@ function Bubble({
         onReply={onReply}
         onJump={onJump}
         flash={flash}
+        clock={clock}
       />
     );
   }
@@ -1162,6 +1198,11 @@ function Bubble({
       className={"row me" + (queued ? " queued" : "") + (flash ? " flash" : "")}
       data-msg-id={m.id}
     >
+      {clock ? (
+        <time className="msg-clock" dateTime={new Date(m.ts).toISOString()}>
+          {clock}
+        </time>
+      ) : null}
       <div className="me-msg">
         {reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
         {body.trim() ? (
