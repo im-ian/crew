@@ -928,6 +928,9 @@ button.avatar {
   font-size: var(--text-md);
   padding: var(--space-8);
 }
+.empty-rail[data-rail-empty="1"] {
+  text-align: center;
+}
 main {
   display: grid;
   grid-template-rows: var(--titlebar) auto auto minmax(0, 1fr) auto;
