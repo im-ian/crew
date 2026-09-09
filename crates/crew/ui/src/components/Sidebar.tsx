@@ -14,6 +14,7 @@ import { useLocale, useT } from "../LocaleContext";
 import { itemKey, parseItemKey } from "../groups";
 import type { AgentInfo, ChannelInfo, Group, Kind, SearchHit } from "../types";
 import { mentionLabel, mentionRuns, mentionText, resolveMention } from "../mentions";
+import { numberDuplicateNames } from "../rail";
 import { Avatar, ChannelAvatar } from "./Avatar";
 import { ChevronDown, Plus, Settings } from "../icons";
 
@@ -57,6 +58,8 @@ type RailItem = {
   id: string;
   name: string;
   preview?: string | null;
+  /** Set only when another item shares this name. */
+  ordinal?: number;
   agent?: AgentInfo;
   channel?: ChannelInfo;
 };
@@ -245,6 +248,7 @@ function toItems(agents: AgentInfo[], channels: ChannelInfo[]): RailItem[] {
       channel: c,
     });
   }
+  numberDuplicateNames(items);
   return items;
 }
 
@@ -291,7 +295,10 @@ export function Sidebar({
 }: Props) {
   const t = useT();
   const { locale } = useLocale();
-  const all = toItems(agents, channels).filter((item) => {
+  // Rebuilding the list numbers every duplicate name and re-sorts each group;
+  // a drag re-renders this on every pointermove and none of it can change.
+  const built = useMemo(() => toItems(agents, channels), [agents, channels]);
+  const all = built.filter((item) => {
     if (item.agent) {
       return matches(
         [
@@ -918,7 +925,12 @@ function ItemRow({
     <>
       {face}
       <div className="rail-row-text">
-        <div className="agent-name">{item.name}</div>
+        <div className="agent-name">
+          <span className="agent-name-text">{item.name}</span>
+          {item.ordinal ? (
+            <span className="name-ordinal">#{item.ordinal}</span>
+          ) : null}
+        </div>
         {item.preview ? (
           <div className="agent-preview">
             {previewRuns.map((run, i) => (
