@@ -1,5 +1,5 @@
 import { splitReply } from "./reply";
-import type { ChatMessage } from "./types";
+import type { AgentInfo, ChatMessage } from "./types";
 
 export function sentTarget(from: string): string | null {
   return from.startsWith("to:") ? from.slice(3) : null;
@@ -39,6 +39,39 @@ export function peekPeerId(
   }
   if (from.startsWith("#") || !agentIds.has(from)) return null;
   return from;
+}
+
+export type NoteRef = {
+  kind: "sent" | "received" | "handoff";
+  /** The bot or `#room` on the other end. */
+  otherId: string;
+};
+
+/**
+ * Whether a row is a bot-to-bot note, and who it is with.
+ *
+ * The thread draws from this and the row builder folds runs by it, so the two
+ * cannot disagree about what a note is — a row grouped as one and drawn as
+ * something else would vanish into a fold.
+ */
+export function noteRef(
+  m: ChatMessage,
+  agents: readonly AgentInfo[],
+): NoteRef | null {
+  if (m.role !== "system") return null;
+  const from = String(m.from || "");
+  // The daemon writing about the conversation, not a bot speaking.
+  if (!from || from === "user" || from === "crew") return null;
+  const kind = m.kind;
+  if (kind === "tool" || kind === "routine") return null;
+  const to = sentTarget(from);
+  if (kind === "sent" || to) return { kind: "sent", otherId: to || from };
+  if (kind === "handoff") return { kind: "handoff", otherId: from };
+  const known = agents.some((a) => a.id === from);
+  if (kind === "received" || known || from.startsWith("#")) {
+    return { kind: "received", otherId: from };
+  }
+  return null;
 }
 
 function stripCrewMarkers(text: string): string {

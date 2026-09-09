@@ -1,19 +1,46 @@
-import type { ChatMessage } from "./types";
+import { noteRef } from "./peek";
+import type { AgentInfo, ChatMessage } from "./types";
 
 export type ThreadRow =
   | { kind: "msg"; msg: ChatMessage }
-  | { kind: "tools"; msgs: ChatMessage[] };
+  | { kind: "tools"; msgs: ChatMessage[] }
+  | { kind: "notes"; peerId: string; msgs: ChatMessage[] };
 
-/** Consecutive tool cards collapse into one row so a long run reads as one line. */
-export function threadRows(list: ChatMessage[]): ThreadRow[] {
+/**
+ * Consecutive tool cards collapse into one row so a long run reads as one line,
+ * and so does a back-and-forth with one bot: sent, received and handoff notes
+ * are one exchange, and four of them in a row is most of a screen.
+ *
+ * A run needs two to be worth folding — a lone note already reads as one line.
+ */
+export function threadRows(
+  list: ChatMessage[],
+  agents: readonly AgentInfo[] = [],
+): ThreadRow[] {
   const rows: ThreadRow[] = [];
   for (const msg of list) {
     const last = rows[rows.length - 1];
-    if (msg.kind === "tool" && last?.kind === "tools") last.msgs.push(msg);
-    else if (msg.kind === "tool") rows.push({ kind: "tools", msgs: [msg] });
-    else rows.push({ kind: "msg", msg });
+    if (msg.kind === "tool") {
+      if (last?.kind === "tools") last.msgs.push(msg);
+      else rows.push({ kind: "tools", msgs: [msg] });
+      continue;
+    }
+    const note = noteRef(msg, agents);
+    if (note) {
+      if (last?.kind === "notes" && last.peerId === note.otherId) {
+        last.msgs.push(msg);
+      } else {
+        rows.push({ kind: "notes", peerId: note.otherId, msgs: [msg] });
+      }
+      continue;
+    }
+    rows.push({ kind: "msg", msg });
   }
-  return rows;
+  return rows.map((r) =>
+    r.kind === "notes" && r.msgs.length === 1
+      ? { kind: "msg" as const, msg: r.msgs[0] }
+      : r,
+  );
 }
 
 const HEAD_KEYS = [

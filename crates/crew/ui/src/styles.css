@@ -1786,6 +1786,25 @@ button.choice-option:disabled {
 .choice-dismiss:hover {
   background: var(--chip-hover);
 }
+/* Mirrors .tool-run: a run of bot-to-bot notes reads as one line until asked. */
+.note-run {
+  display: flex;
+  flex-direction: column;
+  align-self: center;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+}
+.note-run-head {
+  border: 0;
+  background: none;
+  padding: var(--space-2) var(--space-4);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.note-run-head:hover { color: var(--ink); }
 .tool-run {
   align-self: center;
   max-width: 92%;

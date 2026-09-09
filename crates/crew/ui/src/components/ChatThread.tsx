@@ -14,7 +14,7 @@ import type {
 import { busyInChannel } from "../busy";
 import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
-import { sentTarget } from "../peek";
+import { noteRef, sentTarget } from "../peek";
 import { threadRows, toolArgs, toolSummary } from "../tools";
 import { clockLabels } from "../clock";
 import { ChevronDown, Reply, X } from "../icons";
@@ -80,7 +80,7 @@ export function ChatThread({
   const ref = useRef<HTMLDivElement>(null);
   const [away, setAway] = useState(false);
   const visible = visibleMessages(messages);
-  const rows = threadRows(visible);
+  const rows = threadRows(visible, agents);
   // Keyed by message id, not by row index: a filter or an inserted row would
   // slide a parallel array one place and stamp every message with its
   // neighbour's time, silently.
@@ -199,6 +199,24 @@ export function ChatThread({
                 <ToolGroup
                   key={row.msgs[0].id}
                   items={row.msgs}
+                  highlightId={highlightId}
+                />
+              );
+            }
+            if (row.kind === "notes") {
+              return (
+                <NoteGroup
+                  key={row.msgs[0].id}
+                  peerId={row.peerId}
+                  items={row.msgs}
+                  agents={agents}
+                  channels={channels}
+                  selectedKind={selectedKind}
+                  onSelectAgent={openAgent}
+                  onSelectChannel={onSelectChannel}
+                  onReply={onReply}
+                  onJump={onJump}
+                  onPeek={onPeek}
                   highlightId={highlightId}
                 />
               );
@@ -391,48 +409,12 @@ function SystemOrIncoming({
       </div>
     );
   }
-  const classKind = rowClass(m, agents);
-  if (classKind === "sent" || sentTarget(from)) {
+  const note = noteRef(m, agents);
+  if (note) {
     return (
       <TransferNote
-        kind="sent"
-        otherId={sentTarget(from) || from}
-        message={{ ...m, text: displayText(m) }}
-        agents={agents}
-        channels={channels}
-        onSelectAgent={onSelectAgent}
-        onSelectChannel={onSelectChannel}
-        onReply={onReply}
-        onJump={onJump}
-        onPeek={onPeek}
-        flash={flash}
-      />
-    );
-  }
-  if (classKind === "handoff") {
-    return (
-      <TransferNote
-        kind="handoff"
-        otherId={from}
-        message={{ ...m, text: displayText(m) }}
-        agents={agents}
-        channels={channels}
-        onSelectAgent={onSelectAgent}
-        onSelectChannel={onSelectChannel}
-        onReply={onReply}
-        onJump={onJump}
-        onPeek={onPeek}
-        flash={flash}
-      />
-    );
-  }
-  const agent = agents.find((a) => a.id === from) ?? null;
-  const fromChannel = from.startsWith("#");
-  if (classKind === "received" || agent || fromChannel) {
-    return (
-      <TransferNote
-        kind="received"
-        otherId={from}
+        kind={note.kind}
+        otherId={note.otherId}
         message={{ ...m, text: displayText(m) }}
         agents={agents}
         channels={channels}
@@ -752,6 +734,73 @@ function Incoming({
           {clock}
         </time>
       ) : null}
+    </div>
+  );
+}
+
+function NoteGroup({
+  peerId,
+  items,
+  agents,
+  channels,
+  selectedKind,
+  onSelectAgent,
+  onSelectChannel,
+  onReply,
+  onJump,
+  onPeek,
+  highlightId = null,
+}: {
+  peerId: string;
+  items: ChatMessage[];
+  agents: AgentInfo[];
+  channels: ChannelInfo[];
+  selectedKind: Kind;
+  onSelectAgent?: (id: string) => void;
+  onSelectChannel?: (id: string) => void;
+  onReply?: (target: ReplyTarget) => void;
+  onJump?: (id: string) => void;
+  onPeek?: (peerId: string) => void;
+  highlightId?: string | null;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const hit = items.some((m) => m.id === highlightId);
+  // A search hit inside a folded run has to be on screen to be highlighted.
+  const show = open || hit;
+  const fromChannel = peerId.startsWith("#");
+  const agent = agents.find((a) => a.id === peerId) ?? null;
+  const who = fromChannel
+    ? `#${channelDisplayName(peerId, channels)}`
+    : agent?.name || agent?.id || peerId;
+  return (
+    <div className="note-run">
+      <button
+        type="button"
+        className="note-run-head"
+        aria-expanded={show}
+        onClick={() => setOpen(!show)}
+      >
+        <span className="note-caret">{show ? "\u25be" : "\u25b8"}</span>
+        {t("thread.noteRun", { n: items.length, who })}
+      </button>
+      {show
+        ? items.map((m) => (
+            <SystemOrIncoming
+              key={m.id}
+              message={m}
+              agents={agents}
+              channels={channels}
+              selectedKind={selectedKind}
+              onSelectAgent={onSelectAgent}
+              onSelectChannel={onSelectChannel}
+              onReply={onReply}
+              onJump={onJump}
+              onPeek={onPeek}
+              flash={highlightId === m.id}
+            />
+          ))
+        : null}
     </div>
   );
 }
@@ -1370,27 +1419,6 @@ function isPlainEcho(raw: string, messages: ChatMessage[], index: number): boole
     }
   }
   return false;
-}
-
-function rowClass(
-  m: ChatMessage,
-  agents: AgentInfo[],
-): "sent" | "received" | "routine" | "handoff" | "tool" | "user" | "assistant" | "hidden" {
-  if (
-    m.kind === "sent" ||
-    m.kind === "received" ||
-    m.kind === "routine" ||
-    m.kind === "handoff" ||
-    m.kind === "tool"
-  ) {
-    return m.kind;
-  }
-  if (m.role === "user") return "user";
-  if (m.role === "assistant") return "assistant";
-  const from = String(m.from || "");
-  if (from.startsWith("to:")) return "sent";
-  if (from.startsWith("#") || agents.some((a) => a.id === from)) return "received";
-  return "routine";
 }
 
 function displayText(m: ChatMessage): string {
