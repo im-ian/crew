@@ -258,6 +258,10 @@ fn restore_handoffs(agent: &str, mut items: Vec<PendingHandoff>) {
     }
     if let Ok(mut map) = pending_handoffs().lock() {
         let q = map.entry(agent.to_string()).or_default();
+        // A peer that sealed a new reply while the delivery was in flight
+        // already replaced its entry. Keeping both would put the superseded
+        // text first and spend one of the three kept slots on it.
+        items.retain(|old| !q.iter().any(|new| new.from == old.from));
         items.append(q);
         *q = items;
     }
@@ -280,8 +284,9 @@ fn render_handoffs(items: &[PendingHandoff]) -> String {
     };
     let mut out = String::new();
     if omitted > 0 {
+        let noun = if omitted == 1 { "reply" } else { "replies" };
         out.push_str(&crate::protocol::system_envelope(&format!(
-            "{omitted} earlier replies omitted"
+            "{omitted} earlier {noun} omitted"
         )));
         if !out.ends_with('\n') {
             out.push('\n');
@@ -2915,6 +2920,60 @@ mod daemon_tests {
         assert!(next.contains("hello"), "the prompt must survive: {next}");
         assert!(!next.contains("stale review"), "{next}");
         assert!(next.contains("still relevant"), "{next}");
+    }
+
+    #[test]
+    fn a_restored_handoff_yields_to_the_reply_that_replaced_it() {
+        let caller = format!(
+            "restore-pending-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        enqueue_handoff(&caller, "review", "old text");
+        // The delivery drains the queue, then fails.
+        let in_flight = take_handoffs(&caller);
+        // While it was out, that peer sealed a newer reply.
+        enqueue_handoff(&caller, "review", "new text");
+        restore_handoffs(&caller, in_flight);
+        let next = flush_handoffs(&caller, "go");
+        assert!(next.contains("new text"), "{next}");
+        assert!(!next.contains("old text"), "the superseded copy must go: {next}");
+    }
+
+    #[test]
+    fn a_restored_handoff_keeps_a_different_peer() {
+        let caller = format!(
+            "restore-other-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        enqueue_handoff(&caller, "review", "from review");
+        let in_flight = take_handoffs(&caller);
+        enqueue_handoff(&caller, "impl", "from impl");
+        restore_handoffs(&caller, in_flight);
+        let next = flush_handoffs(&caller, "go");
+        assert!(next.contains("from review"), "{next}");
+        assert!(next.contains("from impl"), "{next}");
+    }
+
+    #[test]
+    fn one_omitted_handoff_reads_as_one_reply() {
+        let caller = format!(
+            "one-omitted-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        for i in 0..(MAX_PENDING_HANDOFFS + 1) {
+            enqueue_handoff(&caller, &format!("bot{i}"), &format!("reply {i}"));
+        }
+        let next = flush_handoffs(&caller, "go");
+        assert!(next.contains("1 earlier reply omitted"), "{next}");
     }
 
     #[test]
