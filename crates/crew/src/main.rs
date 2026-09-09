@@ -68,12 +68,16 @@ enum Cmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         message: Vec<String>,
     },
-    /// Ask the human user to pick in this chat; print their choice
+    /// Ask the human user to pick or type in this chat; print their answer
     Ask {
         #[arg(short, long)]
         question: Option<String>,
         #[arg(short, long = "option")]
         options: Vec<String>,
+        #[arg(short = 'i', long = "input")]
+        inputs: Vec<String>,
+        #[arg(long)]
+        hint: Option<String>,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         rest: Vec<String>,
     },
@@ -298,8 +302,10 @@ fn run() -> anyhow::Result<()> {
         Some(Cmd::Ask {
             question,
             options,
+            inputs,
+            hint,
             rest,
-        }) => run_ask(question, options, rest),
+        }) => run_ask(question, options, inputs, hint, rest),
         Some(Cmd::Snapshot { agent }) => {
             client::ensure_daemon()?;
             client::print_event(client::rpc(Request::Snapshot { agent })?)
@@ -623,6 +629,8 @@ fn connect_for_tell() -> anyhow::Result<()> {
 fn run_ask(
     question: Option<String>,
     mut options: Vec<String>,
+    inputs: Vec<String>,
+    hint: Option<String>,
     rest: Vec<String>,
 ) -> anyhow::Result<()> {
     connect_for_tell()?;
@@ -646,6 +654,8 @@ fn run_ask(
         agent,
         question,
         options,
+        inputs,
+        hint: hint.and_then(empty_to_none),
     })?)
 }
 
@@ -1082,10 +1092,14 @@ mod tests {
             Some(Cmd::Ask {
                 question,
                 options,
+                inputs,
+                hint,
                 rest,
             }) => {
                 assert_eq!(question.as_deref(), Some("어느 쪽을 고를래?"));
                 assert_eq!(options, vec!["A", "B", "C"]);
+                assert!(inputs.is_empty());
+                assert!(hint.is_none());
                 assert!(rest.is_empty());
             }
             _ => panic!("expected ask"),
@@ -1095,10 +1109,40 @@ mod tests {
                 question,
                 options,
                 rest,
+                ..
             }) => {
                 assert!(question.is_none());
                 assert!(options.is_empty());
                 assert_eq!(rest, vec!["어느 쪽을 고를래?", "A", "B", "C"]);
+            }
+            _ => panic!("expected ask"),
+        }
+        match parse_ok(&[
+            "crew",
+            "ask",
+            "--question",
+            "로그인",
+            "--hint",
+            "이 계정으로 로그인해주세요.",
+            "--input",
+            "아이디",
+            "--input",
+            "비밀번호",
+        ])
+        .cmd
+        {
+            Some(Cmd::Ask {
+                question,
+                options,
+                inputs,
+                hint,
+                rest,
+            }) => {
+                assert_eq!(question.as_deref(), Some("로그인"));
+                assert!(options.is_empty());
+                assert_eq!(inputs, vec!["아이디", "비밀번호"]);
+                assert_eq!(hint.as_deref(), Some("이 계정으로 로그인해주세요."));
+                assert!(rest.is_empty());
             }
             _ => panic!("expected ask"),
         }

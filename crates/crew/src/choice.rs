@@ -1,13 +1,10 @@
 use anyhow::bail;
 use serde_json::Value;
 
-use crate::protocol::{ChoiceCard, ChoiceOption, ChoiceQuestion, ChoiceState};
+use crate::protocol::{ChoiceCard, ChoiceField, ChoiceOption, ChoiceQuestion, ChoiceState};
 
 pub fn is_ask_tool(name: &str) -> bool {
-    let lower = name
-        .trim()
-        .replace('-', "_")
-        .to_ascii_lowercase();
+    let lower = name.trim().replace('-', "_").to_ascii_lowercase();
     lower.ends_with("ask_user_question") || lower.ends_with("askuserquestion")
 }
 
@@ -30,7 +27,12 @@ pub fn split_from_text(text: &str) -> (String, Option<ChoiceCard>) {
     (text.to_string(), None)
 }
 
-pub fn card_from_cli(question: &str, options: &[String]) -> anyhow::Result<ChoiceCard> {
+pub fn card_from_cli(
+    question: &str,
+    options: &[String],
+    inputs: &[String],
+    hint: Option<&str>,
+) -> anyhow::Result<ChoiceCard> {
     let question = question.trim();
     if question.is_empty() {
         bail!("ask needs a question");
@@ -42,15 +44,31 @@ pub fn card_from_cli(question: &str, options: &[String]) -> anyhow::Result<Choic
         };
         opts.push(opt);
     }
-    if opts.len() < 2 {
+    let mut fields = Vec::new();
+    for (i, raw) in inputs.iter().enumerate() {
+        let Some(field) = parse_cli_input(raw, i) else {
+            bail!("ask input is empty");
+        };
+        fields.push(field);
+    }
+    if opts.len() == 1 {
         bail!("ask needs at least two --option values");
     }
+    if opts.is_empty() && fields.is_empty() {
+        bail!("ask needs --input or at least two --option values");
+    }
+    let hint = hint
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     Ok(ChoiceCard {
         id: String::new(),
         questions: vec![ChoiceQuestion {
             question: question.to_string(),
             header: None,
+            hint,
             options: opts,
+            fields,
             multi: false,
             selected: Vec::new(),
         }],
@@ -64,9 +82,15 @@ fn parse_cli_option(raw: &str, i: usize) -> Option<ChoiceOption> {
         return None;
     }
     let (label, description) = if let Some((a, b)) = raw.split_once(": ") {
-        (a.trim(), Some(b.trim()).filter(|s| !s.is_empty()).map(str::to_string))
+        (
+            a.trim(),
+            Some(b.trim()).filter(|s| !s.is_empty()).map(str::to_string),
+        )
     } else if let Some((a, b)) = raw.split_once(" — ") {
-        (a.trim(), Some(b.trim()).filter(|s| !s.is_empty()).map(str::to_string))
+        (
+            a.trim(),
+            Some(b.trim()).filter(|s| !s.is_empty()).map(str::to_string),
+        )
     } else {
         (raw, None)
     };
@@ -80,7 +104,40 @@ fn parse_cli_option(raw: &str, i: usize) -> Option<ChoiceOption> {
     })
 }
 
+fn parse_cli_input(raw: &str, i: usize) -> Option<ChoiceField> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let (label, value) = if let Some((a, b)) = raw.split_once(": ") {
+        (a.trim(), b.trim())
+    } else if let Some((a, b)) = raw.split_once('=') {
+        (a.trim(), b.trim())
+    } else {
+        (raw, "")
+    };
+    if label.is_empty() {
+        return None;
+    }
+    Some(ChoiceField {
+        id: field_id(i),
+        label: label.to_string(),
+        value: value.to_string(),
+        secret: looks_secret(label),
+        required: true,
+    })
+}
+
 pub fn format_answer(card: &ChoiceCard) -> String {
+    format_answer_inner(card, false)
+}
+
+/// Same as [`format_answer`], but secret field values are replaced with dots.
+pub fn format_answer_masked(card: &ChoiceCard) -> String {
+    format_answer_inner(card, true)
+}
+
+fn format_answer_inner(card: &ChoiceCard, mask: bool) -> String {
     let mut lines = Vec::new();
     for q in &card.questions {
         let labels: Vec<String> = q
@@ -88,15 +145,45 @@ pub fn format_answer(card: &ChoiceCard) -> String {
             .iter()
             .filter_map(|id| q.options.iter().find(|o| &o.id == id).map(option_answer))
             .collect();
-        if labels.is_empty() {
+        let fields: Vec<String> = q
+            .fields
+            .iter()
+            .filter(|f| f.required || !f.value.trim().is_empty())
+            .map(|f| {
+                let value = if mask && f.secret {
+                    "••••••"
+                } else {
+                    f.value.as_str()
+                };
+                format!("{}: {}", f.label, value)
+            })
+            .collect();
+        if labels.is_empty() && fields.is_empty() {
+            if q.fields.is_empty() {
+                continue;
+            }
+            lines.push(q.question.clone());
             continue;
         }
-        lines.push(format!("{} → {}", q.question, labels.join(", ")));
+        if fields.is_empty() {
+            lines.push(format!("{} → {}", q.question, labels.join(", ")));
+            continue;
+        }
+        lines.push(q.question.clone());
+        if !labels.is_empty() {
+            lines.push(format!("→ {}", labels.join(", ")));
+        }
+        lines.extend(fields);
     }
     lines.join("\n")
 }
 
-pub fn apply_answers(card: &mut ChoiceCard, answers: &[Vec<String>], closed: bool) {
+pub fn apply_answers(
+    card: &mut ChoiceCard,
+    answers: &[Vec<String>],
+    values: &[Vec<String>],
+    closed: bool,
+) {
     if closed {
         card.state = ChoiceState::Closed;
         return;
@@ -110,11 +197,39 @@ pub fn apply_answers(card: &mut ChoiceCard, answers: &[Vec<String>], closed: boo
         if !q.multi && q.selected.len() > 1 {
             q.selected.truncate(1);
         }
+        if let Some(vals) = values.get(i) {
+            for (j, f) in q.fields.iter_mut().enumerate() {
+                if let Some(v) = vals.get(j) {
+                    f.value = v.clone();
+                }
+            }
+        }
     }
-    if card.questions.iter().all(|q| q.selected.is_empty()) {
-        return;
+    if is_complete(card) {
+        card.state = ChoiceState::Answered;
     }
-    card.state = ChoiceState::Answered;
+}
+
+pub fn is_complete(card: &ChoiceCard) -> bool {
+    if card.questions.is_empty() {
+        return false;
+    }
+    card.questions.iter().all(question_complete) && card.questions.iter().any(question_answered)
+}
+
+fn question_complete(q: &ChoiceQuestion) -> bool {
+    let fields_ok = q
+        .fields
+        .iter()
+        .all(|f| !f.required || !f.value.trim().is_empty());
+    let opts_ok = q.options.is_empty() || !q.selected.is_empty();
+    fields_ok && opts_ok
+}
+
+fn question_answered(q: &ChoiceQuestion) -> bool {
+    !q.selected.is_empty()
+        || q.fields.iter().any(|f| !f.value.trim().is_empty())
+        || (!q.fields.is_empty() && q.fields.iter().all(|f| !f.required))
 }
 
 /// Question + options as plain lines, for a peer who cannot click the card.
@@ -142,7 +257,12 @@ pub fn plain_text(card: &ChoiceCard) -> String {
 }
 
 fn option_answer(o: &ChoiceOption) -> String {
-    match o.description.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    match o
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some(d) if d != o.label => format!("{} — {}", o.label, d),
         _ => o.label.clone(),
     }
@@ -182,27 +302,91 @@ fn parse_question(v: &Value) -> Option<ChoiceQuestion> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
+    let hint = v
+        .get("hint")
+        .or_else(|| v.get("text"))
+        .or_else(|| v.get("description"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     let multi = v
         .get("multi_select")
         .or_else(|| v.get("multiSelect"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let options = v.get("options").and_then(Value::as_array)?;
+    let options = v.get("options").and_then(Value::as_array);
     let mut out = Vec::new();
-    for (i, opt) in options.iter().enumerate() {
-        if let Some(o) = parse_json_option(opt, i) {
-            out.push(o);
+    if let Some(options) = options {
+        for (i, opt) in options.iter().enumerate() {
+            if let Some(o) = parse_json_option(opt, i) {
+                out.push(o);
+            }
         }
     }
-    if out.len() < 2 {
+    let fields = parse_fields(v);
+    if out.len() < 2 && fields.is_empty() {
         return None;
     }
     Some(ChoiceQuestion {
         question: question.to_string(),
         header,
+        hint,
         options: out,
+        fields,
         multi,
         selected: Vec::new(),
+    })
+}
+
+fn parse_fields(v: &Value) -> Vec<ChoiceField> {
+    let arr = v
+        .get("fields")
+        .or_else(|| v.get("inputs"))
+        .and_then(Value::as_array);
+    let Some(arr) = arr else {
+        return Vec::new();
+    };
+    arr.iter()
+        .enumerate()
+        .filter_map(|(i, f)| parse_json_field(f, i))
+        .collect()
+}
+
+fn parse_json_field(v: &Value, i: usize) -> Option<ChoiceField> {
+    if let Some(s) = v.as_str() {
+        return parse_cli_input(s, i);
+    }
+    let label = v
+        .get("label")
+        .or_else(|| v.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if label.is_empty() {
+        return None;
+    }
+    let value = v
+        .get("value")
+        .or_else(|| v.get("default"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let typed_secret = v
+        .get("type")
+        .and_then(Value::as_str)
+        .map(|s| s.eq_ignore_ascii_case("password"))
+        .unwrap_or(false);
+    let secret = v.get("secret").and_then(Value::as_bool).unwrap_or(false)
+        || typed_secret
+        || looks_secret(label);
+    let required = v.get("required").and_then(Value::as_bool).unwrap_or(true);
+    Some(ChoiceField {
+        id: field_id(i),
+        label: label.to_string(),
+        value,
+        secret,
+        required,
     })
 }
 
@@ -219,11 +403,7 @@ fn parse_json_option(v: &Value, i: usize) -> Option<ChoiceOption> {
             description: Some(s.to_string()),
         });
     }
-    let label = v
-        .get("label")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
+    let label = v.get("label").and_then(Value::as_str).unwrap_or("").trim();
     let description = v
         .get("description")
         .and_then(Value::as_str)
@@ -251,6 +431,19 @@ fn letter_id(i: usize) -> String {
     } else {
         (i + 1).to_string()
     }
+}
+
+fn field_id(i: usize) -> String {
+    format!("i{}", i + 1)
+}
+
+fn looks_secret(label: &str) -> bool {
+    let lower = label.to_ascii_lowercase();
+    lower.contains("password")
+        || lower.contains("passwd")
+        || lower.contains("secret")
+        || label.contains("비밀번호")
+        || label.contains("비번")
 }
 
 fn split_fence(text: &str) -> Option<(String, ChoiceCard)> {
@@ -332,7 +525,9 @@ fn split_lettered(text: &str) -> Option<(String, ChoiceCard)> {
             questions: vec![ChoiceQuestion {
                 question: question.to_string(),
                 header: None,
+                hint: None,
                 options: opts,
+                fields: Vec::new(),
                 multi: false,
                 selected: Vec::new(),
             }],
@@ -389,8 +584,7 @@ fn looks_like_ask(question: &str) -> bool {
     }
     let lower = q.to_ascii_lowercase();
     [
-        "which", "pick", "choose", "select", "option",
-        "고르", "어느", "어떤", "선택", "골라",
+        "which", "pick", "choose", "select", "option", "고르", "어느", "어떤", "선택", "골라",
     ]
     .iter()
     .any(|h| lower.contains(h) || q.contains(h))
@@ -400,19 +594,27 @@ fn ids_consecutive(opts: &[ChoiceOption]) -> bool {
     if opts.len() < 2 {
         return false;
     }
-    if opts.iter().all(|o| o.id.len() == 1 && o.id.chars().all(|c| c.is_ascii_alphabetic())) {
+    if opts
+        .iter()
+        .all(|o| o.id.len() == 1 && o.id.chars().all(|c| c.is_ascii_alphabetic()))
+    {
         let start = opts[0].id.as_bytes()[0];
-        return opts.iter().enumerate().all(|(i, o)| {
-            o.id.as_bytes()[0] == start.wrapping_add(i as u8)
-        });
+        return opts
+            .iter()
+            .enumerate()
+            .all(|(i, o)| o.id.as_bytes()[0] == start.wrapping_add(i as u8));
     }
-    if opts.iter().all(|o| o.id.chars().all(|c| c.is_ascii_digit())) {
+    if opts
+        .iter()
+        .all(|o| o.id.chars().all(|c| c.is_ascii_digit()))
+    {
         let Ok(start) = opts[0].id.parse::<usize>() else {
             return false;
         };
-        return opts.iter().enumerate().all(|(i, o)| {
-            o.id.parse::<usize>().ok() == Some(start + i)
-        });
+        return opts
+            .iter()
+            .enumerate()
+            .all(|(i, o)| o.id.parse::<usize>().ok() == Some(start + i));
     }
     false
 }
@@ -471,7 +673,10 @@ mod tests {
     fn numbered_options_after_a_question_are_a_picker() {
         let (_, card) = split_from_text("Which one?\n1. red\n2. blue\n");
         let card = card.expect("card");
-        assert_eq!(card.questions[0].options[1].description.as_deref(), Some("blue"));
+        assert_eq!(
+            card.questions[0].options[1].description.as_deref(),
+            Some("blue")
+        );
     }
 
     #[test]
@@ -494,7 +699,7 @@ mod tests {
             r#"{"question":"어느 쪽을 고를래?","options":[{"label":"A"},{"label":"B"}]}"#,
         )
         .unwrap();
-        apply_answers(&mut card, &[vec!["nope".into()]], false);
+        apply_answers(&mut card, &[vec!["nope".into()]], &[], false);
         assert_eq!(card.state, ChoiceState::Pending);
     }
 
@@ -510,15 +715,27 @@ mod tests {
     }
 
     #[test]
+    fn fence_json_fields() {
+        let (rest, card) = split_from_text(
+            "fill in\n\n```crew-ask\n{\"question\":\"로그인\",\"fields\":[\"아이디\",\"비밀번호\"]}\n```\n",
+        );
+        let card = card.expect("card");
+        assert_eq!(rest, "fill in");
+        assert!(card.questions[0].options.is_empty());
+        assert_eq!(card.questions[0].fields[0].label, "아이디");
+        assert!(card.questions[0].fields[1].secret);
+    }
+
+    #[test]
     fn format_and_apply() {
         let mut card = from_tool_detail(
             r#"{"question":"어느 쪽을 고를래?","options":[{"label":"A"},{"label":"B"},{"label":"C"}]}"#,
         )
         .unwrap();
-        apply_answers(&mut card, &[vec!["C".into()]], false);
+        apply_answers(&mut card, &[vec!["C".into()]], &[], false);
         assert_eq!(card.state, ChoiceState::Answered);
         assert_eq!(format_answer(&card), "어느 쪽을 고를래? → C");
-        apply_answers(&mut card, &[], true);
+        apply_answers(&mut card, &[], &[], true);
         assert_eq!(card.state, ChoiceState::Closed);
     }
 
@@ -536,13 +753,119 @@ mod tests {
         let card = card_from_cli(
             "어느 쪽을 고를래?",
             &["A".into(), "B: wait".into(), "Ship it: merge now".into()],
+            &[],
+            None,
         )
         .unwrap();
         assert_eq!(card.questions[0].question, "어느 쪽을 고를래?");
         assert_eq!(card.questions[0].options[0].label, "A");
-        assert_eq!(card.questions[0].options[1].description.as_deref(), Some("wait"));
+        assert_eq!(
+            card.questions[0].options[1].description.as_deref(),
+            Some("wait")
+        );
         assert_eq!(card.questions[0].options[2].label, "Ship it");
-        assert!(card_from_cli("Q", &["only-one".into()]).is_err());
-        assert!(card_from_cli("", &["A".into(), "B".into()]).is_err());
+        assert!(card_from_cli("Q", &["only-one".into()], &[], None).is_err());
+        assert!(card_from_cli("Q", &["only-one".into()], &["아이디".into()], None).is_err());
+        assert!(card_from_cli("", &["A".into(), "B".into()], &[], None).is_err());
+    }
+
+    #[test]
+    fn cli_inputs_without_options() {
+        let card = card_from_cli(
+            "로그인",
+            &[],
+            &[
+                "아이디: jtfliverecovery".into(),
+                "비밀번호=ChangeMe123!".into(),
+            ],
+            Some("이 계정으로 로그인해주세요."),
+        )
+        .unwrap();
+        let q = &card.questions[0];
+        assert_eq!(q.question, "로그인");
+        assert_eq!(q.hint.as_deref(), Some("이 계정으로 로그인해주세요."));
+        assert!(q.options.is_empty());
+        assert_eq!(q.fields.len(), 2);
+        assert_eq!(q.fields[0].label, "아이디");
+        assert_eq!(q.fields[0].value, "jtfliverecovery");
+        assert!(!q.fields[0].secret);
+        assert_eq!(q.fields[1].label, "비밀번호");
+        assert_eq!(q.fields[1].value, "ChangeMe123!");
+        assert!(q.fields[1].secret);
+        assert!(q.fields[1].required);
+        assert!(card_from_cli("Q", &[], &[], None).is_err());
+        assert!(card_from_cli("Q", &[], &["".into()], None).is_err());
+    }
+
+    #[test]
+    fn tool_payload_with_fields() {
+        let card = from_tool_detail(
+            r#"{"question":"로그인","hint":"Empty 계정으로 로그인해주세요.","fields":[{"label":"아이디","value":"jtfliverecovery"},{"label":"비밀번호","type":"password"}]}"#,
+        )
+        .expect("card");
+        assert!(card.questions[0].options.is_empty());
+        assert_eq!(card.questions[0].fields.len(), 2);
+        assert_eq!(
+            card.questions[0].hint.as_deref(),
+            Some("Empty 계정으로 로그인해주세요.")
+        );
+        assert!(card.questions[0].fields[1].secret);
+        let mut card = card;
+        apply_answers(
+            &mut card,
+            &[],
+            &[vec!["user".into(), "secret".into()]],
+            false,
+        );
+        assert_eq!(card.state, ChoiceState::Answered);
+        assert_eq!(
+            format_answer(&card),
+            "로그인\n아이디: user\n비밀번호: secret"
+        );
+    }
+
+    #[test]
+    fn missing_required_input_is_not_complete() {
+        let mut card =
+            from_tool_detail(r#"{"question":"이름","inputs":[{"label":"이름"}]}"#).unwrap();
+        apply_answers(&mut card, &[], &[vec!["".into()]], false);
+        assert_eq!(card.state, ChoiceState::Pending);
+        assert!(!is_complete(&card));
+        apply_answers(&mut card, &[], &[vec!["Ada".into()]], false);
+        assert!(is_complete(&card));
+        assert_eq!(format_answer(&card), "이름\n이름: Ada");
+    }
+
+    #[test]
+    fn optional_empty_fields_are_complete() {
+        let mut card =
+            from_tool_detail(r#"{"question":"메모","fields":[{"label":"메모","required":false}]}"#)
+                .unwrap();
+        apply_answers(&mut card, &[], &[vec!["".into()]], false);
+        assert!(is_complete(&card));
+        assert_eq!(card.state, ChoiceState::Answered);
+        assert_eq!(format_answer(&card), "메모");
+    }
+
+    #[test]
+    fn masked_answer_hides_secret_values() {
+        let mut card = from_tool_detail(
+            r#"{"question":"로그인","fields":[{"label":"아이디","value":"ada"},{"label":"비밀번호","type":"password","value":"s3cret"}]}"#,
+        )
+        .unwrap();
+        apply_answers(
+            &mut card,
+            &[],
+            &[vec!["ada".into(), "s3cret".into()]],
+            false,
+        );
+        assert_eq!(
+            format_answer(&card),
+            "로그인\n아이디: ada\n비밀번호: s3cret"
+        );
+        assert_eq!(
+            format_answer_masked(&card),
+            "로그인\n아이디: ada\n비밀번호: ••••••"
+        );
     }
 }

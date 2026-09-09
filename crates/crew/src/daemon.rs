@@ -497,11 +497,13 @@ fn start_ask(
     agent: &str,
     question: &str,
     options: Vec<String>,
+    inputs: Vec<String>,
+    hint: Option<String>,
 ) -> anyhow::Result<(String, oneshot::Receiver<Event>)> {
     if !known_agent(agent) {
         anyhow::bail!("unknown agent {agent}");
     }
-    let card = crate::choice::card_from_cli(question, &options)?;
+    let card = crate::choice::card_from_cli(question, &options, &inputs, hint.as_deref())?;
     let msg = crate::transcript::attach_choice(agent, None, card);
     let Some(choice) = msg.choice.clone() else {
         anyhow::bail!("failed to open choice");
@@ -510,8 +512,7 @@ fn start_ask(
     if !pending {
         if let Some(ch) = get_origin(agent).and_then(|o| o.reply_channel) {
             if known_channel(&ch) {
-                let ch_msg =
-                    crate::transcript::push_channel(&ch, Role::Assistant, agent, "");
+                let ch_msg = crate::transcript::push_channel(&ch, Role::Assistant, agent, "");
                 crate::transcript::set_choice(&format!("ch:{ch}"), &ch_msg.id, choice.clone());
             }
         }
@@ -530,6 +531,7 @@ fn answer_choice(
     message_id: &str,
     channel: Option<String>,
     answers: Vec<Vec<String>>,
+    values: Vec<Vec<String>>,
     closed: bool,
 ) -> anyhow::Result<()> {
     let key = match channel.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
@@ -547,13 +549,20 @@ fn answer_choice(
     }
     if !closed {
         let mut preview = card.clone();
-        crate::choice::apply_answers(&mut preview, &answers, false);
-        if crate::choice::format_answer(&preview).trim().is_empty() {
+        crate::choice::apply_answers(&mut preview, &answers, &values, false);
+        if !crate::choice::is_complete(&preview) {
+            if preview.questions.iter().any(|q| {
+                q.fields
+                    .iter()
+                    .any(|f| f.required && f.value.trim().is_empty())
+            }) {
+                anyhow::bail!("missing input");
+            }
             anyhow::bail!("nothing selected");
         }
     }
     let Some(updated) =
-        crate::transcript::resolve_choice(agent, &card.id, &answers, closed)
+        crate::transcript::resolve_choice(agent, &card.id, &answers, &values, closed)
     else {
         anyhow::bail!("choice not found");
     };
@@ -572,7 +581,7 @@ fn answer_choice(
         if closed {
             return Ok(());
         }
-        return send_agent(agent, &text);
+        return send_agent_shown(agent, &crate::choice::format_answer_masked(&updated), &text);
     }
     if closed {
         return Ok(());
@@ -583,7 +592,7 @@ fn answer_choice(
     }
     // The picker is for the human. Continue only the bot that asked;
     // do not fan the pick out as a channel turn for other members.
-    send_agent(agent, &text)
+    send_agent_shown(agent, &crate::choice::format_answer_masked(&updated), &text)
 }
 
 fn start_delivery(id: &str, text: &str, newline: bool, origin: TurnOrigin) -> anyhow::Result<()> {
@@ -1188,9 +1197,11 @@ async fn handle_client(
                     agent,
                     question,
                     options,
+                    inputs,
+                    hint,
                 } = req
                 {
-                    match start_ask(&agent, &question, options) {
+                    match start_ask(&agent, &question, options, inputs, hint) {
                         Err(err) => {
                             write_event(
                                 &mut write,
@@ -1318,8 +1329,9 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             message_id,
             channel,
             answers,
+            values,
             closed,
-        } => match answer_choice(&agent, &message_id, channel, answers, closed) {
+        } => match answer_choice(&agent, &message_id, channel, answers, values, closed) {
             Ok(()) => vec![Event::Ok],
             Err(err) => vec![Event::Error {
                 message: err.to_string(),
@@ -1686,14 +1698,18 @@ fn apply_user_interrupt(id: &str, text: &str) -> anyhow::Result<bool> {
 }
 
 fn send_agent(id: &str, text: &str) -> anyhow::Result<()> {
+    send_agent_shown(id, text, text)
+}
+
+fn send_agent_shown(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
     let proceed = apply_user_interrupt(id, text)?;
     if !proceed {
-        crate::transcript::push_user(id, "user", text);
+        crate::transcript::push_user(id, "user", shown);
         return Ok(());
     }
     ensure_accepts_turn(id)?;
     let roster = roster_vec();
-    let msg = crate::transcript::push_user(id, "user", text);
+    let msg = crate::transcript::push_user(id, "user", shown);
     let mentions = targeting::one_on_one_tell_targets(crate::rows::reply_body(text), id, &roster);
     let rooms: Vec<Channel> = channels()
         .lock()
@@ -2604,16 +2620,18 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
     let targets = targeting::postback_targets(&origin, agent);
     if let Some(channel) = targets.channel {
         if known_channel(&channel) {
-            let already = msg.choice.as_ref().map(|c| {
-                crate::transcript::channel_messages(&channel).iter().any(|m| {
-                    m.choice.as_ref().map(|x| x.id == c.id).unwrap_or(false)
+            let already = msg
+                .choice
+                .as_ref()
+                .map(|c| {
+                    crate::transcript::channel_messages(&channel)
+                        .iter()
+                        .any(|m| m.choice.as_ref().map(|x| x.id == c.id).unwrap_or(false))
                 })
-            }).unwrap_or(false);
+                .unwrap_or(false);
             let dup = crate::transcript::channel_messages(&channel)
                 .last()
-                .map(|m| {
-                    m.from == agent && !text.is_empty() && m.text.trim() == text
-                })
+                .map(|m| m.from == agent && !text.is_empty() && m.text.trim() == text)
                 .unwrap_or(false);
             if !dup && !already {
                 let ch_msg =

@@ -41,6 +41,7 @@ type Props = {
     agentId: string,
     messageId: string,
     answers: string[][],
+    values: string[][],
     closed: boolean,
   ) => void | Promise<void>;
   highlightId?: string | null;
@@ -204,8 +205,8 @@ export function ChatThread({
                 }
                 onAnswerChoice={
                   onAnswerChoice
-                    ? (answers, closed) =>
-                        onAnswerChoice(m.from, m.id, answers, closed)
+                    ? (answers, values, closed) =>
+                        onAnswerChoice(m.from, m.id, answers, values, closed)
                     : undefined
                 }
                 onReply={onReply}
@@ -556,7 +557,11 @@ function Incoming({
   onSelectAgent?: (id: string) => void;
   onSelectChannel?: (id: string) => void;
   onApprove?: (allow: boolean) => void;
-  onAnswerChoice?: (answers: string[][], closed: boolean) => void | Promise<void>;
+  onAnswerChoice?: (
+    answers: string[][],
+    values: string[][],
+    closed: boolean,
+  ) => void | Promise<void>;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
   flash?: boolean;
@@ -800,14 +805,23 @@ function ChoiceCard({
   onAnswer,
 }: {
   card: ChoiceCardData;
-  onAnswer?: (answers: string[][], closed: boolean) => void | Promise<void>;
+  onAnswer?: (
+    answers: string[][],
+    values: string[][],
+    closed: boolean,
+  ) => void | Promise<void>;
 }) {
   const t = useT();
   const questions = card.questions || [];
   const pending = card.state === "pending";
-  const needsSubmit = questions.length > 1 || questions.some((q) => q.multi);
+  const hasFields = questions.some((q) => (q.fields || []).length > 0);
+  const needsSubmit =
+    questions.length > 1 || questions.some((q) => q.multi) || hasFields;
   const [picks, setPicks] = useState<string[][]>(() =>
     questions.map((q) => q.selected || []),
+  );
+  const [values, setValues] = useState<string[][]>(() =>
+    questions.map((q) => (q.fields || []).map((f) => f.value || "")),
   );
   const [sent, setSent] = useState(false);
   const open = pending && !sent;
@@ -822,20 +836,58 @@ function ChoiceCard({
       return [id];
     });
     setPicks(next);
-    if (!needsSubmit && !multi) void send(next, false);
+    if (!needsSubmit && !multi) void send(next, values, false);
+  }
+
+  function setField(qi: number, fi: number, next: string) {
+    if (!open || !onAnswer) return;
+    setValues((prev) =>
+      questions.map((q, i) => {
+        const row = prev[i] || (q.fields || []).map((f) => f.value || "");
+        if (i !== qi) return row;
+        return (q.fields || []).map((f, j) =>
+          j === fi ? next : row[j] || f.value || "",
+        );
+      }),
+    );
+  }
+
+  function complete(nextPicks = picks, nextValues = values) {
+    const allOk = questions.every((q, qi) => {
+      const fields = q.fields || [];
+      const fieldOk = fields.every((f, fi) => {
+        if (f.required === false) return true;
+        return (nextValues[qi]?.[fi] || "").trim() !== "";
+      });
+      const optOk = !(q.options || []).length || (nextPicks[qi] || []).length > 0;
+      return fieldOk && optOk;
+    });
+    const any = questions.some((_, qi) => {
+      const fields = questions[qi].fields || [];
+      return (
+        (nextPicks[qi] || []).length > 0 ||
+        (nextValues[qi] || []).some((v) => v.trim()) ||
+        (fields.length > 0 && fields.every((f) => f.required === false))
+      );
+    });
+    return allOk && any;
   }
 
   function submit() {
     if (!open || !onAnswer) return;
-    if (picks.every((row) => row.length === 0)) return;
-    void send(picks, false);
+    if (!complete()) return;
+    void send(picks, values, false);
   }
 
-  async function send(answers: string[][], closed: boolean) {
+  async function send(
+    answers: string[][],
+    fieldValues: string[][],
+    closed: boolean,
+  ) {
     if (!onAnswer) return;
     setSent(true);
     try {
-      await onAnswer(answers, closed);
+      await onAnswer(answers, fieldValues, closed);
     } catch {
       setSent(false);
     }
@@ -845,21 +897,33 @@ function ChoiceCard({
     <div className={"choice-card is-" + card.state}>
       {questions.map((q, qi) => {
         const header = (q.header || q.question || "").trim();
+        const hint =
+          (q.hint || "").trim() ||
+          (q.header &&
+          q.question &&
+          q.header.trim() !== q.question.trim()
+            ? q.question.trim()
+            : "");
         const selected = pending ? picks[qi] || [] : q.selected || [];
+        const fields = q.fields || [];
+        const fieldValues = values[qi] || fields.map((f) => f.value || "");
+        const showFields = fields.length > 0 && card.state !== "closed";
         const showList =
-          open || (card.state === "answered" && (q.multi || questions.length > 1));
+          (q.options || []).length > 0 &&
+          (open ||
+            (card.state === "answered" && (q.multi || questions.length > 1)));
         const picked = (q.options || []).filter((o) => selected.includes(o.id));
         return (
           <div className="choice-q" key={q.question + qi}>
             <div className="choice-head">
               <div className="choice-title">{header}</div>
-              {open && onAnswer ? (
+              {open && onAnswer && !hasFields ? (
                 <button
                   type="button"
                   className="choice-x"
                   title={t("thread.choiceClose")}
                   aria-label={t("thread.choiceClose")}
-                  onClick={() => void send(picks, true)}
+                  onClick={() => void send(picks, values, true)}
                 >
                   <X size={14} />
                 </button>
@@ -868,6 +932,43 @@ function ChoiceCard({
                 <span className="choice-closed">{t("thread.choiceClosed")}</span>
               ) : null}
             </div>
+            {hint && card.state !== "closed" ? (
+              <MdBody className="choice-hint md" text={hint} agents={[]} />
+            ) : null}
+            {showFields ? (
+              <div className="choice-fields">
+                {fields.map((f, fi) => {
+                  const required = f.required !== false;
+                  const id = `${card.id}-${qi}-${f.id || fi}`;
+                  return (
+                    <label className="choice-field" key={f.id || fi} htmlFor={id}>
+                      <span className="choice-field-label">
+                        {f.label}
+                        {required ? (
+                          <span className="choice-req"> *</span>
+                        ) : null}
+                      </span>
+                      <input
+                        id={id}
+                        className="textin choice-input"
+                        type={f.secret ? "password" : "text"}
+                        value={fieldValues[fi] || ""}
+                        disabled={!open || !onAnswer}
+                        autoComplete="off"
+                        onChange={(e) => setField(qi, fi, e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter" || e.nativeEvent.isComposing) {
+                            return;
+                          }
+                          e.preventDefault();
+                          submit();
+                        }}
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+            ) : null}
             {showList ? (
               <div className="choice-list">
                 {(q.options || []).map((o, oi) => {
@@ -917,15 +1018,24 @@ function ChoiceCard({
         );
       })}
       {open && needsSubmit && onAnswer ? (
-        <div className="choice-foot">
+        <div className={"choice-foot" + (hasFields ? " is-form" : "")}>
           <button
             type="button"
             className="choice-submit"
-            disabled={picks.every((row) => row.length === 0)}
+            disabled={!complete()}
             onClick={submit}
           >
-            {t("thread.choiceSubmit")}
+            {t(hasFields ? "thread.choiceContinue" : "thread.choiceSubmit")}
           </button>
+          {hasFields ? (
+            <button
+              type="button"
+              className="choice-dismiss"
+              onClick={() => void send(picks, values, true)}
+            >
+              {t("thread.choiceDismiss")}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -968,7 +1078,11 @@ function Bubble({
   onSelectAgent?: (id: string) => void;
   onSelectChannel?: (id: string) => void;
   onApprove?: (allow: boolean) => void;
-  onAnswerChoice?: (answers: string[][], closed: boolean) => void | Promise<void>;
+  onAnswerChoice?: (
+    answers: string[][],
+    values: string[][],
+    closed: boolean,
+  ) => void | Promise<void>;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
   flash?: boolean;
