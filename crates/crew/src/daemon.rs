@@ -2898,24 +2898,28 @@ mod daemon_tests {
 
     #[test]
     fn a_direct_tell_drops_that_peer_pending_handoff() {
-        enqueue_handoff("caller", "review", "stale review");
-        enqueue_handoff("caller", "impl", "still relevant");
-        drop_pending_from("caller", "review");
-        let next = flush_handoffs("caller", "hello");
+        // Pending handoffs live in one process-wide map, so a shared literal
+        // id lets a parallel test drain this queue mid-assertion.
+        let caller = "drop-pending-caller";
+        enqueue_handoff(caller, "review", "stale review");
+        enqueue_handoff(caller, "impl", "still relevant");
+        drop_pending_from(caller, "review");
+        let next = flush_handoffs(caller, "hello");
         assert!(!next.contains("stale review"), "{next}");
         assert!(next.contains("still relevant"), "{next}");
-        clear_agent_context("caller");
+        clear_agent_context(caller);
     }
 
     #[test]
     fn extra_pending_handoffs_are_omitted() {
+        let caller = "omit-pending-caller";
         for i in 0..5 {
-            enqueue_handoff("caller", &format!("bot{i}"), &format!("reply {i}"));
+            enqueue_handoff(caller, &format!("bot{i}"), &format!("reply {i}"));
         }
-        let next = flush_handoffs("caller", "go");
+        let next = flush_handoffs(caller, "go");
         assert!(next.contains("2 earlier replies omitted"), "{next}");
         assert!(!next.contains("reply 0"), "{next}");
         assert!(next.contains("reply 4"), "{next}");
-        clear_agent_context("caller");
+        clear_agent_context(caller);
     }
 }
