@@ -1931,12 +1931,16 @@ fn clone_agent(src_id: &str, name: Option<String>) -> anyhow::Result<String> {
     Ok(new_id)
 }
 
-fn insert_spawned_agent(cfg: AgentConfig) -> anyhow::Result<()> {
-    if cfg.id.trim().is_empty() {
-        anyhow::bail!("agent id is empty");
-    }
+fn insert_spawned_agent(mut cfg: AgentConfig) -> anyhow::Result<()> {
+    cfg.id = cfg.id.trim().to_string();
     if cfg.cmd.is_empty() {
         anyhow::bail!("cmd is empty");
+    }
+    // Minted ids are always in range; the CLI takes one verbatim. An id the
+    // filesystem folds (`춘식이` and `죠르디` both become `___`) would share
+    // one transcript, and one starting with `ch:` decodes as a room.
+    if !crate::config::valid_agent_id(&cfg.id) {
+        anyhow::bail!("{}", crate::config::id_rule(&cfg.id));
     }
     {
         let map = agents().lock().expect("agents mutex");
@@ -2908,6 +2912,35 @@ mod daemon_tests {
         crate::transcript::drop_agent(&peer);
         configs().lock().unwrap().remove(&peer);
         clear_agent_context(&peer);
+    }
+
+    #[test]
+    fn an_id_the_filesystem_would_fold_is_refused_by_add() {
+        let cfg = crate::config::AgentConfig::new(
+            "춘식이".into(),
+            "춘식이".into(),
+            vec!["cat".into()],
+            Some("/tmp/crew-demo/fold".into()),
+        );
+        let err = insert_spawned_agent(cfg).unwrap_err().to_string();
+        assert!(err.contains("must be 1-64 of a-z"), "{err}");
+        // macOS folds case, so an uppercase id is a second agent on one file.
+        let up = crate::config::AgentConfig::new(
+            "Grok".into(),
+            "Grok".into(),
+            vec!["cat".into()],
+            Some("/tmp/crew-demo/fold".into()),
+        );
+        let err = insert_spawned_agent(up).unwrap_err().to_string();
+        assert!(err.contains("must be 1-64 of a-z"), "{err}");
+        let ch = crate::config::AgentConfig::new(
+            "ch:general".into(),
+            "room".into(),
+            vec!["cat".into()],
+            Some("/tmp/crew-demo/fold".into()),
+        );
+        let err = insert_spawned_agent(ch).unwrap_err().to_string();
+        assert!(err.contains("must be 1-64 of a-z"), "{err}");
     }
 
     #[test]

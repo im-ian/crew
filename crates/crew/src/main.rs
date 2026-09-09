@@ -356,6 +356,13 @@ fn run() -> anyhow::Result<()> {
             cli,
         })) => {
             let cmd = resolve_add_cmd(cli, cmd)?;
+            let id = id.trim().to_string();
+            // With no daemon this writes straight into agents.json, so the
+            // daemon's guard never sees it. Refuse here too, before anything
+            // is created on disk for an id that is not going to be accepted.
+            if !config::valid_agent_id(&id) {
+                anyhow::bail!("{}", config::id_rule(&id));
+            }
             let name = name.unwrap_or_else(|| id.clone());
             let cwd = Some(
                 cwd.filter(|s| !s.trim().is_empty())

@@ -36,11 +36,8 @@ impl Channel {
         if id.is_empty() {
             anyhow::bail!("channel id is empty");
         }
-        if !id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        {
-            anyhow::bail!("channel id must be ascii alphanumeric, '-' or '_'");
+        if !valid_agent_id(&id) {
+            anyhow::bail!("{}", id_rule(&id));
         }
         let name = {
             let n = name.trim();
@@ -362,8 +359,72 @@ fn slug_with_fallback(name: &str, fallback: &str) -> String {
     }
 }
 
+/// Base36 milliseconds since the epoch.
+///
+/// This is a wall clock, not a monotonic one. It does not *prove* an id is
+/// never reissued — a clock stepped backwards could repeat a millisecond — but
+/// it is what stops the id of a deleted bot from being handed to the next bot
+/// of that name, which is the way ids actually came back. A counter that
+/// guarantees it would have to live in the daemon's saved state, and today the
+/// id is minted by the caller before the `AddAgent` request is sent.
+fn stamp_from(now: std::time::SystemTime) -> String {
+    let mut ms = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    if ms == 0 {
+        // A clock before the epoch would otherwise stamp every bot `-0`, which
+        // is the recycling this exists to stop.
+        return "epoch".into();
+    }
+    const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let mut out = String::new();
+    while ms > 0 {
+        out.insert(0, DIGITS[(ms % 36) as usize] as char);
+        ms /= 36;
+    }
+    out
+}
+
+/// An id is minted from the name *and* the moment it was minted, so deleting a
+/// bot does not free its id for the next one. A reused id would otherwise come
+/// back attached to the deleted bot's `/tmp/crew-demo/<id>` folder, its
+/// `routine_runs/<id>/` and its `archive/<id>/` — none of which removal clears.
+///
+/// The name still leads, so an id stays recognisable; a name with no ASCII
+/// slugs to `bot`, and the stamp is what tells those apart.
+fn agent_id_at<S: AsRef<str>>(
+    name: &str,
+    now: std::time::SystemTime,
+    existing: impl IntoIterator<Item = S>,
+) -> String {
+    unique_from_base(format!("{}-{}", slug_id(name), stamp_from(now)), existing)
+}
+
 pub fn unique_agent_id<S: AsRef<str>>(name: &str, existing: impl IntoIterator<Item = S>) -> String {
-    unique_from_base(slug_id(name), existing)
+    agent_id_at(name, std::time::SystemTime::now(), existing)
+}
+
+/// One wording for one rule, so the CLI, the daemon and `Channel::new` do not
+/// each phrase the same refusal differently.
+pub fn id_rule(id: &str) -> String {
+    format!("id {id} must be 1-64 of a-z, 0-9, '-' or '_'")
+}
+
+/// Ids reach the filesystem through `paths::safe_agent_id`, which folds every
+/// character outside `[A-Za-z0-9_-]` to `_` — so `춘식이` and `죠르디` would
+/// share one transcript, one memory file and one avatar. Minted ids are always
+/// in range; the CLI takes an id verbatim, so it is the CLI that needs telling.
+///
+/// Uppercase is out too: the app ships for macOS, where `Grok` and `grok` are
+/// two agents to the daemon's maps and one file to the filesystem. Length is
+/// bounded because `transcripts/<id>.jsonl` has to fit in a 255-byte name.
+pub fn valid_agent_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
 pub fn unique_channel_id<S: AsRef<str>>(
@@ -1549,11 +1610,55 @@ mod tests {
     }
 
     #[test]
-    fn unique_agent_id_suffixes() {
-        assert_eq!(unique_agent_id("Grok", ["grok"]), "grok-2");
-        assert_eq!(unique_agent_id("Grok", ["grok", "grok-2"]), "grok-3");
-        assert_eq!(unique_agent_id("Alpha", ["grok"]), "alpha");
-        assert_eq!(unique_agent_id("Grok 복사본", ["grok"]), "grok-2");
+    fn a_minted_id_leads_with_the_name_and_ends_with_the_moment() {
+        let t = |ms| std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms);
+        let none: [&str; 0] = [];
+        assert_eq!(
+            agent_id_at("Grok", t(1_788_000_000_000), none),
+            "grok-mte919mo"
+        );
+        // Two names with no ASCII both slug to `bot`; the stamp is what keeps
+        // them apart, and it is why neither can inherit a deleted bot's id.
+        assert_eq!(
+            agent_id_at("춘식이", t(1_788_000_000_000), none),
+            "bot-mte919mo"
+        );
+        assert_ne!(
+            agent_id_at("춘식이", t(1_788_000_000_000), none),
+            agent_id_at("죠르디", t(1_788_000_000_001), none),
+        );
+        // A clock before the epoch must not stamp every bot the same.
+        assert_eq!(
+            agent_id_at("Grok", std::time::UNIX_EPOCH, none),
+            "grok-epoch"
+        );
+    }
+
+    #[test]
+    fn a_second_bot_in_one_millisecond_walks_the_suffix() {
+        let t = std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_788_000_000_000);
+        let first = agent_id_at("Grok", t, [] as [&str; 0]);
+        let second = agent_id_at("Grok", t, [first.as_str()]);
+        assert_eq!(second, format!("{first}-2"));
+        let third = agent_id_at("Grok", t, [first.as_str(), second.as_str()]);
+        assert_eq!(third, format!("{first}-3"));
+    }
+
+    #[test]
+    fn an_id_the_filesystem_would_fold_is_refused() {
+        assert!(valid_agent_id("bot-mte919mo"));
+        assert!(valid_agent_id("frontend_bot"));
+        assert!(!valid_agent_id(""));
+        // macOS folds case, so these are two agents and one transcript file.
+        assert!(!valid_agent_id("Grok"));
+        // `transcripts/<id>.jsonl` has to fit in a 255-byte name.
+        assert!(!valid_agent_id(&"a".repeat(65)));
+        // `safe_agent_id` folds both of these to `___`, so they would share
+        // every per-id file.
+        assert!(!valid_agent_id("춘식이"));
+        assert!(!valid_agent_id("죠르디"));
+        // And this one decodes as a channel in `persist_path`.
+        assert!(!valid_agent_id("ch:general"));
     }
 
     #[test]
@@ -1584,9 +1689,17 @@ mod tests {
             .push(Routine::new("ping".into(), "0 9 * * *".into(), "hi".into()).unwrap());
         let rid = src.routines[0].id.clone();
         let dup = src.duplicate(None, ["grok"]);
-        assert_eq!(dup.id, "grok-2");
+        // The clone is a new bot, so it gets a minted id, not the next suffix.
+        assert!(dup.id.starts_with("grok-"), "{}", dup.id);
+        assert_ne!(dup.id, "grok");
         assert_eq!(dup.name, "Grok 복사본");
-        assert_eq!(dup.cwd.as_deref(), Some("/tmp/crew-demo/grok-2"));
+        // The clone's folder follows its own id, so it never lands in the
+        // folder a deleted bot left behind. Pinned by value, not re-derived
+        // from `default_add_cwd`, which would hold for any id at all.
+        let cwd = dup.cwd.as_deref().expect("clone has a folder");
+        assert!(cwd.starts_with("/tmp/crew-demo/grok-"), "{cwd}");
+        assert!(cwd.ends_with(&dup.id), "{cwd}");
+        assert_ne!(Some(cwd), src.cwd.as_deref());
         assert_eq!(dup.title.as_deref(), Some("Lead"));
         assert_eq!(dup.role.as_deref(), Some("PM"));
         assert_eq!(dup.description.as_deref(), Some("does things"));
@@ -1600,8 +1713,11 @@ mod tests {
         assert!(dup.avatar.is_none());
         assert_eq!(dup.avatar_shape, Some(AvatarShape::Teardrop));
         assert_eq!(dup.avatar_color.as_deref(), Some("#ff6a00"));
-        let named = src.duplicate(Some("Grok"), ["grok"]);
-        assert_eq!(named.id, "grok-2");
+        // Same display name as the source is allowed; the id is still its own.
+        // `clone_agent` passes the live roster, so the first clone is in it.
+        let named = src.duplicate(Some("Grok"), ["grok", dup.id.as_str()]);
+        assert_ne!(named.id, "grok");
+        assert_ne!(named.id, dup.id);
         assert_eq!(named.name, "Grok");
     }
 
