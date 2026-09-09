@@ -510,13 +510,17 @@ function TransferNote({
         </button>
       ) : null}
       {m.queued ? <QueueWait /> : null}
-      <MsgActions
-        onReply={
-          onReply && body.trim()
-            ? () => onReply(makeReply({ ...m, from: otherId, text: body }, agents, t))
-            : undefined
-        }
-      />
+      {show ? (
+        // Folded, the note is one line and the body is not on screen, so a
+        // reply button floats in the margin beside nothing.
+        <MsgActions
+          onReply={
+            onReply && body.trim()
+              ? () => onReply(makeReply({ ...m, from: otherId, text: body }, agents, t))
+              : undefined
+          }
+        />
+      ) : null}
     </div>
   );
 }
