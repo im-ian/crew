@@ -2673,6 +2673,19 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
 mod daemon_tests {
     use super::*;
 
+    /// A per-test id. The agent, channel and pending-handoff maps are all
+    /// process-wide, so two tests sharing a key drain each other's state
+    /// under the parallel harness — which is how CI failed here.
+    fn test_id(prefix: &str) -> String {
+        format!(
+            "{prefix}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        )
+    }
+
     #[test]
     fn a_hash_prefix_addresses_a_channel() {
         assert!(matches!(routine_host("alpha"), RoutineHost::Agent(id) if id == "alpha"));
@@ -2753,13 +2766,7 @@ mod daemon_tests {
 
     #[test]
     fn sealed_reply_posts_back_to_origin_channel() {
-        let ch = format!(
-            "room-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        );
+        let ch = test_id("room");
         let speaker = format!("beta-{ch}");
         channels().lock().unwrap().insert(
             ch.clone(),
@@ -2804,13 +2811,7 @@ mod daemon_tests {
 
     #[test]
     fn sealed_judgment_marks_channel_approval() {
-        let ch = format!(
-            "room-ask-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        );
+        let ch = test_id("room-ask");
         let speaker = format!("beta-{ch}");
         channels().lock().unwrap().insert(
             ch.clone(),
@@ -2855,13 +2856,7 @@ mod daemon_tests {
 
     #[test]
     fn sealed_reply_handoff_to_origin_agent() {
-        let peer = format!(
-            "alpha-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        );
+        let peer = test_id("alpha");
         let speaker = format!("beta-{peer}");
         configs().lock().unwrap().insert(
             peer.clone(),
@@ -2898,28 +2893,26 @@ mod daemon_tests {
 
     #[test]
     fn a_direct_tell_drops_that_peer_pending_handoff() {
-        // Pending handoffs live in one process-wide map, so a shared literal
-        // id lets a parallel test drain this queue mid-assertion.
-        let caller = "drop-pending-caller";
-        enqueue_handoff(caller, "review", "stale review");
-        enqueue_handoff(caller, "impl", "still relevant");
-        drop_pending_from(caller, "review");
-        let next = flush_handoffs(caller, "hello");
+        let caller = test_id("drop-pending");
+        enqueue_handoff(&caller, "review", "stale review");
+        enqueue_handoff(&caller, "impl", "still relevant");
+        drop_pending_from(&caller, "review");
+        let next = flush_handoffs(&caller, "hello");
+        assert!(next.contains("hello"), "the prompt must survive: {next}");
         assert!(!next.contains("stale review"), "{next}");
         assert!(next.contains("still relevant"), "{next}");
-        clear_agent_context(caller);
     }
 
     #[test]
     fn extra_pending_handoffs_are_omitted() {
-        let caller = "omit-pending-caller";
+        let caller = test_id("omit-pending");
         for i in 0..5 {
-            enqueue_handoff(caller, &format!("bot{i}"), &format!("reply {i}"));
+            enqueue_handoff(&caller, &format!("bot{i}"), &format!("reply {i}"));
         }
-        let next = flush_handoffs(caller, "go");
+        let next = flush_handoffs(&caller, "go");
+        assert!(next.contains("go"), "the prompt must survive: {next}");
         assert!(next.contains("2 earlier replies omitted"), "{next}");
         assert!(!next.contains("reply 0"), "{next}");
         assert!(next.contains("reply 4"), "{next}");
-        clear_agent_context(caller);
     }
 }
