@@ -16,7 +16,7 @@ import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { sentTarget } from "../peek";
 import { threadRows, toolArgs, toolSummary } from "../tools";
-import { Reply, X } from "../icons";
+import { ChevronDown, Reply, X } from "../icons";
 import { Avatar, ChannelAvatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
 import { MdBody } from "./MdBody";
@@ -259,7 +259,7 @@ export function ChatThread({
           aria-label={t("thread.jumpBottom")}
           onClick={jumpBottom}
         >
-          ↓
+          <ChevronDown size={18} />
         </button>
       ) : null}
     </div>

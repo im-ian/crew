@@ -13,7 +13,7 @@ import {
 import { oneLine, wrapReply, type ReplyTarget } from "../reply";
 import { Avatar, ChannelAvatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
-import { CircleDot, Paperclip, Plus, StopSquare, X } from "../icons";
+import { ArrowUp, CircleDot, Paperclip, Plus, StopSquare, X } from "../icons";
 
 export type ComposerHandle = {
   focus: () => void;
@@ -509,7 +509,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
                   aria-label={t("composer.detachNamed", { name: a.name })}
                   onClick={() => removeAttach(a.id)}
                 >
-                  ×
+                  <X size={12} />
                 </button>
               </div>
             ))}
@@ -771,7 +771,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           aria-label={t("composer.send")}
           disabled={!selected || (empty && !attaches.length)}
         >
-          ↑
+          <ArrowUp size={16} />
         </button>
         </div>
       </div>

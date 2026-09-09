@@ -142,6 +142,15 @@ export function ChevronDown(props: Props) {
   );
 }
 
+export function ArrowUp(props: Props) {
+  return (
+    <Icon {...props}>
+      <path d="m5 12 7-7 7 7" />
+      <path d="M12 19V5" />
+    </Icon>
+  );
+}
+
 export function Lock(props: Props) {
   return (
     <Icon {...props}>

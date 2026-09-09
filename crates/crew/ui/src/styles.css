@@ -1977,9 +1977,9 @@ button.choice-option:disabled {
   padding-right: var(--space-6);
 }
 .member-chip-x {
-  font-size: var(--text-md);
+  display: inline-flex;
+  align-items: center;
   color: var(--muted);
-  line-height: 1;
   padding: 0 var(--space-2);
 }
 .member-chip:hover .member-chip-x { color: var(--ink); }
@@ -2401,11 +2401,11 @@ button.who-btn:focus-visible {
   border-radius: 50%;
   background: transparent;
   color: var(--muted);
-  font-size: var(--text-lg);
-  line-height: 1;
   padding: 0;
   cursor: pointer;
   flex-shrink: 0;
+  display: grid;
+  place-items: center;
 }
 .attach-remove:hover {
   background: var(--hover);
@@ -2565,9 +2565,11 @@ button.mention-chip:active {
   border-radius: 50%;
   background: var(--btn);
   color: var(--on-ink);
-  font-size: var(--text-2xl);
   cursor: pointer;
   flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
 }
 .composer-box button[type="submit"]:hover { background: var(--btn-hover); }
 .composer-box button[type="submit"]:not(:disabled):hover {

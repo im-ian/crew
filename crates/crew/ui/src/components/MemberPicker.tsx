@@ -3,7 +3,7 @@ import { mentionLabel } from "../mentions";
 import { useT } from "../LocaleContext";
 import type { AgentInfo } from "../types";
 import { Avatar } from "./Avatar";
-import { Plus } from "../icons";
+import { Plus, X } from "../icons";
 
 type Props = {
   agents: AgentInfo[];
@@ -85,7 +85,7 @@ export function MemberPicker({ agents, selected, onChange }: Props) {
                 />
                 <span className="mention-chip-name">{label}</span>
                 <span className="member-chip-x" aria-hidden="true">
-                  ×
+                  <X size={10} />
                 </span>
               </button>
             );
