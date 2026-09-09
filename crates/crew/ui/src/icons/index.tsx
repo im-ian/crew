@@ -134,6 +134,14 @@ export function StopSquare(props: Props) {
   );
 }
 
+export function ChevronDown(props: Props) {
+  return (
+    <Icon {...props}>
+      <path d="m6 9 6 6 6-6" />
+    </Icon>
+  );
+}
+
 export function Lock(props: Props) {
   return (
     <Icon {...props}>

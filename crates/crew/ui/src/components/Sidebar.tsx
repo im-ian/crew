@@ -15,7 +15,7 @@ import { itemKey, parseItemKey } from "../groups";
 import type { AgentInfo, ChannelInfo, Group, Kind, SearchHit } from "../types";
 import { mentionLabel, mentionRuns, mentionText, resolveMention } from "../mentions";
 import { Avatar, ChannelAvatar } from "./Avatar";
-import { Plus, Settings } from "../icons";
+import { ChevronDown, Plus, Settings } from "../icons";
 
 const RAIL_DEFAULT = 232;
 const RAIL_MIN = 176;
@@ -841,7 +841,7 @@ function GroupHead({
         aria-label={group.collapsed ? t("sidebar.expand") : t("sidebar.collapse")}
         onClick={onToggle}
       >
-        <span className="group-chevron">▾</span>
+        <ChevronDown className="group-chevron" size={14} />
       </button>
       {renaming ? (
         <input
