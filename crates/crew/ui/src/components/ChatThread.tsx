@@ -14,6 +14,7 @@ import type {
 import { busyInChannel } from "../busy";
 import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
+import { sentTarget } from "../peek";
 import { threadRows, toolArgs, toolSummary } from "../tools";
 import { Reply, X } from "../icons";
 import { Avatar, ChannelAvatar } from "./Avatar";
@@ -49,6 +50,7 @@ type Props = {
   jumpSeq?: number;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
+  onPeek?: (peerId: string) => void;
 };
 
 export function ChatThread({
@@ -71,6 +73,7 @@ export function ChatThread({
   jumpSeq = 0,
   onReply,
   onJump,
+  onPeek,
 }: Props) {
   const t = useT();
   const ref = useRef<HTMLDivElement>(null);
@@ -182,6 +185,7 @@ export function ChatThread({
                   onSelectChannel={onSelectChannel}
                   onReply={onReply}
                   onJump={onJump}
+                  onPeek={onPeek}
                   flash={flash}
                 />
               );
@@ -309,6 +313,7 @@ function SystemOrIncoming({
   onSelectChannel,
   onReply,
   onJump,
+  onPeek,
   flash = false,
 }: {
   message: ChatMessage;
@@ -319,6 +324,7 @@ function SystemOrIncoming({
   onSelectChannel?: (id: string) => void;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
+  onPeek?: (peerId: string) => void;
   flash?: boolean;
 }) {
   const t = useT();
@@ -361,6 +367,7 @@ function SystemOrIncoming({
         onSelectChannel={onSelectChannel}
         onReply={onReply}
         onJump={onJump}
+        onPeek={onPeek}
         flash={flash}
       />
     );
@@ -377,6 +384,7 @@ function SystemOrIncoming({
         onSelectChannel={onSelectChannel}
         onReply={onReply}
         onJump={onJump}
+        onPeek={onPeek}
         flash={flash}
       />
     );
@@ -395,6 +403,7 @@ function SystemOrIncoming({
         onSelectChannel={onSelectChannel}
         onReply={onReply}
         onJump={onJump}
+        onPeek={onPeek}
         flash={flash}
       />
     );
@@ -421,6 +430,7 @@ function TransferNote({
   onSelectChannel,
   onReply,
   onJump,
+  onPeek,
   flash = false,
 }: {
   kind: "sent" | "received" | "handoff";
@@ -432,6 +442,7 @@ function TransferNote({
   onSelectChannel?: (id: string) => void;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
+  onPeek?: (peerId: string) => void;
   flash?: boolean;
 }) {
   const fromChannel = otherId.startsWith("#");
@@ -488,6 +499,15 @@ function TransferNote({
           onChannel={onSelectChannel}
           baseDir={agent?.cwd || undefined}
         />
+      ) : null}
+      {show && onPeek && agent ? (
+        <button
+          type="button"
+          className="xfer-peek"
+          onClick={() => onPeek(agent.id)}
+        >
+          {t("thread.viewFull")}
+        </button>
       ) : null}
       {m.queued ? <QueueWait /> : null}
       <MsgActions
@@ -1244,10 +1264,6 @@ function ReplyButton({ onClick }: { onClick: () => void }) {
 function displayWho(m: ChatMessage, agent: AgentInfo | null): string {
   if (agent) return agent.name || agent.id;
   return m.from || "";
-}
-
-function sentTarget(from: string): string | null {
-  return from.startsWith("to:") ? from.slice(3) : null;
 }
 
 function channelDisplayName(from: string, channels: ChannelInfo[]): string {
