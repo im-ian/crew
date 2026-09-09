@@ -99,10 +99,20 @@ export type ChoiceOption = {
   description?: string | null;
 };
 
+export type ChoiceField = {
+  id: string;
+  label: string;
+  value?: string;
+  secret?: boolean;
+  required?: boolean;
+};
+
 export type ChoiceQuestion = {
   question: string;
   header?: string | null;
+  hint?: string | null;
   options: ChoiceOption[];
+  fields?: ChoiceField[];
   multi?: boolean;
   selected?: string[];
 };

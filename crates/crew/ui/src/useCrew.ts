@@ -519,6 +519,7 @@ export function useCrew() {
     agentId: string,
     messageId: string,
     answers: string[][],
+    values: string[][],
     closed: boolean,
   ) {
     const { id: sel, kind } = selectedRef.current;
@@ -528,6 +529,7 @@ export function useCrew() {
         messageId,
         channel: kind === "channel" ? sel : null,
         answers,
+        values,
         closed,
       });
       await refreshList();

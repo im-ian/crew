@@ -242,8 +242,8 @@ export function App() {
           onSelectAgent={crew.selectAgent}
           onSelectChannel={crew.selectChannel}
           onApprove={(allow, id) => void crew.approveAgent(allow, id)}
-          onAnswerChoice={(agentId, messageId, answers, closed) =>
-            crew.answerChoice(agentId, messageId, answers, closed)
+          onAnswerChoice={(agentId, messageId, answers, values, closed) =>
+            crew.answerChoice(agentId, messageId, answers, values, closed)
           }
           highlightId={crew.highlightId}
           onHighlightDone={crew.clearHighlight}

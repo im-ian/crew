@@ -21,7 +21,9 @@ fn parse_effort(effort: Option<String>) -> Result<Option<Effort>, String> {
 fn parse_shape(shape: Option<String>) -> Result<Option<AvatarShape>, String> {
     match shape.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         None => Ok(None),
-        Some(s) => AvatarShape::from_key(s).map(Some).map_err(|e| e.to_string()),
+        Some(s) => AvatarShape::from_key(s)
+            .map(Some)
+            .map_err(|e| e.to_string()),
     }
 }
 
@@ -84,12 +86,14 @@ fn answer_choice(
     channel: Option<String>,
     answers: Vec<Vec<String>>,
     closed: bool,
+    values: Option<Vec<Vec<String>>>,
 ) -> Result<(), String> {
     match client::rpc(Request::AnswerChoice {
         agent,
         message_id,
         channel,
         answers,
+        values: values.unwrap_or_default(),
         closed,
     }) {
         Ok(Event::Ok) => Ok(()),

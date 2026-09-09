@@ -1639,11 +1639,61 @@ button.choice-option:disabled {
   font-size: var(--text-sm);
   line-height: 1.4;
 }
+.choice-hint.md {
+  padding: 0 var(--space-12) var(--space-10);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+.choice-hint.md p {
+  margin: 0;
+}
+.choice-hint.md code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  background: var(--code-bg);
+  padding: 0.12em 0.38em;
+  border-radius: 4px;
+  color: var(--ink);
+}
+.choice-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  padding: 0 var(--space-12) var(--space-12);
+}
+.choice-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+.choice-field-label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.3;
+}
+.choice-req {
+  color: var(--blocked);
+  font-weight: 650;
+}
+.choice-input {
+  background: var(--bg);
+}
+.choice-input:disabled {
+  opacity: 0.85;
+  cursor: default;
+}
 .choice-foot {
   display: flex;
   justify-content: flex-end;
+  gap: var(--space-8);
   padding: var(--space-8) var(--space-12) var(--space-10);
   border-top: 1px solid var(--line);
+}
+.choice-foot.is-form {
+  justify-content: flex-start;
 }
 .choice-submit {
   border: 0;
@@ -1662,6 +1712,26 @@ button.choice-option:disabled {
 }
 .choice-submit:hover:not(:disabled) {
   filter: brightness(1.08);
+}
+.choice-foot.is-form .choice-submit,
+.choice-dismiss {
+  border-radius: 999px;
+  padding: var(--space-6) var(--space-12);
+}
+.choice-foot.is-form .choice-submit {
+  background: var(--ink);
+  color: var(--bg);
+}
+.choice-dismiss {
+  border: 0;
+  background: var(--chip);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-md);
+  cursor: pointer;
+}
+.choice-dismiss:hover {
+  background: var(--chip-hover);
 }
 .tool-run {
   align-self: center;

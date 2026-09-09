@@ -306,9 +306,10 @@ fn is_pinned_ask(agent: &str, call_id: Option<&str>) -> bool {
     let Some(chat) = map.get(agent) else {
         return false;
     };
-    chat.tool_ids.get(id).and_then(|mid| {
-        chat.messages.iter().find(|m| &m.id == mid)
-    }).map(|m| m.choice.is_some() || m.role == Role::Assistant && m.kind.is_none())
+    chat.tool_ids
+        .get(id)
+        .and_then(|mid| chat.messages.iter().find(|m| &m.id == mid))
+        .map(|m| m.choice.is_some() || m.role == Role::Assistant && m.kind.is_none())
         .unwrap_or(false)
 }
 
@@ -379,17 +380,22 @@ pub fn attach_choice(agent: &str, call_id: Option<&str>, mut card: ChoiceCard) -
             .and_then(|id| chat.tool_ids.get(id).cloned())
             .and_then(|mid| chat.messages.iter().position(|m| m.id == mid));
         let known_free = known.filter(|&idx| {
-            chat.messages.get(idx).and_then(|m| m.choice.as_ref()).map(|c| {
-                c.questions.is_empty() || c.id == card.id
-            }).unwrap_or(true)
+            chat.messages
+                .get(idx)
+                .and_then(|m| m.choice.as_ref())
+                .map(|c| c.questions.is_empty() || c.id == card.id)
+                .unwrap_or(true)
         });
         let pending = chat.pending_idx.filter(|&idx| {
-            chat.messages.get(idx).map(|row| {
-                row.choice
-                    .as_ref()
-                    .map(|c| c.questions.is_empty() || c.id == card.id)
-                    .unwrap_or(true)
-            }).unwrap_or(false)
+            chat.messages
+                .get(idx)
+                .map(|row| {
+                    row.choice
+                        .as_ref()
+                        .map(|c| c.questions.is_empty() || c.id == card.id)
+                        .unwrap_or(true)
+                })
+                .unwrap_or(false)
         });
         let idx = known_free.or(pending);
         let out = if let Some(idx) = idx {
@@ -423,8 +429,7 @@ pub fn attach_choice(agent: &str, call_id: Option<&str>, mut card: ChoiceCard) -
             };
             chat.messages.push(m.clone());
             if let Some(id) = call_id {
-                chat.tool_ids
-                    .insert(id.to_string(), m.id.clone());
+                chat.tool_ids.insert(id.to_string(), m.id.clone());
             }
             m
         };
@@ -461,6 +466,7 @@ pub fn resolve_choice(
     agent: &str,
     choice_id: &str,
     answers: &[Vec<String>],
+    values: &[Vec<String>],
     closed: bool,
 ) -> Option<ChoiceCard> {
     let mut updated: Option<ChoiceCard> = None;
@@ -478,7 +484,7 @@ pub fn resolve_choice(
                 if m.from != agent && key != agent {
                     continue;
                 }
-                crate::choice::apply_answers(card, answers, closed);
+                crate::choice::apply_answers(card, answers, values, closed);
                 updated = Some(card.clone());
                 emit_rows.push((key.clone(), m.clone()));
                 dirty = true;
@@ -522,7 +528,7 @@ pub fn close_pending_choices(agent: &str) -> Vec<String> {
         })
         .collect();
     for id in &ids {
-        let _ = resolve_choice(agent, id, &[], true);
+        let _ = resolve_choice(agent, id, &[], &[], true);
     }
     ids
 }
@@ -658,7 +664,10 @@ pub fn set_approval(agent: &str, id: &str, state: ApprovalState) {
 }
 
 pub fn pending_approval(agent: &str) -> Option<ChatMessage> {
-    messages(agent).into_iter().rev().find(|m| m.approval == Some(ApprovalState::Pending))
+    messages(agent)
+        .into_iter()
+        .rev()
+        .find(|m| m.approval == Some(ApprovalState::Pending))
 }
 
 pub fn set_queued(agent: &str, id: &str, queued: bool) {
@@ -1022,6 +1031,19 @@ pub fn archive_and_clear(agent: &str, archive_dir: &Path) -> anyhow::Result<()> 
     Ok(())
 }
 
+fn redact_secrets(m: &mut ChatMessage) {
+    let Some(card) = m.choice.as_mut() else {
+        return;
+    };
+    for q in &mut card.questions {
+        for f in &mut q.fields {
+            if f.secret {
+                f.value.clear();
+            }
+        }
+    }
+}
+
 fn persist(agent: &str, chat: &AgentChat) {
     let path = persist_path(agent);
     if let Some(parent) = path.parent() {
@@ -1031,6 +1053,7 @@ fn persist(agent: &str, chat: &AgentChat) {
     for m in &chat.messages {
         let mut stored = m.clone();
         stored.queued = false;
+        redact_secrets(&mut stored);
         if let Ok(line) = serde_json::to_string(&stored) {
             out.push_str(&line);
             out.push('\n');
@@ -1421,8 +1444,14 @@ mod tests {
             strip_crew_markers("[crew channel:room from:alpha]\nhello"),
             "hello"
         );
-        assert_eq!(strip_crew_markers("[crew system]\nTeammates: a"), "Teammates: a");
-        assert_eq!(strip_crew_markers("keep\n[crew from:x]\nthis"), "keep\nthis");
+        assert_eq!(
+            strip_crew_markers("[crew system]\nTeammates: a"),
+            "Teammates: a"
+        );
+        assert_eq!(
+            strip_crew_markers("keep\n[crew from:x]\nthis"),
+            "keep\nthis"
+        );
     }
 
     #[test]
@@ -1443,10 +1472,7 @@ mod tests {
         on_assistant_delta(&agent, "```sh");
         on_assistant_delta(&agent, "\n");
         on_assistant_delta(&agent, "ls -1\n```");
-        assert_eq!(
-            messages(&agent).last().unwrap().text,
-            "```sh\nls -1\n```"
-        );
+        assert_eq!(messages(&agent).last().unwrap().text, "```sh\nls -1\n```");
         drop_agent(&agent);
     }
 
@@ -1508,7 +1534,7 @@ mod tests {
         let card = last.choice.as_ref().expect("choice");
         assert_eq!(card.questions[0].question, "어느 쪽을 고를래?");
         assert_eq!(card.questions[0].options.len(), 3);
-        let resolved = resolve_choice(&agent, &card.id, &[vec!["C".into()]], false).unwrap();
+        let resolved = resolve_choice(&agent, &card.id, &[vec!["C".into()]], &[], false).unwrap();
         assert_eq!(resolved.state, crate::protocol::ChoiceState::Answered);
         assert_eq!(
             crate::choice::format_answer(&resolved),
@@ -1563,6 +1589,45 @@ mod tests {
         assert_eq!(
             last.choice.as_ref().unwrap().questions[0].question,
             "어느 쪽을 고를래?"
+        );
+        drop_agent(&agent);
+    }
+
+    #[test]
+    fn ask_tool_fields_become_a_choice() {
+        let agent = format!(
+            "ask-in-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        begin_turn(&agent);
+        push_tool(
+            &agent,
+            Some("call-in"),
+            "AskUserQuestion",
+            r#"{"question":"로그인","fields":[{"label":"아이디"},{"label":"비밀번호","type":"password"}]}"#,
+        );
+        let last = messages(&agent).last().cloned().unwrap();
+        let card = last.choice.as_ref().expect("choice");
+        assert_eq!(card.questions[0].question, "로그인");
+        assert!(card.questions[0].options.is_empty());
+        assert_eq!(card.questions[0].fields.len(), 2);
+        assert!(card.questions[0].fields[1].secret);
+        let resolved = resolve_choice(
+            &agent,
+            &card.id,
+            &[],
+            &[vec!["ada".into(), "s3cret".into()]],
+            false,
+        )
+        .unwrap();
+        assert_eq!(resolved.state, crate::protocol::ChoiceState::Answered);
+        assert_eq!(
+            crate::choice::format_answer(&resolved),
+            "로그인\n아이디: ada\n비밀번호: s3cret"
         );
         drop_agent(&agent);
     }

@@ -169,13 +169,17 @@ pub enum Request {
         agent: String,
         allow: bool,
     },
-    /// Show a picker in chat and wait for the user's choice.
+    /// Show a picker or form in chat and wait for the user's answer.
     Ask {
         agent: String,
         question: String,
         options: Vec<String>,
+        #[serde(default)]
+        inputs: Vec<String>,
+        #[serde(default)]
+        hint: Option<String>,
     },
-    /// Pick or dismiss a pending choice card.
+    /// Pick, fill, or dismiss a pending choice card.
     AnswerChoice {
         agent: String,
         message_id: String,
@@ -184,6 +188,9 @@ pub enum Request {
         /// Option ids chosen for each question, in order. Ignored when `closed`.
         #[serde(default)]
         answers: Vec<Vec<String>>,
+        /// Text typed into each question's fields, in order. Ignored when `closed`.
+        #[serde(default)]
+        values: Vec<Vec<String>>,
         #[serde(default)]
         closed: bool,
     },
@@ -374,11 +381,32 @@ pub struct ChoiceOption {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChoiceField {
+    pub id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub value: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub secret: bool,
+    #[serde(default = "serde_true")]
+    pub required: bool,
+}
+
+fn serde_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChoiceQuestion {
     pub question: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub header: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    #[serde(default)]
     pub options: Vec<ChoiceOption>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<ChoiceField>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub multi: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -736,6 +764,8 @@ mod tests {
             agent: "alpha".into(),
             question: "어느 쪽을 고를래?".into(),
             options: vec!["A".into(), "B".into(), "C".into()],
+            inputs: Vec::new(),
+            hint: None,
         };
         let line = req.to_line().unwrap();
         assert!(line.contains("\"type\":\"ask\""));
@@ -745,10 +775,72 @@ mod tests {
                 agent,
                 question,
                 options,
+                inputs,
+                hint,
             } => {
                 assert_eq!(agent, "alpha");
                 assert_eq!(question, "어느 쪽을 고를래?");
                 assert_eq!(options, vec!["A", "B", "C"]);
+                assert!(inputs.is_empty());
+                assert!(hint.is_none());
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let old = r#"{"type":"ask","agent":"alpha","question":"Q","options":["A","B"]}"#;
+        let back: Request = serde_json::from_str(old).unwrap();
+        match back {
+            Request::Ask { inputs, hint, .. } => {
+                assert!(inputs.is_empty());
+                assert!(hint.is_none());
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let req = Request::Ask {
+            agent: "alpha".into(),
+            question: "로그인".into(),
+            options: Vec::new(),
+            inputs: vec!["아이디".into(), "비밀번호".into()],
+            hint: Some("이 계정으로 로그인해주세요.".into()),
+        };
+        let line = req.to_line().unwrap();
+        let back: Request = serde_json::from_str(&line).unwrap();
+        match back {
+            Request::Ask { inputs, hint, .. } => {
+                assert_eq!(inputs, vec!["아이디", "비밀번호"]);
+                assert_eq!(hint.as_deref(), Some("이 계정으로 로그인해주세요."));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn answer_choice_values_roundtrip() {
+        let req = Request::AnswerChoice {
+            agent: "alpha".into(),
+            message_id: "1".into(),
+            channel: None,
+            answers: Vec::new(),
+            values: vec![vec!["id".into(), "pw".into()]],
+            closed: false,
+        };
+        let line = req.to_line().unwrap();
+        assert!(line.contains("\"values\""));
+        let back: Request = serde_json::from_str(&line).unwrap();
+        match back {
+            Request::AnswerChoice {
+                values, answers, ..
+            } => {
+                assert!(answers.is_empty());
+                assert_eq!(values, vec![vec!["id", "pw"]]);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let old = r#"{"type":"answer_choice","agent":"alpha","message_id":"1"}"#;
+        let back: Request = serde_json::from_str(old).unwrap();
+        match back {
+            Request::AnswerChoice { values, closed, .. } => {
+                assert!(values.is_empty());
+                assert!(!closed);
             }
             other => panic!("unexpected {other:?}"),
         }
