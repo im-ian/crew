@@ -295,7 +295,10 @@ export function Sidebar({
 }: Props) {
   const t = useT();
   const { locale } = useLocale();
-  const all = toItems(agents, channels).filter((item) => {
+  // Rebuilding the list numbers every duplicate name and re-sorts each group;
+  // a drag re-renders this on every pointermove and none of it can change.
+  const built = useMemo(() => toItems(agents, channels), [agents, channels]);
+  const all = built.filter((item) => {
     if (item.agent) {
       return matches(
         [
@@ -923,11 +926,9 @@ function ItemRow({
       {face}
       <div className="rail-row-text">
         <div className="agent-name">
-          {item.name}
+          <span className="agent-name-text">{item.name}</span>
           {item.ordinal ? (
-            <span className="name-ordinal" aria-label={`${item.name} ${item.ordinal}`}>
-              {item.ordinal}
-            </span>
+            <span className="name-ordinal">#{item.ordinal}</span>
           ) : null}
         </div>
         {item.preview ? (

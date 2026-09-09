@@ -903,6 +903,9 @@ button.avatar {
 .badge.blocked { background: var(--blocked); }
 .badge.exited { background: var(--exited); }
 .agent-name {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
   font-size: var(--text-lg);
   font-weight: 590;
   line-height: 1.25;
@@ -920,15 +923,20 @@ button.avatar {
 }
 /* Only drawn when a name repeats, so it has to read as a tag on the name
    rather than part of it. */
+/* `#2`, not a pill with a bare digit: the row already carries an unread dot,
+   and a grey rounded number beside a name reads as an unread count. Plain
+   text on the rail keeps it legible where a chip background did not. */
 .name-ordinal {
+  flex-shrink: 0;
   margin-left: var(--space-4);
-  padding: 0 var(--space-4);
-  border-radius: 999px;
-  background: var(--chip);
-  color: var(--faint);
-  font-size: 10.5px;
+  color: var(--muted);
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-  vertical-align: 1px;
+}
+/* The name truncates; the ordinal is the one part that must not. */
+.agent-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* A handle inside a preview: the chip's colour cue without its pill, which
    would not fit a 12.5px row. */
