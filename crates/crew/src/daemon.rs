@@ -890,7 +890,9 @@ pub async fn run() -> anyhow::Result<()> {
         let mut chans = channels().lock().expect("channels mutex");
         for ch in &cfg.channels {
             chans.insert(ch.id.clone(), ch.clone());
-            crate::transcript::load_channel(&ch.id);
+            // Same as a new agent: a room id freed by a deleted channel must not
+        // open onto that channel's messages.
+        crate::transcript::drop_channel(&ch.id);
         }
     }
     {
@@ -1937,6 +1939,12 @@ fn insert_spawned_agent(cfg: AgentConfig) -> anyhow::Result<()> {
             anyhow::bail!("agent {} already exists", cfg.id);
         }
     }
+    // An agent whose `open_agent` failed at startup is logged and skipped, so
+    // it holds a config with no live session. It still owns its id and its
+    // transcript, and the check above would not see it.
+    if configs().lock().expect("configs mutex").contains_key(&cfg.id) {
+        anyhow::bail!("agent {} already exists", cfg.id);
+    }
     if let Some(ref cwd) = cfg.cwd {
         paths::create_cwd(&paths::expand_tilde(cwd))?;
     }
@@ -1945,8 +1953,12 @@ fn insert_spawned_agent(cfg: AgentConfig) -> anyhow::Result<()> {
     if !roster.iter().any(|a| a.id == cfg.id) {
         roster.push(cfg.clone());
     }
+    // The id is new, so nothing on disk belongs to it. Clear both before
+    // opening: `open_agent` resumes `cli-sessions/<id>` when it exists, which
+    // would answer with a dead bot's context that the user cannot even see.
+    crate::transcript::drop_agent(&id);
+    crate::headless::clear_session(&id);
     let live = open_agent(&cfg, DEFAULT_COLS, DEFAULT_ROWS, false, &roster)?;
-    crate::transcript::load_agent(&id);
     agents()
         .lock()
         .expect("agents mutex")
@@ -1969,11 +1981,13 @@ fn remove_agent(id: &str) -> anyhow::Result<()> {
     configs().lock().expect("configs mutex").remove(id);
     crate::avatar::clear(id);
     crate::memory::remove(id);
-    crate::transcript::drop_agent(id);
     crate::headless::clear_session(id);
     clear_inbox(id);
     clear_agent_context(id);
     session.kill();
+    // After the kill: an in-flight headless turn persists through
+    // `push_tool`, which would write the file back moments after we unlink it.
+    crate::transcript::drop_agent(id);
     if let Ok(mut chans) = channels().lock() {
         for ch in chans.values_mut() {
             ch.members.retain(|m| m != id);
