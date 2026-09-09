@@ -1112,6 +1112,17 @@ header .who-avatar {
   display: flex;
   max-width: 100%;
 }
+.msg-clock {
+  align-self: flex-end;
+  flex-shrink: 0;
+  min-width: 3.6em;
+  padding-bottom: var(--space-2);
+  color: var(--faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.row.me .msg-clock { text-align: right; }
 .row.me { justify-content: flex-end; }
 .row.them { justify-content: flex-start; align-items: flex-start; gap: var(--space-10); }
 .msg-avatar {

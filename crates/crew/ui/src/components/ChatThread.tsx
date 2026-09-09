@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useT } from "../LocaleContext";
+import { useLocale, useT } from "../LocaleContext";
 import type { TFn } from "../i18n";
 import type { ReplyTarget } from "../reply";
 import { splitReply } from "../reply";
@@ -16,6 +16,7 @@ import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { sentTarget } from "../peek";
 import { threadRows, toolArgs, toolSummary } from "../tools";
+import { clockLabels } from "../clock";
 import { ChevronDown, Reply, X } from "../icons";
 import { Avatar, ChannelAvatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
@@ -79,6 +80,14 @@ export function ChatThread({
   const ref = useRef<HTMLDivElement>(null);
   const [away, setAway] = useState(false);
   const visible = visibleMessages(messages);
+  const { locale } = useLocale();
+  const rows = threadRows(visible);
+  // Only balloons carry a clock; a tool run or a folded note passes 0 so it
+  // cannot swallow the stamp of the minute it sits in.
+  const clocks = clockLabels(
+    rows.map((r) => (r.kind === "msg" && r.msg.role !== "system" ? r.msg.ts : 0)),
+    locale,
+  );
   const openAgent =
     onSelectAgent &&
     ((id: string) => {
@@ -168,7 +177,8 @@ export function ChatThread({
         {!messages.length ? (
           <EmptyChat agent={currentAgent} channel={currentChannel} agents={agents} />
         ) : (
-          threadRows(visible).map((row) => {
+          rows.map((row, i) => {
+            const clock = clocks[i];
             if (row.kind === "tools") {
               return (
                 <ToolGroup
@@ -204,6 +214,7 @@ export function ChatThread({
             return (
               <Bubble
                 key={m.id}
+                clock={clock}
                 message={m}
                 agents={agents}
                 channels={channels}
@@ -586,6 +597,7 @@ function Incoming({
   onReply,
   onJump,
   flash = false,
+  clock,
 }: {
   message: ChatMessage;
   agent: AgentInfo | null;
@@ -605,6 +617,7 @@ function Incoming({
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
   flash?: boolean;
+  clock?: string;
 }) {
   const color = agent
     ? whoColor(resolveFace(agent.id, agent.avatar_shape, agent.avatar_color).color)
@@ -719,8 +732,14 @@ function Incoming({
           }
         />
       </div>
+      <Clock label={clock} />
     </div>
   );
+}
+
+/** Blank on every message inside the minute already stamped above it. */
+function Clock({ label }: { label?: string }) {
+  return <span className="msg-clock">{label || ""}</span>;
 }
 
 function ToolGroup({
@@ -1107,6 +1126,7 @@ function Bubble({
   onReply,
   onJump,
   flash = false,
+  clock,
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
@@ -1126,6 +1146,7 @@ function Bubble({
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
   flash?: boolean;
+  clock?: string;
 }) {
   const t = useT();
   const text =
@@ -1150,6 +1171,7 @@ function Bubble({
         onReply={onReply}
         onJump={onJump}
         flash={flash}
+        clock={clock}
       />
     );
   }
@@ -1162,6 +1184,7 @@ function Bubble({
       className={"row me" + (queued ? " queued" : "") + (flash ? " flash" : "")}
       data-msg-id={m.id}
     >
+      <Clock label={clock} />
       <div className="me-msg">
         {reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
         {body.trim() ? (
