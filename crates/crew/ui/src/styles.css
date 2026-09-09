@@ -918,6 +918,11 @@ button.avatar {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* A handle inside a preview: the chip's colour cue without its pill, which
+   would not fit a 12.5px row. */
+.preview-mention {
+  color: var(--ink);
+}
 .empty-rail {
   color: var(--faint);
   font-size: var(--text-md);
