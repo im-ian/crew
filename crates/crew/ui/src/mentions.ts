@@ -72,6 +72,47 @@ function attr(s: string): string {
 export type MentionRun = { text: string; mention: boolean };
 
 /**
+ * The one place that decides where a handle starts and ends. `injectMentionChips`
+ * and `mentionRuns` both scan for the same thing and would drift apart as two
+ * copies; only what they build from a hit differs.
+ *
+ * Returns the resolved label and how many characters of `text` it consumed —
+ * `resolveChannel` tolerates a leading `#` inside the token, so the consumed
+ * length is not always `1 + token.length`.
+ */
+export function handleAt(
+  text: string,
+  i: number,
+  agents: readonly AgentInfo[],
+  channels: readonly ChannelInfo[],
+): { sigil: string; id: string; label: string; length: number } | undefined {
+  const sigil = text[i];
+  if (sigil !== "@" && sigil !== "#") return undefined;
+  const raw = (text.slice(i + 1).match(/^[^\s<]+/) || [""])[0];
+  const token = trimMentionPunct(raw);
+  if (!token) return undefined;
+  if (sigil === "@") {
+    const agent = resolveMention(token, agents);
+    if (!agent) return undefined;
+    return {
+      sigil,
+      id: agent.id,
+      label: mentionLabel(agent),
+      length: 1 + token.length,
+    };
+  }
+  if (token.startsWith("#")) return undefined;
+  const channel = resolveChannel(token, channels);
+  if (!channel) return undefined;
+  return {
+    sigil,
+    id: channel.id,
+    label: channelLabel(channel),
+    length: 1 + token.length,
+  };
+}
+
+/**
  * Runs for a one-line preview. Previews carry the raw message text, so a
  * mention arrives as `@bot-3`; read it back as the name the roster shows.
  */
@@ -80,30 +121,23 @@ export function mentionRuns(
   agents: readonly AgentInfo[],
   channels: readonly ChannelInfo[] = [],
 ): MentionRun[] {
+  if (!text) return [];
+  if (!agents.length && !channels.length) {
+    return [{ text, mention: false }];
+  }
   const runs: MentionRun[] = [];
   let plain = "";
   let i = 0;
   let prevWs = true;
   while (i < text.length) {
-    const sigil = text[i];
-    if ((sigil === "@" || sigil === "#") && prevWs) {
-      const raw = (text.slice(i + 1).match(/^\S+/) || [""])[0];
-      const token = trimMentionPunct(raw);
-      const agent = token && sigil === "@" ? resolveMention(token, agents) : undefined;
-      const channel = token && sigil === "#" ? resolveChannel(token, channels) : undefined;
-      const label = agent
-        ? mentionLabel(agent)
-        : channel
-          ? channelLabel(channel)
-          : undefined;
-      if (label !== undefined) {
-        if (plain) runs.push({ text: plain, mention: false });
-        plain = "";
-        runs.push({ text: sigil + label, mention: true });
-        i += 1 + token.length;
-        prevWs = false;
-        continue;
-      }
+    const hit = prevWs ? handleAt(text, i, agents, channels) : undefined;
+    if (hit) {
+      if (plain) runs.push({ text: plain, mention: false });
+      plain = "";
+      runs.push({ text: hit.sigil + hit.label, mention: true });
+      i += hit.length;
+      prevWs = false;
+      continue;
     }
     plain += text[i];
     prevWs = /\s/.test(text[i]);
@@ -111,6 +145,17 @@ export function mentionRuns(
   }
   if (plain) runs.push({ text: plain, mention: false });
   return runs;
+}
+
+/** The preview as it reads on screen, for matching a search query against it. */
+export function mentionText(
+  text: string,
+  agents: readonly AgentInfo[],
+  channels: readonly ChannelInfo[] = [],
+): string {
+  return mentionRuns(text, agents, channels)
+    .map((r) => r.text)
+    .join("");
 }
 
 export function injectMentionChips(
@@ -156,27 +201,13 @@ export function injectMentionChips(
       i = end;
       continue;
     }
-    if (html[i] === "@" && prevWs) {
-      const raw = (html.slice(i + 1).match(/^[^\s<]+/) || [""])[0];
-      const token = trimMentionPunct(raw);
-      const agent = token ? resolveMention(token, agents) : undefined;
-      if (agent) {
-        out += `<span class="mention-chip" data-mention="${attr(agent.id)}"></span>`;
-        i += 1 + token.length;
-        prevWs = false;
-        continue;
-      }
-    }
-    if (html[i] === "#" && prevWs) {
-      const raw = (html.slice(i + 1).match(/^[^\s<]+/) || [""])[0];
-      const token = trimMentionPunct(raw);
-      const channel = token ? resolveChannel(token, channels) : undefined;
-      if (channel) {
-        out += `<span class="mention-chip" data-channel="${attr(channel.id)}"></span>`;
-        i += 1 + token.length;
-        prevWs = false;
-        continue;
-      }
+    const hit = prevWs ? handleAt(html, i, agents, channels) : undefined;
+    if (hit) {
+      const key = hit.sigil === "@" ? "data-mention" : "data-channel";
+      out += `<span class="mention-chip" ${key}="${attr(hit.id)}"></span>`;
+      i += hit.length;
+      prevWs = false;
+      continue;
     }
     out += html[i];
     prevWs = /\s/.test(html[i]);

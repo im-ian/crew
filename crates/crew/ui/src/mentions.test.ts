@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   injectMentionChips,
   mentionRuns,
+  mentionText,
   resolveChannel,
   resolveMention,
   trimMentionPunct,
@@ -128,5 +129,27 @@ describe("mentionRuns", () => {
     expect(mentionRuns("mail me@alpha now", agents)).toEqual([
       { text: "mail me@alpha now", mention: false },
     ]);
+  });
+});
+
+describe("mentionRuns edge cases", () => {
+  it("does not swallow a character on a doubled hash", () => {
+    expect(mentionRuns("##ship 올려", agents, channels)).toEqual([
+      { text: "##ship 올려", mention: false },
+    ]);
+  });
+
+  it("returns the text whole when there is no roster", () => {
+    expect(mentionRuns("@alpha ping", [])).toEqual([
+      { text: "@alpha ping", mention: false },
+    ]);
+    expect(mentionRuns("", agents)).toEqual([]);
+  });
+});
+
+describe("mentionText", () => {
+  it("reads back what the row shows, so a search can match it", () => {
+    expect(mentionText("@gamma 확인해줘", agents)).toBe("@춘식이 확인해줘");
+    expect(mentionText("#ship 올려", agents, channels)).toBe("#출시 올려");
   });
 });

@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -12,7 +13,7 @@ import { createPortal } from "react-dom";
 import { useLocale, useT } from "../LocaleContext";
 import { itemKey, parseItemKey } from "../groups";
 import type { AgentInfo, ChannelInfo, Group, Kind, SearchHit } from "../types";
-import { mentionRuns } from "../mentions";
+import { mentionLabel, mentionRuns, mentionText, resolveMention } from "../mentions";
 import { Avatar, ChannelAvatar } from "./Avatar";
 import { Plus, Settings } from "../icons";
 
@@ -213,6 +214,15 @@ function matches(parts: Array<string | null | undefined>, query: string): boolea
   return parts.filter(Boolean).join(" ").toLowerCase().includes(q);
 }
 
+function memberNames(members: string[], agents: AgentInfo[]): string {
+  return members
+    .map((id) => {
+      const agent = resolveMention(id, agents);
+      return agent ? mentionLabel(agent) : id;
+    })
+    .join(", ");
+}
+
 function toItems(agents: AgentInfo[], channels: ChannelInfo[]): RailItem[] {
   const items: RailItem[] = [];
   for (const a of agents) {
@@ -231,7 +241,7 @@ function toItems(agents: AgentInfo[], channels: ChannelInfo[]): RailItem[] {
       kind: "channel",
       id: c.id,
       name: c.name || c.id,
-      preview: c.preview || (c.members || []).join(", "),
+      preview: c.preview || memberNames(c.members || [], agents),
       channel: c,
     });
   }
@@ -284,12 +294,28 @@ export function Sidebar({
   const all = toItems(agents, channels).filter((item) => {
     if (item.agent) {
       return matches(
-        [item.agent.name, item.agent.id, item.agent.title, item.agent.role, item.agent.preview],
+        [
+          item.agent.name,
+          item.agent.id,
+          item.agent.title,
+          item.agent.role,
+          // The row shows resolved names, so the query has to see them too.
+          mentionText(item.agent.preview || "", agents, channels),
+        ],
         query,
       );
     }
     const c = item.channel;
-    return matches([c?.name, c?.id, (c?.members || []).join(" "), c?.preview], query);
+    return matches(
+      [
+        c?.name,
+        c?.id,
+        (c?.members || []).join(" "),
+        memberNames(c?.members || [], agents),
+        mentionText(c?.preview || "", agents, channels),
+      ],
+      query,
+    );
   });
   const byKey = new Map(all.map((item) => [item.key, item]));
   const used = new Set<string>();
@@ -868,6 +894,12 @@ function ItemRow({
   onPointerDown?: (e: ReactPointerEvent<HTMLButtonElement>) => void;
 }) {
   const a = item.agent;
+  // ItemRow re-renders on every pointermove while a drag is armed, so the scan
+  // does not want to run per frame per visible row.
+  const previewRuns = useMemo(
+    () => mentionRuns(item.preview || "", agents, channels),
+    [item.preview, agents, channels],
+  );
   const face =
     item.kind === "channel" && item.channel ? (
       <ChannelAvatar channel={item.channel} agents={agents} />
@@ -889,15 +921,11 @@ function ItemRow({
         <div className="agent-name">{item.name}</div>
         {item.preview ? (
           <div className="agent-preview">
-            {mentionRuns(item.preview, agents, channels).map((run, i) =>
-              run.mention ? (
-                <span key={i} className="preview-mention">
-                  {run.text}
-                </span>
-              ) : (
-                <span key={i}>{run.text}</span>
-              ),
-            )}
+            {previewRuns.map((run, i) => (
+              <span key={i} className={run.mention ? "preview-mention" : undefined}>
+                {run.text}
+              </span>
+            ))}
           </div>
         ) : null}
       </div>
