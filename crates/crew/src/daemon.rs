@@ -1938,6 +1938,15 @@ fn insert_spawned_agent(cfg: AgentConfig) -> anyhow::Result<()> {
     if cfg.cmd.is_empty() {
         anyhow::bail!("cmd is empty");
     }
+    // Minted ids are always in range; the CLI takes one verbatim. An id the
+    // filesystem folds (`춘식이` and `죠르디` both become `___`) would share
+    // one transcript, and one starting with `ch:` decodes as a room.
+    if !crate::config::valid_agent_id(&cfg.id) {
+        anyhow::bail!(
+            "agent id {} must be letters, digits, '-' or '_'",
+            cfg.id
+        );
+    }
     {
         let map = agents().lock().expect("agents mutex");
         if map.contains_key(&cfg.id) {
@@ -2908,6 +2917,26 @@ mod daemon_tests {
         crate::transcript::drop_agent(&peer);
         configs().lock().unwrap().remove(&peer);
         clear_agent_context(&peer);
+    }
+
+    #[test]
+    fn an_id_the_filesystem_would_fold_is_refused_by_add() {
+        let cfg = crate::config::AgentConfig::new(
+            "춘식이".into(),
+            "춘식이".into(),
+            vec!["cat".into()],
+            Some("/tmp/crew-demo/fold".into()),
+        );
+        let err = insert_spawned_agent(cfg).unwrap_err().to_string();
+        assert!(err.contains("must be letters"), "{err}");
+        let ch = crate::config::AgentConfig::new(
+            "ch:general".into(),
+            "room".into(),
+            vec!["cat".into()],
+            Some("/tmp/crew-demo/fold".into()),
+        );
+        let err = insert_spawned_agent(ch).unwrap_err().to_string();
+        assert!(err.contains("must be letters"), "{err}");
     }
 
     #[test]
