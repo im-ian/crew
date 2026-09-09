@@ -829,21 +829,30 @@ export function useCrew() {
         description: persona || null,
       });
       if (args.shape || args.color) {
-        await api.setAgent({
-          id,
-          model: null,
-          effort: null,
-          unsetModel: false,
-          unsetEffort: false,
-          title: null,
-          role: null,
-          description: null,
-          unsetTitle: false,
-          unsetRole: false,
-          unsetDescription: false,
-          shape: args.shape,
-          color: args.color,
-        });
+        // The bot already exists. A face that fails to stick must not leave
+        // the modal open over it, or the next Create mints a second bot with
+        // the same name.
+        try {
+          await api.setAgent({
+            id,
+            model: null,
+            effort: null,
+            unsetModel: false,
+            unsetEffort: false,
+            title: null,
+            role: null,
+            description: null,
+            unsetTitle: false,
+            unsetRole: false,
+            unsetDescription: false,
+            shape: args.shape,
+            color: args.color,
+            cwd: null,
+            unsetCwd: false,
+          });
+        } catch (err) {
+          showError(err);
+        }
       }
       closeNewBot();
       selectedRef.current = { id, kind: "agent" };
