@@ -768,23 +768,40 @@ function NoteGroup({
   const hit = items.some((m) => m.id === highlightId);
   // A search hit inside a folded run has to be on screen to be highlighted.
   const show = open || hit;
+  // One note is not a run. The row is still a run so that a reply arriving
+  // does not change the element type and remount the note under the reader.
+  const folds = items.length > 1;
   const fromChannel = peerId.startsWith("#");
   const agent = agents.find((a) => a.id === peerId) ?? null;
   const who = fromChannel
     ? `#${channelDisplayName(peerId, channels)}`
-    : agent?.name || agent?.id || peerId;
+    : displayWho({ from: peerId } as ChatMessage, agent);
+  const queued = items.some((m) => m.queued);
   return (
-    <div className="note-run">
-      <button
-        type="button"
-        className="note-run-head"
-        aria-expanded={show}
-        onClick={() => setOpen(!show)}
-      >
-        <span className="note-caret">{show ? "\u25be" : "\u25b8"}</span>
-        {t("thread.noteRun", { n: items.length, who })}
-      </button>
-      {show
+    <div className={"note-run" + (queued ? " queued" : "")}>
+      {folds ? (
+        <div className="note-run-chip">
+          <button
+            type="button"
+            className="note-run-head"
+            aria-expanded={show}
+            onClick={() => setOpen(!open)}
+          >
+            <span className="note-caret">{show ? "\u25be" : "\u25b8"}</span>
+            {t("thread.noteRun", { n: items.length })}
+          </button>
+          <WhoButton
+            agent={agent}
+            who={who}
+            fallbackId={peerId}
+            onClick={
+              onSelectAgent && agent ? () => onSelectAgent(agent.id) : undefined
+            }
+          />
+        </div>
+      ) : null}
+      {folds && !show && queued ? <QueueWait /> : null}
+      {!folds || show
         ? items.map((m) => (
             <SystemOrIncoming
               key={m.id}
@@ -823,7 +840,7 @@ function ToolGroup({
         type="button"
         className="tool-run-head"
         aria-expanded={show}
-        onClick={() => setOpen(!show)}
+        onClick={() => setOpen(!open)}
       >
         <span className="note-caret">{show ? "\u25be" : "\u25b8"}</span>
         {t("thread.toolUsed", { n: items.length })}

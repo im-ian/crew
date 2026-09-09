@@ -24,13 +24,13 @@ describe("threadRows", () => {
       msg("t2", "tool"),
       msg("t3", "tool"),
       msg("b"),
-    ]);
+    ], []);
     expect(rows.map((r) => r.kind)).toEqual(["msg", "tools", "msg"]);
     expect(rows[1].kind === "tools" && rows[1].msgs.length).toBe(3);
   });
 
   it("keeps runs split by a message between them", () => {
-    const rows = threadRows([msg("t1", "tool"), msg("a"), msg("t2", "tool")]);
+    const rows = threadRows([msg("t1", "tool"), msg("a"), msg("t2", "tool")], []);
     expect(rows.map((r) => r.kind)).toEqual(["tools", "msg", "tools"]);
   });
 });
@@ -79,16 +79,18 @@ describe("threadRows note runs", () => {
       ],
       roster,
     );
-    expect(rows.map((r) => r.kind)).toEqual(["notes", "notes"]);
-    expect(rows.map((r) => (r.kind === "notes" ? r.peerId : ""))).toEqual([
+    expect(rows.map((r) => (r.kind === "notes" ? r.peerId : r.kind))).toEqual([
       "jordy",
       "chunsik",
     ]);
   });
 
-  it("leaves a lone note as it was — it is already one line", () => {
+  it("keeps a lone note in a run so a reply does not remount it", () => {
+    // The row type has to stay put when the second note lands, or React
+    // unmounts the note the reader had open. NoteGroup draws no head for one.
     const rows = threadRows([note("a", "jordy", "received")], roster);
-    expect(rows.map((r) => r.kind)).toEqual(["msg"]);
+    expect(rows.map((r) => r.kind)).toEqual(["notes"]);
+    expect(rows[0].kind === "notes" && rows[0].msgs.length).toBe(1);
   });
 
   it("does not fold across a message between the notes", () => {
@@ -100,7 +102,7 @@ describe("threadRows note runs", () => {
       ],
       roster,
     );
-    expect(rows.map((r) => r.kind)).toEqual(["msg", "msg", "msg"]);
+    expect(rows.map((r) => r.kind)).toEqual(["notes", "msg", "notes"]);
   });
 
   it("keeps tool cards in their own run", () => {
@@ -108,6 +110,32 @@ describe("threadRows note runs", () => {
       [note("a", "jordy", "received"), msg("t1", "tool"), note("b", "jordy", "handoff")],
       roster,
     );
-    expect(rows.map((r) => r.kind)).toEqual(["msg", "tools", "msg"]);
+    expect(rows.map((r) => r.kind)).toEqual(["notes", "tools", "notes"]);
+  });
+
+  it("folds a room the same way", () => {
+    const rows = threadRows(
+      [note("a", "#ship", "received"), note("b", "#ship", "received")],
+      roster,
+    );
+    expect(rows[0].kind === "notes" && rows[0].peerId).toBe("#ship");
+  });
+
+  // The guards below are what keep `threadRows` and `SystemOrIncoming`
+  // agreeing on what a note is. Drop any one of them and a row would be
+  // grouped as a note and drawn as something else — vanishing into the fold.
+  it("leaves the human's own message alone", () => {
+    const rows = threadRows([note("a", "user", "received")], roster);
+    expect(rows.map((r) => r.kind)).toEqual(["msg"]);
+  });
+
+  it("leaves a notice the daemon wrote alone", () => {
+    const rows = threadRows([note("a", "crew", "received")], roster);
+    expect(rows.map((r) => r.kind)).toEqual(["msg"]);
+  });
+
+  it("leaves a routine row alone", () => {
+    const rows = threadRows([note("a", "jordy", "routine")], roster);
+    expect(rows.map((r) => r.kind)).toEqual(["msg"]);
   });
 });

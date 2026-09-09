@@ -5,40 +5,22 @@ export function sentTarget(from: string): string | null {
   return from.startsWith("to:") ? from.slice(3) : null;
 }
 
-function transferKind(
-  m: ChatMessage,
-  agentIds: ReadonlySet<string>,
-): "sent" | "received" | "handoff" | null {
-  if (
-    m.kind === "sent" ||
-    m.kind === "received" ||
-    m.kind === "handoff"
-  ) {
-    return m.kind;
-  }
-  if (m.kind) return null;
-  if (m.role !== "system") return null;
-  const from = m.from || "";
-  if (from.startsWith("to:")) return "sent";
-  if (from.startsWith("#")) return "received";
-  if (agentIds.has(from)) return "received";
-  return null;
-}
-
 /** The other bot on a sent/received/handoff row. Channels are not a peek. */
 export function peekPeerId(
   m: ChatMessage,
   agentIds: ReadonlySet<string>,
 ): string | null {
-  const kind = transferKind(m, agentIds);
-  if (!kind) return null;
-  const from = m.from || "";
-  if (kind === "sent") {
-    const id = sentTarget(from);
-    return id && agentIds.has(id) ? id : null;
-  }
-  if (from.startsWith("#") || !agentIds.has(from)) return null;
-  return from;
+  // One classifier: a row the thread folds as a note and the peek view reads
+  // as something else is how the two drift apart.
+  const ref = noteRef(m, roster(agentIds));
+  if (!ref) return null;
+  // A room is not a peek — there is no 1:1 to open.
+  return agentIds.has(ref.otherId) ? ref.otherId : null;
+}
+
+/** `noteRef` only ever reads ids off the roster. */
+function roster(agentIds: ReadonlySet<string>): AgentInfo[] {
+  return [...agentIds].map((id) => ({ id }) as AgentInfo);
 }
 
 export type NoteRef = {
@@ -106,13 +88,12 @@ export function peekMessages(
   const out: ChatMessage[] = [];
   let followSelf = false;
   for (const m of messages) {
-    const peer = peekPeerId(m, agentIds);
-    if (peer === peerId) {
-      const kind = transferKind(m, agentIds);
-      const speaker = kind === "sent" ? selfId : peerId;
+    const ref = noteRef(m, roster(agentIds));
+    if (ref && agentIds.has(ref.otherId) && ref.otherId === peerId) {
+      const speaker = ref.kind === "sent" ? selfId : peerId;
       const row = asSpeech(m, speaker);
       if (row) out.push(row);
-      followSelf = kind === "received";
+      followSelf = ref.kind === "received";
       continue;
     }
     if (m.kind === "tool") continue;
@@ -124,7 +105,7 @@ export function peekMessages(
       out.push({ ...m, text, kind: null });
       continue;
     }
-    if (m.role === "user" || peer || m.role === "system") {
+    if (m.role === "user" || ref || m.role === "system") {
       followSelf = false;
     }
   }

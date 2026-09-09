@@ -11,11 +11,14 @@ export type ThreadRow =
  * and so does a back-and-forth with one bot: sent, received and handoff notes
  * are one exchange, and four of them in a row is most of a screen.
  *
- * A run needs two to be worth folding — a lone note already reads as one line.
+ * A note run is emitted even when it holds one note, so a row does not change
+ * element type the moment a reply arrives — React would unmount the note the
+ * reader had open and remount it inside a closed fold. `NoteGroup` draws the
+ * fold head only once there is more than one.
  */
 export function threadRows(
   list: ChatMessage[],
-  agents: readonly AgentInfo[] = [],
+  agents: readonly AgentInfo[],
 ): ThreadRow[] {
   const rows: ThreadRow[] = [];
   for (const msg of list) {
@@ -36,11 +39,7 @@ export function threadRows(
     }
     rows.push({ kind: "msg", msg });
   }
-  return rows.map((r) =>
-    r.kind === "notes" && r.msgs.length === 1
-      ? { kind: "msg" as const, msg: r.msgs[0] }
-      : r,
-  );
+  return rows;
 }
 
 const HEAD_KEYS = [
