@@ -69,6 +69,50 @@ function attr(s: string): string {
     .replace(/</g, "&lt;");
 }
 
+export type MentionRun = { text: string; mention: boolean };
+
+/**
+ * Runs for a one-line preview. Previews carry the raw message text, so a
+ * mention arrives as `@bot-3`; read it back as the name the roster shows.
+ */
+export function mentionRuns(
+  text: string,
+  agents: readonly AgentInfo[],
+  channels: readonly ChannelInfo[] = [],
+): MentionRun[] {
+  const runs: MentionRun[] = [];
+  let plain = "";
+  let i = 0;
+  let prevWs = true;
+  while (i < text.length) {
+    const sigil = text[i];
+    if ((sigil === "@" || sigil === "#") && prevWs) {
+      const raw = (text.slice(i + 1).match(/^\S+/) || [""])[0];
+      const token = trimMentionPunct(raw);
+      const agent = token && sigil === "@" ? resolveMention(token, agents) : undefined;
+      const channel = token && sigil === "#" ? resolveChannel(token, channels) : undefined;
+      const label = agent
+        ? mentionLabel(agent)
+        : channel
+          ? channelLabel(channel)
+          : undefined;
+      if (label !== undefined) {
+        if (plain) runs.push({ text: plain, mention: false });
+        plain = "";
+        runs.push({ text: sigil + label, mention: true });
+        i += 1 + token.length;
+        prevWs = false;
+        continue;
+      }
+    }
+    plain += text[i];
+    prevWs = /\s/.test(text[i]);
+    i += 1;
+  }
+  if (plain) runs.push({ text: plain, mention: false });
+  return runs;
+}
+
 export function injectMentionChips(
   html: string,
   agents: readonly AgentInfo[],

@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 import { useLocale, useT } from "../LocaleContext";
 import { itemKey, parseItemKey } from "../groups";
 import type { AgentInfo, ChannelInfo, Group, Kind, SearchHit } from "../types";
+import { mentionRuns } from "../mentions";
 import { Avatar, ChannelAvatar } from "./Avatar";
 import { Plus, Settings } from "../icons";
 
@@ -634,6 +635,7 @@ export function Sidebar({
                         key={item.key}
                         item={item}
                         agents={agents}
+                        channels={channels}
                         active={selectedKind === item.kind && selected === item.id}
                         unread={unread.includes(item.key)}
                         dragging={drag?.key === item.key && drag.armed}
@@ -664,6 +666,7 @@ export function Sidebar({
                     key={item.key}
                     item={item}
                     agents={agents}
+                    channels={channels}
                     active={selectedKind === item.kind && selected === item.id}
                     unread={unread.includes(item.key)}
                     dragging={drag?.key === item.key && drag.armed}
@@ -739,7 +742,7 @@ export function Sidebar({
                   ["--ghost-oy" as string]: `${drag.grabY}px`,
                 }}
               >
-                <ItemRow item={drag.item} agents={agents} ghost />
+                <ItemRow item={drag.item} agents={agents} channels={channels} ghost />
               </div>
             </>,
             document.body,
@@ -844,6 +847,7 @@ function GroupHead({
 function ItemRow({
   item,
   agents,
+  channels,
   active,
   unread,
   dragging,
@@ -854,6 +858,7 @@ function ItemRow({
 }: {
   item: RailItem;
   agents: AgentInfo[];
+  channels: ChannelInfo[];
   active?: boolean;
   unread?: boolean;
   dragging?: boolean;
@@ -882,7 +887,19 @@ function ItemRow({
       {face}
       <div className="rail-row-text">
         <div className="agent-name">{item.name}</div>
-        {item.preview ? <div className="agent-preview">{item.preview}</div> : null}
+        {item.preview ? (
+          <div className="agent-preview">
+            {mentionRuns(item.preview, agents, channels).map((run, i) =>
+              run.mention ? (
+                <span key={i} className="preview-mention">
+                  {run.text}
+                </span>
+              ) : (
+                <span key={i}>{run.text}</span>
+              ),
+            )}
+          </div>
+        ) : null}
       </div>
       {unread ? <span className="unread-dot" aria-hidden /> : null}
     </>

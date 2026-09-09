@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   injectMentionChips,
+  mentionRuns,
   resolveChannel,
   resolveMention,
   trimMentionPunct,
@@ -92,5 +93,40 @@ describe("injectMentionChips", () => {
     expect(injectMentionChips("<p>#nobody</p>", agents, channels)).toBe(
       "<p>#nobody</p>",
     );
+  });
+});
+
+describe("mentionRuns", () => {
+  it("reads a mentioned id back as the roster name", () => {
+    expect(mentionRuns("@gamma 확인해줘", agents)).toEqual([
+      { text: "@춘식이", mention: true },
+      { text: " 확인해줘", mention: false },
+    ]);
+  });
+
+  it("keeps trailing punctuation outside the mention", () => {
+    expect(mentionRuns("@alpha, 봐줘", agents)).toEqual([
+      { text: "@Alpha", mention: true },
+      { text: ", 봐줘", mention: false },
+    ]);
+  });
+
+  it("names a channel too", () => {
+    expect(mentionRuns("#ship 에 올렸어", agents, channels)).toEqual([
+      { text: "#출시", mention: true },
+      { text: " 에 올렸어", mention: false },
+    ]);
+  });
+
+  it("leaves an unknown handle as written", () => {
+    expect(mentionRuns("@nobody 안녕", agents)).toEqual([
+      { text: "@nobody 안녕", mention: false },
+    ]);
+  });
+
+  it("ignores an @ that is not a handle start", () => {
+    expect(mentionRuns("mail me@alpha now", agents)).toEqual([
+      { text: "mail me@alpha now", mention: false },
+    ]);
   });
 });

@@ -343,7 +343,10 @@ button.linkish {
 }
 .rail-section + .rail-section { margin-top: var(--space-8); }
 .rail-section.grouped .rail-row,
-.rail-section.grouped .empty-rail {
+.rail-section.grouped .preview-mention {
+  color: var(--ink);
+}
+.empty-rail {
   margin-left: var(--space-12);
   width: calc(100% - 12px);
 }
