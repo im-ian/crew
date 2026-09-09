@@ -1931,10 +1931,8 @@ fn clone_agent(src_id: &str, name: Option<String>) -> anyhow::Result<String> {
     Ok(new_id)
 }
 
-fn insert_spawned_agent(cfg: AgentConfig) -> anyhow::Result<()> {
-    if cfg.id.trim().is_empty() {
-        anyhow::bail!("agent id is empty");
-    }
+fn insert_spawned_agent(mut cfg: AgentConfig) -> anyhow::Result<()> {
+    cfg.id = cfg.id.trim().to_string();
     if cfg.cmd.is_empty() {
         anyhow::bail!("cmd is empty");
     }
@@ -1942,10 +1940,7 @@ fn insert_spawned_agent(cfg: AgentConfig) -> anyhow::Result<()> {
     // filesystem folds (`춘식이` and `죠르디` both become `___`) would share
     // one transcript, and one starting with `ch:` decodes as a room.
     if !crate::config::valid_agent_id(&cfg.id) {
-        anyhow::bail!(
-            "agent id {} must be letters, digits, '-' or '_'",
-            cfg.id
-        );
+        anyhow::bail!("{}", crate::config::id_rule(&cfg.id));
     }
     {
         let map = agents().lock().expect("agents mutex");
@@ -2928,7 +2923,16 @@ mod daemon_tests {
             Some("/tmp/crew-demo/fold".into()),
         );
         let err = insert_spawned_agent(cfg).unwrap_err().to_string();
-        assert!(err.contains("must be letters"), "{err}");
+        assert!(err.contains("must be 1-64 of a-z"), "{err}");
+        // macOS folds case, so an uppercase id is a second agent on one file.
+        let up = crate::config::AgentConfig::new(
+            "Grok".into(),
+            "Grok".into(),
+            vec!["cat".into()],
+            Some("/tmp/crew-demo/fold".into()),
+        );
+        let err = insert_spawned_agent(up).unwrap_err().to_string();
+        assert!(err.contains("must be 1-64 of a-z"), "{err}");
         let ch = crate::config::AgentConfig::new(
             "ch:general".into(),
             "room".into(),
@@ -2936,7 +2940,7 @@ mod daemon_tests {
             Some("/tmp/crew-demo/fold".into()),
         );
         let err = insert_spawned_agent(ch).unwrap_err().to_string();
-        assert!(err.contains("must be letters"), "{err}");
+        assert!(err.contains("must be 1-64 of a-z"), "{err}");
     }
 
     #[test]
