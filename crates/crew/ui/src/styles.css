@@ -1786,6 +1786,37 @@ button.choice-option:disabled {
 .choice-dismiss:hover {
   background: var(--chip-hover);
 }
+/* The same air and inset as .tool-run, so a note run and a tool run standing
+   next to each other line up. */
+.note-run {
+  display: flex;
+  flex-direction: column;
+  align-self: center;
+  align-items: center;
+  gap: var(--space-8);
+  max-width: 92%;
+  min-width: 0;
+  flex: 0 0 auto;
+  padding: var(--space-8) 0;
+}
+.note-run-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+.note-run-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-md);
+  cursor: pointer;
+}
+.note-run-head:hover { color: var(--ink); }
 .tool-run {
   align-self: center;
   max-width: 92%;
