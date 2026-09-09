@@ -130,15 +130,20 @@ pub fn load_channel(id: &str) {
 }
 
 pub fn drop_agent(agent: &str) {
-    if let Ok(mut map) = chats().lock() {
-        map.remove(agent);
-    }
+    drop_key(agent);
 }
 
 pub fn drop_channel(id: &str) {
+    drop_key(&channel_key(id));
+}
+
+/// Removal is final: forget the chat and its file, so an id reused by a
+/// later agent of the same name does not inherit the old session.
+fn drop_key(key: &str) {
     if let Ok(mut map) = chats().lock() {
-        map.remove(&channel_key(id));
+        map.remove(key);
     }
+    let _ = fs::remove_file(persist_path(key));
 }
 
 pub fn messages(agent: &str) -> Vec<ChatMessage> {
@@ -1230,6 +1235,22 @@ mod tests {
     fn strip_csi_and_cr() {
         let raw = "\u{1b}[31mhello\u{1b}[0m\r\nworld\r";
         assert_eq!(normalize_text(&strip_ansi(raw)), "hello\nworld\n");
+    }
+
+    #[test]
+    fn dropping_an_agent_deletes_its_transcript_file() {
+        crate::paths::testing::with_home("transcript-drop", || {
+            let agent = "bot-3";
+            push_user(agent, "user", "old session");
+            let path = paths::transcript_path(agent);
+            assert!(path.exists(), "transcript should persist");
+            drop_agent(agent);
+            assert!(!path.exists(), "a removed agent must not leave its file");
+            // A later agent reusing the id starts empty.
+            load_agent(agent);
+            assert!(messages(agent).is_empty());
+            drop_agent(agent);
+        });
     }
 
     #[test]
