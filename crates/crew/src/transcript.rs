@@ -7,7 +7,9 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::paths;
-use crate::protocol::{ApprovalState, ChatMessage, Event, MessageKind, Role};
+use crate::protocol::{
+    ApprovalState, ChatMessage, ChoiceCard, ChoiceState, Event, MessageKind, Role,
+};
 use crate::rows::{is_crew_marker_line, strip_crew_markers};
 
 fn channel_key(id: &str) -> String {
@@ -158,10 +160,18 @@ pub fn channel_last_ts(id: &str) -> u64 {
 pub fn preview(agent: &str) -> Option<String> {
     let msgs = messages(agent);
     let last = msgs.last()?;
-    let t: String = crate::rows::display_text(last)
+    let mut t: String = crate::rows::display_text(last)
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
+    if t.is_empty() {
+        t = last
+            .choice
+            .as_ref()
+            .and_then(|c| c.questions.first())
+            .map(|q| q.question.clone())
+            .unwrap_or_default();
+    }
     if t.is_empty() {
         return None;
     }
@@ -214,6 +224,31 @@ pub fn push_handoff(agent: &str, from: &str, text: &str) -> ChatMessage {
 /// One row per tool call. `call_id` is the CLI's id for the call: later events
 /// for the same id fill the same card in instead of stacking another row.
 pub fn push_tool(agent: &str, call_id: Option<&str>, name: &str, detail: &str) -> ChatMessage {
+    let pinned_ask = is_pinned_ask(agent, call_id);
+    if crate::choice::is_ask_tool(name) || pinned_ask {
+        if let Some(card) = crate::choice::from_tool_detail(detail) {
+            return attach_choice(agent, call_id, card);
+        }
+        pin_ask_tool(agent, call_id);
+        if detail.is_empty() {
+            return ChatMessage {
+                id: String::new(),
+                role: Role::System,
+                from: name.to_string(),
+                text: String::new(),
+                ts: now_ms(),
+                queued: false,
+                kind: Some(MessageKind::Tool),
+                approval: None,
+                choice: None,
+            };
+        }
+        // Unrecognised payload: still show a tool row so the turn isn't silent.
+    } else if name.is_empty() {
+        if let Some(card) = crate::choice::from_tool_detail(detail) {
+            return attach_choice(agent, call_id, card);
+        }
+    }
     let mut msg = ChatMessage {
         id: new_id(),
         role: Role::System,
@@ -223,6 +258,7 @@ pub fn push_tool(agent: &str, call_id: Option<&str>, name: &str, detail: &str) -
         queued: false,
         kind: Some(MessageKind::Tool),
         approval: None,
+        choice: None,
     };
     if let Ok(mut map) = chats().lock() {
         let chat = map
@@ -257,6 +293,238 @@ pub fn push_tool(agent: &str, call_id: Option<&str>, name: &str, detail: &str) -
     }
     emit(agent, msg.clone());
     msg
+}
+
+/// Attach a picker to the in-flight assistant row, or open a new one.
+fn is_pinned_ask(agent: &str, call_id: Option<&str>) -> bool {
+    let Some(id) = call_id.filter(|s| !s.is_empty()) else {
+        return false;
+    };
+    let Ok(map) = chats().lock() else {
+        return false;
+    };
+    let Some(chat) = map.get(agent) else {
+        return false;
+    };
+    chat.tool_ids.get(id).and_then(|mid| {
+        chat.messages.iter().find(|m| &m.id == mid)
+    }).map(|m| m.choice.is_some() || m.role == Role::Assistant && m.kind.is_none())
+        .unwrap_or(false)
+}
+
+fn pin_ask_tool(agent: &str, call_id: Option<&str>) {
+    let Some(id) = call_id.filter(|s| !s.is_empty()) else {
+        return;
+    };
+    let mut map = match chats().lock() {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+    let chat = map
+        .entry(agent.to_string())
+        .or_insert_with(AgentChat::empty);
+    if chat.tool_ids.contains_key(id) {
+        return;
+    }
+    if let Some(idx) = chat.pending_idx {
+        chat.tool_ids
+            .insert(id.to_string(), chat.messages[idx].id.clone());
+        return;
+    }
+    let m = ChatMessage {
+        id: new_id(),
+        role: Role::Assistant,
+        from: agent.to_string(),
+        text: String::new(),
+        ts: now_ms(),
+        queued: false,
+        kind: None,
+        approval: None,
+        choice: None,
+    };
+    chat.messages.push(m.clone());
+    chat.pending_idx = Some(chat.messages.len() - 1);
+    chat.tool_ids.insert(id.to_string(), m.id);
+}
+
+pub fn attach_choice(agent: &str, call_id: Option<&str>, mut card: ChoiceCard) -> ChatMessage {
+    if card.id.is_empty() {
+        card.id = call_id
+            .filter(|id| !id.is_empty())
+            .map(|id| format!("{agent}:{id}"))
+            .unwrap_or_else(new_id);
+    }
+    let msg = {
+        let mut map = match chats().lock() {
+            Ok(m) => m,
+            Err(_) => {
+                return ChatMessage {
+                    id: String::new(),
+                    role: Role::Assistant,
+                    from: agent.to_string(),
+                    text: String::new(),
+                    ts: now_ms(),
+                    queued: false,
+                    kind: None,
+                    approval: None,
+                    choice: Some(card),
+                };
+            }
+        };
+        let chat = map
+            .entry(agent.to_string())
+            .or_insert_with(AgentChat::empty);
+        let call_id = call_id.filter(|id| !id.is_empty());
+        let known = call_id
+            .and_then(|id| chat.tool_ids.get(id).cloned())
+            .and_then(|mid| chat.messages.iter().position(|m| m.id == mid));
+        let known_free = known.filter(|&idx| {
+            chat.messages.get(idx).and_then(|m| m.choice.as_ref()).map(|c| {
+                c.questions.is_empty() || c.id == card.id
+            }).unwrap_or(true)
+        });
+        let pending = chat.pending_idx.filter(|&idx| {
+            chat.messages.get(idx).map(|row| {
+                row.choice
+                    .as_ref()
+                    .map(|c| c.questions.is_empty() || c.id == card.id)
+                    .unwrap_or(true)
+            }).unwrap_or(false)
+        });
+        let idx = known_free.or(pending);
+        let out = if let Some(idx) = idx {
+            let row = &mut chat.messages[idx];
+            let keep = row
+                .choice
+                .as_ref()
+                .map(|c| c.state == ChoiceState::Pending)
+                .unwrap_or(true);
+            if keep {
+                if let Some(existing) = row.choice.as_ref() {
+                    card.id = existing.id.clone();
+                }
+                row.choice = Some(card);
+            }
+            if let Some(id) = call_id {
+                chat.tool_ids.insert(id.to_string(), row.id.clone());
+            }
+            row.clone()
+        } else {
+            let m = ChatMessage {
+                id: new_id(),
+                role: Role::Assistant,
+                from: agent.to_string(),
+                text: String::new(),
+                ts: now_ms(),
+                queued: false,
+                kind: None,
+                approval: None,
+                choice: Some(card),
+            };
+            chat.messages.push(m.clone());
+            if let Some(id) = call_id {
+                chat.tool_ids
+                    .insert(id.to_string(), m.id.clone());
+            }
+            m
+        };
+        persist(agent, chat);
+        out
+    };
+    if !msg.id.is_empty() {
+        emit(agent, msg.clone());
+    }
+    msg
+}
+
+pub fn set_choice(key: &str, message_id: &str, card: ChoiceCard) {
+    let msg = {
+        let mut map = match chats().lock() {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        let Some(chat) = map.get_mut(key) else {
+            return;
+        };
+        let Some(m) = chat.messages.iter_mut().rev().find(|m| m.id == message_id) else {
+            return;
+        };
+        m.choice = Some(card);
+        let out = m.clone();
+        persist(key, chat);
+        out
+    };
+    emit_row(key, msg);
+}
+
+pub fn resolve_choice(
+    agent: &str,
+    choice_id: &str,
+    answers: &[Vec<String>],
+    closed: bool,
+) -> Option<ChoiceCard> {
+    let mut updated: Option<ChoiceCard> = None;
+    let mut emit_rows: Vec<(String, ChatMessage)> = Vec::new();
+    if let Ok(mut map) = chats().lock() {
+        for (key, chat) in map.iter_mut() {
+            let mut dirty = false;
+            for m in chat.messages.iter_mut() {
+                let Some(card) = m.choice.as_mut() else {
+                    continue;
+                };
+                if card.id != choice_id {
+                    continue;
+                }
+                if m.from != agent && key != agent {
+                    continue;
+                }
+                crate::choice::apply_answers(card, answers, closed);
+                updated = Some(card.clone());
+                emit_rows.push((key.clone(), m.clone()));
+                dirty = true;
+            }
+            if dirty {
+                persist(key, chat);
+            }
+        }
+    }
+    for (key, msg) in emit_rows {
+        emit_row(&key, msg);
+    }
+    updated
+}
+
+pub fn pending_message_id(agent: &str) -> Option<String> {
+    let map = chats().lock().ok()?;
+    let chat = map.get(agent)?;
+    let idx = chat.pending_idx?;
+    chat.messages.get(idx).map(|m| m.id.clone())
+}
+
+pub fn choice_by_message(key: &str, message_id: &str) -> Option<ChatMessage> {
+    messages(key)
+        .into_iter()
+        .rev()
+        .find(|m| m.id == message_id && m.choice.is_some())
+}
+
+pub fn close_pending_choices(agent: &str) -> Vec<String> {
+    let ids: Vec<String> = messages(agent)
+        .into_iter()
+        .filter_map(|m| {
+            m.choice.and_then(|c| {
+                if c.state == ChoiceState::Pending {
+                    Some(c.id)
+                } else {
+                    None
+                }
+            })
+        })
+        .collect();
+    for id in &ids {
+        let _ = resolve_choice(agent, id, &[], true);
+    }
+    ids
 }
 
 pub fn all_messages() -> Vec<(String, ChatMessage)> {
@@ -347,6 +615,7 @@ fn push_role(
         queued: false,
         kind,
         approval: None,
+        choice: None,
     };
     if let Ok(mut map) = chats().lock() {
         let chat = map
@@ -512,6 +781,7 @@ pub fn set_pending_assistant(agent: &str, text: &str) {
                 queued: false,
                 kind: None,
                 approval: None,
+                choice: None,
             };
             chat.messages.push(m.clone());
             chat.pending_idx = Some(chat.messages.len() - 1);
@@ -578,6 +848,7 @@ pub fn on_pty_bytes(agent: &str, bytes: &[u8]) {
                 queued: false,
                 kind: None,
                 approval: None,
+                choice: None,
             };
             chat.messages.push(m.clone());
             chat.pending_idx = Some(chat.messages.len() - 1);
@@ -713,7 +984,17 @@ fn finish_pending(agent: &str, chat: &mut AgentChat) -> Option<ChatMessage> {
         .trim_end()
         .to_string();
     chat.expecting = false;
-    if chat.messages[idx].text.is_empty() {
+    if chat.messages[idx].choice.is_none() {
+        let (rest, parsed) = crate::choice::split_from_text(&chat.messages[idx].text);
+        if let Some(mut card) = parsed {
+            if card.id.is_empty() {
+                card.id = chat.messages[idx].id.clone();
+            }
+            chat.messages[idx].choice = Some(card);
+            chat.messages[idx].text = rest;
+        }
+    }
+    if chat.messages[idx].text.is_empty() && chat.messages[idx].choice.is_none() {
         chat.messages.remove(idx);
         persist(agent, chat);
         return None;
@@ -763,6 +1044,17 @@ fn emit(agent: &str, message: ChatMessage) {
         agent: agent.to_string(),
         message,
     });
+}
+
+fn emit_row(key: &str, message: ChatMessage) {
+    if let Some(channel) = key.strip_prefix("ch:") {
+        let _ = crate::daemon::events().send(Event::ChannelMessage {
+            channel: channel.to_string(),
+            message,
+        });
+    } else {
+        emit(key, message);
+    }
 }
 
 fn emit_sealed(agent: &str, message: ChatMessage) {
@@ -1062,6 +1354,7 @@ mod tests {
             queued: false,
             kind: None,
             approval: None,
+            choice: None,
         };
         let line = serde_json::to_string(&msg).unwrap();
         assert!(!line.contains("queued"), "{line}");
@@ -1187,6 +1480,90 @@ mod tests {
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].role, Role::System);
         assert_eq!(msgs[0].text, "안녕?");
+        drop_agent(&agent);
+    }
+
+    #[test]
+    fn ask_tool_becomes_a_choice_not_a_tool_row() {
+        let agent = format!(
+            "ask-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        begin_turn(&agent);
+        on_assistant_delta(&agent, "이렇게 고를 수 있어.");
+        push_tool(
+            &agent,
+            Some("call-q"),
+            "ask_user_question",
+            r#"{"questions":[{"question":"어느 쪽을 고를래?","options":[{"label":"A"},{"label":"B"},{"label":"C"}]}]}"#,
+        );
+        let msgs = messages(&agent);
+        let last = msgs.last().unwrap();
+        assert_eq!(last.role, Role::Assistant);
+        assert_ne!(last.kind, Some(MessageKind::Tool));
+        let card = last.choice.as_ref().expect("choice");
+        assert_eq!(card.questions[0].question, "어느 쪽을 고를래?");
+        assert_eq!(card.questions[0].options.len(), 3);
+        let resolved = resolve_choice(&agent, &card.id, &[vec!["C".into()]], false).unwrap();
+        assert_eq!(resolved.state, crate::protocol::ChoiceState::Answered);
+        assert_eq!(
+            crate::choice::format_answer(&resolved),
+            "어느 쪽을 고를래? → C"
+        );
+        drop_agent(&agent);
+    }
+
+    #[test]
+    fn sealed_lettered_list_becomes_a_choice() {
+        let agent = format!(
+            "list-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        push_user(&agent, "user", "hi");
+        on_assistant_delta(&agent, "어느 쪽을 고를래?\nA. A\nB. B\nC. C");
+        seal_now(&agent);
+        let last = messages(&agent).last().cloned().unwrap();
+        assert!(last.text.is_empty(), "{}", last.text);
+        let card = last.choice.expect("choice");
+        assert_eq!(card.questions[0].question, "어느 쪽을 고를래?");
+        assert_eq!(card.questions[0].options.len(), 3);
+        drop_agent(&agent);
+    }
+
+    #[test]
+    fn ask_tool_name_then_args_become_a_choice() {
+        let agent = format!(
+            "ask2-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        begin_turn(&agent);
+        on_assistant_delta(&agent, "고를 수 있어.");
+        push_tool(&agent, Some("call-q"), "AskUserQuestion", "");
+        push_tool(
+            &agent,
+            Some("call-q"),
+            "",
+            r#"{"questions":[{"question":"어느 쪽을 고를래?","options":[{"label":"A"},{"label":"B"},{"label":"C"}]}]}"#,
+        );
+        let last = messages(&agent).last().cloned().unwrap();
+        assert_eq!(last.role, Role::Assistant);
+        assert_ne!(last.kind, Some(MessageKind::Tool));
+        assert_eq!(
+            last.choice.as_ref().unwrap().questions[0].question,
+            "어느 쪽을 고를래?"
+        );
         drop_agent(&agent);
     }
 }

@@ -91,6 +91,27 @@ export type ChannelInfo = {
 
 export type MessageKind = "sent" | "received" | "routine" | "handoff" | "tool";
 export type ApprovalState = "pending" | "allowed" | "denied";
+export type ChoiceState = "pending" | "answered" | "closed";
+
+export type ChoiceOption = {
+  id: string;
+  label: string;
+  description?: string | null;
+};
+
+export type ChoiceQuestion = {
+  question: string;
+  header?: string | null;
+  options: ChoiceOption[];
+  multi?: boolean;
+  selected?: string[];
+};
+
+export type ChoiceCard = {
+  id: string;
+  questions: ChoiceQuestion[];
+  state: ChoiceState;
+};
 
 export type ChatMessage = {
   id: string;
@@ -101,6 +122,7 @@ export type ChatMessage = {
   queued?: boolean;
   kind?: MessageKind | null;
   approval?: ApprovalState | null;
+  choice?: ChoiceCard | null;
 };
 
 export type PendingAvatar = {

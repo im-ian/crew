@@ -515,6 +515,31 @@ export function useCrew() {
     }
   }
 
+  async function answerChoice(
+    agentId: string,
+    messageId: string,
+    answers: string[][],
+    closed: boolean,
+  ) {
+    const { id: sel, kind } = selectedRef.current;
+    try {
+      await api.answerChoice({
+        agent: agentId,
+        messageId,
+        channel: kind === "channel" ? sel : null,
+        answers,
+        closed,
+      });
+      await refreshList();
+      await refreshMessages();
+    } catch (err) {
+      const msg = errMsg(err);
+      if (msg.includes("already resolved")) return;
+      showError(err);
+      throw err;
+    }
+  }
+
   async function saveAgentInfo(fields: {
     name: string;
     role: string;
@@ -1101,6 +1126,7 @@ export function useCrew() {
     onSend,
     stopAgent,
     approveAgent,
+    answerChoice,
     saveAgentInfo,
     saveChannel,
     saveAgentFace,

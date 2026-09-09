@@ -169,6 +169,24 @@ pub enum Request {
         agent: String,
         allow: bool,
     },
+    /// Show a picker in chat and wait for the user's choice.
+    Ask {
+        agent: String,
+        question: String,
+        options: Vec<String>,
+    },
+    /// Pick or dismiss a pending choice card.
+    AnswerChoice {
+        agent: String,
+        message_id: String,
+        #[serde(default)]
+        channel: Option<String>,
+        /// Option ids chosen for each question, in order. Ignored when `closed`.
+        #[serde(default)]
+        answers: Vec<Vec<String>>,
+        #[serde(default)]
+        closed: bool,
+    },
     Search {
         query: String,
     },
@@ -241,6 +259,9 @@ pub enum Event {
     },
     Search {
         hits: Vec<crate::search::SearchHit>,
+    },
+    Answered {
+        text: String,
     },
     Shutdown,
 }
@@ -335,6 +356,43 @@ pub enum ApprovalState {
     Denied,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ChoiceState {
+    #[default]
+    Pending,
+    Answered,
+    Closed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChoiceOption {
+    pub id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChoiceQuestion {
+    pub question: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header: Option<String>,
+    pub options: Vec<ChoiceOption>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub multi: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selected: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChoiceCard {
+    pub id: String,
+    pub questions: Vec<ChoiceQuestion>,
+    #[serde(default)]
+    pub state: ChoiceState,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub id: String,
@@ -348,6 +406,8 @@ pub struct ChatMessage {
     pub kind: Option<MessageKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval: Option<ApprovalState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choice: Option<ChoiceCard>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -671,6 +731,30 @@ mod tests {
     }
 
     #[test]
+    fn ask_request_roundtrip() {
+        let req = Request::Ask {
+            agent: "alpha".into(),
+            question: "어느 쪽을 고를래?".into(),
+            options: vec!["A".into(), "B".into(), "C".into()],
+        };
+        let line = req.to_line().unwrap();
+        assert!(line.contains("\"type\":\"ask\""));
+        let back: Request = serde_json::from_str(&line).unwrap();
+        match back {
+            Request::Ask {
+                agent,
+                question,
+                options,
+            } => {
+                assert_eq!(agent, "alpha");
+                assert_eq!(question, "어느 쪽을 고를래?");
+                assert_eq!(options, vec!["A", "B", "C"]);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
     fn chat_message_roundtrip() {
         let msg = ChatMessage {
             id: "1".into(),
@@ -681,6 +765,7 @@ mod tests {
             queued: false,
             kind: None,
             approval: None,
+            choice: None,
         };
         let line = serde_json::to_string(&msg).unwrap();
         assert!(line.contains("\"role\":\"user\""));

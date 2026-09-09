@@ -17,6 +17,7 @@
     "allow-send-message",
     "allow-stop-agent",
     "allow-approve-agent",
+    "allow-answer-choice",
     "allow-tell-message",
     "allow-add-channel",
     "allow-set-channel",

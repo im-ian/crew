@@ -51,6 +51,8 @@ pub fn rpc(req: Request) -> anyhow::Result<Event> {
             | (Request::RoutineRuns { .. }, Event::RoutineRuns { .. })
             | (Request::Interrupt { .. }, Event::Ok)
             | (Request::Approve { .. }, Event::Ok)
+            | (Request::Ask { .. }, Event::Answered { .. } | Event::Error { .. })
+            | (Request::AnswerChoice { .. }, Event::Ok)
             | (Request::Search { .. }, Event::Search { .. })
             | (Request::ListChannels, Event::Channels { .. } | Event::Agents { .. })
             | (Request::ChannelMessages { .. }, Event::ChannelMessages { .. })
@@ -296,6 +298,12 @@ pub fn print_event(ev: Event) -> anyhow::Result<()> {
                 message.from,
                 message.id
             );
+        }
+        Event::Answered { text } => {
+            print!("{text}");
+            if !text.ends_with('\n') {
+                println!();
+            }
         }
         Event::Error { message } => bail!("{message}"),
         Event::Ok | Event::Pong | Event::Shutdown => println!("ok"),

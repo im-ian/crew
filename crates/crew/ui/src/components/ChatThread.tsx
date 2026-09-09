@@ -3,12 +3,19 @@ import { useT } from "../LocaleContext";
 import type { TFn } from "../i18n";
 import type { ReplyTarget } from "../reply";
 import { splitReply } from "../reply";
-import type { AgentInfo, ChannelInfo, ChatMessage, Kind } from "../types";
+import type {
+  AgentInfo,
+  ChannelInfo,
+  ChatMessage,
+  ChoiceCard as ChoiceCardData,
+  ChoiceOption,
+  Kind,
+} from "../types";
 import { busyInChannel } from "../busy";
 import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { threadRows, toolArgs, toolSummary } from "../tools";
-import { Reply } from "../icons";
+import { Reply, X } from "../icons";
 import { Avatar, ChannelAvatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
 import { MdBody } from "./MdBody";
@@ -30,6 +37,12 @@ type Props = {
   onSelectAgent?: (id: string) => void;
   onSelectChannel?: (id: string) => void;
   onApprove?: (allow: boolean, agentId?: string) => void;
+  onAnswerChoice?: (
+    agentId: string,
+    messageId: string,
+    answers: string[][],
+    closed: boolean,
+  ) => void | Promise<void>;
   highlightId?: string | null;
   onHighlightDone?: () => void;
   jumpSeq?: number;
@@ -51,6 +64,7 @@ export function ChatThread({
   onSelectAgent,
   onSelectChannel,
   onApprove,
+  onAnswerChoice,
   highlightId = null,
   onHighlightDone,
   jumpSeq = 0,
@@ -186,6 +200,12 @@ export function ChatThread({
                 onApprove={
                   onApprove
                     ? (allow) => onApprove(allow, m.from)
+                    : undefined
+                }
+                onAnswerChoice={
+                  onAnswerChoice
+                    ? (answers, closed) =>
+                        onAnswerChoice(m.from, m.id, answers, closed)
                     : undefined
                 }
                 onReply={onReply}
@@ -521,6 +541,7 @@ function Incoming({
   onSelectAgent,
   onSelectChannel,
   onApprove,
+  onAnswerChoice,
   onReply,
   onJump,
   flash = false,
@@ -535,6 +556,7 @@ function Incoming({
   onSelectAgent?: (id: string) => void;
   onSelectChannel?: (id: string) => void;
   onApprove?: (allow: boolean) => void;
+  onAnswerChoice?: (answers: string[][], closed: boolean) => void | Promise<void>;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
   flash?: boolean;
@@ -550,7 +572,6 @@ function Incoming({
   const queued = !!m.queued;
   const { reply, body } = splitReply(m.text || "");
   const parts = splitBubbles(body);
-  const bubbles = parts.length ? parts : [""];
   return (
     <div
       className={
@@ -591,35 +612,58 @@ function Incoming({
           </div>
         )}
         {reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
-        {bubbles.map((part, i) => {
-          const last = i === bubbles.length - 1;
-          const stack =
-            bubbles.length > 1
-              ? i === 0
-                ? " stack-first"
-                : last
-                  ? " stack-last"
-                  : " stack-mid"
-              : "";
-          return (
-            <MdBody
-              key={m.id + "-" + i}
-              className={
-                "bubble md incoming" +
-                stack +
-                (caret && last ? " streaming" : "") +
-                (queued ? " queued" : "")
-              }
-              text={part}
-              agents={agents}
-              channels={channels}
-              onMention={onSelectAgent}
-              onChannel={onSelectChannel}
-              baseDir={agent?.cwd || undefined}
-            />
-          );
-        })}
+        {parts.length
+          ? parts.map((part, i) => {
+              const last = i === parts.length - 1;
+              const stack =
+                parts.length > 1
+                  ? i === 0
+                    ? " stack-first"
+                    : last
+                      ? " stack-last"
+                      : " stack-mid"
+                  : "";
+              return (
+                <MdBody
+                  key={m.id + "-" + i}
+                  className={
+                    "bubble md incoming" +
+                    stack +
+                    (caret && last ? " streaming" : "") +
+                    (queued ? " queued" : "")
+                  }
+                  text={part}
+                  agents={agents}
+                  channels={channels}
+                  onMention={onSelectAgent}
+                  onChannel={onSelectChannel}
+                  baseDir={agent?.cwd || undefined}
+                />
+              );
+            })
+          : caret
+            ? (
+                <MdBody
+                  className={
+                    "bubble md incoming streaming" + (queued ? " queued" : "")
+                  }
+                  text=""
+                  agents={agents}
+                  channels={channels}
+                  onMention={onSelectAgent}
+                  onChannel={onSelectChannel}
+                  baseDir={agent?.cwd || undefined}
+                />
+              )
+            : null}
         {queued ? <QueueWait /> : null}
+        {m.choice ? (
+          <ChoiceCard
+            key={m.choice.id}
+            card={m.choice}
+            onAnswer={onAnswerChoice}
+          />
+        ) : null}
         <ApprovalCard state={m.approval} onApprove={onApprove} />
         <MsgActions
           copy={body.trim()}
@@ -751,6 +795,153 @@ function ApprovalCard({
   );
 }
 
+function ChoiceCard({
+  card,
+  onAnswer,
+}: {
+  card: ChoiceCardData;
+  onAnswer?: (answers: string[][], closed: boolean) => void | Promise<void>;
+}) {
+  const t = useT();
+  const questions = card.questions || [];
+  const pending = card.state === "pending";
+  const needsSubmit = questions.length > 1 || questions.some((q) => q.multi);
+  const [picks, setPicks] = useState<string[][]>(() =>
+    questions.map((q) => q.selected || []),
+  );
+  const [sent, setSent] = useState(false);
+  const open = pending && !sent;
+
+  function toggle(qi: number, id: string, multi: boolean) {
+    if (!open || !onAnswer) return;
+    const next = picks.map((row, i) => {
+      if (i !== qi) return row;
+      if (multi) {
+        return row.includes(id) ? row.filter((x) => x !== id) : [...row, id];
+      }
+      return [id];
+    });
+    setPicks(next);
+    if (!needsSubmit && !multi) void send(next, false);
+  }
+
+  function submit() {
+    if (!open || !onAnswer) return;
+    if (picks.every((row) => row.length === 0)) return;
+    void send(picks, false);
+  }
+
+  async function send(answers: string[][], closed: boolean) {
+    if (!onAnswer) return;
+    setSent(true);
+    try {
+      await onAnswer(answers, closed);
+    } catch {
+      setSent(false);
+    }
+  }
+
+  return (
+    <div className={"choice-card is-" + card.state}>
+      {questions.map((q, qi) => {
+        const header = (q.header || q.question || "").trim();
+        const selected = pending ? picks[qi] || [] : q.selected || [];
+        const showList =
+          open || (card.state === "answered" && (q.multi || questions.length > 1));
+        const picked = (q.options || []).filter((o) => selected.includes(o.id));
+        return (
+          <div className="choice-q" key={q.question + qi}>
+            <div className="choice-head">
+              <div className="choice-title">{header}</div>
+              {open && onAnswer ? (
+                <button
+                  type="button"
+                  className="choice-x"
+                  title={t("thread.choiceClose")}
+                  aria-label={t("thread.choiceClose")}
+                  onClick={() => void send(picks, true)}
+                >
+                  <X size={14} />
+                </button>
+              ) : null}
+              {card.state === "closed" ? (
+                <span className="choice-closed">{t("thread.choiceClosed")}</span>
+              ) : null}
+            </div>
+            {showList ? (
+              <div className="choice-list">
+                {(q.options || []).map((o, oi) => {
+                  const view = optionView(o, oi);
+                  const on = selected.includes(o.id);
+                  return (
+                    <button
+                      type="button"
+                      key={o.id}
+                      className={"choice-option" + (on ? " is-on" : "")}
+                      disabled={!open || !onAnswer}
+                      onClick={() => toggle(qi, o.id, !!q.multi)}
+                    >
+                      <span className="choice-badge">{view.badge}</span>
+                      {view.title || view.sub ? (
+                        <span className="choice-copy">
+                          {view.title ? (
+                            <span className="choice-label">{view.title}</span>
+                          ) : null}
+                          {view.sub ? (
+                            <span className="choice-desc">{view.sub}</span>
+                          ) : null}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : picked.length ? (
+              <div className="choice-picked">
+                {picked.map((o, oi) => {
+                  const view = optionView(o, oi);
+                  return (
+                    <div className="choice-option is-on" key={o.id}>
+                      <span className="choice-badge">{view.badge}</span>
+                      {view.title ? (
+                        <span className="choice-copy">
+                          <span className="choice-label">{view.title}</span>
+                        </span>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+      {open && needsSubmit && onAnswer ? (
+        <div className="choice-foot">
+          <button
+            type="button"
+            className="choice-submit"
+            disabled={picks.every((row) => row.length === 0)}
+            onClick={submit}
+          >
+            {t("thread.choiceSubmit")}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function optionView(o: ChoiceOption, i: number) {
+  const label = (o.label || "").trim() || String.fromCharCode(65 + i);
+  const desc = (o.description || "").trim();
+  const short = label.length <= 3;
+  const badge = short ? label : String.fromCharCode(65 + (i % 26));
+  const title = short ? desc : label;
+  const sub = !short && desc && desc !== label ? desc : null;
+  return { badge, title, sub };
+}
+
 function Bubble({
   message: m,
   agents,
@@ -762,6 +953,7 @@ function Bubble({
   onSelectAgent,
   onSelectChannel,
   onApprove,
+  onAnswerChoice,
   onReply,
   onJump,
   flash = false,
@@ -776,6 +968,7 @@ function Bubble({
   onSelectAgent?: (id: string) => void;
   onSelectChannel?: (id: string) => void;
   onApprove?: (allow: boolean) => void;
+  onAnswerChoice?: (answers: string[][], closed: boolean) => void | Promise<void>;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
   flash?: boolean;
@@ -799,6 +992,7 @@ function Bubble({
         onSelectAgent={onSelectAgent}
         onSelectChannel={onSelectChannel}
         onApprove={onApprove}
+        onAnswerChoice={onAnswerChoice}
         onReply={onReply}
         onJump={onJump}
         flash={flash}
@@ -1018,6 +1212,6 @@ function visibleMessages(messages: ChatMessage[]): ChatMessage[] {
     const raw = m.text || "";
     if (isEnvelopeEcho(raw, messages[i - 1])) return false;
     if (isPlainEcho(raw, messages, i)) return false;
-    return stripCrewMarkers(raw).length > 0;
+    return stripCrewMarkers(raw).length > 0 || !!m.choice;
   });
 }

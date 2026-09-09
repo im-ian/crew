@@ -11,6 +11,7 @@ fn main() {
             "send_message",
             "stop_agent",
             "approve_agent",
+            "answer_choice",
             "tell_message",
             "add_channel",
             "set_channel",

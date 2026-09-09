@@ -195,6 +195,12 @@
           "markdownDescription": "Enables the add_routine command without any pre-configured scope."
         },
         {
+          "description": "Enables the answer_choice command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-answer-choice",
+          "markdownDescription": "Enables the answer_choice command without any pre-configured scope."
+        },
+        {
           "description": "Enables the approve_agent command without any pre-configured scope.",
           "type": "string",
           "const": "allow-approve-agent",
@@ -457,6 +463,12 @@
           "type": "string",
           "const": "deny-add-routine",
           "markdownDescription": "Denies the add_routine command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the answer_choice command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-answer-choice",
+          "markdownDescription": "Denies the answer_choice command without any pre-configured scope."
         },
         {
           "description": "Denies the approve_agent command without any pre-configured scope.",

@@ -706,6 +706,9 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
     s.push_str(
         "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew channel:…]` / `[crew system]` / `[crew handoff from:…]` / `[crew reply:…]` are real messages. A `[crew reply:…]` line is the user answering an earlier message; the next line is the quote, then their new text. A handoff is a teammate's finished reply; do not crew tell them that same text back.\n",
     );
+    s.push_str(
+        "To ask the human user in this chat to pick, actually run `crew ask --question \"어느 쪽을 고를래?\" --option A --option B --option C`. Crew shows them a picker and prints their choice. Never send a picker to a teammate. Do not crew tell the options. Do not ask the user to type the letter. This is not a substitute for `crew tell`, `crew agent set`, or `crew routine add`.\n",
+    );
     s
 }
 
@@ -1041,7 +1044,10 @@ pub fn format_roster(agents: &[AgentConfig], channels: &[Channel]) -> String {
     );
     out.push_str("Rename yourself with `crew agent set --name \"New Name\"`.\n");
     out.push_str(
-        "Schedule work with `crew routine add --name \"...\" --schedule \"평일 8시에 브리핑\" --prompt \"...\"`.\n\n",
+        "Schedule work with `crew routine add --name \"...\" --schedule \"평일 8시에 브리핑\" --prompt \"...\"`.\n",
+    );
+    out.push_str(
+        "Ask the human user to pick with `crew ask --question \"...\" --option A --option B`. Do not use this to ask a teammate.\n\n",
     );
     out.push_str("## Agents\n\n");
     if agents.is_empty() {
@@ -1451,6 +1457,7 @@ mod tests {
         assert!(md.contains("crew tell"));
         assert!(md.contains("crew agent set --name"));
         assert!(md.contains("crew routine add"));
+        assert!(md.contains("crew ask --question"));
     }
 
     #[test]
@@ -1733,6 +1740,10 @@ mod tests {
         assert!(rules.contains("[crew reply:"));
         assert!(rules.contains("crew agent set --name"));
         assert!(rules.contains("crew routine add"));
+        assert!(rules.contains("crew ask --question"));
+        assert!(rules.contains("human user"));
+        assert!(rules.contains("Never send a picker to a teammate"));
+        assert!(rules.contains("not a substitute for `crew tell`"));
         assert!(!rules.contains("roster.md"));
         assert!(!rules.contains("crew memory show"));
     }

@@ -72,8 +72,9 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 
 > 사용자가 `@id`를 쓰면 그건 **너에게** 다른 봇을 가리키는 것이다. 이 세션에 남아라. 필요하면 직접 `crew tell <id> <text>`를 실행해라.
 > 이름을 바꿔 달라면 `crew agent set --name "새 이름"`을 실행해라. 반복 일을 맡기면 `crew routine add`로 루틴을 만들어라.
+> 사람에게 고르라고 물으려면 `crew ask --question "..." --option A --option B`를 실행해라. 다른 봇에게 선택지를 보내지 마라.
 
-그래서 1:1 대화에서 `@리뷰어 이 패치 봐줘`라고 쓰면, 지금 대화 중인 봇이 먼저 일을 하고 필요할 때 리뷰어 봇에게 넘겨요. 봇 사이의 릴레이는 사용자 메시지 하나당 최대 4홉이에요. 이름 변경과 루틴 등록도 채팅에서 시키면 봇이 같은 식으로 `crew`를 실행해요.
+그래서 1:1 대화에서 `@리뷰어 이 패치 봐줘`라고 쓰면, 지금 대화 중인 봇이 먼저 일을 하고 필요할 때 리뷰어 봇에게 넘겨요. 봇 사이의 릴레이는 사용자 메시지 하나당 최대 4홉이에요. 이름 변경과 루틴 등록은 채팅에서 시키면 봇이 같은 식으로 `crew`를 실행해요. 사람에게 A / B / C를 고르라고 물을 때도 `crew ask`로 그 봇의 채팅에 선택지 카드가 떠요.
 
 ### <img src="docs/readme/face-teardrop.png" width="28" height="28" alt=""> 메모리
 
@@ -90,6 +91,7 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 - `@멘션` 칩, 파일 첨부, `/스킬` 문구 삽입
 - 봇이 작업 중일 때 보낸 메시지는 순서대로 대기해요. 봇당 최대 32개
 - 중지 (`⌘.` 또는 `stop` / `중지` / `멈춰`). 확인이 필요할 땐 한 번 허용 / 거부
+- 봇이 사람에게 고르라고 물으면 (`crew ask`) 그 채팅에 선택지 카드가 떠요. 고른 답이 봇에게 돌아와요. 다른 봇에게 묻지 않아요
 - 도구 호출은 접힌 카드로 보여 주고, 긴 핸드오프도 접을 수 있어요
 - 읽지 않은 대화 표시, Dock 배지, 작업 완료·차단·루틴 실패 알림
 
@@ -329,6 +331,7 @@ crew agent remove shell
 crew tell grok 이 파일의 테스트를 보강해줘
 crew tell review --from grok 방금 패치 리뷰해줘
 crew tell --channel frontend @grok 오늘 보드 요약해줘
+crew ask --question "어느 쪽을 고를래?" --option A --option B --option C
 
 crew channel add frontend --name "프론트엔드" --members grok,review
 crew channel send frontend 스탠드업 시작

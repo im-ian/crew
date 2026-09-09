@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, oneshot};
 
 use crate::config::{
     empty_to_none, find_routine_index, parse_hex_color, roster_update_text, unique_ids,
@@ -427,6 +427,8 @@ fn interrupt_turn(id: &str) -> anyhow::Result<()> {
         LiveAgent::Pty(_) => {}
     }
     crate::transcript::end_turn(id);
+    let closed = crate::transcript::close_pending_choices(id);
+    fail_asks(&closed, "interrupted");
     emit_agent_frame(id);
     pump_inbox(id);
     Ok(())
@@ -462,6 +464,126 @@ fn approve_agent(id: &str, allow: bool) -> anyhow::Result<()> {
         )?;
     }
     Ok(())
+}
+
+fn ask_waiters() -> &'static Mutex<HashMap<String, oneshot::Sender<Event>>> {
+    static WAITERS: OnceLock<Mutex<HashMap<String, oneshot::Sender<Event>>>> = OnceLock::new();
+    WAITERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn fail_asks(ids: &[String], message: &str) {
+    let mut map = match ask_waiters().lock() {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+    for id in ids {
+        if let Some(tx) = map.remove(id) {
+            let _ = tx.send(Event::Error {
+                message: message.to_string(),
+            });
+        }
+    }
+}
+
+fn take_ask(choice_id: &str) -> Option<oneshot::Sender<Event>> {
+    ask_waiters().lock().ok()?.remove(choice_id)
+}
+
+fn drop_ask(choice_id: &str) {
+    let _ = ask_waiters().lock().ok().map(|mut m| m.remove(choice_id));
+}
+
+fn start_ask(
+    agent: &str,
+    question: &str,
+    options: Vec<String>,
+) -> anyhow::Result<(String, oneshot::Receiver<Event>)> {
+    if !known_agent(agent) {
+        anyhow::bail!("unknown agent {agent}");
+    }
+    let card = crate::choice::card_from_cli(question, &options)?;
+    let msg = crate::transcript::attach_choice(agent, None, card);
+    let Some(choice) = msg.choice.clone() else {
+        anyhow::bail!("failed to open choice");
+    };
+    let pending = crate::transcript::pending_message_id(agent).as_deref() == Some(msg.id.as_str());
+    if !pending {
+        if let Some(ch) = get_origin(agent).and_then(|o| o.reply_channel) {
+            if known_channel(&ch) {
+                let ch_msg =
+                    crate::transcript::push_channel(&ch, Role::Assistant, agent, "");
+                crate::transcript::set_choice(&format!("ch:{ch}"), &ch_msg.id, choice.clone());
+            }
+        }
+    }
+    let (tx, rx) = oneshot::channel();
+    let id = choice.id.clone();
+    ask_waiters()
+        .lock()
+        .expect("ask waiters")
+        .insert(id.clone(), tx);
+    Ok((id, rx))
+}
+
+fn answer_choice(
+    agent: &str,
+    message_id: &str,
+    channel: Option<String>,
+    answers: Vec<Vec<String>>,
+    closed: bool,
+) -> anyhow::Result<()> {
+    let key = match channel.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(ch) => format!("ch:{ch}"),
+        None => agent.to_string(),
+    };
+    let Some(msg) = crate::transcript::choice_by_message(&key, message_id) else {
+        anyhow::bail!("no choice on that message");
+    };
+    let Some(card) = msg.choice.as_ref() else {
+        anyhow::bail!("no choice on that message");
+    };
+    if card.state != crate::protocol::ChoiceState::Pending {
+        anyhow::bail!("choice already resolved");
+    }
+    if !closed {
+        let mut preview = card.clone();
+        crate::choice::apply_answers(&mut preview, &answers, false);
+        if crate::choice::format_answer(&preview).trim().is_empty() {
+            anyhow::bail!("nothing selected");
+        }
+    }
+    let Some(updated) =
+        crate::transcript::resolve_choice(agent, &card.id, &answers, closed)
+    else {
+        anyhow::bail!("choice not found");
+    };
+    if let Some(tx) = take_ask(&updated.id) {
+        let text = crate::choice::format_answer(&updated);
+        let ev = if closed {
+            Event::Error {
+                message: "choice closed".into(),
+            }
+        } else {
+            Event::Answered { text: text.clone() }
+        };
+        if tx.send(ev).is_ok() {
+            return Ok(());
+        }
+        if closed {
+            return Ok(());
+        }
+        return send_agent(agent, &text);
+    }
+    if closed {
+        return Ok(());
+    }
+    let text = crate::choice::format_answer(&updated);
+    if text.trim().is_empty() {
+        anyhow::bail!("nothing selected");
+    }
+    // The picker is for the human. Continue only the bot that asked;
+    // do not fan the pick out as a channel turn for other members.
+    send_agent(agent, &text)
 }
 
 fn start_delivery(id: &str, text: &str, newline: bool, origin: TurnOrigin) -> anyhow::Result<()> {
@@ -1062,6 +1184,42 @@ async fn handle_client(
                 if matches!(req, Request::Subscribe) {
                     subscribed = true;
                 }
+                if let Request::Ask {
+                    agent,
+                    question,
+                    options,
+                } = req
+                {
+                    match start_ask(&agent, &question, options) {
+                        Err(err) => {
+                            write_event(
+                                &mut write,
+                                &Event::Error {
+                                    message: err.to_string(),
+                                },
+                            )
+                            .await?;
+                        }
+                        Ok((choice_id, rx)) => {
+                            tokio::select! {
+                                ev = rx => {
+                                    let ev = ev.unwrap_or_else(|_| Event::Error {
+                                        message: "ask cancelled".into(),
+                                    });
+                                    if write_event(&mut write, &ev).await.is_err() {
+                                        if let Event::Answered { text } = ev {
+                                            let _ = send_agent(&agent, &text);
+                                        }
+                                    }
+                                }
+                                _ = lines.next_line() => {
+                                    drop_ask(&choice_id);
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
                 let responses = dispatch(req, &shutdown);
                 for ev in responses {
                     write_event(&mut write, &ev).await?;
@@ -1147,6 +1305,21 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             }],
         },
         Request::Approve { agent, allow } => match approve_agent(&agent, allow) {
+            Ok(()) => vec![Event::Ok],
+            Err(err) => vec![Event::Error {
+                message: err.to_string(),
+            }],
+        },
+        Request::Ask { .. } => vec![Event::Error {
+            message: "ask waits on the calling connection".into(),
+        }],
+        Request::AnswerChoice {
+            agent,
+            message_id,
+            channel,
+            answers,
+            closed,
+        } => match answer_choice(&agent, &message_id, channel, answers, closed) {
             Ok(()) => vec![Event::Ok],
             Err(err) => vec![Event::Error {
                 message: err.to_string(),
@@ -2422,7 +2595,7 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
         return;
     }
     let text = crate::rows::display_text(msg);
-    if text.is_empty() {
+    if text.is_empty() && msg.choice.is_none() {
         return;
     }
     let Some(origin) = get_origin(agent) else {
@@ -2431,12 +2604,27 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
     let targets = targeting::postback_targets(&origin, agent);
     if let Some(channel) = targets.channel {
         if known_channel(&channel) {
+            let already = msg.choice.as_ref().map(|c| {
+                crate::transcript::channel_messages(&channel).iter().any(|m| {
+                    m.choice.as_ref().map(|x| x.id == c.id).unwrap_or(false)
+                })
+            }).unwrap_or(false);
             let dup = crate::transcript::channel_messages(&channel)
                 .last()
-                .map(|m| m.from == agent && m.text.trim() == text)
+                .map(|m| {
+                    m.from == agent && !text.is_empty() && m.text.trim() == text
+                })
                 .unwrap_or(false);
-            if !dup {
-                crate::transcript::push_channel(&channel, Role::Assistant, agent, &text);
+            if !dup && !already {
+                let ch_msg =
+                    crate::transcript::push_channel(&channel, Role::Assistant, agent, &text);
+                if let Some(choice) = &msg.choice {
+                    crate::transcript::set_choice(
+                        &format!("ch:{channel}"),
+                        &ch_msg.id,
+                        choice.clone(),
+                    );
+                }
             }
             if crate::interrupt::looks_like_judgment_question(&text) {
                 if let Some(ch_msg) = crate::transcript::channel_messages(&channel).last() {
@@ -2452,7 +2640,7 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
         }
     }
     if let Some(peer) = targets.agent {
-        if known_agent(&peer) {
+        if known_agent(&peer) && !text.is_empty() && msg.choice.is_none() {
             crate::transcript::push_handoff(&peer, agent, &text);
             enqueue_handoff(&peer, agent, &text);
         }
@@ -2580,6 +2768,7 @@ mod daemon_tests {
             queued: false,
             kind: None,
             approval: None,
+            choice: None,
         };
         on_assistant_sealed(&speaker, &reply);
         let msgs = crate::transcript::channel_messages(&ch);
@@ -2629,6 +2818,7 @@ mod daemon_tests {
             queued: false,
             kind: None,
             approval: None,
+            choice: None,
         };
         on_assistant_sealed(&speaker, &reply);
         let ch_last = crate::transcript::channel_messages(&ch)
@@ -2670,6 +2860,7 @@ mod daemon_tests {
             queued: false,
             kind: None,
             approval: None,
+            choice: None,
         };
         on_assistant_sealed(&speaker, &reply);
         let msgs = crate::transcript::messages(&peer);

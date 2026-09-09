@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 
 mod avatar;
 mod channel_context;
+mod choice;
 mod client;
 mod config;
 mod cron;
@@ -66,6 +67,15 @@ enum Cmd {
         channel: Option<String>,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         message: Vec<String>,
+    },
+    /// Ask the human user to pick in this chat; print their choice
+    Ask {
+        #[arg(short, long)]
+        question: Option<String>,
+        #[arg(short, long = "option")]
+        options: Vec<String>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        rest: Vec<String>,
     },
     /// Print the current PTY screen for an agent
     Snapshot { agent: String },
@@ -285,6 +295,11 @@ fn run() -> anyhow::Result<()> {
             channel,
             message,
         }) => run_tell(to, from, channel, message),
+        Some(Cmd::Ask {
+            question,
+            options,
+            rest,
+        }) => run_ask(question, options, rest),
         Some(Cmd::Snapshot { agent }) => {
             client::ensure_daemon()?;
             client::print_event(client::rpc(Request::Snapshot { agent })?)
@@ -603,6 +618,35 @@ fn connect_for_tell() -> anyhow::Result<()> {
     } else {
         client::ensure_daemon()
     }
+}
+
+fn run_ask(
+    question: Option<String>,
+    mut options: Vec<String>,
+    rest: Vec<String>,
+) -> anyhow::Result<()> {
+    connect_for_tell()?;
+    let agent = require_agent_id(None, "ask")?;
+    let question = match question.and_then(empty_to_none) {
+        Some(q) => {
+            options.extend(rest);
+            q
+        }
+        None => {
+            let mut rest = rest;
+            if rest.is_empty() {
+                anyhow::bail!("ask needs a question");
+            }
+            let q = rest.remove(0);
+            options.extend(rest);
+            q
+        }
+    };
+    client::print_event(client::rpc(Request::Ask {
+        agent,
+        question,
+        options,
+    })?)
 }
 
 fn run_tell(
@@ -1017,6 +1061,47 @@ mod tests {
 
     fn parse_ok(args: &[&str]) -> Cli {
         Cli::try_parse_from(args).expect("parse")
+    }
+
+    #[test]
+    fn ask_flags_and_trailing_args() {
+        match parse_ok(&[
+            "crew",
+            "ask",
+            "--question",
+            "어느 쪽을 고를래?",
+            "--option",
+            "A",
+            "--option",
+            "B",
+            "--option",
+            "C",
+        ])
+        .cmd
+        {
+            Some(Cmd::Ask {
+                question,
+                options,
+                rest,
+            }) => {
+                assert_eq!(question.as_deref(), Some("어느 쪽을 고를래?"));
+                assert_eq!(options, vec!["A", "B", "C"]);
+                assert!(rest.is_empty());
+            }
+            _ => panic!("expected ask"),
+        }
+        match parse_ok(&["crew", "ask", "어느 쪽을 고를래?", "A", "B", "C"]).cmd {
+            Some(Cmd::Ask {
+                question,
+                options,
+                rest,
+            }) => {
+                assert!(question.is_none());
+                assert!(options.is_empty());
+                assert_eq!(rest, vec!["어느 쪽을 고를래?", "A", "B", "C"]);
+            }
+            _ => panic!("expected ask"),
+        }
     }
 
     #[test]

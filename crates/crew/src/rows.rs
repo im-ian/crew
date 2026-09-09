@@ -177,6 +177,7 @@ mod tests {
             queued: false,
             kind: None,
             approval: None,
+            choice: None,
         }
     }
 

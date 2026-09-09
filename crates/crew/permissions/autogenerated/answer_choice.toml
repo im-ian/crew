@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-answer-choice"
+description = "Enables the answer_choice command without any pre-configured scope."
+commands.allow = ["answer_choice"]
+
+[[permission]]
+identifier = "deny-answer-choice"
+description = "Denies the answer_choice command without any pre-configured scope."
+commands.deny = ["answer_choice"]

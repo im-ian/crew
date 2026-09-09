@@ -29,6 +29,20 @@ export const api = {
   stopAgent: (agent: string) => invoke<void>("stop_agent", { agent }),
   approveAgent: (agent: string, allow: boolean) =>
     invoke<void>("approve_agent", { agent, allow }),
+  answerChoice: (args: {
+    agent: string;
+    messageId: string;
+    channel?: string | null;
+    answers: string[][];
+    closed: boolean;
+  }) =>
+    invoke<void>("answer_choice", {
+      agent: args.agent,
+      messageId: args.messageId,
+      channel: args.channel ?? null,
+      answers: args.answers,
+      closed: args.closed,
+    }),
   tellMessage: (to: string, text: string, from = "user") =>
     invoke<void>("tell_message", { from, to, text }),
   channelSend: (channel: string, text: string) =>
