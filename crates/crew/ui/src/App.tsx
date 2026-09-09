@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatThread } from "./components/ChatThread";
+import { PeekRoom } from "./components/PeekRoom";
 import { Composer, type ComposerHandle } from "./components/Composer";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ContextMenu, type MenuEntry } from "./components/ContextMenu";
@@ -40,10 +41,13 @@ export function App() {
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [theme, setTheme] = useState<ThemePref>(loadThemePref);
   const [jumpSeq, setJumpSeq] = useState(0);
+  const [peekPeer, setPeekPeer] = useState<string | null>(null);
   const updater = useUpdater();
   const renamingId = crew.pendingRenameId || renameId;
   const searchRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<ComposerHandle>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const peekOpen = !!(peekPeer && crew.currentAgent);
 
   function finishRename() {
     crew.clearPendingRename();
@@ -59,6 +63,20 @@ export function App() {
     );
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    setPeekPeer(null);
+  }, [crew.selected, crew.selectedKind]);
+
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    for (const el of Array.from(main.children)) {
+      if (el.classList.contains("peek-room")) continue;
+      if (peekOpen) el.setAttribute("inert", "");
+      else el.removeAttribute("inert");
+    }
+  }, [peekOpen]);
 
   useEffect(() => {
     applyTheme(theme);
@@ -86,10 +104,28 @@ export function App() {
       const c = crewRef.current;
       if (c.confirmOpen) return;
       const typing = isTypingTarget(e.target);
+      if (peekPeer && e.key === "Escape") {
+        if (typing) return;
+        e.preventDefault();
+        setPeekPeer(null);
+        return;
+      }
       const id = shortcutId(e, typing);
       if (!id) return;
       if (helpOpen && id !== "help") return;
       e.preventDefault();
+      if (
+        peekPeer &&
+        (id === "composer" ||
+          id === "attach" ||
+          id === "info" ||
+          id === "routines" ||
+          id === "approve" ||
+          id === "deny" ||
+          id === "bottom")
+      ) {
+        return;
+      }
       if (id === "help") {
         setHelpOpen((open) => !open);
         return;
@@ -171,7 +207,7 @@ export function App() {
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [helpOpen, settingsOpen]);
+  }, [helpOpen, settingsOpen, peekPeer]);
 
   return (
     <div className="app">
@@ -201,7 +237,7 @@ export function App() {
         searchRef={searchRef}
         onOpenSettings={() => setSettingsOpen(true)}
       />
-      <main>
+      <main ref={mainRef}>
         <div className="titlebar-align" data-tauri-drag-region />
         <UpdateBanner
           visible={updater.shouldNotify}
@@ -250,6 +286,7 @@ export function App() {
           jumpSeq={jumpSeq}
           onReply={(target) => composerRef.current?.replyTo(target)}
           onJump={crew.highlightMessage}
+          onPeek={setPeekPeer}
         />
         <Composer
           ref={composerRef}
@@ -318,6 +355,16 @@ export function App() {
           onLoadMemory={crew.loadMemory}
           onSaveMemory={crew.saveMemory}
         />
+        {peekPeer && crew.currentAgent ? (
+          <PeekRoom
+            peerId={peekPeer}
+            self={crew.currentAgent}
+            messages={crew.messages}
+            agents={crew.agents}
+            channels={crew.channels}
+            onClose={() => setPeekPeer(null)}
+          />
+        ) : null}
       </main>
       <ConfirmDialog
         open={crew.confirmOpen}
