@@ -1946,7 +1946,9 @@ fn insert_spawned_agent(cfg: AgentConfig) -> anyhow::Result<()> {
         roster.push(cfg.clone());
     }
     let live = open_agent(&cfg, DEFAULT_COLS, DEFAULT_ROWS, false, &roster)?;
-    crate::transcript::load_agent(&id);
+    // A fresh agent has no history: an id freed by an earlier bot of the same
+    // name must not read that bot's file back in.
+    crate::transcript::drop_agent(&id);
     agents()
         .lock()
         .expect("agents mutex")
