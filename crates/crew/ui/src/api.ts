@@ -71,7 +71,10 @@ export const api = {
     color?: string | null;
     name?: string | null;
     cwd?: string | null;
-    unsetCwd?: boolean;
+    // Required, like the other five `unset*` flags: Tauri reads a missing key
+    // for an `Option<T>` as `None`, but a `bool` with no key is an error. The
+    // optional marker is what let a caller drop it.
+    unsetCwd: boolean;
   }) => invoke<void>("set_agent", args),
   addAgent: (args: {
     name: string;
