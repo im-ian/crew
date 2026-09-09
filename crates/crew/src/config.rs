@@ -698,6 +698,12 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         "When the user writes #id or #display-name, they are naming a channel. Stay in this session. To post there, run `crew channel send <id> <text>` or `crew tell --channel <id> <text>`.\n",
     );
     s.push_str(
+        "To change your display name, actually run `crew agent set --name \"New Name\"` (id defaults to CREW_AGENT_ID). Do not only claim you renamed yourself.\n",
+    );
+    s.push_str(
+        "To schedule recurring work, actually run `crew routine add --name \"...\" --schedule \"평일 8시에 브리핑\" --prompt \"...\"`. Schedule may be cron or a short Korean/English sentence. That creates a Crew routine, not a chat reminder.\n",
+    );
+    s.push_str(
         "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew channel:…]` / `[crew system]` / `[crew handoff from:…]` / `[crew reply:…]` are real messages. A `[crew reply:…]` line is the user answering an earlier message; the next line is the quote, then their new text. A handoff is a teammate's finished reply; do not crew tell them that same text back.\n",
     );
     s
@@ -834,7 +840,11 @@ fn is_mention_punct(c: char) -> bool {
     )
 }
 
-pub(crate) fn resolve_mention(token: &str, self_id: &str, roster: &[AgentConfig]) -> Option<String> {
+pub(crate) fn resolve_mention(
+    token: &str,
+    self_id: &str,
+    roster: &[AgentConfig],
+) -> Option<String> {
     let lower = token.to_lowercase();
     roster
         .iter()
@@ -870,6 +880,7 @@ fn inject_team_rules(
     match program {
         "grok" => append_flag_value(args, "--rules", &text),
         "claude" => append_flag_value(args, "--append-system-prompt", &text),
+        "codex" => append_codex_config(args, "developer_instructions", &text),
         _ => {}
     }
 }
@@ -899,12 +910,7 @@ fn apply_grok_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSe
 fn apply_claude_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSession>) {
     remove_switch(
         args,
-        &[
-            "-p",
-            "--print",
-            "--include-partial-messages",
-            "--verbose",
-        ],
+        &["-p", "--print", "--include-partial-messages", "--verbose"],
     );
     remove_flag_with_value(args, &["--output-format", "--resume", "-r", "--session-id"]);
     args.push("-p".into());
@@ -967,8 +973,30 @@ fn inject_memory(program: &str, args: &mut Vec<String>, agent_id: &str) {
     match program {
         "grok" => append_flag_value(args, "--rules", text),
         "claude" => append_flag_value(args, "--append-system-prompt", text),
+        "codex" => append_codex_config(args, "developer_instructions", text),
         _ => {}
     }
+}
+
+/// `-c key=value`. Repeating the same key appends to its value so team_rules
+/// stay in front of memory, matching grok `--rules`.
+fn append_codex_config(args: &mut Vec<String>, key: &str, extra: &str) {
+    let prefix = format!("{key}=");
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "-c" && i + 1 < args.len() && args[i + 1].starts_with(&prefix) {
+            let existing = args[i + 1][prefix.len()..].trim();
+            if existing.is_empty() {
+                args[i + 1] = format!("{prefix}{extra}");
+            } else {
+                args[i + 1] = format!("{prefix}{existing}\n\n{extra}");
+            }
+            return;
+        }
+        i += 1;
+    }
+    args.push("-c".into());
+    args.push(format!("{prefix}{extra}"));
 }
 
 fn append_flag_value(args: &mut Vec<String>, flag: &str, extra: &str) {
@@ -1009,7 +1037,11 @@ pub fn format_roster(agents: &[AgentConfig], channels: &[Channel]) -> String {
     out.push_str("Message a teammate with `crew tell <id> <text>`.\n");
     out.push_str("crew is on PATH; CREW_AGENT_ID is set in each agent session.\n");
     out.push_str(
-        "Channel post: `crew tell --channel <id> <text>` or `crew channel send <id> <text>`.\n\n",
+        "Channel post: `crew tell --channel <id> <text>` or `crew channel send <id> <text>`.\n",
+    );
+    out.push_str("Rename yourself with `crew agent set --name \"New Name\"`.\n");
+    out.push_str(
+        "Schedule work with `crew routine add --name \"...\" --schedule \"평일 8시에 브리핑\" --prompt \"...\"`.\n\n",
     );
     out.push_str("## Agents\n\n");
     if agents.is_empty() {
@@ -1046,12 +1078,7 @@ pub fn format_roster(agents: &[AgentConfig], channels: &[Channel]) -> String {
                 "- `{}` — {}\n  members: {}\n",
                 c.id, c.name, members
             ));
-            if let Some(brief) = c
-                .brief
-                .as_deref()
-                .map(str::trim)
-                .filter(|t| !t.is_empty())
-            {
+            if let Some(brief) = c.brief.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
                 out.push_str(&format!("  brief: {brief}\n"));
             }
         }
@@ -1145,6 +1172,14 @@ mod tests {
         argv.get(i + 1).map(|s| s.as_str()).unwrap_or("")
     }
 
+    fn codex_config_after<'a>(argv: &'a [String], key: &str) -> &'a str {
+        let prefix = format!("{key}=");
+        argv.windows(2)
+            .find(|w| w[0] == "-c" && w[1].starts_with(&prefix))
+            .map(|w| &w[1][prefix.len()..])
+            .unwrap_or("")
+    }
+
     #[test]
     fn channel_reads_a_config_written_before_routines_existed() {
         let raw = r#"{"id":"room","name":"방","members":["a1","a2"]}"#;
@@ -1190,17 +1225,14 @@ mod tests {
     #[test]
     fn codex_uses_model_flag_and_config_override() {
         let argv = cfg(&["codex", "--yolo"], Some("o3"), Some(Effort::Medium)).spawn_cmd(false);
-        assert_eq!(
-            argv,
-            vec![
-                "codex",
-                "--yolo",
-                "--model",
-                "o3",
-                "-c",
-                "model_reasoning_effort=medium"
-            ]
-        );
+        assert_eq!(argv[0], "codex");
+        assert!(argv.contains(&"--yolo".to_string()));
+        assert!(argv.contains(&"--model".to_string()));
+        assert!(argv.contains(&"o3".to_string()));
+        assert!(argv
+            .windows(2)
+            .any(|w| { w[0] == "-c" && w[1] == "model_reasoning_effort=medium" }));
+        assert!(codex_config_after(&argv, "developer_instructions").contains("crew tell"));
     }
 
     #[test]
@@ -1286,6 +1318,7 @@ mod tests {
         assert_eq!(argv[2], "resume");
         assert_eq!(argv[3], resume.id);
         assert_eq!(argv.last().map(|s| s.as_str()), Some("again"));
+        assert!(codex_config_after(&argv, "developer_instructions").contains("crew tell"));
     }
 
     #[test]
@@ -1351,11 +1384,22 @@ mod tests {
     }
 
     #[test]
-    fn unknown_and_codex_skip_persona_flags() {
+    fn unknown_cli_skips_persona_flags() {
         let cat = cfg_persona(&["cat"], Some("x"), Some("y")).spawn_cmd(false);
         assert_eq!(cat, vec!["cat"]);
-        let codex = cfg_persona(&["codex", "--yolo"], Some("x"), None).spawn_cmd(false);
-        assert_eq!(codex, vec!["codex", "--yolo"]);
+    }
+
+    #[test]
+    fn codex_gets_developer_instructions() {
+        let argv = cfg_persona(&["codex", "--yolo"], Some("reviewer"), None).spawn_cmd(false);
+        assert_eq!(argv[0], "codex");
+        assert!(argv.contains(&"--yolo".to_string()));
+        let text = codex_config_after(&argv, "developer_instructions");
+        assert!(text.contains("You are Crew agent `t`"));
+        assert!(text.contains("reviewer"));
+        assert!(text.contains("crew tell"));
+        assert!(text.contains("crew agent set --name"));
+        assert!(text.contains("crew routine add"));
     }
 
     #[test]
@@ -1405,6 +1449,8 @@ mod tests {
         let md = format_roster(&[a], &[with_brief]);
         assert!(md.contains("brief: launch notes"));
         assert!(md.contains("crew tell"));
+        assert!(md.contains("crew agent set --name"));
+        assert!(md.contains("crew routine add"));
     }
 
     #[test]
@@ -1434,9 +1480,7 @@ mod tests {
         ch.set_members(vec!["a".into(), "b".into(), "a".into()], ["a", "b", "c"])
             .unwrap();
         assert_eq!(ch.members, vec!["a", "b"]);
-        let err = ch
-            .set_members(vec!["nope".into()], ["a", "b"])
-            .unwrap_err();
+        let err = ch.set_members(vec!["nope".into()], ["a", "b"]).unwrap_err();
         assert!(err.to_string().contains("unknown agent nope"), "{err}");
     }
 
@@ -1484,10 +1528,7 @@ mod tests {
         a.cwd = Some("".into());
         assert_eq!(Config::default_cwd(&a), PathBuf::from("/tmp/crew-demo"));
         a.cwd = Some("/tmp/crew-work/x".into());
-        assert_eq!(
-            Config::default_cwd(&a),
-            PathBuf::from("/tmp/crew-work/x")
-        );
+        assert_eq!(Config::default_cwd(&a), PathBuf::from("/tmp/crew-work/x"));
     }
 
     #[test]
@@ -1574,7 +1615,10 @@ mod tests {
         assert_eq!(back, AvatarShape::RoundedSquare);
         assert_eq!(AvatarShape::from_key("rounded_square").unwrap(), back);
         assert_eq!(AvatarShape::from_key("star").unwrap(), AvatarShape::Star);
-        assert_eq!(AvatarShape::from_key("droplet").unwrap(), AvatarShape::Teardrop);
+        assert_eq!(
+            AvatarShape::from_key("droplet").unwrap(),
+            AvatarShape::Teardrop
+        );
         for shape in [
             AvatarShape::Circle,
             AvatarShape::Teardrop,
@@ -1687,6 +1731,8 @@ mod tests {
         assert!(rules.contains("Do not ask the user to switch chats"));
         assert!(rules.contains("[crew handoff from:"));
         assert!(rules.contains("[crew reply:"));
+        assert!(rules.contains("crew agent set --name"));
+        assert!(rules.contains("crew routine add"));
         assert!(!rules.contains("roster.md"));
         assert!(!rules.contains("crew memory show"));
     }
@@ -1701,6 +1747,19 @@ mod tests {
             let team_at = rules.find("You are Crew agent `t`").expect("team_rules");
             let mem_at = rules.find("remember the harbor").expect("memory");
             assert!(team_at < mem_at, "{rules}");
+        });
+    }
+
+    #[test]
+    fn codex_prefix_is_team_rules_then_memory() {
+        crate::paths::testing::with_home("codex-prefix-order", || {
+            crate::memory::write("t", "remember the harbor").unwrap();
+            let c = cfg(&["codex", "--yolo"], None, None);
+            let argv = c.spawn_cmd_with(false, &[c.clone()]);
+            let text = codex_config_after(&argv, "developer_instructions");
+            let team_at = text.find("You are Crew agent `t`").expect("team_rules");
+            let mem_at = text.find("remember the harbor").expect("memory");
+            assert!(team_at < mem_at, "{text}");
         });
     }
 

@@ -10,6 +10,35 @@ pub struct ParsedRoutine {
     pub prompt: String,
 }
 
+/// Fill name / cron / prompt from structured fields, or from a Korean/English
+/// sentence when `schedule` is not already cron.
+pub fn resolve_routine_fields(
+    name: String,
+    schedule: String,
+    prompt: String,
+) -> anyhow::Result<(String, String, String)> {
+    if cron::validate(&schedule).is_ok() && !name.trim().is_empty() && !prompt.trim().is_empty() {
+        return Ok((name, schedule, prompt));
+    }
+    let blob = [name.trim(), schedule.trim(), prompt.trim()]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let parsed = parse_nl_routine(&blob)?;
+    let name = if name.trim().is_empty() {
+        parsed.name
+    } else {
+        name
+    };
+    let prompt = if prompt.trim().is_empty() {
+        parsed.prompt
+    } else {
+        prompt
+    };
+    Ok((name, parsed.schedule, prompt))
+}
+
 pub fn parse_nl_routine(text: &str) -> anyhow::Result<ParsedRoutine> {
     let raw = text.trim();
     if raw.is_empty() {
@@ -325,5 +354,28 @@ mod tests {
     #[test]
     fn empty_fails() {
         assert!(parse_nl_routine("   ").is_err());
+    }
+
+    #[test]
+    fn resolve_keeps_cron_and_explicit_fields() {
+        let (name, schedule, prompt) =
+            resolve_routine_fields("아침".into(), "0 8 * * 1-5".into(), "오늘 할 일".into())
+                .unwrap();
+        assert_eq!(name, "아침");
+        assert_eq!(schedule, "0 8 * * 1-5");
+        assert_eq!(prompt, "오늘 할 일");
+    }
+
+    #[test]
+    fn resolve_parses_korean_schedule_and_keeps_name() {
+        let (name, schedule, prompt) = resolve_routine_fields(
+            "아침".into(),
+            "평일 8시에 브리핑".into(),
+            "오늘 할 일".into(),
+        )
+        .unwrap();
+        assert_eq!(name, "아침");
+        assert_eq!(schedule, "0 8 * * 1-5");
+        assert_eq!(prompt, "오늘 할 일");
     }
 }

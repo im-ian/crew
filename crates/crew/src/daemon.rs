@@ -11,8 +11,8 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::broadcast;
 
 use crate::config::{
-    empty_to_none, find_routine_index, parse_hex_color, roster_update_text, unique_ids, write_roster,
-    AgentConfig, AvatarShape, Channel, Config, Effort, Routine,
+    empty_to_none, find_routine_index, parse_hex_color, roster_update_text, unique_ids,
+    write_roster, AgentConfig, AvatarShape, Channel, Config, Effort, Routine,
 };
 use crate::cron;
 use crate::headless::{self, HeadlessSession};
@@ -378,9 +378,7 @@ fn agent_busy(id: &str) -> anyhow::Result<bool> {
 
 fn live_status(id: &str) -> anyhow::Result<AgentStatus> {
     let map = agents().lock().expect("agents mutex");
-    let live = map
-        .get(id)
-        .with_context(|| format!("unknown agent {id}"))?;
+    let live = map.get(id).with_context(|| format!("unknown agent {id}"))?;
     match live {
         LiveAgent::Headless(session) => {
             let inner = session.inner.lock().expect("headless inner");
@@ -638,12 +636,7 @@ pub fn emit_agent_frame(id: &str) {
 }
 
 fn notify_from_frame(ev: &Event) {
-    let Event::Frame {
-        agent,
-        status,
-        ..
-    } = ev
-    else {
+    let Event::Frame { agent, status, .. } = ev else {
         return;
     };
     let prev = {
@@ -1552,9 +1545,7 @@ fn send_agent(id: &str, text: &str) -> anyhow::Result<()> {
 
 fn ensure_accepts_turn(id: &str) -> anyhow::Result<()> {
     let map = agents().lock().expect("agents mutex");
-    let live = map
-        .get(id)
-        .with_context(|| format!("unknown agent {id}"))?;
+    let live = map.get(id).with_context(|| format!("unknown agent {id}"))?;
     match live {
         LiveAgent::Headless(_) => Ok(()),
         LiveAgent::Pty(session) => {
@@ -1973,37 +1964,11 @@ fn clone_agent_cfg(id: &str) -> anyhow::Result<AgentConfig> {
 }
 
 fn add_routine(target: &str, name: String, schedule: String, prompt: String) -> anyhow::Result<()> {
-    let (name, schedule, prompt) = resolve_routine_fields(name, schedule, prompt)?;
+    let (name, schedule, prompt) =
+        crate::nl_routine::resolve_routine_fields(name, schedule, prompt)?;
     let mut routines = read_routines(target)?;
     routines.push(Routine::new(name, schedule, prompt)?);
     write_routines(target, routines)
-}
-
-fn resolve_routine_fields(
-    name: String,
-    schedule: String,
-    prompt: String,
-) -> anyhow::Result<(String, String, String)> {
-    if cron::validate(&schedule).is_ok() && !name.trim().is_empty() && !prompt.trim().is_empty() {
-        return Ok((name, schedule, prompt));
-    }
-    let blob = [name.trim(), schedule.trim(), prompt.trim()]
-        .into_iter()
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
-    let parsed = crate::nl_routine::parse_nl_routine(&blob)?;
-    let name = if name.trim().is_empty() {
-        parsed.name
-    } else {
-        name
-    };
-    let prompt = if prompt.trim().is_empty() {
-        parsed.prompt
-    } else {
-        prompt
-    };
-    Ok((name, parsed.schedule, prompt))
 }
 
 fn edit_routine(
@@ -2378,7 +2343,11 @@ fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
     }
     // A bot posting to the room continues whatever chain it is already in; a user
     // post starts a fresh one.
-    let parent = if from == "user" { None } else { get_origin(&from) };
+    let parent = if from == "user" {
+        None
+    } else {
+        get_origin(&from)
+    };
     let origin = targeting::inherit_origin(parent.as_ref(), TurnOrigin::channel(&ch.id, &from));
     let mut sent = 0usize;
     let mut last_err: Option<anyhow::Error> = None;
@@ -2709,10 +2678,7 @@ mod daemon_tests {
         assert_eq!(last.kind, Some(crate::protocol::MessageKind::Handoff));
         assert_eq!(last.text, "reviewed");
         let next = flush_handoffs(&peer, "please continue");
-        assert!(
-            next.starts_with("[crew handoff from:"),
-            "{next}"
-        );
+        assert!(next.starts_with("[crew handoff from:"), "{next}");
         assert!(next.contains("reviewed"), "{next}");
         assert!(next.contains("please continue"), "{next}");
         assert_eq!(flush_handoffs(&peer, "please continue"), "please continue");

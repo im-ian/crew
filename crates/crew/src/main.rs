@@ -10,22 +10,22 @@ mod desktop;
 mod groups;
 mod headless;
 mod interrupt;
-#[cfg(debug_assertions)]
-mod ui_dev;
 mod memory;
 mod models;
 mod nl_routine;
 mod notify;
-mod routine_log;
-mod search;
-mod skills;
-mod tool_card;
 mod paths;
 mod protocol;
 mod pty_agent;
+mod routine_log;
 mod rows;
+mod search;
+mod skills;
 mod targeting;
+mod tool_card;
 mod transcript;
+#[cfg(debug_assertions)]
+mod ui_dev;
 
 use config::{
     empty_to_none, parse_hex_color, resolve_add_cmd, unique_ids, write_roster, AgentCli,
@@ -121,7 +121,11 @@ enum AgentCmd {
         name: Option<String>,
     },
     Set {
-        id: String,
+        /// Agent id. Defaults to $CREW_AGENT_ID.
+        #[arg(value_name = "ID")]
+        id: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
         #[arg(long)]
         model: Option<String>,
         #[arg(long, value_enum)]
@@ -163,7 +167,9 @@ enum RoutineCmd {
         agent: Option<String>,
     },
     Add {
-        agent: String,
+        /// Agent id or `#channel`. Defaults to $CREW_AGENT_ID.
+        #[arg(value_name = "AGENT")]
+        agent: Option<String>,
         #[arg(long)]
         name: String,
         #[arg(long)]
@@ -365,6 +371,7 @@ fn run() -> anyhow::Result<()> {
         }
         Some(Cmd::Agent(AgentCmd::Set {
             id,
+            name,
             model,
             effort,
             unset_model,
@@ -382,7 +389,8 @@ fn run() -> anyhow::Result<()> {
             cwd,
             unset_cwd,
         })) => {
-            if model.is_none()
+            if name.is_none()
+                && model.is_none()
                 && effort.is_none()
                 && title.is_none()
                 && description.is_none()
@@ -400,9 +408,10 @@ fn run() -> anyhow::Result<()> {
                 && !unset_cwd
             {
                 anyhow::bail!(
-                    "nothing to set; pass --model, --effort, --title, --description, --role, --avatar, --shape, --color, --cwd, or an --unset-* flag"
+                    "nothing to set; pass --name, --model, --effort, --title, --description, --role, --avatar, --shape, --color, --cwd, or an --unset-* flag"
                 );
             }
+            let id = require_agent_id(id, "agent set")?;
             if paths::is_socket_live() {
                 match client::rpc(Request::SetAgent {
                     id,
@@ -420,7 +429,7 @@ fn run() -> anyhow::Result<()> {
                     unset_avatar,
                     shape,
                     color,
-                    name: None,
+                    name,
                     cwd,
                     unset_cwd,
                 })? {
@@ -450,7 +459,7 @@ fn run() -> anyhow::Result<()> {
                     unset_avatar,
                     shape,
                     color,
-                    None,
+                    name,
                     cwd,
                     unset_cwd,
                 )?;
@@ -539,15 +548,25 @@ fn run_memory(cmd: MemoryCmd) -> anyhow::Result<()> {
     }
 }
 
+fn session_agent_id() -> Option<String> {
+    std::env::var("CREW_AGENT_ID")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn require_agent_id(explicit: Option<String>, what: &str) -> anyhow::Result<String> {
+    explicit
+        .and_then(empty_to_none)
+        .or_else(session_agent_id)
+        .ok_or_else(|| anyhow::anyhow!("{what} needs an agent id (or CREW_AGENT_ID)"))
+}
+
 fn memory_agent(flag: Option<String>, rest: &mut Vec<String>) -> anyhow::Result<String> {
     if let Some(id) = flag.and_then(empty_to_none) {
         return Ok(id);
     }
-    if let Some(id) = std::env::var("CREW_AGENT_ID")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-    {
+    if let Some(id) = session_agent_id() {
         return Ok(id);
     }
     if !rest.is_empty() {
@@ -672,15 +691,7 @@ fn run_channel(cmd: ChannelCmd) -> anyhow::Result<()> {
             }
         }
         ChannelCmd::Join { channel, agent } => {
-            let agent = agent
-                .and_then(empty_to_none)
-                .or_else(|| {
-                    std::env::var("CREW_AGENT_ID")
-                        .ok()
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                })
-                .ok_or_else(|| anyhow::anyhow!("join needs an agent id (or CREW_AGENT_ID)"))?;
+            let agent = require_agent_id(agent, "join")?;
             if paths::is_socket_live() {
                 match client::rpc(Request::JoinChannel { channel, agent })? {
                     Event::Error { message } => anyhow::bail!("{message}"),
@@ -705,15 +716,7 @@ fn run_channel(cmd: ChannelCmd) -> anyhow::Result<()> {
             }
         }
         ChannelCmd::Leave { channel, agent } => {
-            let agent = agent
-                .and_then(empty_to_none)
-                .or_else(|| {
-                    std::env::var("CREW_AGENT_ID")
-                        .ok()
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                })
-                .ok_or_else(|| anyhow::anyhow!("leave needs an agent id (or CREW_AGENT_ID)"))?;
+            let agent = require_agent_id(agent, "leave")?;
             if paths::is_socket_live() {
                 match client::rpc(Request::LeaveChannel { channel, agent })? {
                     Event::Error { message } => anyhow::bail!("{message}"),
@@ -898,7 +901,9 @@ fn run_routine(cmd: RoutineCmd) -> anyhow::Result<()> {
             schedule,
             prompt,
         } => {
-            let _ = Routine::new(name.clone(), schedule.clone(), prompt.clone())?;
+            let agent = require_agent_id(agent, "routine add")?;
+            let (name, schedule, prompt) =
+                crate::nl_routine::resolve_routine_fields(name, schedule, prompt)?;
             if paths::is_socket_live() {
                 match client::rpc(Request::AddRoutine {
                     agent,
@@ -910,15 +915,7 @@ fn run_routine(cmd: RoutineCmd) -> anyhow::Result<()> {
                     ev => client::print_event(ev),
                 }
             } else {
-                let mut cfg = Config::load()?;
-                let slot = cfg
-                    .agents
-                    .iter_mut()
-                    .find(|a| a.id == agent)
-                    .ok_or_else(|| anyhow::anyhow!("unknown agent {agent}"))?;
-                slot.routines.push(Routine::new(name, schedule, prompt)?);
-                cfg.save()?;
-                Ok(())
+                add_offline_routine(&agent, name, schedule, prompt)
             }
         }
         RoutineCmd::Remove { agent, key } => {
@@ -964,6 +961,37 @@ fn set_routine_enabled(agent: String, key: String, enabled: bool) -> anyhow::Res
     }
 }
 
+fn add_offline_routine(
+    target: &str,
+    name: String,
+    schedule: String,
+    prompt: String,
+) -> anyhow::Result<()> {
+    let routine = Routine::new(name, schedule, prompt)?;
+    let mut cfg = Config::load()?;
+    match target.trim().strip_prefix('#') {
+        Some(channel) => {
+            let channel = channel.trim();
+            let slot = cfg
+                .channels
+                .iter_mut()
+                .find(|c| c.id == channel)
+                .ok_or_else(|| anyhow::anyhow!("unknown channel {channel}"))?;
+            slot.routines.push(routine);
+        }
+        None => {
+            let slot = cfg
+                .agents
+                .iter_mut()
+                .find(|a| a.id == target)
+                .ok_or_else(|| anyhow::anyhow!("unknown agent {target}"))?;
+            slot.routines.push(routine);
+        }
+    }
+    cfg.save()?;
+    Ok(())
+}
+
 fn mutate_offline_routine(
     agent: &str,
     key: &str,
@@ -980,4 +1008,101 @@ fn mutate_offline_routine(
     f(&mut slot.routines, idx)?;
     cfg.save()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    fn parse_ok(args: &[&str]) -> Cli {
+        Cli::try_parse_from(args).expect("parse")
+    }
+
+    #[test]
+    fn agent_set_accepts_name() {
+        match parse_ok(&["crew", "agent", "set", "grok", "--name", "그록봇 테스터"]).cmd {
+            Some(Cmd::Agent(AgentCmd::Set { id, name, .. })) => {
+                assert_eq!(id.as_deref(), Some("grok"));
+                assert_eq!(name.as_deref(), Some("그록봇 테스터"));
+            }
+            _ => panic!("expected agent set"),
+        }
+    }
+
+    #[test]
+    fn agent_set_name_can_omit_id() {
+        match parse_ok(&["crew", "agent", "set", "--name", "그록봇 테스터"]).cmd {
+            Some(Cmd::Agent(AgentCmd::Set { id, name, .. })) => {
+                assert!(id.is_none());
+                assert_eq!(name.as_deref(), Some("그록봇 테스터"));
+            }
+            _ => panic!("expected agent set"),
+        }
+    }
+
+    #[test]
+    fn routine_add_can_omit_agent() {
+        match parse_ok(&[
+            "crew",
+            "routine",
+            "add",
+            "--name",
+            "아침",
+            "--schedule",
+            "평일 8시에 브리핑",
+            "--prompt",
+            "오늘 할 일",
+        ])
+        .cmd
+        {
+            Some(Cmd::Routine(RoutineCmd::Add {
+                agent,
+                name,
+                schedule,
+                prompt,
+            })) => {
+                assert!(agent.is_none());
+                assert_eq!(name, "아침");
+                assert_eq!(schedule, "평일 8시에 브리핑");
+                assert_eq!(prompt, "오늘 할 일");
+            }
+            _ => panic!("expected routine add"),
+        }
+    }
+
+    #[test]
+    fn apply_agent_set_renames() {
+        let mut agent = AgentConfig::new("grok".into(), "Grok".into(), vec!["grok".into()], None);
+        apply_agent_set(
+            &mut agent,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+            None,
+            false,
+            false,
+            false,
+            None,
+            false,
+            None,
+            None,
+            Some("그록봇 테스터".into()),
+            None,
+            false,
+        )
+        .unwrap();
+        assert_eq!(agent.display_name(), "그록봇 테스터");
+    }
+
+    #[test]
+    fn require_agent_id_prefers_explicit() {
+        assert_eq!(
+            require_agent_id(Some("grok".into()), "agent set").unwrap(),
+            "grok"
+        );
+    }
 }

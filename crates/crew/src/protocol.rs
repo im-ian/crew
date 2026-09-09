@@ -363,10 +363,34 @@ impl AgentStatus {
     pub fn label(self, lang: &str) -> &'static str {
         let en = lang == "en";
         match self {
-            AgentStatus::Working => if en { "working" } else { "작업 중" },
-            AgentStatus::Idle => if en { "idle" } else { "대기" },
-            AgentStatus::Blocked => if en { "blocked" } else { "차단됨" },
-            AgentStatus::Exited => if en { "exited" } else { "종료됨" },
+            AgentStatus::Working => {
+                if en {
+                    "working"
+                } else {
+                    "작업 중"
+                }
+            }
+            AgentStatus::Idle => {
+                if en {
+                    "idle"
+                } else {
+                    "대기"
+                }
+            }
+            AgentStatus::Blocked => {
+                if en {
+                    "blocked"
+                } else {
+                    "차단됨"
+                }
+            }
+            AgentStatus::Exited => {
+                if en {
+                    "exited"
+                } else {
+                    "종료됨"
+                }
+            }
         }
     }
 }
@@ -697,7 +721,7 @@ mod tests {
             unset_avatar: false,
             shape: Some(crate::config::AvatarShape::Circle),
             color: Some("#ff6a00".into()),
-            name: None,
+            name: Some("그록봇 테스터".into()),
             cwd: Some("~/proj".into()),
             unset_cwd: false,
         };
@@ -714,6 +738,7 @@ mod tests {
                 unset_avatar,
                 shape,
                 color,
+                name,
                 cwd,
                 unset_cwd,
                 ..
@@ -723,6 +748,7 @@ mod tests {
                 assert!(!unset_avatar);
                 assert_eq!(shape, Some(crate::config::AvatarShape::Circle));
                 assert_eq!(color.as_deref(), Some("#ff6a00"));
+                assert_eq!(name.as_deref(), Some("그록봇 테스터"));
                 assert_eq!(cwd.as_deref(), Some("~/proj"));
                 assert!(!unset_cwd);
             }

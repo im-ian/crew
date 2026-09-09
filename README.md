@@ -71,12 +71,13 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 세션마다 `CREW_AGENT_ID`와 확장된 `PATH`가 들어가요. 시스템 프롬프트는 대략 이렇게 알려 줘요.
 
 > 사용자가 `@id`를 쓰면 그건 **너에게** 다른 봇을 가리키는 것이다. 이 세션에 남아라. 필요하면 직접 `crew tell <id> <text>`를 실행해라.
+> 이름을 바꿔 달라면 `crew agent set --name "새 이름"`을 실행해라. 반복 일을 맡기면 `crew routine add`로 루틴을 만들어라.
 
-그래서 1:1 대화에서 `@리뷰어 이 패치 봐줘`라고 쓰면, 지금 대화 중인 봇이 먼저 일을 하고 필요할 때 리뷰어 봇에게 넘겨요. 봇 사이의 릴레이는 사용자 메시지 하나당 최대 4홉이에요.
+그래서 1:1 대화에서 `@리뷰어 이 패치 봐줘`라고 쓰면, 지금 대화 중인 봇이 먼저 일을 하고 필요할 때 리뷰어 봇에게 넘겨요. 봇 사이의 릴레이는 사용자 메시지 하나당 최대 4홉이에요. 이름 변경과 루틴 등록도 채팅에서 시키면 봇이 같은 식으로 `crew`를 실행해요.
 
 ### <img src="docs/readme/face-teardrop.png" width="28" height="28" alt=""> 메모리
 
-대화 기록은 지우면 아카이브로 옮겨가지만, `$CREW_HOME/memory/<id>.md`는 그대로 남아요. 다음 턴에 Grok은 `--rules`로, Claude는 `--append-system-prompt`로 다시 넣어 줘요. 봇을 복제하면 메모리도 함께 복사되고, 봇을 삭제하면 메모리 파일도 같이 지워져요.
+대화 기록은 지우면 아카이브로 옮겨가지만, `$CREW_HOME/memory/<id>.md`는 그대로 남아요. 다음 턴에 Grok은 `--rules`로, Claude는 `--append-system-prompt`로, Codex는 `-c developer_instructions=`로 다시 넣어 줘요. 봇을 복제하면 메모리도 함께 복사되고, 봇을 삭제하면 메모리 파일도 같이 지워져요.
 
 ---
 
@@ -320,6 +321,7 @@ crew agent list
 crew agent add review --cli claude --name "리뷰어"
 crew agent add impl --cli grok --cwd ~/Projects/app
 crew agent add hack --cli codex
+crew agent set grok --name "그록봇 테스터"
 crew agent set grok --model grok-4 --effort high --shape circle --color "#ff6a00"
 crew agent clone grok --name "Grok 복사본"
 crew agent remove shell
@@ -332,6 +334,7 @@ crew channel add frontend --name "프론트엔드" --members grok,review
 crew channel send frontend 스탠드업 시작
 crew channel set frontend --brief "이 방은 UI만"
 
+crew routine add grok --name "아침" --schedule "평일 8시에 브리핑" --prompt "오늘 할 일 브리핑"
 crew routine add grok --name "아침" --schedule "0 8 * * 1-5" --prompt "오늘 할 일 브리핑"
 crew routine add '#frontend' --name "스탠드업" --schedule "0 9 * * 1-5" --prompt "어제 한 일"
 crew routine run grok 아침
