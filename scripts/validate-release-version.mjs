@@ -112,6 +112,9 @@ export function readRepositoryVersions(root) {
   const uiPackage = JSON.parse(
     readFileSync(resolve(root, "crates/crew/ui/package.json"), "utf8"),
   );
+  const uiLock = JSON.parse(
+    readFileSync(resolve(root, "crates/crew/ui/package-lock.json"), "utf8"),
+  );
   const tauriConfig = JSON.parse(
     readFileSync(resolve(root, "crates/crew/tauri.conf.json"), "utf8"),
   );
@@ -119,9 +122,32 @@ export function readRepositoryVersions(root) {
 
   return {
     "crates/crew/ui/package.json": uiPackage.version,
+    // The lockfile holds the number twice, and `npm install` rewrites both from
+    // package.json — so a stale one turns a local release build into a dirty
+    // working tree, and misreports the version to anything that reads it.
+    "crates/crew/ui/package-lock.json": uiLock.version,
+    'crates/crew/ui/package-lock.json packages[""]': uiLock.packages?.[""]?.version,
     "crates/crew/tauri.conf.json": tauriConfig.version,
     "Cargo.toml": readWorkspacePackageVersion(cargoToml),
   };
+}
+
+/**
+ * Every manifest carries the same number, whatever it is. This is what CI can
+ * check: a tag does not exist yet on a pull request, and finding the drift at
+ * tag-push time means finding it after the tag is published.
+ */
+export function assertConsistentVersions(root = process.cwd()) {
+  const versions = readRepositoryVersions(root);
+  const [first, ...rest] = Object.entries(versions);
+  for (const [source, version] of rest) {
+    if (version !== first[1]) {
+      throw new Error(
+        `version mismatch: ${first[0]} has ${JSON.stringify(first[1])}, ${source} has ${JSON.stringify(version)}`,
+      );
+    }
+  }
+  return first[1];
 }
 
 export function validateRepositoryReleaseVersion(tag, root = process.cwd()) {
@@ -131,6 +157,10 @@ export function validateRepositoryReleaseVersion(tag, root = process.cwd()) {
 function main() {
   if (process.argv[2] === "--assert-newer" && process.argv.length === 5) {
     assertReleaseIsNewer(process.argv[3], process.argv[4]);
+    return;
+  }
+  if (process.argv[2] === "--assert-consistent") {
+    process.stdout.write(`${assertConsistentVersions()}\n`);
     return;
   }
   const tag = process.argv[2];
