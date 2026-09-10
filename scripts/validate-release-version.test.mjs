@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 
 import {
+  assertConsistentVersions,
   assertMatchingReleaseVersions,
   assertReleaseIsNewer,
   compareReleaseTags,
@@ -102,11 +103,76 @@ describe("readRepositoryVersions", () => {
       join(root, "crates/crew/ui/package.json"),
       JSON.stringify({ version: "0.1.0" }),
     );
+    writeFileSync(
+      join(root, "crates/crew/ui/package-lock.json"),
+      JSON.stringify({ version: "0.1.0", packages: { "": { version: "0.1.0" } } }),
+    );
 
     assert.deepEqual(readRepositoryVersions(root), {
       "crates/crew/ui/package.json": "0.1.0",
+      "crates/crew/ui/package-lock.json": "0.1.0",
+      'crates/crew/ui/package-lock.json packages[""]': "0.1.0",
       "crates/crew/tauri.conf.json": "0.1.0",
       "Cargo.toml": "0.1.0",
     });
+  });
+});
+
+describe("assertConsistentVersions", () => {
+  const write = (versions) => {
+    const root = mkdtempSync(join(tmpdir(), "crew-release-consistent-"));
+    temporaryDirectories.push(root);
+    mkdirSync(join(root, "crates/crew/ui"), { recursive: true });
+    writeFileSync(
+      join(root, "Cargo.toml"),
+      `[workspace]\nmembers = ["crates/crew"]\n\n[workspace.package]\nversion = "${versions.cargo}"\nedition = "2021"\n`,
+    );
+    writeFileSync(
+      join(root, "crates/crew/tauri.conf.json"),
+      JSON.stringify({ version: versions.tauri }),
+    );
+    writeFileSync(
+      join(root, "crates/crew/ui/package.json"),
+      JSON.stringify({ version: versions.pkg }),
+    );
+    writeFileSync(
+      join(root, "crates/crew/ui/package-lock.json"),
+      JSON.stringify({
+        version: versions.lock,
+        packages: { "": { version: versions.lockInner ?? versions.lock } },
+      }),
+    );
+    return root;
+  };
+
+  it("returns the version every manifest agrees on", () => {
+    const root = write({
+      cargo: "0.2.0",
+      tauri: "0.2.0",
+      pkg: "0.2.0",
+      lock: "0.2.0",
+    });
+    assert.equal(assertConsistentVersions(root), "0.2.0");
+  });
+
+  it("catches a lockfile left behind by a bump", () => {
+    const root = write({
+      cargo: "0.2.0",
+      tauri: "0.2.0",
+      pkg: "0.2.0",
+      lock: "0.1.0",
+    });
+    assert.throws(() => assertConsistentVersions(root), /package-lock\.json has "0\.1\.0"/);
+  });
+
+  it("catches the lockfile's second copy of the number", () => {
+    const root = write({
+      cargo: "0.2.0",
+      tauri: "0.2.0",
+      pkg: "0.2.0",
+      lock: "0.2.0",
+      lockInner: "0.1.0",
+    });
+    assert.throws(() => assertConsistentVersions(root), /packages\[""\] has "0\.1\.0"/);
   });
 });

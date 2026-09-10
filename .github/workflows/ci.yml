@@ -39,6 +39,12 @@ jobs:
       - name: Release script tests
         run: node --test scripts/*.test.mjs
 
+      # The validator only ran at tag-push time, which finds a mismatch after
+      # the tag is published — and recovering means deleting and re-pushing a
+      # tag the release job then refuses as an existing asset set.
+      - name: Version manifests agree
+        run: node scripts/validate-release-version.mjs --assert-consistent
+
       - name: Typecheck + production bundle
         run: npm run build
         working-directory: crates/crew/ui
