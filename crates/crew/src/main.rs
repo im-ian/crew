@@ -29,8 +29,8 @@ mod transcript;
 mod ui_dev;
 
 use config::{
-    empty_to_none, parse_hex_color, resolve_add_cmd, unique_ids, write_roster, AgentCli,
-    AgentConfig, AvatarShape, Channel, Config, Effort, Routine,
+    empty_to_none, parse_hex_color, resolve_add_cmd, unique_channel_id, unique_ids, write_roster,
+    AgentCli, AgentConfig, AvatarShape, Channel, Config, Effort, Routine,
 };
 use protocol::{Event, Request};
 
@@ -214,7 +214,8 @@ enum RoutineCmd {
 enum ChannelCmd {
     List,
     Add {
-        id: String,
+        /// Channel id (a-z, 0-9, '-', '_'). Omit it to mint one from --name.
+        id: Option<String>,
         #[arg(long)]
         name: Option<String>,
         #[arg(long, value_delimiter = ',')]
@@ -708,6 +709,23 @@ fn run_tell(
     }
 }
 
+fn existing_channel_ids(live: bool) -> anyhow::Result<Vec<String>> {
+    if !live {
+        return Ok(Config::load()
+            .unwrap_or_default()
+            .channels
+            .into_iter()
+            .map(|c| c.id)
+            .collect());
+    }
+    match client::rpc(Request::ListChannels)? {
+        Event::Channels { channels } => Ok(channels.into_iter().map(|c| c.id).collect()),
+        Event::Agents { channels, .. } => Ok(channels.into_iter().map(|c| c.id).collect()),
+        Event::Error { message } => anyhow::bail!("{message}"),
+        _ => Ok(Vec::new()),
+    }
+}
+
 fn run_channel(cmd: ChannelCmd) -> anyhow::Result<()> {
     match cmd {
         ChannelCmd::List => {
@@ -724,13 +742,28 @@ fn run_channel(cmd: ChannelCmd) -> anyhow::Result<()> {
             }
         }
         ChannelCmd::Add { id, name, members } => {
-            let name = name.unwrap_or_else(|| id.clone());
+            let live = paths::is_socket_live();
             let members = unique_ids(members);
-            let ch = Channel::new(id.clone(), name.clone(), members.clone())?;
-            if paths::is_socket_live() {
-                match client::rpc(Request::AddChannel { id, name, members })? {
+            // A bot names a room the way a person does ("브라우저 QA"), and that
+            // is not an id. Minting one from the name keeps the id rule out of
+            // the way; an explicit id is still there for whoever wants it.
+            let (id, name) = match (id, name) {
+                (Some(id), name) => {
+                    let name = name.unwrap_or_else(|| id.clone());
+                    (id, name)
+                }
+                (None, Some(name)) => (unique_channel_id(&name, existing_channel_ids(live)?), name),
+                (None, None) => anyhow::bail!("channel add needs an id or --name"),
+            };
+            let ch = Channel::new(id, name.clone(), members.clone())?;
+            if live {
+                match client::rpc(Request::AddChannel {
+                    id: ch.id.clone(),
+                    name,
+                    members,
+                })? {
                     Event::Error { message } => anyhow::bail!("{message}"),
-                    ev => client::print_event(ev),
+                    _ => {}
                 }
             } else {
                 let mut cfg = Config::load().unwrap_or_default();
@@ -745,11 +778,13 @@ fn run_channel(cmd: ChannelCmd) -> anyhow::Result<()> {
                         anyhow::bail!("unknown agent {m}");
                     }
                 }
-                cfg.channels.push(ch);
+                cfg.channels.push(ch.clone());
                 cfg.save()?;
                 write_roster(&cfg.agents, &cfg.channels)?;
-                Ok(())
             }
+            // The caller (often a bot) needs the id to post there next.
+            println!("{}", ch.id);
+            Ok(())
         }
         ChannelCmd::Join { channel, agent } => {
             let agent = require_agent_id(agent, "join")?;
