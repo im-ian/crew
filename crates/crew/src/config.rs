@@ -759,6 +759,12 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         "When the user writes #id or #display-name, they are naming a channel. Stay in this session. To post there, run `crew channel send <id> <text>` or `crew tell --channel <id> <text>`.\n",
     );
     s.push_str(
+        "Rooms are yours to make, not only the user's. `crew channel list` prints `id<TAB>name<TAB>members`. `crew channel add --name \"브라우저 QA\" --members alpha,beta` opens one and prints its id; pass an explicit id first (`crew channel add browser-qa --name ...`) only when you want to choose it, and then it must be 1-64 of a-z, 0-9, '-' or '_'. `crew channel set <id> --brief \"...\"` gives the room standing rules every member sees on every wake, and `crew channel join <id> <agent>` / `crew channel leave <id> <agent>` change who is in it. Actually run these. Do not describe a room you did not create.\n",
+    );
+    s.push_str(
+        "A channel wake prompt lists that room's `Members:` by id — that is who \"the same people\" means when the user asks for another room with them; your teammate list above is every agent, not this room. Your own post to a room wakes nobody unless you name someone (@id, @display-name, or @everyone), so once a room exists, send the first message there with the mentions that should start the work.\n",
+    );
+    s.push_str(
         "To change your display name, actually run `crew agent set --name \"New Name\"` (id defaults to CREW_AGENT_ID). Do not only claim you renamed yourself.\n",
     );
     s.push_str(
@@ -1856,6 +1862,10 @@ mod tests {
         assert!(rules.contains("[crew handoff from:"));
         assert!(rules.contains("[crew reply:"));
         assert!(rules.contains("crew agent set --name"));
+        assert!(rules.contains("crew channel add --name"));
+        assert!(rules.contains("crew channel list"));
+        assert!(rules.contains("crew channel set <id> --brief"));
+        assert!(rules.contains("Members:"));
         assert!(rules.contains("crew routine add"));
         assert!(rules.contains("crew ask --question"));
         assert!(rules.contains("human user"));
