@@ -64,7 +64,9 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 - 멘션이 없으면 → 마지막으로 답한 멤버가, 그마저 없으면 첫 번째 멤버가
 - 봇이 멘션 없이 채널에 글을 남기면 → 아무도 답하지 않아요. 봇끼리 끝없이 주고받지 않도록요
 
-호출된 봇에게는 채널 이름, 브리프, 최근 대화 몇 줄이 함께 전달돼요.
+호출된 봇에게는 채널 이름, **멤버 id**, 브리프, 최근 대화 몇 줄이 함께 전달돼요.
+
+채널은 봇도 만들 수 있어요. "이 멤버 그대로 다른 방 하나 파 줘" 처럼 부탁하면, 봇이 `crew channel list`로 지금 방 멤버를 확인하고 `crew channel add`로 새 방을 열어요. 새 방에 브리프를 넣어 두면 그 방에서 깨어나는 멤버마다 그 룰을 같이 받아요. 방은 멤버가 아니면 글을 못 올리니까 봇이 그 방에서 말할 거면 자기 id도 멤버에 넣어야 하고, 봇이 올린 첫 글에 `@멤버`나 `@everyone`이 있어야 일이 시작돼요.
 
 ### <img src="docs/readme/face-square.png" width="28" height="28" alt=""> 핸드오프
 
@@ -335,8 +337,11 @@ crew ask --question "어느 쪽을 고를래?" --option A --option B --option C
 crew ask --question "로그인" --input 아이디 --input 비밀번호
 
 crew channel add frontend --name "프론트엔드" --members grok,review
+crew channel add --name "브라우저 QA" --members grok,review   # id를 생략하면 이름에서 만들고, 만든 id를 출력해요
 crew channel send frontend 스탠드업 시작
 crew channel set frontend --brief "이 방은 UI만"
+crew channel join frontend impl
+crew channel leave frontend review
 
 crew routine add grok --name "아침" --schedule "평일 8시에 브리핑" --prompt "오늘 할 일 브리핑"
 crew routine add grok --name "아침" --schedule "0 8 * * 1-5" --prompt "오늘 할 일 브리핑"

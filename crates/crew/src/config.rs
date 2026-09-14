@@ -340,6 +340,11 @@ pub fn slug_id(name: &str) -> String {
     slug_with_fallback(name, "bot")
 }
 
+/// Caps a minted slug well short of `valid_agent_id`'s 64, leaving room for the
+/// `-2` … `-N` suffix `unique_from_base` appends. Without it a long name mints
+/// an id that `Channel::new` then rejects — naming an id the caller never typed.
+const SLUG_MAX: usize = 48;
+
 fn slug_with_fallback(name: &str, fallback: &str) -> String {
     let mut out = String::new();
     for c in name.chars() {
@@ -351,6 +356,7 @@ fn slug_with_fallback(name: &str, fallback: &str) -> String {
             }
         }
     }
+    out.truncate(SLUG_MAX);
     let out = out.trim_matches('-').to_string();
     if out.is_empty() {
         fallback.into()
@@ -757,6 +763,12 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
     );
     s.push_str(
         "When the user writes #id or #display-name, they are naming a channel. Stay in this session. To post there, run `crew channel send <id> <text>` or `crew tell --channel <id> <text>`.\n",
+    );
+    s.push_str(
+        "Rooms are yours to make, not only the user's. `crew channel list` prints `id<TAB>name<TAB>members`. `crew channel add --name \"브라우저 QA\" --members alpha,beta` opens one and prints its id. A room only takes posts from its members, so put your own id in `--members` when you will speak there. Pass an explicit id first (`crew channel add browser-qa --name ...`) only when you want to choose it, and then it must be 1-64 of a-z, 0-9, '-' or '_'. `crew channel set <id> --brief \"...\"` gives the room standing rules every member sees on every wake, and `crew channel join <id> <agent>` / `crew channel leave <id> <agent>` change who is in it. Actually run these. Do not describe a room you did not create.\n",
+    );
+    s.push_str(
+        "A channel wake prompt lists that room's `Members:` by id — that is who \"the same people\" means when the user asks for another room with them; your teammate list above is every agent, not this room. Your own post to a room wakes nobody unless you name someone (@id, @display-name, or @everyone), so once a room exists, send the first message there with the mentions that should start the work.\n",
     );
     s.push_str(
         "To change your display name, actually run `crew agent set --name \"New Name\"` (id defaults to CREW_AGENT_ID). Do not only claim you renamed yourself.\n",
@@ -1762,6 +1774,20 @@ mod tests {
     }
 
     #[test]
+    fn a_minted_id_always_passes_the_id_rule() {
+        let long = "Browser QA for the checkout flow regression suite and payment edge cases";
+        let id = unique_channel_id(long, Vec::<&str>::new());
+        assert!(valid_agent_id(&id), "{id}");
+        let taken: Vec<String> = (2..40)
+            .map(|n| format!("{id}-{n}"))
+            .chain([id.clone()])
+            .collect();
+        let suffixed = unique_channel_id(long, taken);
+        assert!(valid_agent_id(&suffixed), "{suffixed}");
+        assert!(Channel::new(suffixed.clone(), "x".into(), Vec::new()).is_ok());
+    }
+
+    #[test]
     fn unique_channel_id_suffixes() {
         assert_eq!(unique_channel_id("Room", ["room"]), "room-2");
         assert_eq!(unique_channel_id("프로젝트", Vec::<&str>::new()), "channel");
@@ -1856,6 +1882,10 @@ mod tests {
         assert!(rules.contains("[crew handoff from:"));
         assert!(rules.contains("[crew reply:"));
         assert!(rules.contains("crew agent set --name"));
+        assert!(rules.contains("crew channel add --name"));
+        assert!(rules.contains("crew channel list"));
+        assert!(rules.contains("crew channel set <id> --brief"));
+        assert!(rules.contains("Members:"));
         assert!(rules.contains("crew routine add"));
         assert!(rules.contains("crew ask --question"));
         assert!(rules.contains("human user"));

@@ -17,9 +17,15 @@ pub struct WakeLine<'a> {
 /// wake prompt. Lines at or before it are omitted so they are not compounded
 /// into the CLI session on every wake. `None` uses the latest `RECENT_LIMIT`
 /// window (first wake, or after a session reset).
+///
+/// `members` are the room's agent ids, verbatim. A member asked to carry this
+/// room's people somewhere else — a new room, a tell — has no other way to
+/// learn who is in here: the spawn-time roster lists every agent, not this
+/// room's.
 pub fn wake_text(
     channel_id: &str,
     channel_name: &str,
+    members: &[String],
     brief: Option<&str>,
     recent: &[WakeLine<'_>],
     after_id: Option<&str>,
@@ -31,6 +37,11 @@ pub fn wake_text(
     if !name.is_empty() && name != channel_id {
         out.push_str("Channel: ");
         out.push_str(name);
+        out.push('\n');
+    }
+    if !members.is_empty() {
+        out.push_str("Members: ");
+        out.push_str(&members.join(", "));
         out.push('\n');
     }
     if let Some(brief) = brief.map(str::trim).filter(|s| !s.is_empty()) {
@@ -107,10 +118,11 @@ mod tests {
 
     #[test]
     fn envelope_stays_first_and_current_is_last() {
-        let text = wake_text("room", "room", None, &[], None, "user", "hello");
+        let text = wake_text("room", "room", &[], None, &[], None, "user", "hello");
         assert!(text.starts_with("[crew channel:room from:user]\n"));
         assert!(text.ends_with("hello\n"));
         assert!(!text.contains("Brief:"));
+        assert!(!text.contains("Members:"));
         assert!(!text.contains("Earlier"));
     }
 
@@ -133,9 +145,11 @@ mod tests {
                 text: "ship it today",
             },
         ];
+        let members = ["alpha".to_string(), "beta".to_string()];
         let text = wake_text(
             "launch",
             "Launch",
+            &members,
             Some("  landing page this week  "),
             &recent,
             None,
@@ -144,6 +158,7 @@ mod tests {
         );
         assert!(text.starts_with("[crew channel:launch from:user]\n"));
         assert!(text.contains("Channel: Launch\n"));
+        assert!(text.contains("Members: alpha, beta\n"));
         assert!(text.contains("Brief:\nlanding page this week\n"));
         assert!(text.contains("- user: can you review the hero"));
         assert!(text.contains("- alpha: I changed the type"));
@@ -166,7 +181,7 @@ mod tests {
             from: "user",
             text: &long,
         });
-        let text = wake_text("room", "room", None, &recent, None, "user", "now");
+        let text = wake_text("room", "room", &[], None, &recent, None, "user", "now");
         assert!(!text.contains("msg 0"));
         assert!(text.contains("msg 19"));
         let clipped = format!("{}…", "x".repeat(LINE_LIMIT));
@@ -193,12 +208,12 @@ mod tests {
                 text: "new",
             },
         ];
-        let text = wake_text("room", "room", None, &recent, Some("2"), "user", "new");
+        let text = wake_text("room", "room", &[], None, &recent, Some("2"), "user", "new");
         assert!(!text.contains("- user: old"));
         assert!(!text.contains("- alpha: seen"));
         assert!(!text.contains("Earlier"));
         assert!(text.ends_with("new\n"));
-        let again = wake_text("room", "room", None, &recent, Some("3"), "user", "new");
+        let again = wake_text("room", "room", &[], None, &recent, Some("3"), "user", "new");
         assert!(!again.contains("Earlier"));
     }
 }
