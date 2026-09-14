@@ -2583,6 +2583,7 @@ fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
         let envelope = crate::channel_context::wake_text(
             &ch.id,
             &ch.name,
+            &ch.members,
             ch.brief.as_deref(),
             &recent,
             last_wake_id(to, &ch.id).as_deref(),
