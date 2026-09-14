@@ -722,7 +722,23 @@ fn existing_channel_ids(live: bool) -> anyhow::Result<Vec<String>> {
         Event::Channels { channels } => Ok(channels.into_iter().map(|c| c.id).collect()),
         Event::Agents { channels, .. } => Ok(channels.into_iter().map(|c| c.id).collect()),
         Event::Error { message } => anyhow::bail!("{message}"),
-        _ => Ok(Vec::new()),
+        _ => anyhow::bail!("unexpected daemon response"),
+    }
+}
+
+/// A room's id and display name from what the caller typed. The id is optional
+/// so a bot can name a room the way a person does ("브라우저 QA"); the name then
+/// mints one. An empty name is the daemon's cue to reuse the id, so the CLI does
+/// not decide that a second time.
+fn resolve_channel_add(
+    id: Option<String>,
+    name: Option<String>,
+    existing: impl FnOnce() -> anyhow::Result<Vec<String>>,
+) -> anyhow::Result<(String, String)> {
+    match (id, name) {
+        (Some(id), name) => Ok((id, name.unwrap_or_default())),
+        (None, Some(name)) => Ok((unique_channel_id(&name, existing()?), name)),
+        (None, None) => anyhow::bail!("channel add needs an id or --name"),
     }
 }
 
@@ -744,26 +760,16 @@ fn run_channel(cmd: ChannelCmd) -> anyhow::Result<()> {
         ChannelCmd::Add { id, name, members } => {
             let live = paths::is_socket_live();
             let members = unique_ids(members);
-            // A bot names a room the way a person does ("브라우저 QA"), and that
-            // is not an id. Minting one from the name keeps the id rule out of
-            // the way; an explicit id is still there for whoever wants it.
-            let (id, name) = match (id, name) {
-                (Some(id), name) => {
-                    let name = name.unwrap_or_else(|| id.clone());
-                    (id, name)
-                }
-                (None, Some(name)) => (unique_channel_id(&name, existing_channel_ids(live)?), name),
-                (None, None) => anyhow::bail!("channel add needs an id or --name"),
-            };
+            let (id, name) = resolve_channel_add(id, name, || existing_channel_ids(live))?;
             let ch = Channel::new(id, name.clone(), members.clone())?;
+            let id = ch.id.clone();
             if live {
-                match client::rpc(Request::AddChannel {
-                    id: ch.id.clone(),
+                if let Event::Error { message } = client::rpc(Request::AddChannel {
+                    id: id.clone(),
                     name,
                     members,
                 })? {
-                    Event::Error { message } => anyhow::bail!("{message}"),
-                    _ => {}
+                    anyhow::bail!("{message}");
                 }
             } else {
                 let mut cfg = Config::load().unwrap_or_default();
@@ -778,12 +784,12 @@ fn run_channel(cmd: ChannelCmd) -> anyhow::Result<()> {
                         anyhow::bail!("unknown agent {m}");
                     }
                 }
-                cfg.channels.push(ch.clone());
+                cfg.channels.push(ch);
                 cfg.save()?;
                 write_roster(&cfg.agents, &cfg.channels)?;
             }
             // The caller (often a bot) needs the id to post there next.
-            println!("{}", ch.id);
+            println!("{id}");
             Ok(())
         }
         ChannelCmd::Join { channel, agent } => {
@@ -1113,6 +1119,44 @@ mod tests {
 
     fn parse_ok(args: &[&str]) -> Cli {
         Cli::try_parse_from(args).expect("parse")
+    }
+
+    fn taken() -> anyhow::Result<Vec<String>> {
+        Ok(vec!["qa".to_string()])
+    }
+
+    #[test]
+    fn channel_add_takes_an_id_or_mints_one_from_the_name() {
+        match parse_ok(&["crew", "channel", "add", "--name", "브라우저 QA"]).cmd {
+            Some(Cmd::Channel(ChannelCmd::Add { id, name, members })) => {
+                assert!(id.is_none(), "a bot names a room without picking an id");
+                assert_eq!(name.as_deref(), Some("브라우저 QA"));
+                assert!(members.is_empty());
+            }
+            _ => panic!("expected channel add"),
+        }
+
+        // Minted from the name, and suffixed past the id already in use.
+        let (id, name) =
+            resolve_channel_add(None, Some("브라우저 QA".into()), taken).expect("mint");
+        assert_eq!(id, "qa-2");
+        assert_eq!(name, "브라우저 QA");
+
+        // An explicit id is kept verbatim, and the empty name lets `Channel::new`
+        // decide the display name once, on the daemon's side of the wire.
+        let (id, name) = resolve_channel_add(Some("browser-qa".into()), None, || {
+            panic!("an explicit id must not cost a channel list")
+        })
+        .expect("explicit");
+        assert_eq!(id, "browser-qa");
+        assert_eq!(name, "");
+        assert_eq!(
+            Channel::new(id, name, Vec::new()).unwrap().name,
+            "browser-qa"
+        );
+
+        let err = resolve_channel_add(None, None, taken).expect_err("needs one of them");
+        assert!(err.to_string().contains("needs an id or --name"), "{err}");
     }
 
     #[test]
