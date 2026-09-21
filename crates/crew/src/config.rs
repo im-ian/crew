@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
+use anyhow::Context;
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
@@ -12,6 +13,7 @@ const DEFAULT_AGENTS: &str = include_str!("../../../agents.example.json");
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
+    #[serde(default)]
     pub agents: Vec<AgentConfig>,
     #[serde(default)]
     pub channels: Vec<Channel>,
@@ -501,12 +503,11 @@ impl Config {
             paths::ensure_home()?;
             fs::write(&path, DEFAULT_AGENTS)?;
         }
-        let raw = fs::read_to_string(&path)?;
-        let cfg: Config = serde_json::from_str(&raw)?;
-        if cfg.agents.is_empty() {
-            anyhow::bail!("no agents configured in {}", path.display());
-        }
-        Ok(cfg)
+        let raw = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+        // An empty roster is a starting point, not an error. Deleting the last
+        // bot saves one, and refusing to load it left the daemon dead and the
+        // desktop quitting on launch with no way back in.
+        serde_json::from_str(&raw).with_context(|| format!("parse {}", path.display()))
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
@@ -1257,6 +1258,38 @@ mod tests {
             .find(|w| w[0] == "-c" && w[1].starts_with(&prefix))
             .map(|w| &w[1][prefix.len()..])
             .unwrap_or("")
+    }
+
+    #[test]
+    fn load_accepts_an_empty_roster() {
+        paths::testing::with_home("config-empty-roster", || {
+            paths::ensure_home().expect("home");
+            fs::write(paths::agents_path(), r#"{"agents":[],"channels":[]}"#).expect("write");
+            let cfg = Config::load().expect("an empty roster is not an error");
+            assert!(cfg.agents.is_empty());
+        });
+    }
+
+    #[test]
+    fn load_accepts_a_config_that_omits_the_roster() {
+        paths::testing::with_home("config-no-roster-key", || {
+            paths::ensure_home().expect("home");
+            fs::write(paths::agents_path(), r#"{"channels":[]}"#).expect("write");
+            let cfg = Config::load().expect("a missing roster key is an empty roster");
+            assert!(cfg.agents.is_empty());
+        });
+    }
+
+    /// The offline CLI arms save straight after loading. Defaulting a config
+    /// this binary cannot read would write that empty default over the roster.
+    #[test]
+    fn load_refuses_an_unreadable_config() {
+        paths::testing::with_home("config-corrupt", || {
+            paths::ensure_home().expect("home");
+            fs::write(paths::agents_path(), "{\"agents\": [,]}").expect("write");
+            let err = Config::load().expect_err("a corrupt config is an error");
+            assert!(err.to_string().contains("agents.json"), "{err:#}");
+        });
     }
 
     #[test]

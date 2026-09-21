@@ -333,6 +333,9 @@ fn run() -> anyhow::Result<()> {
                 client::print_event(client::rpc(Request::List)?)
             } else {
                 let cfg = Config::load()?;
+                if cfg.agents.is_empty() {
+                    println!("(no agents)");
+                }
                 for a in cfg.agents {
                     println!(
                         "{}\t{}\toff\t{}\t{}\t{}\t{}",
@@ -385,7 +388,7 @@ fn run() -> anyhow::Result<()> {
                     ev => client::print_event(ev),
                 }
             } else {
-                let mut cfg = Config::load().unwrap_or_default();
+                let mut cfg = Config::load()?;
                 if cfg.agents.iter().any(|a| a.id == id) {
                     anyhow::bail!("agent {id} already exists");
                 }
@@ -772,7 +775,7 @@ fn run_channel(cmd: ChannelCmd) -> anyhow::Result<()> {
                     anyhow::bail!("{message}");
                 }
             } else {
-                let mut cfg = Config::load().unwrap_or_default();
+                let mut cfg = Config::load()?;
                 if cfg.agents.is_empty() {
                     anyhow::bail!("no agents configured");
                 }
