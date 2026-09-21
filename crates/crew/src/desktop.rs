@@ -1,3 +1,11 @@
+//! Tauri commands for the desktop window.
+//!
+//! A command declared `#[tauri::command]` runs on the main thread, so anything
+//! that waits — a daemon round-trip, a daemon start, a child process — freezes
+//! the window for as long as it takes. Those are declared
+//! `#[tauri::command(async)]` instead, which hands them to a worker. See the
+//! test at the bottom of this file, which holds the rule.
+
 use std::sync::Mutex;
 
 use tauri::Manager;
@@ -29,13 +37,13 @@ fn parse_shape(shape: Option<String>) -> Result<Option<AvatarShape>, String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_models(cli: String) -> Result<crate::models::ModelList, String> {
     let cli = AgentCli::from_key(&cli).map_err(|e| e.to_string())?;
     crate::models::list_models(cli).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_agents() -> Result<Vec<AgentInfo>, String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     match client::rpc(Request::List) {
@@ -51,7 +59,7 @@ fn list_agents() -> Result<Vec<AgentInfo>, String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn send_message(agent: String, text: String) -> Result<(), String> {
     match client::rpc(Request::Send { agent, text }) {
         Ok(Event::Ok) => Ok(()),
@@ -61,7 +69,7 @@ fn send_message(agent: String, text: String) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn stop_agent(agent: String) -> Result<(), String> {
     match client::rpc(Request::Interrupt { agent }) {
         Ok(Event::Ok) => Ok(()),
@@ -71,7 +79,7 @@ fn stop_agent(agent: String) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn approve_agent(agent: String, allow: bool) -> Result<(), String> {
     match client::rpc(Request::Approve { agent, allow }) {
         Ok(Event::Ok) => Ok(()),
@@ -81,7 +89,7 @@ fn approve_agent(agent: String, allow: bool) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn answer_choice(
     agent: String,
     message_id: String,
@@ -105,7 +113,7 @@ fn answer_choice(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn tell_message(from: Option<String>, to: String, text: String) -> Result<(), String> {
     let from = client::tell_from(from);
     match client::rpc(Request::Tell {
@@ -128,7 +136,7 @@ struct SnapshotView {
     status: crate::protocol::AgentStatus,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_snapshot(agent: String) -> Result<SnapshotView, String> {
     match client::rpc(Request::Snapshot { agent }) {
         Ok(Event::Snapshot {
@@ -147,7 +155,7 @@ fn get_snapshot(agent: String) -> Result<SnapshotView, String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_channels() -> Result<Vec<ChannelInfo>, String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     match client::rpc(Request::ListChannels) {
@@ -159,7 +167,7 @@ fn list_channels() -> Result<Vec<ChannelInfo>, String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_channel_messages(channel: String) -> Result<Vec<ChatMessage>, String> {
     match client::rpc(Request::ChannelMessages { channel }) {
         Ok(Event::ChannelMessages { messages, .. }) => Ok(messages),
@@ -169,7 +177,7 @@ fn get_channel_messages(channel: String) -> Result<Vec<ChatMessage>, String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn add_channel(name: String, members: Vec<String>) -> Result<String, String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     let name = name.trim().to_string();
@@ -190,7 +198,7 @@ fn add_channel(name: String, members: Vec<String>) -> Result<String, String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_channel(
     id: String,
     name: Option<String>,
@@ -217,7 +225,7 @@ fn set_channel(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn leave_channel(channel: String, agent: Option<String>) -> Result<(), String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     let channel = channel.trim().to_string();
@@ -237,7 +245,7 @@ fn leave_channel(channel: String, agent: Option<String>) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn remove_channel(channel: String) -> Result<(), String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     let channel = channel.trim().to_string();
@@ -252,7 +260,7 @@ fn remove_channel(channel: String) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn channel_send(channel: String, text: String) -> Result<(), String> {
     let from = client::tell_from(Some("user".into()));
     match client::rpc(Request::Tell {
@@ -296,7 +304,7 @@ fn set_memory(agent: String, text: String) -> Result<(), String> {
     crate::memory::write(agent, &text).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_messages(agent: String) -> Result<Vec<ChatMessage>, String> {
     match client::rpc(Request::Messages { agent }) {
         Ok(Event::Messages { messages, .. }) => Ok(messages),
@@ -331,7 +339,7 @@ fn ping_failure(err: String) -> String {
     start_error().unwrap_or(err)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn daemon_ping() -> Result<(), String> {
     match client::rpc(Request::Ping) {
         Ok(Event::Pong) => {
@@ -344,7 +352,7 @@ fn daemon_ping() -> Result<(), String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn reset_agent(agent: String, drop_routines: bool) -> Result<String, String> {
     match client::rpc(Request::Reset {
         agent,
@@ -358,7 +366,7 @@ fn reset_agent(agent: String, drop_routines: bool) -> Result<String, String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_agent(
     id: String,
     model: Option<String>,
@@ -407,7 +415,7 @@ fn set_agent(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn add_agent(
     name: String,
     cli: String,
@@ -472,7 +480,7 @@ fn add_agent(
     Ok(id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn clone_agent(id: String, name: Option<String>) -> Result<String, String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     let id = id.trim().to_string();
@@ -489,7 +497,7 @@ fn clone_agent(id: String, name: Option<String>) -> Result<String, String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn remove_agent(id: String) -> Result<(), String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     match client::rpc(Request::RemoveAgent { id }) {
@@ -528,7 +536,7 @@ fn rpc_set_avatar(id: String, avatar: Option<String>, unset_avatar: bool) -> Res
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_avatar(id: String, data: String, name: Option<String>) -> Result<(), String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     let id = id.trim().to_string();
@@ -541,7 +549,7 @@ fn set_avatar(id: String, data: String, name: Option<String>) -> Result<(), Stri
     rpc_set_avatar(id, Some(dest.to_string_lossy().into_owned()), false)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn clear_avatar(id: String) -> Result<(), String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     let id = id.trim().to_string();
@@ -551,7 +559,7 @@ fn clear_avatar(id: String) -> Result<(), String> {
     rpc_set_avatar(id, None, true)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn add_routine(
     agent: String,
     name: String,
@@ -571,7 +579,7 @@ fn add_routine(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn remove_routine(agent: String, key: String) -> Result<(), String> {
     match client::rpc(Request::RemoveRoutine { agent, key }) {
         Ok(Event::Ok) | Ok(Event::Agents { .. }) => Ok(()),
@@ -581,7 +589,7 @@ fn remove_routine(agent: String, key: String) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_routine_enabled(agent: String, key: String, enabled: bool) -> Result<(), String> {
     match client::rpc(Request::SetRoutineEnabled {
         agent,
@@ -595,7 +603,7 @@ fn set_routine_enabled(agent: String, key: String, enabled: bool) -> Result<(), 
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn run_routine(agent: String, key: String) -> Result<(), String> {
     match client::rpc(Request::RunRoutine { agent, key }) {
         Ok(Event::Ok) | Ok(Event::Agents { .. }) => Ok(()),
@@ -605,7 +613,7 @@ fn run_routine(agent: String, key: String) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn edit_routine(
     agent: String,
     key: String,
@@ -627,7 +635,7 @@ fn edit_routine(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_routine_runs(
     agent: String,
     key: String,
@@ -640,7 +648,7 @@ fn list_routine_runs(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn search_crew(query: String) -> Result<Vec<crate::search::SearchHit>, String> {
     match client::rpc(Request::Search { query }) {
         Ok(Event::Search { hits }) => Ok(hits),
@@ -696,7 +704,7 @@ fn set_locale(locale: String) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn open_path(path: String) -> Result<(), String> {
     let raw = path.trim();
     if raw.is_empty() {
@@ -846,6 +854,33 @@ mod tests {
         assert_eq!(
             ping_failure("cannot connect to daemon at /x/crew.sock".into()),
             "cannot connect to daemon at /x/crew.sock"
+        );
+    }
+
+    /// The rule from the module header, checked against the file itself: a
+    /// command that waits on the daemon must not hold the main thread. Adding
+    /// one is a single missing token away from freezing the window, and the
+    /// symptom — a UI that stops repainting while a daemon is slow — reads as
+    /// anything but a missing attribute.
+    #[test]
+    fn no_command_waits_on_the_daemon_from_the_main_thread() {
+        let src = include_str!("desktop.rs");
+        let mut offenders = Vec::new();
+        for block in src.split("#[tauri::command]\n").skip(1) {
+            let body = block.split("\n}\n").next().unwrap_or(block);
+            if body.contains("client::rpc") || body.contains("client::ensure_daemon") {
+                let name = body
+                    .split_once("fn ")
+                    .and_then(|(_, rest)| rest.split_once(['(', '<']))
+                    .map(|(name, _)| name)
+                    .unwrap_or("?");
+                offenders.push(name.to_string());
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "these talk to the daemon on the main thread; \
+             declare them #[tauri::command(async)]: {offenders:?}"
         );
     }
 }
