@@ -2833,7 +2833,10 @@ mod daemon_tests {
         assert!(!lost_socket(ours, Some(ours)), "still ours");
         assert!(lost_socket(ours, None), "unlinked and not replaced");
         assert!(lost_socket(ours, Some((1, 101))), "somebody else's socket");
-        assert!(lost_socket(ours, Some((2, 100))), "same inode, other device");
+        assert!(
+            lost_socket(ours, Some((2, 100))),
+            "same inode, other device"
+        );
     }
 
     #[test]
