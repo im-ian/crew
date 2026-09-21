@@ -887,6 +887,13 @@ fn restore_transcripts(cfg: &Config) {
     }
 }
 
+/// Whether the socket path has stopped naming the socket this daemon bound.
+/// `None` — unlinked and not yet replaced — is as unreachable as a different
+/// socket sitting there.
+fn lost_socket(bound: (u64, u64), now: Option<(u64, u64)>) -> bool {
+    now != Some(bound)
+}
+
 pub async fn run() -> anyhow::Result<()> {
     paths::ensure_home()?;
     if paths::is_socket_live() {
@@ -942,6 +949,10 @@ pub async fn run() -> anyhow::Result<()> {
 
     let listener = UnixListener::bind(paths::socket_path())
         .with_context(|| format!("bind {}", paths::socket_path().display()))?;
+    // Immediately, before anything else can run: a theft landing between the
+    // bind and this read would record the thief's socket as ours and leave the
+    // check below comparing it against itself forever.
+    let bound = paths::socket_identity();
     paths::write_pid(std::process::id())?;
     paths::write_daemon_version(env!("CARGO_PKG_VERSION"))?;
     eprintln!(
@@ -949,33 +960,45 @@ pub async fn run() -> anyhow::Result<()> {
         paths::socket_path().display()
     );
 
-    // What we just bound. If the path stops naming it, another daemon unlinked
-    // it and bound its own — see the race in README — and this process would
-    // otherwise sit in the loop below forever, unreachable, with its tickers
-    // still flushing the transcripts the reachable daemon now owns.
-    let bound = paths::socket_identity();
-
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
     spawn_status_ticker();
     spawn_transcript_ticker();
     spawn_routine_ticker();
 
+    // Another daemon can unlink this socket and bind its own at the same path
+    // (issue #25). The daemon that was unlinked has no other way to find out:
+    // its listener still works, nothing ever connects, and it would sit here
+    // for the life of the machine with its tickers flushing the transcripts
+    // the reachable daemon now owns.
+    //
+    // `bound` is None only if that stat failed, which turns the check off
+    // rather than guessing.
     let mut still_ours = tokio::time::interval(Duration::from_secs(1));
+    let mut lost = 0u8;
     loop {
         tokio::select! {
-            _ = still_ours.tick() => {
-                // `bound` is None only if that first stat failed, which leaves
-                // the check off rather than guessing.
-                if bound.is_some() && paths::socket_identity() != bound {
-                    eprintln!(
-                        "[crew] {} is no longer the socket this daemon bound; another daemon has it. exiting",
-                        paths::socket_path().display()
-                    );
-                    // Leave everything. The socket, pid and version name the
-                    // daemon that took the path, and `shutdown_agents` would
-                    // unlink `cli-sessions/<id>` — the ids its bots resume
-                    // from. This process's pty children end with it.
-                    std::process::exit(1);
+            _ = still_ours.tick(), if bound.is_some() => {
+                let now = paths::socket_identity();
+                if !lost_socket(bound.expect("guarded"), now) {
+                    lost = 0;
+                } else {
+                    // Twice, because one `stat` can fail for reasons that are
+                    // not this, and the answer here is to end the process.
+                    lost += 1;
+                    if lost >= 2 {
+                        eprintln!(
+                            "[crew] {} {}; this daemon is unreachable. exiting",
+                            paths::socket_path().display(),
+                            if now.is_none() { "is gone" } else { "is a different socket now" }
+                        );
+                        // Only exit. The socket, pid and version name whoever
+                        // has the path now, and `shutdown_agents` would unlink
+                        // `cli-sessions/<id>` — the ids that daemon's bots
+                        // resume from. The pty children end with this process;
+                        // a headless turn in flight loses its thread here, so
+                        // it writes nothing, though its CLI child outlives us.
+                        std::process::exit(1);
+                    }
                 }
             }
             _ = tokio::signal::ctrl_c() => {
@@ -2802,6 +2825,15 @@ mod daemon_tests {
             assert!(crate::transcript::channel_messages(&room).is_empty());
             let _ = remove_channel(&room);
         });
+    }
+
+    #[test]
+    fn a_socket_that_is_gone_counts_as_lost() {
+        let ours = (1, 100);
+        assert!(!lost_socket(ours, Some(ours)), "still ours");
+        assert!(lost_socket(ours, None), "unlinked and not replaced");
+        assert!(lost_socket(ours, Some((1, 101))), "somebody else's socket");
+        assert!(lost_socket(ours, Some((2, 100))), "same inode, other device");
     }
 
     #[test]
