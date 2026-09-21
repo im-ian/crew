@@ -385,7 +385,7 @@ fn run() -> anyhow::Result<()> {
                     ev => client::print_event(ev),
                 }
             } else {
-                let mut cfg = Config::load().unwrap_or_default();
+                let mut cfg = Config::load()?;
                 if cfg.agents.iter().any(|a| a.id == id) {
                     anyhow::bail!("agent {id} already exists");
                 }
@@ -772,7 +772,7 @@ fn run_channel(cmd: ChannelCmd) -> anyhow::Result<()> {
                     anyhow::bail!("{message}");
                 }
             } else {
-                let mut cfg = Config::load().unwrap_or_default();
+                let mut cfg = Config::load()?;
                 if cfg.agents.is_empty() {
                     anyhow::bail!("no agents configured");
                 }

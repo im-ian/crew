@@ -502,11 +502,10 @@ impl Config {
             fs::write(&path, DEFAULT_AGENTS)?;
         }
         let raw = fs::read_to_string(&path)?;
-        let cfg: Config = serde_json::from_str(&raw)?;
-        if cfg.agents.is_empty() {
-            anyhow::bail!("no agents configured in {}", path.display());
-        }
-        Ok(cfg)
+        // An empty roster is a starting point, not an error. Deleting the last
+        // bot saves one, and refusing to load it left the daemon dead and the
+        // desktop quitting on launch with no way back in.
+        Ok(serde_json::from_str(&raw)?)
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
@@ -1257,6 +1256,16 @@ mod tests {
             .find(|w| w[0] == "-c" && w[1].starts_with(&prefix))
             .map(|w| &w[1][prefix.len()..])
             .unwrap_or("")
+    }
+
+    #[test]
+    fn load_accepts_an_empty_roster() {
+        paths::testing::with_home("config-empty-roster", || {
+            paths::ensure_home().expect("home");
+            fs::write(paths::agents_path(), r#"{"agents":[],"channels":[]}"#).expect("write");
+            let cfg = Config::load().expect("an empty roster is not an error");
+            assert!(cfg.agents.is_empty());
+        });
     }
 
     #[test]
