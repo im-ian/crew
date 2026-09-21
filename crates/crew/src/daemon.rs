@@ -897,6 +897,21 @@ pub async fn run() -> anyhow::Result<()> {
     }
     paths::remove_stale_socket();
 
+    // `serve` opens the roster before it binds, so by the time it finds out it
+    // lost a start race — two daemons can both pass the check above while
+    // neither has bound — every agent is already open. Returning that error
+    // straight from here left all of them running, because the teardown lived
+    // at the far end of the accept loop.
+    //
+    // Only the agents. The socket, pid and version name whoever is serving,
+    // and on this path that is somebody else: clearing them here would unlink
+    // the live socket of the daemon that won.
+    let served = serve().await;
+    shutdown_agents();
+    served
+}
+
+async fn serve() -> anyhow::Result<()> {
     crate::transcript::set_seal_hook(on_assistant_sealed);
 
     let cfg = Config::load()?;
@@ -983,7 +998,7 @@ pub async fn run() -> anyhow::Result<()> {
         }
     }
 
-    shutdown_agents();
+    // A clean stop, so these are ours to clear. `run` kills the agents.
     paths::remove_stale_socket();
     paths::remove_pid();
     let _ = events().send(Event::Shutdown);
