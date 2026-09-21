@@ -333,6 +333,9 @@ fn run() -> anyhow::Result<()> {
                 client::print_event(client::rpc(Request::List)?)
             } else {
                 let cfg = Config::load()?;
+                if cfg.agents.is_empty() {
+                    println!("(no agents)");
+                }
                 for a in cfg.agents {
                     println!(
                         "{}\t{}\toff\t{}\t{}\t{}\t{}",
