@@ -2737,7 +2737,10 @@ mod daemon_tests {
             crate::transcript::push_user(&bot, "user", "어제 시킨 일");
             let room_path = paths::channel_transcript_path(&room);
             let bot_path = paths::transcript_path(&bot);
-            assert!(room_path.exists() && bot_path.exists(), "both should persist");
+            assert!(
+                room_path.exists() && bot_path.exists(),
+                "both should persist"
+            );
 
             let cfg = Config {
                 agents: vec![AgentConfig::new(
@@ -2747,12 +2750,15 @@ mod daemon_tests {
                     None,
                 )],
                 channels: vec![
-                    Channel::new(room.clone(), "방".into(), Vec::new()).expect("channel"),
+                    Channel::new(room.clone(), "방".into(), Vec::new()).expect("channel")
                 ],
             };
             restore_transcripts(&cfg);
 
-            assert!(room_path.exists(), "boot must not unlink a room's transcript");
+            assert!(
+                room_path.exists(),
+                "boot must not unlink a room's transcript"
+            );
             assert!(bot_path.exists(), "boot must not unlink a bot's transcript");
             assert_eq!(crate::transcript::channel_messages(&room).len(), 1);
             assert_eq!(crate::transcript::messages(&bot).len(), 1);
