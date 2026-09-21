@@ -896,7 +896,32 @@ pub async fn run() -> anyhow::Result<()> {
         );
     }
     paths::remove_stale_socket();
+    // Cleared here and written once the accept loop is up, so it reads as
+    // "serving" rather than "was serving at some point".
+    paths::remove_daemon_version();
 
+    // Bind before anything is spawned. A live socket is how a second daemon —
+    // and `client::ensure_daemon` — decides one is already coming up, and
+    // binding last left the whole roster opening inside a window where that
+    // check still said no. Two daemons could each spawn every agent onto the
+    // same cwd and transcripts, and the one that lost the bind returned
+    // through `?` without reaching `shutdown_agents`, abandoning its children.
+    let listener = UnixListener::bind(paths::socket_path())
+        .with_context(|| format!("bind {}", paths::socket_path().display()))?;
+
+    // The socket is ours from here, so no path out may leave it behind:
+    // `is_socket_live` would keep answering yes and `ensure_daemon` would wait
+    // out its deadline against a daemon that is gone.
+    let served = serve(listener).await;
+    shutdown_agents();
+    paths::remove_stale_socket();
+    paths::remove_pid();
+    paths::remove_daemon_version();
+    let _ = events().send(Event::Shutdown);
+    served
+}
+
+async fn serve(listener: UnixListener) -> anyhow::Result<()> {
     crate::transcript::set_seal_hook(on_assistant_sealed);
 
     let cfg = Config::load()?;
@@ -940,8 +965,6 @@ pub async fn run() -> anyhow::Result<()> {
     }
     let _ = write_roster(&cfg.agents, &cfg.channels);
 
-    let listener = UnixListener::bind(paths::socket_path())
-        .with_context(|| format!("bind {}", paths::socket_path().display()))?;
     paths::write_pid(std::process::id())?;
     paths::write_daemon_version(env!("CARGO_PKG_VERSION"))?;
     eprintln!(
@@ -983,10 +1006,6 @@ pub async fn run() -> anyhow::Result<()> {
         }
     }
 
-    shutdown_agents();
-    paths::remove_stale_socket();
-    paths::remove_pid();
-    let _ = events().send(Event::Shutdown);
     Ok(())
 }
 
@@ -2779,6 +2798,59 @@ mod daemon_tests {
 
             assert!(crate::transcript::channel_messages(&room).is_empty());
             let _ = remove_channel(&room);
+        });
+    }
+
+    /// The socket, pid and version file belong to this process only while it
+    /// is running. Leaving any of them behind makes `is_socket_live` answer
+    /// yes for a daemon that is gone, and `ensure_daemon` then waits out its
+    /// whole deadline before saying so.
+    #[test]
+    fn a_daemon_leaves_nothing_behind_when_it_stops() {
+        paths::testing::with_home("stop", || {
+            paths::ensure_home().expect("home");
+            fs::write(paths::agents_path(), r#"{"agents":[],"channels":[]}"#).expect("write");
+
+            let boot = std::thread::spawn(|| {
+                let rt = tokio::runtime::Runtime::new().expect("runtime");
+                rt.block_on(run())
+            });
+            for _ in 0..200 {
+                if paths::is_socket_live() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            assert!(paths::is_socket_live(), "the daemon should be listening");
+
+            crate::client::rpc(crate::protocol::Request::Shutdown).expect("shutdown");
+            boot.join().expect("join").expect("clean exit");
+
+            assert!(!paths::socket_path().exists(), "socket outlived the daemon");
+            assert!(!paths::pid_path().exists(), "pid outlived the daemon");
+            assert!(
+                !paths::daemon_version_path().exists(),
+                "version outlived the daemon"
+            );
+        });
+    }
+
+    /// Boot binds before it opens anything, so the second daemon has to see
+    /// the first through a socket that is bound and not yet accepting — which
+    /// is the whole point of binding first.
+    #[test]
+    fn a_bound_socket_stops_a_second_daemon_before_it_spawns() {
+        paths::testing::with_home("bind", || {
+            paths::ensure_home().expect("home");
+            let held = std::os::unix::net::UnixListener::bind(paths::socket_path()).expect("bind");
+            assert!(
+                paths::is_socket_live(),
+                "a bound listener counts as live before it accepts"
+            );
+            let rt = tokio::runtime::Runtime::new().expect("runtime");
+            let err = rt.block_on(run()).expect_err("a second daemon must bail");
+            assert!(err.to_string().contains("already running"), "{err:#}");
+            drop(held);
         });
     }
 

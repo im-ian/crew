@@ -120,6 +120,12 @@ fn running_as_agent() -> bool {
 }
 
 pub fn ensure_daemon() -> anyhow::Result<()> {
+    // Someone else is mid-boot: the socket is bound but the roster is still
+    // opening. Starting another would be refused anyway, and the version is
+    // not readable until it is up, so wait rather than judge it.
+    if paths::is_socket_live() && !paths::daemon_is_ready() {
+        wait_ready(Duration::from_secs(4));
+    }
     if paths::is_socket_live() {
         if paths::daemon_version_matches(env!("CARGO_PKG_VERSION")) {
             return Ok(());
@@ -160,12 +166,11 @@ pub fn ensure_daemon() -> anyhow::Result<()> {
     }
     cmd.spawn().context("spawn crew daemon")?;
 
-    let deadline = Instant::now() + Duration::from_secs(4);
-    while Instant::now() < deadline {
-        if paths::is_socket_live() {
-            return Ok(());
-        }
-        thread::sleep(Duration::from_millis(50));
+    // Ready, not merely bound: returning on the bind would hand the caller a
+    // socket that accepts the connection and answers nothing until the roster
+    // has finished opening.
+    if wait_ready(Duration::from_secs(4)) {
+        return Ok(());
     }
     let tail = std::fs::read_to_string(paths::log_path()).unwrap_or_default();
     let tail = tail
@@ -178,6 +183,17 @@ pub fn ensure_daemon() -> anyhow::Result<()> {
         .collect::<Vec<_>>()
         .join("\n");
     bail!("daemon did not start. log tail:\n{tail}")
+}
+
+fn wait_ready(timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if paths::daemon_is_ready() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    false
 }
 
 pub fn stop_daemon() -> anyhow::Result<()> {

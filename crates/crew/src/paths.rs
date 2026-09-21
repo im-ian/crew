@@ -218,6 +218,15 @@ pub fn daemon_version_matches(current: &str) -> bool {
     read_daemon_version().as_deref() == Some(current)
 }
 
+/// A daemon that is bound *and* serving. The socket binds before the roster
+/// opens, so that a second daemon cannot start one too — which leaves a window
+/// where connecting succeeds but nothing answers yet. The version file is
+/// written once the accept loop is up and removed on the way out, so it is
+/// what "ready" means.
+pub fn daemon_is_ready() -> bool {
+    daemon_version_path().exists() && is_socket_live()
+}
+
 pub fn create_cwd(path: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(path)?;
     Ok(())
