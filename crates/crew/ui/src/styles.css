@@ -305,6 +305,21 @@ html.rail-resizing * {
   flex-direction: column;
   gap: var(--space-8);
 }
+.conn-banner-slot {
+  min-height: 0;
+}
+.conn-banner {
+  padding: var(--space-8) var(--space-16);
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--blocked) 12%, var(--bg));
+  font-size: var(--text-sm);
+  line-height: 1.35;
+  /* A daemon log tail arrives with newlines and long paths. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 30vh;
+  overflow: auto;
+}
 .update-banner {
   display: flex;
   align-items: center;
@@ -953,7 +968,7 @@ button.avatar {
 }
 main {
   display: grid;
-  grid-template-rows: var(--titlebar) auto auto minmax(0, 1fr) auto;
+  grid-template-rows: var(--titlebar) auto auto auto minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
   overflow: hidden;

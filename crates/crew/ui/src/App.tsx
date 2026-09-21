@@ -8,6 +8,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ContextMenu, type MenuEntry } from "./components/ContextMenu";
 import { AgentPane } from "./components/AgentPane";
 import { ChannelPane } from "./components/ChannelPane";
+import { ConnectionBanner } from "./components/ConnectionBanner";
 import { NewBotModal } from "./components/NewBotModal";
 import { NewChannelModal } from "./components/NewChannelModal";
 import { SettingsPane } from "./components/SettingsPane";
@@ -239,6 +240,11 @@ export function App() {
       />
       <main ref={mainRef}>
         <div className="titlebar-align" data-tauri-drag-region />
+        {/* `connected` starts null — not checked yet, which is not a failure. */}
+        <ConnectionBanner
+          visible={crew.connected === false}
+          detail={crew.connDetail}
+        />
         <UpdateBanner
           visible={updater.shouldNotify}
           version={updater.available?.version}

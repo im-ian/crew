@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 use tauri::Manager;
 
 use crate::client;
@@ -304,12 +306,28 @@ fn get_messages(agent: String) -> Result<Vec<ChatMessage>, String> {
     }
 }
 
+/// Why the daemon start at launch failed, if it did. A window that opens
+/// without a daemon can only say `cannot connect to <socket>`, which describes
+/// the hole rather than what made it.
+static START_ERROR: Mutex<Option<String>> = Mutex::new(None);
+
+fn set_start_error(err: Option<String>) {
+    if let Ok(mut slot) = START_ERROR.lock() {
+        *slot = err;
+    }
+}
+
+fn start_error() -> Option<String> {
+    START_ERROR.lock().ok().and_then(|slot| slot.clone())
+}
+
 #[tauri::command]
 fn daemon_ping() -> Result<bool, String> {
     match client::rpc(Request::Ping) {
         Ok(Event::Pong) => Ok(true),
-        Ok(_) => Ok(false),
-        Err(err) => Err(err.to_string()),
+        Ok(Event::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected daemon response".into()),
+        Err(err) => Err(start_error().unwrap_or_else(|| err.to_string())),
     }
 }
 
@@ -695,7 +713,23 @@ fn save_upload(name: String, data: String) -> Result<String, String> {
 }
 
 pub fn run() -> anyhow::Result<()> {
-    client::ensure_daemon()?;
+    // `ensure_daemon` is what created the home directory, and `setup` writes
+    // `ui.pid` into it and swallows the failure — on a first launch the pid
+    // would go unwritten and the window would notify as if it were closed.
+    crate::paths::ensure_home()?;
+    // A daemon that will not start is a window that opens disconnected, not an
+    // app that fails to launch. Returning this error built nothing at all, so
+    // a config this binary cannot parse — or any other reason a daemon will
+    // not start — looked like the app refusing to open, with no window left to
+    // fix it from. Keep the reason for the UI to show.
+    set_start_error(match client::ensure_daemon() {
+        Ok(()) => None,
+        Err(err) => {
+            let err = format!("{err:#}");
+            eprintln!("crew: {err}");
+            Some(err)
+        }
+    });
     #[cfg(debug_assertions)]
     crate::ui_dev::ensure_vite()?;
     tauri::Builder::default()

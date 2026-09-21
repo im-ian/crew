@@ -172,10 +172,7 @@ export function useCrew() {
   }
 
   function showError(err: unknown) {
-    const msg = errMsg(err);
-    setConnected(false);
-    setConnDetail(msg);
-    showToast(msg);
+    showToast(errMsg(err));
   }
 
   function hideCtx() {
@@ -917,14 +914,14 @@ export function useCrew() {
 
   useEffect(() => {
     let cancelled = false;
+    // The ping owns connection state. A message fetch fails fast with a bare
+    // socket error, and at 200ms it would overwrite the ping's reason — and
+    // flip `connected` — several times a second.
     async function tickMessages() {
       try {
         await refreshMessages();
-      } catch (err) {
-        if (!cancelled) {
-          setConnected(false);
-          setConnDetail(errMsg(err));
-        }
+      } catch {
+        // The ping reports the connection; nothing to add here.
       }
     }
     async function tickList() {
