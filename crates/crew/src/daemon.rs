@@ -873,6 +873,20 @@ fn open_agent(
     }
 }
 
+/// Boot reads back what every configured id already owns on disk. The create
+/// paths do the opposite — `insert_spawned_agent` and `add_channel` drop first,
+/// so an id freed by a delete cannot open onto the old conversation. Keep the
+/// two loops here together: getting one of them backwards is how rooms came to
+/// be unlinked on every start.
+fn restore_transcripts(cfg: &Config) {
+    for agent_cfg in &cfg.agents {
+        crate::transcript::load_agent(&agent_cfg.id);
+    }
+    for ch in &cfg.channels {
+        crate::transcript::load_channel(&ch.id);
+    }
+}
+
 pub async fn run() -> anyhow::Result<()> {
     paths::ensure_home()?;
     if paths::is_socket_live() {
@@ -890,16 +904,13 @@ pub async fn run() -> anyhow::Result<()> {
         let mut cfgs = configs().lock().expect("configs mutex");
         for agent_cfg in &cfg.agents {
             cfgs.insert(agent_cfg.id.clone(), agent_cfg.clone());
-            crate::transcript::load_agent(&agent_cfg.id);
         }
         let mut chans = channels().lock().expect("channels mutex");
         for ch in &cfg.channels {
             chans.insert(ch.id.clone(), ch.clone());
-            // Same as a new agent: a room id freed by a deleted channel must not
-        // open onto that channel's messages.
-        crate::transcript::drop_channel(&ch.id);
         }
     }
+    restore_transcripts(&cfg);
     {
         let mut map = agents().lock().expect("agents mutex");
         for agent_cfg in &cfg.agents {
@@ -2381,11 +2392,17 @@ fn add_channel(id: String, name: String, members: Vec<String>) -> anyhow::Result
     }
     let ch = Channel::new(id, name, members)?;
     {
-        let mut chans = channels().lock().expect("channels mutex");
+        let chans = channels().lock().expect("channels mutex");
         if chans.contains_key(&ch.id) {
             anyhow::bail!("channel {} already exists", ch.id);
         }
-        crate::transcript::load_channel(&ch.id);
+    }
+    // Same as a new agent: a room id freed by a deleted channel must not open
+    // onto that channel's messages. Outside the lock — this unlinks a file, and
+    // every RPC that reads the roster waits on that guard.
+    crate::transcript::drop_channel(&ch.id);
+    {
+        let mut chans = channels().lock().expect("channels mutex");
         chans.insert(ch.id.clone(), ch);
     }
     save_state()?;
@@ -2708,6 +2725,61 @@ mod daemon_tests {
                 .map(|d| d.as_nanos())
                 .unwrap_or(0)
         )
+    }
+
+    /// Both arms, because the bug was one arm doing the opposite of the other.
+    #[test]
+    fn boot_keeps_the_messages_a_room_and_a_bot_already_have() {
+        paths::testing::with_home("daemon-restore", || {
+            let room = test_id("room");
+            let bot = test_id("bot");
+            crate::transcript::push_channel(&room, Role::User, "user", "어제 한 말");
+            crate::transcript::push_user(&bot, "user", "어제 시킨 일");
+            let room_path = paths::channel_transcript_path(&room);
+            let bot_path = paths::transcript_path(&bot);
+            assert!(
+                room_path.exists() && bot_path.exists(),
+                "both should persist"
+            );
+
+            let cfg = Config {
+                agents: vec![AgentConfig::new(
+                    bot.clone(),
+                    bot.clone(),
+                    vec!["cat".into()],
+                    None,
+                )],
+                channels: vec![
+                    Channel::new(room.clone(), "방".into(), Vec::new()).expect("channel")
+                ],
+            };
+            restore_transcripts(&cfg);
+
+            assert!(
+                room_path.exists(),
+                "boot must not unlink a room's transcript"
+            );
+            assert!(bot_path.exists(), "boot must not unlink a bot's transcript");
+            assert_eq!(crate::transcript::channel_messages(&room).len(), 1);
+            assert_eq!(crate::transcript::messages(&bot).len(), 1);
+            crate::transcript::drop_channel(&room);
+            crate::transcript::drop_agent(&bot);
+        });
+    }
+
+    /// The other half of the swap: a room minted on a freed id starts empty.
+    #[test]
+    fn a_new_room_does_not_open_onto_a_freed_id() {
+        paths::testing::with_home("daemon-add-channel", || {
+            let room = test_id("room");
+            crate::transcript::push_channel(&room, Role::User, "user", "지난 방 대화");
+            assert!(paths::channel_transcript_path(&room).exists());
+
+            add_channel(room.clone(), "방".into(), Vec::new()).expect("add");
+
+            assert!(crate::transcript::channel_messages(&room).is_empty());
+            let _ = remove_channel(&room);
+        });
     }
 
     #[test]
