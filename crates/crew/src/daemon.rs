@@ -873,6 +873,19 @@ fn open_agent(
     }
 }
 
+/// Boot reads back what every configured id already owns on disk. The create
+/// paths do the opposite — `insert_spawned_agent` and `add_channel` drop first,
+/// so an id freed by a delete cannot open onto the old conversation. Rooms had
+/// the two swapped, and boot unlinked every `channels/<id>.jsonl` it found.
+fn restore_transcripts(cfg: &Config) {
+    for agent_cfg in &cfg.agents {
+        crate::transcript::load_agent(&agent_cfg.id);
+    }
+    for ch in &cfg.channels {
+        crate::transcript::load_channel(&ch.id);
+    }
+}
+
 pub async fn run() -> anyhow::Result<()> {
     paths::ensure_home()?;
     if paths::is_socket_live() {
@@ -890,16 +903,13 @@ pub async fn run() -> anyhow::Result<()> {
         let mut cfgs = configs().lock().expect("configs mutex");
         for agent_cfg in &cfg.agents {
             cfgs.insert(agent_cfg.id.clone(), agent_cfg.clone());
-            crate::transcript::load_agent(&agent_cfg.id);
         }
         let mut chans = channels().lock().expect("channels mutex");
         for ch in &cfg.channels {
             chans.insert(ch.id.clone(), ch.clone());
-            // Same as a new agent: a room id freed by a deleted channel must not
-        // open onto that channel's messages.
-        crate::transcript::drop_channel(&ch.id);
         }
     }
+    restore_transcripts(&cfg);
     {
         let mut map = agents().lock().expect("agents mutex");
         for agent_cfg in &cfg.agents {
@@ -2385,7 +2395,9 @@ fn add_channel(id: String, name: String, members: Vec<String>) -> anyhow::Result
         if chans.contains_key(&ch.id) {
             anyhow::bail!("channel {} already exists", ch.id);
         }
-        crate::transcript::load_channel(&ch.id);
+        // Same as a new agent: a room id freed by a deleted channel must not
+        // open onto that channel's messages.
+        crate::transcript::drop_channel(&ch.id);
         chans.insert(ch.id.clone(), ch);
     }
     save_state()?;
@@ -2708,6 +2720,26 @@ mod daemon_tests {
                 .map(|d| d.as_nanos())
                 .unwrap_or(0)
         )
+    }
+
+    #[test]
+    fn boot_keeps_the_messages_a_room_already_has() {
+        paths::testing::with_home("daemon-restore", || {
+            let id = test_id("room");
+            crate::transcript::push_channel(&id, Role::User, "user", "어제 한 말");
+            let path = paths::channel_transcript_path(&id);
+            assert!(path.exists(), "the room should persist");
+
+            let cfg = Config {
+                agents: Vec::new(),
+                channels: vec![Channel::new(id.clone(), "방".into(), Vec::new()).expect("channel")],
+            };
+            restore_transcripts(&cfg);
+
+            assert!(path.exists(), "boot must not unlink a room's transcript");
+            assert_eq!(crate::transcript::channel_messages(&id).len(), 1);
+            crate::transcript::drop_channel(&id);
+        });
     }
 
     #[test]
