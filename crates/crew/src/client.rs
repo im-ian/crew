@@ -12,18 +12,97 @@ use crate::config::Channel;
 use crate::paths;
 use crate::protocol::{AgentInfo, ChannelInfo, Event, Request};
 
+/// A request the daemon answers out of its own state. Everything it does for
+/// one is bounded, so silence past this means wedged rather than busy.
+const ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// The liveness probe, and the only request whose job is to notice trouble.
+/// The window polls it every second, so it has to give up inside that.
+const PING_TIMEOUT: Duration = Duration::from_millis(900);
+
+/// One short line into a socket buffer. Taking this long means nobody is
+/// draining it.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long the whole exchange may take. `None` is for the two that are not
+/// questions: `Ask` waits on a person, and `Subscribe` is a stream the daemon
+/// keeps pushing to. Every other variant is a question the daemon answers, and
+/// leaving them unbounded parked the caller for good when a socket took the
+/// connection and then went quiet.
+///
+/// Matched exhaustively on purpose: a new long-running request should not
+/// inherit a fifteen-second guillotine from a catch-all.
+fn answer_timeout(req: &Request) -> Option<Duration> {
+    match req {
+        Request::Ask { .. } | Request::Subscribe => None,
+        Request::Ping => Some(PING_TIMEOUT),
+        Request::List
+        | Request::Send { .. }
+        | Request::Tell { .. }
+        | Request::Input { .. }
+        | Request::Resize { .. }
+        | Request::Snapshot { .. }
+        | Request::Messages { .. }
+        | Request::AddAgent { .. }
+        | Request::CloneAgent { .. }
+        | Request::RemoveAgent { .. }
+        | Request::SetAgent { .. }
+        | Request::Reset { .. }
+        | Request::AddRoutine { .. }
+        | Request::RemoveRoutine { .. }
+        | Request::SetRoutineEnabled { .. }
+        | Request::RunRoutine { .. }
+        | Request::EditRoutine { .. }
+        | Request::RoutineRuns { .. }
+        | Request::Interrupt { .. }
+        | Request::Approve { .. }
+        | Request::AnswerChoice { .. }
+        | Request::Search { .. }
+        | Request::ListChannels
+        | Request::ChannelMessages { .. }
+        | Request::AddChannel { .. }
+        | Request::JoinChannel { .. }
+        | Request::LeaveChannel { .. }
+        | Request::RemoveChannel { .. }
+        | Request::SetChannel { .. }
+        | Request::Shutdown => Some(ANSWER_TIMEOUT),
+    }
+}
+
 pub fn rpc(req: Request) -> anyhow::Result<Event> {
+    let answer = answer_timeout(&req);
+    rpc_within(req, answer)
+}
+
+fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
     let mut stream = connect()?;
     let line = req.to_line()?;
-    writeln!(stream, "{line}")?;
-    stream.flush()?;
+    writeln!(stream, "{line}").map_err(stalled)?;
+    stream.flush().map_err(stalled)?;
+    // The budget is for the exchange, not for one read. The loop below skips
+    // events that do not answer this request, and re-arming the full timeout
+    // each time would let a daemon dribbling one unrelated event a second keep
+    // a caller here forever.
+    let deadline = answer.map(|answer| Instant::now() + answer);
     let mut reader = BufReader::new(stream);
     let mut buf = String::new();
     loop {
+        if let Some(deadline) = deadline {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(no_answer());
+            }
+            reader.get_ref().set_read_timeout(Some(left))?;
+        }
         buf.clear();
-        let n = reader.read_line(&mut buf)?;
+        let n = reader.read_line(&mut buf).map_err(stalled)?;
         if n == 0 {
             bail!("daemon closed the connection");
+        }
+        // The daemon's own reader skips these; a blank line is not a protocol
+        // error to report back.
+        if buf.trim().is_empty() {
+            continue;
         }
         let ev = Event::from_line(buf.trim_end())?;
         match (&req, &ev) {
@@ -83,13 +162,37 @@ pub fn rpc(req: Request) -> anyhow::Result<Event> {
     }
 }
 
+fn no_answer() -> anyhow::Error {
+    anyhow::anyhow!(
+        "daemon took the connection but did not answer ({})",
+        paths::socket_path().display()
+    )
+}
+
+/// A stall and a real IO error read the same from a caller's side unless the
+/// timeout is named; keep the OS error as the cause so EAGAIN and ETIMEDOUT
+/// stay distinguishable.
+fn stalled(err: std::io::Error) -> anyhow::Error {
+    match err.kind() {
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+            anyhow::Error::from(err).context(no_answer().to_string())
+        }
+        _ => err.into(),
+    }
+}
+
+/// Deadlines belong to the connection, so nothing that reaches for one gets an
+/// untimed socket. `rpc_within` narrows the read budget per request.
 pub fn connect() -> anyhow::Result<UnixStream> {
-    UnixStream::connect(paths::socket_path()).with_context(|| {
+    let stream = UnixStream::connect(paths::socket_path()).with_context(|| {
         format!(
             "cannot connect to daemon at {}",
             paths::socket_path().display()
         )
-    })
+    })?;
+    stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
+    stream.set_read_timeout(Some(ANSWER_TIMEOUT))?;
+    Ok(stream)
 }
 
 pub fn tell_from(explicit: Option<String>) -> String {
@@ -437,6 +540,68 @@ pub fn print_routines_from_config(
 mod tests {
     use super::*;
     use crate::config::Routine;
+
+    #[test]
+    fn a_person_gets_as_long_as_they_need_and_nobody_else_does() {
+        assert_eq!(
+            answer_timeout(&Request::Ask {
+                agent: "a".into(),
+                question: "?".into(),
+                options: Vec::new(),
+                inputs: Vec::new(),
+                hint: None,
+            }),
+            None,
+            "Ask waits on a person"
+        );
+        assert_eq!(answer_timeout(&Request::Ping), Some(PING_TIMEOUT));
+        assert_eq!(answer_timeout(&Request::List), Some(ANSWER_TIMEOUT));
+    }
+
+    /// A daemon can take the connection and then never answer — an accept loop
+    /// wedged on a lock, or one killed between the connect and the reply. That
+    /// used to park the caller for good.
+    ///
+    /// Run on a worker with a deadline, because the regression this guards is
+    /// "blocks forever": asserting inline would hang the suite instead of
+    /// failing it.
+    #[test]
+    fn a_socket_that_never_answers_gives_up() {
+        paths::testing::with_home("rpc", || {
+            paths::ensure_home().expect("home");
+            let listener =
+                std::os::unix::net::UnixListener::bind(paths::socket_path()).expect("bind");
+            // Accept and say nothing, holding the connection open.
+            let quiet = thread::spawn(move || listener.accept().map(|(s, _)| s));
+
+            let (tx, rx) = std::sync::mpsc::channel();
+            thread::spawn(move || {
+                let _ = tx.send(
+                    rpc_within(Request::Ping, Some(Duration::from_millis(200)))
+                        .map(|ev| format!("{ev:?}"))
+                        .map_err(|err| format!("{err:#}")),
+                );
+            });
+            let err = rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("rpc must return, not park")
+                .expect_err("a silent daemon is not an answer");
+            assert!(err.contains("did not answer"), "{err}");
+            drop(quiet.join().expect("accept"));
+        });
+    }
+
+    /// A stream and a question are not the same shape, and the loop skips
+    /// events that do not answer the request — so a deadline that re-armed per
+    /// read would never fire against a daemon pushing frames.
+    #[test]
+    fn a_stream_is_not_a_question() {
+        assert_eq!(answer_timeout(&Request::Subscribe), None);
+        assert!(
+            PING_TIMEOUT < Duration::from_secs(1),
+            "the window polls it every second"
+        );
+    }
 
     fn routine(name: &str) -> Routine {
         let mut r = Routine::new(name.into(), "0 9 * * *".into(), "brief".into()).unwrap();

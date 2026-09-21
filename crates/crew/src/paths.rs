@@ -349,12 +349,14 @@ pub(crate) mod testing {
     /// suite, since the env var is process-wide.
     pub fn with_home<R>(tag: &str, f: impl FnOnce() -> R) -> R {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Short on purpose: tests bind a socket in here, and macOS caps a
+        // unix path at 104 bytes counting the temp dir in front of it.
         let dir = std::env::temp_dir().join(format!(
-            "crew-{tag}-test-{}-{}",
+            "cw-{tag}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
+                .map(|d| d.as_nanos() % 1_000_000)
                 .unwrap_or(0)
         ));
         let _ = fs::remove_dir_all(&dir);
