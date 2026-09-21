@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 use tauri::Manager;
 
 use crate::client;
@@ -304,12 +306,41 @@ fn get_messages(agent: String) -> Result<Vec<ChatMessage>, String> {
     }
 }
 
+/// Why the daemon could not be started, if it could not. A window with no
+/// daemon can only say `cannot connect to <socket>`, which describes the hole
+/// rather than what made it. Poisoning must not lose it — that would leave
+/// exactly the bare message this exists to replace.
+static START_ERROR: Mutex<Option<String>> = Mutex::new(None);
+
+fn set_start_error(err: Option<String>) {
+    *START_ERROR.lock().unwrap_or_else(|e| e.into_inner()) = err;
+}
+
+fn start_error() -> Option<String> {
+    START_ERROR
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+/// What the window says when the socket will not answer. The recorded reason
+/// wins while it is still the reason — see `daemon_ping`, which drops it as
+/// soon as a daemon answers, so a later disconnect does not blame a file the
+/// user has already fixed.
+fn ping_failure(err: String) -> String {
+    start_error().unwrap_or(err)
+}
+
 #[tauri::command]
-fn daemon_ping() -> Result<bool, String> {
+fn daemon_ping() -> Result<(), String> {
     match client::rpc(Request::Ping) {
-        Ok(Event::Pong) => Ok(true),
-        Ok(_) => Ok(false),
-        Err(err) => Err(err.to_string()),
+        Ok(Event::Pong) => {
+            set_start_error(None);
+            Ok(())
+        }
+        Ok(Event::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected daemon response".into()),
+        Err(err) => Err(ping_failure(err.to_string())),
     }
 }
 
@@ -695,7 +726,38 @@ fn save_upload(name: String, data: String) -> Result<String, String> {
 }
 
 pub fn run() -> anyhow::Result<()> {
-    client::ensure_daemon()?;
+    // A daemon that will not start is a window that opens disconnected, not an
+    // app that fails to launch. Returning either of these built nothing at all,
+    // so a config this binary cannot parse — or a home directory that cannot be
+    // created — looked like the app refusing to open, with no window left to
+    // fix it from. Nothing here may use `?` for the same reason.
+    //
+    // `ensure_home` was reached through `ensure_daemon`, and `setup` writes
+    // `ui.pid` into that directory and swallows the failure — on a first launch
+    // the pid would go unwritten and the window would notify as if it were
+    // closed.
+    let start = crate::paths::ensure_home()
+        // `File exists (os error 17)` alone does not say which path, and this
+        // is the text the window will be showing.
+        .map_err(|err| format!("create {}: {err:#}", crate::paths::home_dir().display()))
+        .and_then(|_| client::ensure_daemon().map_err(|err| format!("{err:#}")));
+    set_start_error(match start {
+        Ok(_) => None,
+        Err(err) => {
+            // A bundled .app discards stderr, so the log is where this stays
+            // readable after the fact.
+            eprintln!("crew: {err}");
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(crate::paths::log_path())
+                .and_then(|mut f| {
+                    use std::io::Write;
+                    f.write_all(format!("crew: {err}\n").as_bytes())
+                });
+            Some(err)
+        }
+    });
     #[cfg(debug_assertions)]
     crate::ui_dev::ensure_vite()?;
     tauri::Builder::default()
@@ -763,4 +825,27 @@ pub fn run() -> anyhow::Result<()> {
         .run(tauri::generate_context!())
         .map_err(|e| anyhow::anyhow!(e))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Serialised: `START_ERROR` is process-wide.
+    #[test]
+    fn a_recorded_start_reason_outranks_the_bare_socket_error() {
+        set_start_error(Some("parse agents.json: expected value".into()));
+        assert_eq!(
+            ping_failure("cannot connect to daemon at /x/crew.sock".into()),
+            "parse agents.json: expected value"
+        );
+
+        // Cleared once a daemon has answered: a later disconnect is a new
+        // failure, and the old note would blame a file already fixed.
+        set_start_error(None);
+        assert_eq!(
+            ping_failure("cannot connect to daemon at /x/crew.sock".into()),
+            "cannot connect to daemon at /x/crew.sock"
+        );
+    }
 }
