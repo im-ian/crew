@@ -382,6 +382,8 @@ crew reset grok --drop-routines
 | `archive/` | 지운 대화 |
 | `uploads/` | 첨부 파일 |
 | `crew.sock` / `crew.pid` | 데몬 |
+| `crew.lock` | 데몬이 하나만 뜨게 잡는 잠금 — 지우지 마세요 |
+| `daemon.version` | 실행 중인 데몬의 버전 |
 | `crew.log` | 데몬 로그 |
 
 ---

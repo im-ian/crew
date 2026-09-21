@@ -160,6 +160,134 @@ pub fn enriched_path() -> String {
         .unwrap_or_else(|_| std::env::var("PATH").unwrap_or_default())
 }
 
+pub fn lock_path() -> PathBuf {
+    home_dir().join("crew.lock")
+}
+
+/// Held by the daemon for as long as it runs, and the one thing that says who
+/// the daemon is. The kernel releases it when the process ends, however it
+/// ends, so unlike a pid file or a socket left on disk it cannot go stale.
+///
+/// The open file is what holds the lock, so this field is load-bearing without
+/// ever being read — rustc says to remove it, and removing it would make this a
+/// no-op. The daemon leaks it deliberately rather than relying on drop, so the
+/// lock outlives the future that took it.
+#[allow(dead_code)]
+pub struct DaemonLock(fs::File);
+
+/// A POSIX record lock rather than `flock`, for two reasons `flock` cannot
+/// give: `F_GETLK` asks who holds it **without taking it** — a probe that
+/// acquires would be indistinguishable from an owner and could refuse a daemon
+/// that is legitimately starting — and it reports the holder's pid, so a
+/// refusal can name the process instead of a path.
+///
+/// Record locks are per-process: a second lock inside the owning process
+/// succeeds, and closing any fd to the file releases them. That is fine here
+/// and nowhere else: the owner is always the daemon process, and the only
+/// processes that probe are the CLI and the desktop, which never own.
+fn write_lock(file: &fs::File, cmd: libc::c_int) -> std::io::Result<libc::flock> {
+    use std::os::unix::io::AsRawFd;
+    let mut lock = libc::flock {
+        l_start: 0,
+        l_len: 0,
+        l_pid: 0,
+        l_type: libc::F_WRLCK as libc::c_short,
+        l_whence: libc::SEEK_SET as libc::c_short,
+    };
+    loop {
+        if unsafe { libc::fcntl(file.as_raw_fd(), cmd, &mut lock) } != -1 {
+            return Ok(lock);
+        }
+        let err = std::io::Error::last_os_error();
+        // A signal arriving mid-call is not an answer about the lock.
+        if err.kind() != std::io::ErrorKind::Interrupted {
+            return Err(err);
+        }
+    }
+}
+
+/// `create` only for the daemon taking ownership. A probe must not create it:
+/// asking about a fresh inode answers "nobody" no matter who holds the one
+/// that was there, which would let a caller clear a live daemon's files.
+fn open_lock_file(create: bool) -> anyhow::Result<Option<fs::File>> {
+    if create {
+        ensure_home()?;
+    }
+    match fs::OpenOptions::new()
+        .create(create)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(lock_path())
+    {
+        Ok(file) => Ok(Some(file)),
+        // No file, so no lock on it.
+        Err(err) if !create && err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => {
+            Err(anyhow::Error::from(err).context(format!("open {}", lock_path().display())))
+        }
+    }
+}
+
+/// `Ok(None)` means another process owns this home. `Err` means the lock could
+/// not be asked about at all, which is not a daemon to point at.
+pub fn take_daemon_lock() -> anyhow::Result<Option<DaemonLock>> {
+    let file = open_lock_file(true)?.expect("created");
+    match write_lock(&file, libc::F_SETLK) {
+        Ok(_) => Ok(Some(DaemonLock(file))),
+        Err(err) if matches!(err.raw_os_error(), Some(libc::EAGAIN) | Some(libc::EACCES)) => {
+            Ok(None)
+        }
+        Err(err) => {
+            Err(anyhow::Error::from(err).context(format!("lock {}", lock_path().display())))
+        }
+    }
+}
+
+/// Who owns this home, as far as the lock can say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Owner {
+    /// Nobody holds the lock.
+    Free,
+    /// Held, and this pid can be signalled.
+    Pid(i32),
+    /// Held, but by nobody this process may name. `F_GETLK` answers `-1` for
+    /// an open-file-description lock and a remote holder over NFS can answer
+    /// `0` — and `kill` reads those as "my process group" and "every process I
+    /// may signal". Never signal what cannot be named.
+    Unnameable,
+}
+
+impl Owner {
+    pub fn is_free(self) -> bool {
+        self == Owner::Free
+    }
+}
+
+/// Asks without taking, so a caller can poll without becoming the answer.
+pub fn daemon_owner() -> anyhow::Result<Owner> {
+    let Some(file) = open_lock_file(false)? else {
+        return Ok(Owner::Free);
+    };
+    let lock = write_lock(&file, libc::F_GETLK).map_err(|err| {
+        anyhow::Error::from(err).context(format!("query {}", lock_path().display()))
+    })?;
+    if lock.l_type == libc::F_UNLCK as libc::c_short {
+        return Ok(Owner::Free);
+    }
+    Ok(match lock.l_pid {
+        pid if pid > 0 => Owner::Pid(pid),
+        _ => Owner::Unnameable,
+    })
+}
+
+/// Ownership, reduced to a yes or no. An error reads as "somebody may own it":
+/// guessing "free" would start a second daemon on a home whose lock could not
+/// be read.
+pub fn daemon_is_owned() -> bool {
+    !matches!(daemon_owner(), Ok(Owner::Free))
+}
+
 pub fn remove_stale_socket() {
     let sock = socket_path();
     if sock.exists() {
@@ -179,10 +307,6 @@ pub fn write_pid(pid: u32) -> anyhow::Result<()> {
     ensure_home()?;
     fs::write(pid_path(), pid.to_string())?;
     Ok(())
-}
-
-pub fn read_pid() -> Option<u32> {
-    fs::read_to_string(pid_path()).ok()?.trim().parse().ok()
 }
 
 pub fn remove_pid() {
@@ -391,7 +515,11 @@ mod tests {
             write_locale("  en\n");
             assert_eq!(locale(), "en");
             write_locale("klingon");
-            assert_eq!(locale(), "ko", "an unknown tag falls back, it does not stick");
+            assert_eq!(
+                locale(),
+                "ko",
+                "an unknown tag falls back, it does not stick"
+            );
             fs::write(locale_path(), "en").unwrap();
             assert_eq!(locale(), "en");
         });

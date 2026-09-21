@@ -222,30 +222,54 @@ fn running_as_agent() -> bool {
         .is_some()
 }
 
-pub fn ensure_daemon() -> anyhow::Result<()> {
-    if paths::is_socket_live() {
-        if paths::daemon_version_matches(env!("CARGO_PKG_VERSION")) {
-            return Ok(());
-        }
-        // A packaged update replaces Crew.app in place. Agent children must
-        // keep talking to the still-running daemon; the desktop/CLI process
-        // restarts it so the new binary takes over.
-        if running_as_agent() {
-            return Ok(());
-        }
-        let _ = stop_daemon();
-    }
-    if running_as_agent() {
-        bail!(
-            "daemon is not running ({}); agent processes will not start one",
-            paths::socket_path().display()
-        );
-    }
-    paths::ensure_home()?;
-    if paths::socket_path().exists() {
-        paths::remove_stale_socket();
-    }
+/// How long a daemon gets to answer before it counts as wedged rather than
+/// busy. It has to cover a roster open, which spawns one CLI per bot — and how
+/// long that takes depends on the bots, the machine and the CLIs, none of
+/// which this can see. Guess too low and a healthy daemon gets killed 18
+/// seconds into starting, so the guess is overridable.
+const READY_TIMEOUT: Duration = Duration::from_secs(20);
 
+fn ready_timeout() -> Duration {
+    std::env::var("CREW_READY_TIMEOUT")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+        .map(Duration::from_secs)
+        .unwrap_or(READY_TIMEOUT)
+}
+
+/// Each step of stopping one. A daemon that ignores `Shutdown` gets SIGTERM,
+/// and one that ignores that gets SIGKILL — without the last step a daemon
+/// wedged in `shutdown_agents` would hold its lock forever and no daemon could
+/// ever start again.
+const STOP_STEP: Duration = Duration::from_secs(5);
+
+fn poll_until(timeout: Duration, mut ready: impl FnMut() -> bool) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if ready() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn log_tail() -> String {
+    let log = std::fs::read_to_string(paths::log_path()).unwrap_or_default();
+    log.lines()
+        .rev()
+        .take(12)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn spawn_daemon() -> anyhow::Result<std::process::Child> {
     let exe = std::env::current_exe().context("current_exe")?;
     let log = OpenOptions::new()
         .create(true)
@@ -261,58 +285,144 @@ pub fn ensure_daemon() -> anyhow::Result<()> {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    cmd.spawn().context("spawn crew daemon")?;
-
-    let deadline = Instant::now() + Duration::from_secs(4);
-    while Instant::now() < deadline {
-        if paths::is_socket_live() {
-            return Ok(());
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
-    let tail = std::fs::read_to_string(paths::log_path()).unwrap_or_default();
-    let tail = tail
-        .lines()
-        .rev()
-        .take(12)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join("\n");
-    bail!("daemon did not start. log tail:\n{tail}")
+    cmd.spawn().context("spawn crew daemon")
 }
 
-pub fn stop_daemon() -> anyhow::Result<()> {
-    if paths::is_socket_live() {
-        match rpc(Request::Shutdown) {
-            Ok(_) => {
-                wait_dead(Duration::from_secs(2));
-                cleanup();
+/// Ownership is the lock; answering is the socket. Keeping those apart is what
+/// lets this tell "starting" from "wedged" from "gone" — the socket alone
+/// cannot, because it is absent for all three.
+/// Whether the daemon answering on this home is this binary's version, and
+/// whether that matters to this caller. Shared by both paths into
+/// `ensure_daemon`: a caller that lost a start race is talking to somebody
+/// else's daemon and has the same reason to check.
+fn usable_daemon() -> bool {
+    paths::daemon_version_matches(env!("CARGO_PKG_VERSION"))
+        // A packaged update replaces Crew.app in place. Agent children must
+        // keep talking to the still-running daemon; the desktop and the CLI
+        // restart it so the new binary takes over.
+        || running_as_agent()
+}
+
+pub fn ensure_daemon() -> anyhow::Result<()> {
+    if paths::daemon_is_owned() {
+        // Someone owns the home. Give them the time a roster open takes.
+        if poll_until(ready_timeout(), paths::is_socket_live) {
+            if usable_daemon() {
                 return Ok(());
             }
-            Err(_) => {}
+        } else if running_as_agent() {
+            bail!(
+                "daemon owns {} but is not answering; agent processes will not restart it",
+                paths::home_dir().display()
+            );
         }
+        // Either the wrong version, or it owns the home and will not answer.
+        // Both mean the same thing here: it has to let go first.
+        stop_daemon().context("stop the daemon that owns this home")?;
+    } else if running_as_agent() {
+        bail!(
+            "daemon is not running ({}); agent processes will not start one",
+            paths::socket_path().display()
+        );
     }
-    if let Some(pid) = paths::read_pid() {
-        let _ = Command::new("kill").arg(pid.to_string()).status();
-        wait_dead(Duration::from_secs(2));
+
+    paths::ensure_home()?;
+    // The socket is not ours to remove. A daemon merely slow to answer still
+    // owns that path, and unlinking it strands it on an inode nobody can
+    // reach. The daemon clears it on the way in, holding the lock.
+    let mut child = spawn_daemon()?;
+    let ours_exited = |child: &mut std::process::Child| matches!(child.try_wait(), Ok(Some(_)));
+    let answering = poll_until(ready_timeout(), || {
+        // Our child exiting is not the end of it: with the lock refusing a
+        // second daemon, the loser of a start race exits in milliseconds while
+        // the winner is still opening its roster. Keep waiting for whoever
+        // owns the home, and only give up once nobody does.
+        paths::is_socket_live() || (ours_exited(&mut child) && !paths::daemon_is_owned())
+    }) && paths::is_socket_live();
+    // Reap it whenever it ends, and never here: the daemon outlives this call,
+    // so killing it would take down the one we just started, and dropping the
+    // handle unreaped leaves a zombie under a long-lived desktop process.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    if answering && usable_daemon() {
+        return Ok(());
     }
-    cleanup();
-    Ok(())
+    if answering {
+        // Somebody else's daemon won the race, and it is the wrong version.
+        stop_daemon().context("stop the daemon that won the race")?;
+        return ensure_daemon();
+    }
+    bail!("daemon did not start. log tail:\n{}", log_tail())
 }
 
-fn wait_dead(timeout: Duration) {
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        if !paths::is_socket_live() {
-            return;
+/// Returns only once nobody owns the home, so the caller may start one.
+pub fn stop_daemon() -> anyhow::Result<()> {
+    let owner = paths::daemon_owner()?;
+    // Ask first, whoever owns it — and even if the lock says nobody does,
+    // because a socket that answers is a daemon regardless of what happened
+    // to the lock file.
+    if paths::is_socket_live() {
+        let _ = rpc(Request::Shutdown);
+        // The same budget the start path gets: `shutdown_agents` seals every
+        // transcript and kills every agent, which is the work `READY_TIMEOUT`
+        // is sized for on the way in.
+        if stopped(ready_timeout()) {
+            cleanup();
+            return Ok(());
         }
-        thread::sleep(Duration::from_millis(40));
     }
+    match owner {
+        paths::Owner::Free => {
+            cleanup();
+            Ok(())
+        }
+        // Escalate. The lock is released by the kernel when the process ends,
+        // so ending it is the whole job. Signalling kills without running
+        // `shutdown_agents`, which is why it comes after asking.
+        paths::Owner::Pid(pid) => {
+            for signal in [libc::SIGTERM, libc::SIGKILL] {
+                if unsafe { libc::kill(pid, signal) } == -1 {
+                    let err = std::io::Error::last_os_error();
+                    // Already gone is the outcome we wanted.
+                    if err.raw_os_error() != Some(libc::ESRCH) {
+                        return Err(
+                            anyhow::Error::from(err).context(format!("signal daemon {pid}"))
+                        );
+                    }
+                }
+                if stopped(STOP_STEP) {
+                    cleanup();
+                    return Ok(());
+                }
+            }
+            bail!(
+                "daemon {pid} did not stop; it still owns {}",
+                paths::home_dir().display()
+            )
+        }
+        paths::Owner::Unnameable => bail!(
+            "something owns {} and will not say which process; stop it by hand",
+            paths::lock_path().display()
+        ),
+    }
+}
+
+/// Nobody owns the home and nothing is answering on it.
+fn stopped(timeout: Duration) -> bool {
+    poll_until(timeout, || {
+        !paths::daemon_is_owned() && !paths::is_socket_live()
+    })
 }
 
 fn cleanup() {
+    // These name whoever owns the home, so they are only ours to clear once
+    // nobody does. The lock is asked first and the socket second: a lock file
+    // that was deleted under a running daemon reads as free, and clearing on
+    // that alone would strand it on an inode nobody can reach.
+    if paths::daemon_is_owned() || paths::is_socket_live() {
+        return;
+    }
     paths::remove_stale_socket();
     paths::remove_pid();
     paths::remove_daemon_version();

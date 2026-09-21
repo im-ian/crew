@@ -889,14 +889,49 @@ fn restore_transcripts(cfg: &Config) {
 
 pub async fn run() -> anyhow::Result<()> {
     paths::ensure_home()?;
-    if paths::is_socket_live() {
-        anyhow::bail!(
-            "daemon already running ({})",
-            paths::socket_path().display()
-        );
-    }
+    // The lock says who the daemon is; the socket only says whether one is
+    // answering yet. Deciding ownership from the socket meant connecting and
+    // then acting on the answer, with the whole roster open in between — long
+    // enough for a second daemon to pass the same check, unlink the first's
+    // live socket, bind its own, and spawn every agent onto the same cwd and
+    // transcripts.
+    //
+    // No fallback. A home where this cannot be asked is a home where two
+    // daemons cannot be kept apart, and saying so beats going quiet and
+    // corrupting a roster.
+    let lock = match paths::take_daemon_lock()? {
+        Some(lock) => lock,
+        None => {
+            let owner = match paths::daemon_owner() {
+                Ok(paths::Owner::Pid(pid)) => format!("pid {pid}"),
+                _ => paths::lock_path().display().to_string(),
+            };
+            anyhow::bail!("daemon already running ({owner})");
+        }
+    };
+    // Held until the process ends, not until this future does: `serve` spawns
+    // three tickers that are never joined, and `crew-transcript` keeps
+    // flushing every 150ms. Releasing it when `run` returns would let the next
+    // daemon load transcripts this one is still writing.
+    std::mem::forget(lock);
+    // Ours now, so a socket still here belongs to a daemon that is gone.
     paths::remove_stale_socket();
+    paths::write_pid(std::process::id())?;
 
+    // Once `serve` has opened the roster, every way out has to close it. Bind
+    // and the version write return through `?` with every agent already
+    // spawned, which orphaned a CLI child per agent onto the transcripts the
+    // next daemon would load.
+    let served = serve().await;
+    shutdown_agents();
+    paths::remove_stale_socket();
+    paths::remove_pid();
+    paths::remove_daemon_version();
+    let _ = events().send(Event::Shutdown);
+    served
+}
+
+async fn serve() -> anyhow::Result<()> {
     crate::transcript::set_seal_hook(on_assistant_sealed);
 
     let cfg = Config::load()?;
@@ -940,10 +975,16 @@ pub async fn run() -> anyhow::Result<()> {
     }
     let _ = write_roster(&cfg.agents, &cfg.channels);
 
+    // The version goes down before the socket comes up. A caller polling for
+    // the socket checks the version the instant it answers, and in the other
+    // order that window reads as a mismatch and stops a daemon that had just
+    // started correctly.
+    paths::write_daemon_version(env!("CARGO_PKG_VERSION"))?;
+    // Bind stays last. The lock already keeps daemons apart, so a live socket
+    // can go on meaning "answering" — which is what every `is_socket_live()`
+    // gate in the CLI reads it as.
     let listener = UnixListener::bind(paths::socket_path())
         .with_context(|| format!("bind {}", paths::socket_path().display()))?;
-    paths::write_pid(std::process::id())?;
-    paths::write_daemon_version(env!("CARGO_PKG_VERSION"))?;
     eprintln!(
         "[crew] daemon listening on {}",
         paths::socket_path().display()
@@ -983,10 +1024,6 @@ pub async fn run() -> anyhow::Result<()> {
         }
     }
 
-    shutdown_agents();
-    paths::remove_stale_socket();
-    paths::remove_pid();
-    let _ = events().send(Event::Shutdown);
     Ok(())
 }
 
