@@ -12,8 +12,38 @@ use crate::config::Channel;
 use crate::paths;
 use crate::protocol::{AgentInfo, ChannelInfo, Event, Request};
 
+/// A request the daemon answers on its own. Everything it does per request is
+/// bounded, so silence past this means it is wedged, not busy.
+const ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// The UI polls the ping faster than a wedged daemon can be noticed, so this
+/// one gives up sooner than the rest.
+const PING_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// `Ask` waits on a person and has no deadline worth guessing at. Everything
+/// else does: a socket that accepted the connection and then went quiet used
+/// to park the caller for good, and the callers are command threads the window
+/// is waiting on.
+fn answer_timeout(req: &Request) -> Option<Duration> {
+    match req {
+        Request::Ask { .. } => None,
+        Request::Ping => Some(PING_TIMEOUT),
+        _ => Some(ANSWER_TIMEOUT),
+    }
+}
+
 pub fn rpc(req: Request) -> anyhow::Result<Event> {
-    let mut stream = connect()?;
+    let answer = answer_timeout(&req);
+    rpc_within(req, answer)
+}
+
+fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
+    let stream = connect()?;
+    // Writes are one short line into a socket buffer; taking this long means
+    // nobody is draining it.
+    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+    stream.set_read_timeout(answer)?;
+    let mut stream = stream;
     let line = req.to_line()?;
     writeln!(stream, "{line}")?;
     stream.flush()?;
@@ -21,7 +51,15 @@ pub fn rpc(req: Request) -> anyhow::Result<Event> {
     let mut buf = String::new();
     loop {
         buf.clear();
-        let n = reader.read_line(&mut buf)?;
+        let n = reader.read_line(&mut buf).map_err(|err| match err.kind() {
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+                anyhow::anyhow!(
+                    "daemon took the connection but did not answer ({})",
+                    paths::socket_path().display()
+                )
+            }
+            _ => err.into(),
+        })?;
         if n == 0 {
             bail!("daemon closed the connection");
         }
@@ -437,6 +475,42 @@ pub fn print_routines_from_config(
 mod tests {
     use super::*;
     use crate::config::Routine;
+
+    #[test]
+    fn a_person_gets_as_long_as_they_need_and_nobody_else_does() {
+        assert_eq!(
+            answer_timeout(&Request::Ask {
+                agent: "a".into(),
+                question: "?".into(),
+                options: Vec::new(),
+                inputs: Vec::new(),
+                hint: None,
+            }),
+            None,
+            "Ask waits on a person"
+        );
+        assert_eq!(answer_timeout(&Request::Ping), Some(PING_TIMEOUT));
+        assert_eq!(answer_timeout(&Request::List), Some(ANSWER_TIMEOUT));
+    }
+
+    /// A daemon can take the connection and then never answer — a boot that
+    /// bound but is not accepting yet, or an accept loop wedged on a lock.
+    /// That used to park the caller for good.
+    #[test]
+    fn a_socket_that_never_answers_gives_up() {
+        paths::testing::with_home("rpc", || {
+            paths::ensure_home().expect("home");
+            let listener =
+                std::os::unix::net::UnixListener::bind(paths::socket_path()).expect("bind");
+            // Accept and say nothing, holding the connection open.
+            let quiet = thread::spawn(move || listener.accept().map(|(s, _)| s));
+
+            let err = rpc_within(Request::Ping, Some(Duration::from_millis(200)))
+                .expect_err("a silent daemon must not park the caller");
+            assert!(err.to_string().contains("did not answer"), "{err:#}");
+            drop(quiet.join().expect("accept"));
+        });
+    }
 
     fn routine(name: &str) -> Routine {
         let mut r = Routine::new(name.into(), "0 9 * * *".into(), "brief".into()).unwrap();
