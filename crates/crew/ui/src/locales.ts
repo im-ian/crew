@@ -289,6 +289,7 @@ export const KO = {
 
   "conn.checking": "데몬 확인 중…",
   "conn.ok": "데몬 연결됨",
+  "conn.down": "데몬에 연결하지 못했어요. 봇과 대화는 연결된 뒤에 할 수 있어요.",
   "group.new": "새 그룹",
 } as const;
 
@@ -585,5 +586,6 @@ export const EN: { [K in MessageKey]: string } = {
 
   "conn.checking": "Checking daemon…",
   "conn.ok": "Daemon connected",
+  "conn.down": "Could not reach the daemon. Bots stay unavailable until it is back.",
   "group.new": "New group",
 };

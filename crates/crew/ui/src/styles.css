@@ -305,20 +305,24 @@ html.rail-resizing * {
   flex-direction: column;
   gap: var(--space-8);
 }
-.conn-banner-slot {
-  min-height: 0;
-}
 .conn-banner {
   padding: var(--space-8) var(--space-16);
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--blocked) 12%, var(--bg));
   font-size: var(--text-sm);
   line-height: 1.35;
-  /* A daemon log tail arrives with newlines and long paths. */
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
   max-height: 30vh;
   overflow: auto;
+}
+.conn-banner-head {
+  font-weight: 650;
+}
+.conn-banner-detail {
+  margin-top: var(--space-4);
+  opacity: 0.75;
+  /* The daemon's own text: newlines, and paths with no break opportunities. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .update-banner {
   display: flex;
@@ -975,7 +979,8 @@ main {
   background: var(--bg);
   position: relative;
 }
-.update-banner-slot {
+.update-banner-slot,
+.conn-banner-slot {
   min-height: 0;
 }
 .titlebar-align {

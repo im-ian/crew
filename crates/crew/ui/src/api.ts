@@ -52,7 +52,7 @@ export const api = {
   getMessages: (agent: string) => invoke<ChatMessage[]>("get_messages", { agent }),
   getChannelMessages: (channel: string) =>
     invoke<ChatMessage[]>("get_channel_messages", { channel }),
-  daemonPing: () => invoke<boolean>("daemon_ping"),
+  daemonPing: () => invoke<void>("daemon_ping"),
   resetAgent: (agent: string, dropRoutines: boolean) =>
     invoke<string>("reset_agent", { agent, dropRoutines }),
   setAgent: (args: {

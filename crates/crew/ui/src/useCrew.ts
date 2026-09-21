@@ -920,8 +920,12 @@ export function useCrew() {
     async function tickMessages() {
       try {
         await refreshMessages();
-      } catch {
-        // The ping reports the connection; nothing to add here.
+      } catch (err) {
+        // The ping owns whether the daemon is up; this only says a fetch
+        // failed, which at 200ms is far too often to put in front of anyone.
+        // It still has to leave a trace — a daemon that is up and answering
+        // `Error` here would otherwise freeze the thread on stale messages.
+        console.error("refreshMessages", err);
       }
     }
     async function tickList() {
