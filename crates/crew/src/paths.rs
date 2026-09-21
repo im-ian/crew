@@ -167,6 +167,16 @@ pub fn remove_stale_socket() {
     }
 }
 
+/// Which file the socket path points at, as the kernel sees it. Two daemons
+/// can end up with a socket each — one unlinks the other's and binds its own —
+/// and the one that was unlinked has no other way to notice: its listener
+/// still works, nothing connects to it, and the path now names somebody else.
+pub fn socket_identity() -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = fs::metadata(socket_path()).ok()?;
+    Some((meta.dev(), meta.ino()))
+}
+
 pub fn is_socket_live() -> bool {
     let sock = socket_path();
     if !sock.exists() {
@@ -379,6 +389,34 @@ pub(crate) mod testing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The whole orphan check rests on this telling one socket from the next
+    /// at the same path — a comparison on the path alone would never fire.
+    #[test]
+    fn a_rebound_socket_is_a_different_socket() {
+        testing::with_home("ident", || {
+            ensure_home().expect("home");
+            assert_eq!(socket_identity(), None, "nothing bound yet");
+
+            let first = std::os::unix::net::UnixListener::bind(socket_path()).expect("bind");
+            let before = socket_identity().expect("bound");
+
+            assert_eq!(socket_identity(), Some(before), "same socket, same answer");
+
+            // What the losing daemon in the race has done to us.
+            remove_stale_socket();
+            assert_eq!(socket_identity(), None, "unlinked");
+            let second = std::os::unix::net::UnixListener::bind(socket_path()).expect("rebind");
+            assert_ne!(
+                socket_identity(),
+                Some(before),
+                "a new socket at the same path is not ours"
+            );
+
+            drop(first);
+            drop(second);
+        });
+    }
 
     #[test]
     fn locale_defaults_to_korean_and_only_accepts_known_tags() {

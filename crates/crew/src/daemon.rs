@@ -949,13 +949,35 @@ pub async fn run() -> anyhow::Result<()> {
         paths::socket_path().display()
     );
 
+    // What we just bound. If the path stops naming it, another daemon unlinked
+    // it and bound its own — see the race in README — and this process would
+    // otherwise sit in the loop below forever, unreachable, with its tickers
+    // still flushing the transcripts the reachable daemon now owns.
+    let bound = paths::socket_identity();
+
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
     spawn_status_ticker();
     spawn_transcript_ticker();
     spawn_routine_ticker();
 
+    let mut still_ours = tokio::time::interval(Duration::from_secs(1));
     loop {
         tokio::select! {
+            _ = still_ours.tick() => {
+                // `bound` is None only if that first stat failed, which leaves
+                // the check off rather than guessing.
+                if bound.is_some() && paths::socket_identity() != bound {
+                    eprintln!(
+                        "[crew] {} is no longer the socket this daemon bound; another daemon has it. exiting",
+                        paths::socket_path().display()
+                    );
+                    // Leave everything. The socket, pid and version name the
+                    // daemon that took the path, and `shutdown_agents` would
+                    // unlink `cli-sessions/<id>` — the ids its bots resume
+                    // from. This process's pty children end with it.
+                    std::process::exit(1);
+                }
+            }
             _ = tokio::signal::ctrl_c() => {
                 eprintln!("[crew] signal, shutting down");
                 break;
