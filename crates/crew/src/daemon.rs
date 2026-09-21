@@ -887,11 +887,12 @@ fn restore_transcripts(cfg: &Config) {
     }
 }
 
-/// Whether the socket path has stopped naming the socket this daemon bound.
-/// `None` — unlinked and not yet replaced — is as unreachable as a different
-/// socket sitting there.
-fn lost_socket(bound: (u64, u64), now: Option<(u64, u64)>) -> bool {
-    now != Some(bound)
+/// Two readings in a row before acting, because one `stat` can fail for
+/// reasons that are not a theft and what follows is ending the process.
+/// Returns whether it is time to go.
+fn note_loss(strikes: &mut u8, lost: bool) -> bool {
+    *strikes = if lost { strikes.saturating_add(1) } else { 0 };
+    *strikes >= 2
 }
 
 pub async fn run() -> anyhow::Result<()> {
@@ -951,8 +952,17 @@ pub async fn run() -> anyhow::Result<()> {
         .with_context(|| format!("bind {}", paths::socket_path().display()))?;
     // Immediately, before anything else can run: a theft landing between the
     // bind and this read would record the thief's socket as ours and leave the
-    // check below comparing it against itself forever.
-    let bound = paths::socket_identity();
+    // check below comparing it against itself forever. And one statement after
+    // a successful bind there is only one way to find nothing there — somebody
+    // has already unlinked it — so that is not a reason to stop looking, it is
+    // the answer.
+    let bound = match paths::socket_identity() {
+        Some(bound) => bound,
+        None => anyhow::bail!(
+            "{} was taken before this daemon could claim it",
+            paths::socket_path().display()
+        ),
+    };
     paths::write_pid(std::process::id())?;
     paths::write_daemon_version(env!("CARGO_PKG_VERSION"))?;
     eprintln!(
@@ -970,35 +980,40 @@ pub async fn run() -> anyhow::Result<()> {
     // its listener still works, nothing ever connects, and it would sit here
     // for the life of the machine with its tickers flushing the transcripts
     // the reachable daemon now owns.
-    //
-    // `bound` is None only if that stat failed, which turns the check off
-    // rather than guessing.
     let mut still_ours = tokio::time::interval(Duration::from_secs(1));
-    let mut lost = 0u8;
+    // Ticks missed while this loop was busy are not evidence; without this
+    // they arrive back to back and the two readings below become one.
+    still_ours.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut strikes = 0u8;
     loop {
         tokio::select! {
-            _ = still_ours.tick(), if bound.is_some() => {
+            _ = still_ours.tick() => {
                 let now = paths::socket_identity();
-                if !lost_socket(bound.expect("guarded"), now) {
-                    lost = 0;
-                } else {
-                    // Twice, because one `stat` can fail for reasons that are
-                    // not this, and the answer here is to end the process.
-                    lost += 1;
-                    if lost >= 2 {
-                        eprintln!(
-                            "[crew] {} {}; this daemon is unreachable. exiting",
-                            paths::socket_path().display(),
-                            if now.is_none() { "is gone" } else { "is a different socket now" }
-                        );
-                        // Only exit. The socket, pid and version name whoever
-                        // has the path now, and `shutdown_agents` would unlink
-                        // `cli-sessions/<id>` — the ids that daemon's bots
-                        // resume from. The pty children end with this process;
-                        // a headless turn in flight loses its thread here, so
-                        // it writes nothing, though its CLI child outlives us.
-                        std::process::exit(1);
+                if note_loss(&mut strikes, now != Some(bound)) {
+                    eprintln!(
+                        "[crew] {} {}; this daemon is unreachable. exiting",
+                        paths::socket_path().display(),
+                        if now.is_none() { "is gone" } else { "is a different socket now" }
+                    );
+                    // Reap what is in flight first. `interrupt` bumps the
+                    // turn's generation, so `run_turn` returns at its
+                    // staleness check — before the arm that calls
+                    // `clear_session` on the ids this exit exists to leave
+                    // alone. Without it the turn's CLI child outlives us and
+                    // keeps writing the session the reachable daemon resumes.
+                    let live: Vec<LiveAgent> = match agents().lock() {
+                        Ok(map) => map.values().cloned().collect(),
+                        Err(_) => Vec::new(),
+                    };
+                    for agent in live {
+                        if let LiveAgent::Headless(session) = agent {
+                            headless::interrupt(&session);
+                        }
                     }
+                    // Then only exit. The socket, pid and version name whoever
+                    // has the path now, and `shutdown_agents` would unlink
+                    // `cli-sessions/<id>`. The pty children end with us.
+                    std::process::exit(1);
                 }
             }
             _ = tokio::signal::ctrl_c() => {
@@ -2828,15 +2843,17 @@ mod daemon_tests {
     }
 
     #[test]
-    fn a_socket_that_is_gone_counts_as_lost() {
-        let ours = (1, 100);
-        assert!(!lost_socket(ours, Some(ours)), "still ours");
-        assert!(lost_socket(ours, None), "unlinked and not replaced");
-        assert!(lost_socket(ours, Some((1, 101))), "somebody else's socket");
-        assert!(
-            lost_socket(ours, Some((2, 100))),
-            "same inode, other device"
-        );
+    fn one_reading_is_not_enough_to_leave() {
+        let mut strikes = 0;
+        assert!(!note_loss(&mut strikes, true), "one is a maybe");
+        assert!(note_loss(&mut strikes, true), "two in a row is an answer");
+
+        // A reading that finds it again clears what came before.
+        let mut strikes = 0;
+        assert!(!note_loss(&mut strikes, true));
+        assert!(!note_loss(&mut strikes, false), "found it again");
+        assert!(!note_loss(&mut strikes, true), "counting starts over");
+        assert!(note_loss(&mut strikes, true));
     }
 
     #[test]
