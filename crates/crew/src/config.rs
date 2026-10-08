@@ -760,7 +760,7 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         }
     }
     s.push_str(
-        "When the user writes @id or @display-name, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend.\n",
+        "When the user writes @id or @display-name, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too.\n",
     );
     s.push_str(
         "When the user writes #id or #display-name, they are naming a channel. Stay in this session. To post there, run `crew channel send <id> <text>` or `crew tell --channel <id> <text>`.\n",
@@ -769,7 +769,7 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         "Rooms are yours to make, not only the user's. `crew channel list` prints `id<TAB>name<TAB>members`. `crew channel add --name \"브라우저 QA\" --members alpha,beta` opens one and prints its id. A room only takes posts from its members, so put your own id in `--members` when you will speak there. Pass an explicit id first (`crew channel add browser-qa --name ...`) only when you want to choose it, and then it must be 1-64 of a-z, 0-9, '-' or '_'. `crew channel set <id> --brief \"...\"` gives the room standing rules every member sees on every wake, and `crew channel join <id> <agent>` / `crew channel leave <id> <agent>` change who is in it. Actually run these. Do not describe a room you did not create.\n",
     );
     s.push_str(
-        "A channel wake prompt lists that room's `Members:` by id — that is who \"the same people\" means when the user asks for another room with them; your teammate list above is every agent, not this room. Your own post to a room wakes nobody unless you name someone (@id, @display-name, or @everyone), so once a room exists, send the first message there with the mentions that should start the work.\n",
+        "A channel wake prompt lists that room's `Members:` by id — that is who \"the same people\" means when the user asks for another room with them; your teammate list above is every agent, not this room. Your own post to a room wakes nobody unless you name someone (@id, @display-name, or @everyone), so once a room exists, send the first message there with the mentions that should start the work. A channel message that names several members is handed out one member at a time, in the order the names were written, or in member order for @everyone. You are asked when it is your turn.\n",
     );
     s.push_str(
         "To change your display name, actually run `crew agent set --name \"New Name\"` (id defaults to CREW_AGENT_ID). Do not only claim you renamed yourself.\n",
@@ -1919,6 +1919,8 @@ mod tests {
         assert!(rules.contains("crew channel list"));
         assert!(rules.contains("crew channel set <id> --brief"));
         assert!(rules.contains("Members:"));
+        assert!(rules.contains("one member at a time"));
+        assert!(rules.contains("in the order they were written"));
         assert!(rules.contains("crew routine add"));
         assert!(rules.contains("crew ask --question"));
         assert!(rules.contains("human user"));

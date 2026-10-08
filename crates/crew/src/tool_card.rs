@@ -47,7 +47,10 @@ fn claude_block_tools(v: &Value) -> Vec<ToolCard> {
     if ty != "content_block_start" && ty != "content_block" {
         return Vec::new();
     }
-    let block = v.get("content_block").or_else(|| v.get("content")).unwrap_or(v);
+    let block = v
+        .get("content_block")
+        .or_else(|| v.get("content"))
+        .unwrap_or(v);
     tool_use_card(block).into_iter().collect()
 }
 
@@ -84,7 +87,9 @@ fn item_tools(v: &Value) -> Vec<ToolCard> {
         return Vec::new();
     }
     let detail = if args_detail(item).is_empty() {
-        first_str(item, &["command", "status"]).unwrap_or("").to_string()
+        first_str(item, &["command", "status"])
+            .unwrap_or("")
+            .to_string()
     } else {
         args_detail(item)
     };
@@ -187,9 +192,10 @@ mod tests {
 
     #[test]
     fn nameless_empty_block_is_not_a_card() {
-        let v: Value =
-            serde_json::from_str(r#"{"type":"content_block_start","content_block":{"type":"tool_use","input":{}}}"#)
-                .unwrap();
+        let v: Value = serde_json::from_str(
+            r#"{"type":"content_block_start","content_block":{"type":"tool_use","input":{}}}"#,
+        )
+        .unwrap();
         assert!(from_events(&v).is_empty());
     }
 

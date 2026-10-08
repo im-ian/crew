@@ -124,11 +124,7 @@ pub fn interrupt(session: &HeadlessSession) {
 }
 
 pub fn is_interrupted(session: &HeadlessSession) -> bool {
-    session
-        .inner
-        .lock()
-        .map(|i| i.interrupted)
-        .unwrap_or(false)
+    session.inner.lock().map(|i| i.interrupted).unwrap_or(false)
 }
 
 pub fn set_status(session: &HeadlessSession, status: AgentStatus) {
@@ -203,21 +199,9 @@ fn run_turn(
         .and_then(|i| i.session_id.clone())
         .or_else(|| load_session(&session.id));
     let (turn_session, created_id) = match (program.as_str(), stored) {
-        ("codex", Some(id)) => (
-            Some(TurnSession {
-                id,
-                resume: true,
-            }),
-            None,
-        ),
+        ("codex", Some(id)) => (Some(TurnSession { id, resume: true }), None),
         ("codex", None) => (None, None),
-        (_, Some(id)) => (
-            Some(TurnSession {
-                id,
-                resume: true,
-            }),
-            None,
-        ),
+        (_, Some(id)) => (Some(TurnSession { id, resume: true }), None),
         (_, None) => {
             let id = new_cli_uuid();
             (
@@ -580,7 +564,9 @@ fn claude_text_delta(v: &Value) -> Option<String> {
     } else {
         v
     };
-    let delta = event.get("delta").or_else(|| event.get("event").and_then(|e| e.get("delta")))?;
+    let delta = event
+        .get("delta")
+        .or_else(|| event.get("event").and_then(|e| e.get("delta")))?;
     let ty = delta.get("type").and_then(Value::as_str).unwrap_or("");
     if ty == "text_delta" || ty == "text" {
         let text = delta.get("text").and_then(Value::as_str)?;
@@ -745,7 +731,12 @@ fn is_tui_noise_line(line: &str) -> bool {
         return true;
     }
     let stripped: String = t.chars().filter(|c| !c.is_whitespace()).collect();
-    stripped.chars().all(|c| matches!(c, '⠋' | '⠙' | '⠹' | '⠸' | '⠼' | '⠴' | '⠦' | '⠧' | '⠇' | '⠏' | '.' | '•'))
+    stripped.chars().all(|c| {
+        matches!(
+            c,
+            '⠋' | '⠙' | '⠹' | '⠸' | '⠼' | '⠴' | '⠦' | '⠧' | '⠇' | '⠏' | '.' | '•'
+        )
+    })
 }
 
 pub fn new_cli_uuid() -> String {
@@ -825,16 +816,16 @@ mod tests {
         assert!(chunk.is_none());
         let (chunk, _) = grok_line(r#"{"type":"text","data":"Hello"}"#);
         assert_eq!(chunk.as_deref(), Some("Hello"));
-        let (chunk, st) = grok_line(r#"{"type":"end","sessionId":"abc-123","stopReason":"end_turn"}"#);
+        let (chunk, st) =
+            grok_line(r#"{"type":"end","sessionId":"abc-123","stopReason":"end_turn"}"#);
         assert!(chunk.is_none());
         assert_eq!(st.session_id.as_deref(), Some("abc-123"));
     }
 
     #[test]
     fn grok_ignores_tool_and_mcp_events() {
-        let (chunk, _) = grok_line(
-            r#"{"type":"tool_call","toolCallId":"1","title":"MCP","toolName":"mcp"}"#,
-        );
+        let (chunk, _) =
+            grok_line(r#"{"type":"tool_call","toolCallId":"1","title":"MCP","toolName":"mcp"}"#);
         assert!(chunk.is_none());
         let (chunk, _) = grok_line(r#"{"type":"available_commands","commands":["help"]}"#);
         assert!(chunk.is_none());
