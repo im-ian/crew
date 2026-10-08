@@ -429,7 +429,11 @@ mod tests {
             write_locale("  en\n");
             assert_eq!(locale(), "en");
             write_locale("klingon");
-            assert_eq!(locale(), "ko", "an unknown tag falls back, it does not stick");
+            assert_eq!(
+                locale(),
+                "ko",
+                "an unknown tag falls back, it does not stick"
+            );
             fs::write(locale_path(), "en").unwrap();
             assert_eq!(locale(), "en");
         });

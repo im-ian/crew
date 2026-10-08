@@ -61,13 +61,16 @@ pub fn lookup_in(query: &str, skills: &[Skill]) -> Option<Skill> {
     if prefixed.len() == 1 {
         return Some(prefixed.into_iter().next().unwrap());
     }
-    skills.iter().find(|s| {
-        s.body
-            .lines()
-            .next()
-            .map(|l| l.trim().trim_start_matches('#').trim())
-            .is_some_and(|h| h.eq_ignore_ascii_case(q))
-    }).cloned()
+    skills
+        .iter()
+        .find(|s| {
+            s.body
+                .lines()
+                .next()
+                .map(|l| l.trim().trim_start_matches('#').trim())
+                .is_some_and(|h| h.eq_ignore_ascii_case(q))
+        })
+        .cloned()
 }
 
 pub fn save(name: &str, body: &str) -> anyhow::Result<Skill> {

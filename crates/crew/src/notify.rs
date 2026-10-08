@@ -86,7 +86,11 @@ pub fn maybe_status_notify(
         Some(ch) => ("channel", ch),
         None => ("agent", agent_id),
     };
-    let event = if next == AgentStatus::Blocked { "blocked" } else { "done" };
+    let event = if next == AgentStatus::Blocked {
+        "blocked"
+    } else {
+        "done"
+    };
     write_focus(kind, id, &body, event, name);
     if paths::ui_is_live() {
         return;
@@ -174,21 +178,51 @@ mod tests {
 
     #[test]
     fn notifies_on_finish_and_blocked_only() {
-        assert!(should_notify(AgentStatus::Working, AgentStatus::Idle, false));
-        assert!(should_notify(AgentStatus::Idle, AgentStatus::Blocked, false));
-        assert!(should_notify(AgentStatus::Working, AgentStatus::Blocked, false));
+        assert!(should_notify(
+            AgentStatus::Working,
+            AgentStatus::Idle,
+            false
+        ));
+        assert!(should_notify(
+            AgentStatus::Idle,
+            AgentStatus::Blocked,
+            false
+        ));
+        assert!(should_notify(
+            AgentStatus::Working,
+            AgentStatus::Blocked,
+            false
+        ));
         assert!(should_notify(AgentStatus::Idle, AgentStatus::Blocked, true));
-        assert!(!should_notify(AgentStatus::Working, AgentStatus::Idle, true));
-        assert!(!should_notify(AgentStatus::Blocked, AgentStatus::Blocked, false));
+        assert!(!should_notify(
+            AgentStatus::Working,
+            AgentStatus::Idle,
+            true
+        ));
+        assert!(!should_notify(
+            AgentStatus::Blocked,
+            AgentStatus::Blocked,
+            false
+        ));
         assert!(!should_notify(AgentStatus::Idle, AgentStatus::Idle, false));
-        assert!(!should_notify(AgentStatus::Working, AgentStatus::Working, false));
+        assert!(!should_notify(
+            AgentStatus::Working,
+            AgentStatus::Working,
+            false
+        ));
     }
 
     #[test]
     fn bodies_follow_the_language() {
         assert_eq!(notify_body("Ada", AgentStatus::Idle, "en"), "Ada finished");
-        assert_eq!(notify_body("Ada", AgentStatus::Blocked, "en"), "Ada needs a look");
-        assert_eq!(notify_body("에이다", AgentStatus::Idle, "ko"), "에이다 작업을 마쳤습니다");
+        assert_eq!(
+            notify_body("Ada", AgentStatus::Blocked, "en"),
+            "Ada needs a look"
+        );
+        assert_eq!(
+            notify_body("에이다", AgentStatus::Idle, "ko"),
+            "에이다 작업을 마쳤습니다"
+        );
         assert_eq!(routine_fail_body("brief", "en"), "Routine \"brief\" failed");
         assert!(routine_fail_body("brief", "ko").contains("실패"));
     }

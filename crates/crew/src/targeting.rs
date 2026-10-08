@@ -25,8 +25,7 @@ pub fn channel_wake_targets(
     if members.is_empty() {
         return Vec::new();
     }
-    let member_set: std::collections::HashSet<&str> =
-        members.iter().map(|s| s.as_str()).collect();
+    let member_set: std::collections::HashSet<&str> = members.iter().map(|s| s.as_str()).collect();
     let mut mentioned = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let mut everyone = false;
@@ -67,11 +66,7 @@ fn pick_one_member(members: &[String], last_speaker: Option<&str>) -> Vec<String
 }
 
 /// 1:1 `@teammate` ids that should receive a real `tell` (not the current bot).
-pub fn one_on_one_tell_targets(
-    text: &str,
-    self_id: &str,
-    roster: &[AgentConfig],
-) -> Vec<String> {
+pub fn one_on_one_tell_targets(text: &str, self_id: &str, roster: &[AgentConfig]) -> Vec<String> {
     crate::config::mentioned_teammate_ids(text, self_id, roster)
 }
 
@@ -282,11 +277,7 @@ mod tests {
         let r = roster();
         let m = members();
         for text in ["@everyone hi", "ping @all", "@here", "hey @channel"] {
-            assert_eq!(
-                channel_wake_targets(text, &m, &r, None, true),
-                m,
-                "{text}"
-            );
+            assert_eq!(channel_wake_targets(text, &m, &r, None, true), m, "{text}");
         }
     }
 
@@ -368,9 +359,7 @@ mod tests {
         );
         let o = origin_from_envelope("[crew routine:brief]\nstandup");
         assert_eq!(o.routine.as_deref(), Some("brief"));
-        let o = origin_from_envelope(
-            "[crew from:user]\n[crew handoff from:beta]\nok\nhello",
-        );
+        let o = origin_from_envelope("[crew from:user]\n[crew handoff from:beta]\nok\nhello");
         assert_eq!(o.from, "user");
         assert!(o.reply_agent.is_none());
         let o = origin_from_envelope("[crew handoff from:beta]\nok\nplease continue");

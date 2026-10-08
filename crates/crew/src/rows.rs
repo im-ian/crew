@@ -99,9 +99,7 @@ fn leaked_or_echo(msg: &ChatMessage, prev: Option<&ChatMessage>) -> bool {
     }
     if !had_marker {
         if let Some(prev) = prev {
-            if matches!(prev.role, Role::User | Role::System)
-                && stripped == prev.text.trim()
-            {
+            if matches!(prev.role, Role::User | Role::System) && stripped == prev.text.trim() {
                 return true;
             }
         }
@@ -240,7 +238,11 @@ mod tests {
             RowClass::Received
         );
         assert_eq!(
-            classify_row(&msg(Role::System, "morning-brief", "standup"), None, &agents),
+            classify_row(
+                &msg(Role::System, "morning-brief", "standup"),
+                None,
+                &agents
+            ),
             RowClass::Routine
         );
         assert_eq!(
@@ -257,15 +259,8 @@ mod tests {
     fn leaked_envelope_is_hidden() {
         let agents = ["alpha"];
         let prev = msg(Role::User, "user", "안녕?");
-        let leak = msg(
-            Role::Assistant,
-            "alpha",
-            "[crew from:user]\n안녕?",
-        );
-        assert_eq!(
-            classify_row(&leak, Some(&prev), &agents),
-            RowClass::Hidden
-        );
+        let leak = msg(Role::Assistant, "alpha", "[crew from:user]\n안녕?");
+        assert_eq!(classify_row(&leak, Some(&prev), &agents), RowClass::Hidden);
         let markers_only = msg(Role::Assistant, "alpha", "[crew from:user]\n");
         assert_eq!(classify_row(&markers_only, None, &agents), RowClass::Hidden);
         let channel_leak = msg(
@@ -279,7 +274,10 @@ mod tests {
             RowClass::Hidden
         );
         let real = msg(Role::Assistant, "alpha", "here is the review");
-        assert_eq!(classify_row(&real, Some(&prev), &agents), RowClass::Assistant);
+        assert_eq!(
+            classify_row(&real, Some(&prev), &agents),
+            RowClass::Assistant
+        );
     }
 
     #[test]

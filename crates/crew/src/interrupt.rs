@@ -160,7 +160,9 @@ mod tests {
             "Should I send this email to the customer?"
         ));
         assert!(looks_like_judgment_question("이 변경을 실행할까요?"));
-        assert!(looks_like_judgment_question("Need you to approve the budget."));
+        assert!(looks_like_judgment_question(
+            "Need you to approve the budget."
+        ));
         assert!(!looks_like_judgment_question("What time is the meeting?"));
         assert!(!looks_like_judgment_question("here is the report"));
         assert!(!looks_like_judgment_question(""));
