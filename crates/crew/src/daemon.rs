@@ -384,6 +384,15 @@ fn agent_busy(id: &str) -> anyhow::Result<bool> {
     Ok(live_status(id)? == AgentStatus::Working)
 }
 
+/// Working, or blocked on an approval card. Either one still holds its place
+/// in a room's speaking order.
+fn holds_turn(id: &str) -> bool {
+    matches!(
+        live_status(id),
+        Ok(AgentStatus::Working | AgentStatus::Blocked)
+    )
+}
+
 fn live_status(id: &str) -> anyhow::Result<AgentStatus> {
     let map = agents().lock().expect("agents mutex");
     let live = map.get(id).with_context(|| format!("unknown agent {id}"))?;
@@ -989,6 +998,31 @@ fn dispatch_serial(jobs: Vec<SerialJob>) -> anyhow::Result<()> {
         return Err(err);
     }
     anyhow::bail!("no members received the message");
+}
+
+/// The member already speaking in this room, in member order.
+fn room_speaker(channel: &str, members: &[String]) -> Option<String> {
+    members
+        .iter()
+        .find(|id| {
+            holds_turn(id)
+                && get_origin(id)
+                    .and_then(|origin| origin.reply_channel)
+                    .as_deref()
+                    == Some(channel)
+        })
+        .cloned()
+}
+
+/// Attach `jobs` so they run when `agent` is next idle. If that turn ended
+/// while they were being attached, start them now.
+fn park_serial_on(agent: &str, jobs: Vec<SerialJob>) {
+    mark_serial_arming(agent);
+    queue_serial_after(agent, jobs);
+    unmark_serial_arming(agent);
+    if !holds_turn(agent) {
+        pump_inbox(agent);
+    }
 }
 
 fn advance_serial(start: &str) {
@@ -3048,15 +3082,16 @@ fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
             },
         })
         .collect::<Vec<_>>();
+    // This room already has a speaker. The new names wait behind that turn and
+    // then go in order. Another room keeps its own order.
+    if let Some(speaker) = room_speaker(&ch.id, &ch.members) {
+        park_serial_on(&speaker, jobs);
+        return Ok(());
+    }
     // The bot who just posted is still in its turn. Ask the room after that
     // turn ends, so its reply is already in the channel when the next member starts.
     if from != "user" && agent_busy(&from).unwrap_or(false) {
-        mark_serial_arming(&from);
-        queue_serial_after(&from, jobs);
-        unmark_serial_arming(&from);
-        if !agent_busy(&from).unwrap_or(true) {
-            pump_inbox(&from);
-        }
+        park_serial_on(&from, jobs);
         return Ok(());
     }
     dispatch_serial(jobs)
@@ -3702,6 +3737,151 @@ mod daemon_tests {
         clear_serial_after(&anchor);
         clear_serial_after(&keep);
         clear_serial_after(&rest);
+    }
+
+    struct Speaking(String, String);
+
+    impl Speaking {
+        fn hold(channel: &str, status: AgentStatus) -> Self {
+            let id = test_id("speaker");
+            let session = std::sync::Arc::new(crate::headless::HeadlessSession {
+                id: id.clone(),
+                name: id.clone(),
+                cmd: vec!["grok".into()],
+                cwd: std::path::PathBuf::from("/tmp"),
+                inner: Mutex::new(crate::headless::HeadlessInner {
+                    status,
+                    last_output: Instant::now(),
+                    seq: 1,
+                    cols: 80,
+                    rows: 24,
+                    session_id: None,
+                    child: None,
+                    generation: 0,
+                    interrupted: false,
+                }),
+            });
+            agents()
+                .lock()
+                .unwrap()
+                .insert(id.clone(), LiveAgent::Headless(session));
+            set_origin(&id, TurnOrigin::channel(channel, "user"));
+            Self(id, channel.to_string())
+        }
+    }
+
+    impl Drop for Speaking {
+        fn drop(&mut self) {
+            agents().lock().unwrap().remove(&self.0);
+            take_origin(&self.0);
+            clear_serial_after(&self.0);
+            clear_inbox(&self.0);
+            cancel_serial_channel(&self.1);
+        }
+    }
+
+    fn insert_cfg(id: &str) {
+        configs().lock().unwrap().insert(
+            id.to_string(),
+            crate::config::AgentConfig::new(id.into(), id.into(), vec!["grok".into()], None),
+        );
+    }
+
+    /// A named bot who is not live. Starting them would be the concurrency bug;
+    /// parking must not reach `submit_delivery`.
+    fn roster_only(ids: &[&str]) -> Vec<String> {
+        ids.iter()
+            .map(|id| {
+                let id = test_id(id);
+                insert_cfg(&id);
+                id
+            })
+            .collect()
+    }
+
+    fn open_room(members: &[String]) -> String {
+        let id = test_id("room");
+        channels().lock().unwrap().insert(
+            id.clone(),
+            crate::config::Channel::new(id.clone(), id.clone(), members.to_vec()).unwrap(),
+        );
+        crate::transcript::load_channel(&id);
+        id
+    }
+
+    fn close_room(id: &str, members: &[String]) {
+        channels().lock().unwrap().remove(id);
+        crate::transcript::drop_channel(id);
+        cancel_serial_channel(id);
+        for member in members {
+            configs().lock().unwrap().remove(member);
+            clear_serial_after(member);
+        }
+    }
+
+    #[test]
+    fn a_room_speaks_in_order_behind_whoever_is_already_talking() {
+        paths::testing::with_home("room-order", || {
+            let mut members = roster_only(&["beta", "gamma"]);
+            let room = open_room(&members);
+            let speaking = Speaking::hold(&room, AgentStatus::Working);
+            members.push(speaking.0.clone());
+            insert_cfg(&speaking.0);
+            channels().lock().unwrap().insert(
+                room.clone(),
+                crate::config::Channel::new(room.clone(), room.clone(), members.clone()).unwrap(),
+            );
+            queue_serial_after(&speaking.0, vec![channel_job("old", &room)]);
+
+            let beta = &members[0];
+            let gamma = &members[1];
+            send_channel(&room, "user", &format!("@{beta} then @{gamma}"))
+                .expect("the new names wait behind the current speaker");
+
+            let first = take_next_serial(&speaking.0).expect("beta is next");
+            assert_eq!(first.to, *beta);
+            let second = take_next_serial(beta).expect("gamma follows beta");
+            assert_eq!(second.to, *gamma);
+            assert!(
+                take_next_serial(gamma).is_none(),
+                "the previous lineup does not answer this message too"
+            );
+
+            let other_members = roster_only(&["delta"]);
+            let other = open_room(&other_members);
+            let err = send_channel(&other, "user", &format!("@{}", other_members[0]))
+                .expect_err("another room keeps its own order and tries to start");
+            assert!(err.to_string().contains(&other_members[0]), "{err}");
+            assert!(
+                take_next_serial(&speaking.0).is_none(),
+                "the other room must not join this room's order"
+            );
+
+            close_room(&room, &members);
+            close_room(&other, &other_members);
+        });
+    }
+
+    #[test]
+    fn a_blocked_speaker_still_holds_the_rooms_place() {
+        paths::testing::with_home("room-blocked", || {
+            let members = roster_only(&["beta"]);
+            let room = open_room(&members);
+            let speaking = Speaking::hold(&room, AgentStatus::Blocked);
+            let mut all = members.clone();
+            all.push(speaking.0.clone());
+            insert_cfg(&speaking.0);
+            channels().lock().unwrap().insert(
+                room.clone(),
+                crate::config::Channel::new(room.clone(), room.clone(), all.clone()).unwrap(),
+            );
+
+            send_channel(&room, "user", &format!("@{}", members[0]))
+                .expect("a blocked speaker keeps the next name waiting");
+            let next = take_next_serial(&speaking.0).expect("parked");
+            assert_eq!(next.to, members[0]);
+            close_room(&room, &all);
+        });
     }
 
     #[test]
