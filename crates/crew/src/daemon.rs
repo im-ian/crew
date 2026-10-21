@@ -705,7 +705,26 @@ pub(crate) fn pump_inbox(id: &str) {
 fn pump_inbox_inner(id: &str) {
     match agent_busy(id) {
         Ok(false) => {}
-        _ => return,
+        Ok(true) => return,
+        // Exited or gone: nothing queued here will start. A chain riding on it
+        // goes on without this bot, as past a delivery that failed.
+        Err(_) => {
+            let chains: Vec<VecDeque<SerialJob>> = inbox()
+                .lock()
+                .ok()
+                .and_then(|mut map| {
+                    map.get_mut(id).map(|q| {
+                        q.iter_mut()
+                            .map(|item| std::mem::take(&mut item.then))
+                            .collect()
+                    })
+                })
+                .unwrap_or_default();
+            for chain in chains {
+                release(chain);
+            }
+            return;
+        }
     }
     // Claimed before the pop, so two pumps cannot start this bot's queue out
     // of order.
@@ -3715,6 +3734,49 @@ exec sleep 1"#,
             for id in [&bot, &reviewer] {
                 headless_status(id, AgentStatus::Idle);
                 clear_inbox(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// "@B @C" while terminal bot B is busy: B's turn queues, carrying C. When
+    /// B's terminal exits, nothing queued there starts, and C still answers.
+    #[test]
+    fn the_rest_of_a_chain_goes_on_past_a_bot_that_exited() {
+        paths::testing::with_home("exited", || {
+            paths::write_notifications_enabled(false);
+            let [term, c] = ["exit-term", "exit-c"].map(test_id);
+            insert_spawned_agent(AgentConfig::new(
+                term.clone(),
+                term.clone(),
+                vec!["cat".into()],
+                Some(paths::home_dir().display().to_string()),
+            ))
+            .unwrap();
+            claude_bot(&c);
+            headless_status(&c, AgentStatus::Working);
+            let mut then = VecDeque::from([SerialJob {
+                to: c.clone(),
+                kind: SerialKind::Tell {
+                    from: "user".into(),
+                    text: "같이 봐줘".into(),
+                    origin: Some(TurnOrigin::mention_tell("chat-a")),
+                },
+                own: false,
+            }]);
+            let origin = TurnOrigin::mention_tell("chat-a");
+            enqueue_delivery(&term, "같이 봐줘", true, None, origin, &mut then).unwrap();
+            match agents().lock().unwrap().get(&term) {
+                Some(LiveAgent::Pty(s)) => s.inner.lock().unwrap().status = AgentStatus::Exited,
+                _ => panic!("cat runs on a terminal"),
+            }
+
+            pump_inbox(&term);
+            assert!(told(&c, "같이 봐줘"), "C waited on a bot that is gone");
+
+            headless_status(&c, AgentStatus::Idle);
+            clear_inbox(&c);
+            for id in [&term, &c] {
                 remove_agent(id).unwrap();
             }
         });
