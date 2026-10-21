@@ -27,8 +27,9 @@ export type ThreadRow =
 
 /**
  * Consecutive tool cards collapse into one row so a long run reads as one line,
- * and so does a back-and-forth with one bot: sent, received and handoff notes
- * are one exchange, and four of them in a row is most of a screen.
+ * and so does a back-and-forth with one bot: sent, received and handoff notes,
+ * and the reply to a turn that bot asked for, are one exchange (`runPeer`), and
+ * four of them in a row is most of a screen.
  *
  * A note run is emitted even when it holds one note, so a row does not change
  * element type the moment a reply arrives — React would unmount the note the
@@ -42,18 +43,18 @@ export function threadRows(
   const rows: ThreadRow[] = [];
   for (const msg of list) {
     const last = rows[rows.length - 1];
+    const peer = runPeer(msg, agents);
+    if (peer) {
+      if (last?.kind === "notes" && last.peerId === peer) {
+        last.msgs.push(msg);
+      } else {
+        rows.push({ kind: "notes", peerId: peer, msgs: [msg] });
+      }
+      continue;
+    }
     if (msg.kind === "tool") {
       if (last?.kind === "tools") last.msgs.push(msg);
       else rows.push({ kind: "tools", msgs: [msg] });
-      continue;
-    }
-    const note = noteRef(msg, agents);
-    if (note) {
-      if (last?.kind === "notes" && last.peerId === note.otherId) {
-        last.msgs.push(msg);
-      } else {
-        rows.push({ kind: "notes", peerId: note.otherId, msgs: [msg] });
-      }
       continue;
     }
     rows.push({ kind: "msg", msg });
@@ -72,6 +73,22 @@ export function momentStamp(row: ThreadRow): number {
   const m = row.msg;
   if (m.role === "system" && m.from !== "user") return 0;
   return m.ts || 0;
+}
+
+/**
+ * The bot whose exchange a row folds into: the other end of a note, or the
+ * bot that asked for the turn the row came from. That turn's reply is already
+ * in the asker's chat, so here it reads beside the thread. A card waiting on
+ * the user stays in the thread, where it can be answered.
+ */
+export function runPeer(
+  msg: ChatMessage,
+  agents: readonly AgentInfo[],
+): string | null {
+  const note = noteRef(msg, agents);
+  if (note) return note.otherId;
+  if (msg.choice || msg.approval) return null;
+  return msg.peer || null;
 }
 
 /**

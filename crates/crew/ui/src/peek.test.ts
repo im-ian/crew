@@ -76,12 +76,15 @@ describe("peekMessages", () => {
     ]);
   });
 
-  it("includes the callee's assistant reply after a received tell", () => {
+  it("includes the callee's reply to the turn the peer asked for", () => {
     const rows = peekMessages(
       [
-        msg("system", "alpha", "please review", { kind: "received" }),
-        msg("system", "read_file", "path=foo", { kind: "tool" }),
-        msg("assistant", "beta", "looks good"),
+        msg("system", "alpha", "please review", {
+          kind: "received",
+          peer: "alpha",
+        }),
+        msg("system", "read_file", "path=foo", { kind: "tool", peer: "alpha" }),
+        msg("assistant", "beta", "looks good", { peer: "alpha" }),
       ],
       "alpha",
       "beta",
@@ -93,19 +96,46 @@ describe("peekMessages", () => {
     ]);
   });
 
-  it("stops following assistant turns after the user speaks", () => {
+  // The bot told the user who won, in its own chat. Shown beside the thread
+  // too, it was the same answer twice.
+  it("leaves out what the bot says to the user, even right after a note", () => {
     const rows = peekMessages(
       [
-        msg("system", "alpha", "please review", { kind: "received" }),
-        msg("user", "user", "also fix the padding"),
-        msg("assistant", "beta", "ok, padding next"),
+        msg("system", "alpha", "rock", { kind: "received" }),
+        msg("assistant", "beta", "alpha won"),
+        msg("user", "user", "again"),
+        msg("assistant", "beta", "ok"),
+      ],
+      "alpha",
+      "beta",
+      AGENTS,
+    );
+    expect(rows.map((m) => [m.from, m.text])).toEqual([["alpha", "rock"]]);
+  });
+
+  it("keeps a reply to another peer out", () => {
+    const rows = peekMessages(
+      [msg("assistant", "beta", "for gamma", { peer: "gamma" })],
+      "alpha",
+      "beta",
+      AGENTS,
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("shows the user's words when they were typed in the peer's chat", () => {
+    const rows = peekMessages(
+      [
+        msg("system", "user", "@beta say hi", { peer: "alpha" }),
+        msg("assistant", "beta", "hi", { peer: "alpha" }),
       ],
       "alpha",
       "beta",
       AGENTS,
     );
     expect(rows.map((m) => [m.from, m.text])).toEqual([
-      ["alpha", "please review"],
+      ["user", "@beta say hi"],
+      ["beta", "hi"],
     ]);
   });
 
@@ -154,9 +184,12 @@ describe("peekMessages", () => {
       [
         msg("system", "alpha", "[crew from:alpha]\nplease review", {
           kind: "received",
+          peer: "alpha",
         }),
-        msg("assistant", "beta", "[crew from:alpha]\nplease review"),
-        msg("assistant", "beta", "on it"),
+        msg("assistant", "beta", "[crew from:alpha]\nplease review", {
+          peer: "alpha",
+        }),
+        msg("assistant", "beta", "on it", { peer: "alpha" }),
       ],
       "alpha",
       "beta",

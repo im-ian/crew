@@ -86,28 +86,21 @@ export function peekMessages(
   agentIds: ReadonlySet<string>,
 ): ChatMessage[] {
   const out: ChatMessage[] = [];
-  let followSelf = false;
   for (const m of messages) {
     const ref = noteRef(m, roster(agentIds));
-    if (ref && agentIds.has(ref.otherId) && ref.otherId === peerId) {
-      const speaker = ref.kind === "sent" ? selfId : peerId;
-      const row = asSpeech(m, speaker);
+    if (ref) {
+      if (ref.otherId !== peerId || !agentIds.has(peerId)) continue;
+      const row = asSpeech(m, ref.kind === "sent" ? selfId : peerId);
       if (row) out.push(row);
-      followSelf = ref.kind === "received";
       continue;
     }
-    if (m.kind === "tool") continue;
-    if (followSelf && m.role === "assistant") {
-      const text = speechText(m);
-      if (!text) continue;
-      const prev = out[out.length - 1];
-      if (prev && prev.text.trim() === text) continue;
-      out.push({ ...m, text, kind: null });
-      continue;
-    }
-    if (m.role === "user" || ref || m.role === "system") {
-      followSelf = false;
-    }
+    // The rest of a turn the peer asked for: this bot's reply, and the user's
+    // words when they were typed in the peer's chat. What this bot says to the
+    // user in its own turns stays in the thread, even right after a note.
+    if (m.peer !== peerId || m.kind === "tool") continue;
+    const row = asSpeech(m, m.role === "assistant" ? selfId : m.from);
+    // A terminal types the tell back before the reply.
+    if (row && row.text !== out[out.length - 1]?.text) out.push(row);
   }
   return out;
 }
