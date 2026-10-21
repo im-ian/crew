@@ -7,16 +7,13 @@ import { Composer, type ComposerHandle } from "./components/Composer";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ContextMenu, type MenuEntry } from "./components/ContextMenu";
 import { AgentPane } from "./components/AgentPane";
-import { ChannelPane } from "./components/ChannelPane";
 import { ConnectionBanner } from "./components/ConnectionBanner";
 import { NewBotModal } from "./components/NewBotModal";
-import { NewChannelModal } from "./components/NewChannelModal";
 import { SettingsPane } from "./components/SettingsPane";
 import { SkillsPane } from "./components/SkillsPane";
 import { ShortcutHelp } from "./components/ShortcutHelp";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
-import { busyInChannel } from "./busy";
 import { railOrder } from "./groups";
 import { useT } from "./LocaleContext";
 import type { TFn } from "./i18n";
@@ -27,7 +24,6 @@ import {
   saveThemePref,
   type ThemePref,
 } from "./theme";
-import type { Kind } from "./types";
 import { useCrew } from "./useCrew";
 import { useUpdater } from "./updater";
 
@@ -153,10 +149,6 @@ export function App() {
         c.openNewBot();
         return;
       }
-      if (id === "new-channel") {
-        c.openNewChannel();
-        return;
-      }
       if (id === "info") {
         if (c.selected) c.openInfo(c.selected);
         return;
@@ -166,13 +158,6 @@ export function App() {
         return;
       }
       if (id === "stop") {
-        if (c.selectedKind === "channel" && c.currentChannel) {
-          const working = busyInChannel(c.agents, c.currentChannel.id).filter(
-            (a) => a.status === "working",
-          );
-          for (const a of working) void c.stopAgent(a.id);
-          return;
-        }
         void c.stopAgent();
         return;
       }
@@ -181,7 +166,7 @@ export function App() {
         return;
       }
       if (id === "prev-chat" || id === "next-chat") {
-        const order = railOrder(c.groups, c.ungrouped, c.agents, c.channels);
+        const order = railOrder(c.groups, c.ungrouped, c.agents);
         if (!order.length) return;
         const i = order.findIndex(
           (row) => row.kind === c.selectedKind && row.id === c.selected,
@@ -190,20 +175,14 @@ export function App() {
           id === "next-chat"
             ? order[(i < 0 ? 0 : i + 1) % order.length]
             : order[(i < 0 ? order.length - 1 : i - 1 + order.length) % order.length];
-        if (next.kind === "channel") c.selectChannel(next.id);
-        else c.selectAgent(next.id);
+        c.selectAgent(next.id);
         return;
       }
       if (id === "approve" || id === "deny") {
         const allow = id === "approve";
-        if (c.selectedKind === "agent" && c.currentAgent?.status === "blocked") {
+        if (c.currentAgent?.status === "blocked") {
           void c.approveAgent(allow, c.currentAgent.id);
-          return;
         }
-        const blocked = busyInChannel(c.agents, c.currentChannel?.id).find(
-          (a) => a.status === "blocked",
-        );
-        if (blocked) void c.approveAgent(allow, blocked.id);
       }
     }
     window.addEventListener("keydown", onKey, true);
@@ -214,7 +193,6 @@ export function App() {
     <div className="app">
       <Sidebar
         agents={crew.agents}
-        channels={crew.channels}
         groups={crew.groups}
         ungrouped={crew.ungrouped}
         selected={crew.selected}
@@ -225,10 +203,8 @@ export function App() {
         onQuery={crew.setQuery}
         onSearchHit={crew.openSearchHit}
         onSelectAgent={crew.selectAgent}
-        onSelectChannel={crew.selectChannel}
         onCreateMenu={crew.showCreateMenu}
         onAgentCtx={(e, id) => crew.showCtx(e, id, "agent")}
-        onChannelCtx={(e, id) => crew.showCtx(e, id, "channel")}
         onGroupCtx={(e, id) => crew.showCtx(e, id, "group")}
         onToggleGroup={crew.toggleGroup}
         onRenameGroup={crew.renameGroup}
@@ -256,8 +232,6 @@ export function App() {
         />
         <ChatHeader
           currentAgent={crew.currentAgent}
-          currentChannel={crew.currentChannel}
-          agents={crew.agents}
           onOpenInfo={() => {
             if (crew.selected) crew.openInfo(crew.selected);
           }}
@@ -269,11 +243,9 @@ export function App() {
         <ChatThread
           messages={crew.messages}
           agents={crew.agents}
-          channels={crew.channels}
           selected={crew.selected}
           selectedKind={crew.selectedKind}
           currentAgent={crew.currentAgent}
-          currentChannel={crew.currentChannel}
           stick={crew.stick}
           onStick={crew.setStick}
           streaming={
@@ -282,7 +254,6 @@ export function App() {
               crew.currentAgent?.status === "blocked")
           }
           onSelectAgent={crew.selectAgent}
-          onSelectChannel={crew.selectChannel}
           onApprove={(allow, id) => void crew.approveAgent(allow, id)}
           onAnswerChoice={(agentId, messageId, answers, values, closed) =>
             crew.answerChoice(agentId, messageId, answers, values, closed)
@@ -297,51 +268,22 @@ export function App() {
         <Composer
           ref={composerRef}
           agents={crew.agents}
-          channels={crew.channels}
           selected={crew.selected}
           selectedKind={crew.selectedKind}
           placeholder={crew.placeholder}
           onSend={crew.onSend}
           onJump={crew.highlightMessage}
           busy={
-            (crew.selectedKind === "agent" &&
-              (crew.currentAgent?.status === "working" ||
-                crew.currentAgent?.status === "blocked")) ||
-            (crew.selectedKind === "channel" &&
-              busyInChannel(crew.agents, crew.currentChannel?.id).some(
-                (a) => a.status === "working" || a.status === "blocked",
-              ))
+            crew.currentAgent?.status === "working" ||
+            crew.currentAgent?.status === "blocked"
           }
           onStop={() => {
-            if (crew.selectedKind === "channel" && crew.currentChannel) {
-              for (const a of busyInChannel(crew.agents, crew.currentChannel.id)) {
-                if (a.status === "working" || a.status === "blocked") {
-                  void crew.stopAgent(a.id);
-                }
-              }
-              return;
-            }
             void crew.stopAgent();
           }}
           onOpenSkills={() => setSkillsOpen(true)}
         />
-        <ChannelPane
-          open={crew.paneOpen && crew.selectedKind === "channel"}
-          tab={crew.paneTab}
-          channel={crew.currentChannel}
-          agents={crew.agents}
-          onTab={crew.setPaneTab}
-          onClose={crew.closePane}
-          onSave={crew.saveChannel}
-          onAddRoutine={crew.addRoutine}
-          onToggleRoutine={crew.toggleRoutine}
-          onDeleteRoutine={crew.deleteRoutine}
-          onRunRoutine={crew.runRoutine}
-          onEditRoutine={crew.editRoutine}
-          onLoadRoutineRuns={crew.loadRoutineRuns}
-        />
         <AgentPane
-          open={crew.paneOpen && crew.selectedKind === "agent"}
+          open={crew.paneOpen}
           tab={crew.paneTab}
           agent={crew.currentAgent}
           onTab={crew.setPaneTab}
@@ -367,7 +309,6 @@ export function App() {
             self={crew.currentAgent}
             messages={crew.messages}
             agents={crew.agents}
-            channels={crew.channels}
             onClose={() => setPeekPeer(null)}
           />
         ) : null}
@@ -382,12 +323,6 @@ export function App() {
         open={crew.newBotOpen}
         onClose={crew.closeNewBot}
         onCreate={crew.createBot}
-      />
-      <NewChannelModal
-        open={crew.newChannelOpen}
-        agents={crew.agents}
-        onClose={crew.closeNewChannel}
-        onCreate={crew.createChannel}
       />
       <ContextMenu
         open={crew.ctx.open}
@@ -439,14 +374,6 @@ function menuItems(
       },
       {
         type: "action",
-        label: t("menu.newChannel"),
-        onClick: () => {
-          crew.hideCtx();
-          crew.openNewChannel();
-        },
-      },
-      {
-        type: "action",
         label: t("menu.newGroup"),
         onClick: () => {
           crew.hideCtx();
@@ -478,9 +405,7 @@ function menuItems(
     ];
   }
   const id = ctx.id;
-  const kind: Kind = ctx.kind === "channel" ? "channel" : "agent";
-  const isCh = kind === "channel";
-  const currentGroup = id ? crew.itemGroupId(kind, id) : null;
+  const currentGroup = id ? crew.itemGroupId("agent", id) : null;
   const moveItems: MenuEntry[] = groups
     .filter((g) => g.id !== currentGroup)
     .map((g) => ({
@@ -488,7 +413,7 @@ function menuItems(
       label: g.name,
       onClick: () => {
         crew.hideCtx();
-        if (id) crew.moveToGroup(kind, id, g.id);
+        if (id) crew.moveToGroup("agent", id, g.id);
       },
     }));
   if (currentGroup) {
@@ -497,39 +422,29 @@ function menuItems(
       label: t("menu.leaveGroup"),
       onClick: () => {
         crew.hideCtx();
-        if (id) crew.moveToGroup(kind, id, null);
+        if (id) crew.moveToGroup("agent", id, null);
       },
     });
   }
-  const items: MenuEntry[] = [];
-  if (!isCh) {
-    items.push({
+  const items: MenuEntry[] = [
+    {
       type: "action",
       label: t("menu.clearChat"),
       onClick: () => {
         crew.hideCtx();
         if (id) crew.openConfirm(id, "reset");
       },
-    });
-    items.push({
+    },
+    {
       type: "action",
       label: t("menu.cloneBot"),
       onClick: () => {
         crew.hideCtx();
         if (id) void crew.cloneBot(id);
       },
-    });
-  } else {
-    items.push({
-      type: "action",
-      label: t("menu.leaveChannel"),
-      onClick: () => {
-        crew.hideCtx();
-        if (id) crew.openConfirm(id, "leave-channel");
-      },
-    });
-  }
-  items.push({ type: "sep" });
+    },
+    { type: "sep" },
+  ];
   if (moveItems.length) {
     items.push({ type: "sub", label: t("menu.moveToGroup"), items: moveItems });
   }
@@ -538,17 +453,17 @@ function menuItems(
     label: t("menu.moveToNewGroup"),
     onClick: () => {
       crew.hideCtx();
-      if (id) crew.createGroup({ kind, id });
+      if (id) crew.createGroup({ kind: "agent", id });
     },
   });
   items.push({ type: "sep" });
   items.push({
     type: "action",
-    label: isCh ? t("menu.deleteChannel") : t("menu.deleteBot"),
+    label: t("menu.deleteBot"),
     danger: true,
     onClick: () => {
       crew.hideCtx();
-      if (id) crew.openConfirm(id, isCh ? "remove-channel" : "remove");
+      if (id) crew.openConfirm(id, "remove");
     },
   });
   return items;

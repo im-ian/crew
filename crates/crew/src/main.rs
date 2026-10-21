@@ -1,7 +1,6 @@
 use clap::{Parser, Subcommand};
 
 mod avatar;
-mod channel_context;
 mod choice;
 mod client;
 mod config;
@@ -29,8 +28,8 @@ mod transcript;
 mod ui_dev;
 
 use config::{
-    empty_to_none, parse_hex_color, resolve_add_cmd, unique_channel_id, unique_ids, write_roster,
-    AgentCli, AgentConfig, AvatarShape, Channel, Config, Effort, Routine,
+    empty_to_none, parse_hex_color, resolve_add_cmd, write_roster, AgentCli, AgentConfig,
+    AvatarShape, Config, Effort, Routine,
 };
 use protocol::{Event, Request};
 
@@ -55,16 +54,13 @@ enum Cmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         message: Vec<String>,
     },
-    /// Send a marked 1:1 envelope to an agent (or `--channel` fan-out)
+    /// Send a marked 1:1 envelope to an agent
     Tell {
-        /// Recipient agent id (omit when using --channel)
-        to: Option<String>,
+        /// Recipient agent id
+        to: String,
         /// Sender id. Defaults to $CREW_AGENT_ID, else `user`
         #[arg(long)]
         from: Option<String>,
-        /// Post to a channel instead of a 1:1 tell
-        #[arg(long)]
-        channel: Option<String>,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         message: Vec<String>,
     },
@@ -95,12 +91,9 @@ enum Cmd {
     /// Manage agents
     #[command(subcommand)]
     Agent(AgentCmd),
-    /// Scheduled routines for a bot, or for a channel addressed as `#room`
+    /// Scheduled routines for a bot
     #[command(subcommand)]
     Routine(RoutineCmd),
-    /// Group channels
-    #[command(subcommand)]
-    Channel(ChannelCmd),
     /// Persistent per-agent notes (`$CREW_HOME/memory/AGENT.md`)
     #[command(subcommand)]
     Memory(MemoryCmd),
@@ -181,7 +174,7 @@ enum RoutineCmd {
         agent: Option<String>,
     },
     Add {
-        /// Agent id or `#channel`. Defaults to $CREW_AGENT_ID.
+        /// Agent id. Defaults to $CREW_AGENT_ID.
         #[arg(value_name = "AGENT")]
         agent: Option<String>,
         #[arg(long)]
@@ -207,48 +200,6 @@ enum RoutineCmd {
     Run {
         agent: String,
         key: String,
-    },
-}
-
-#[derive(Subcommand)]
-enum ChannelCmd {
-    List,
-    Add {
-        /// Channel id (a-z, 0-9, '-', '_'). Omit it to mint one from --name.
-        id: Option<String>,
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long, value_delimiter = ',')]
-        members: Vec<String>,
-    },
-    Join {
-        channel: String,
-        agent: Option<String>,
-    },
-    Leave {
-        channel: String,
-        agent: Option<String>,
-    },
-    Remove {
-        channel: String,
-    },
-    Set {
-        channel: String,
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long)]
-        brief: Option<String>,
-        #[arg(long)]
-        unset_brief: bool,
-        #[arg(long, value_delimiter = ',')]
-        members: Option<Vec<String>>,
-    },
-    Send {
-        channel: String,
-        #[arg(long)]
-        from: Option<String>,
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
-        message: Vec<String>,
     },
 }
 
@@ -294,12 +245,7 @@ fn run() -> anyhow::Result<()> {
             let text = message.join(" ");
             client::print_event(client::rpc(Request::Send { agent, text })?)
         }
-        Some(Cmd::Tell {
-            to,
-            from,
-            channel,
-            message,
-        }) => run_tell(to, from, channel, message),
+        Some(Cmd::Tell { to, from, message }) => run_tell(to, from, message),
         Some(Cmd::Ask {
             question,
             options,
@@ -397,7 +343,7 @@ fn run() -> anyhow::Result<()> {
                 agent.effort = effort;
                 cfg.agents.push(agent);
                 cfg.save()?;
-                write_roster(&cfg.agents, &cfg.channels)?;
+                write_roster(&cfg.agents)?;
                 Ok(())
             }
         }
@@ -496,7 +442,7 @@ fn run() -> anyhow::Result<()> {
                     unset_cwd,
                 )?;
                 cfg.save()?;
-                write_roster(&cfg.agents, &cfg.channels)?;
+                write_roster(&cfg.agents)?;
                 Ok(())
             }
         }
@@ -515,11 +461,8 @@ fn run() -> anyhow::Result<()> {
                 }
                 crate::avatar::clear(&id);
                 crate::memory::remove(&id);
-                for ch in &mut cfg.channels {
-                    ch.members.retain(|m| m != &id);
-                }
                 cfg.save()?;
-                write_roster(&cfg.agents, &cfg.channels)?;
+                write_roster(&cfg.agents)?;
                 Ok(())
             }
         }
@@ -544,13 +487,12 @@ fn run() -> anyhow::Result<()> {
                 let new_id = agent.id.clone();
                 cfg.agents.push(agent);
                 cfg.save()?;
-                write_roster(&cfg.agents, &cfg.channels)?;
+                write_roster(&cfg.agents)?;
                 println!("ok {new_id}");
                 Ok(())
             }
         }
         Some(Cmd::Routine(sub)) => run_routine(sub),
-        Some(Cmd::Channel(sub)) => run_channel(sub),
         Some(Cmd::Memory(sub)) => run_memory(sub),
     }
 }
@@ -670,253 +612,20 @@ fn run_ask(
     })?)
 }
 
-fn run_tell(
-    to: Option<String>,
-    from: Option<String>,
-    channel: Option<String>,
-    message: Vec<String>,
-) -> anyhow::Result<()> {
+fn run_tell(to: String, from: Option<String>, message: Vec<String>) -> anyhow::Result<()> {
     connect_for_tell()?;
     let from = client::tell_from(from);
-    let channel = channel.and_then(empty_to_none);
-    if let Some(channel) = channel {
-        let mut parts = Vec::new();
-        if let Some(to) = to.and_then(empty_to_none) {
-            parts.push(to);
-        }
-        parts.extend(message);
-        let text = parts.join(" ");
-        if text.trim().is_empty() {
-            anyhow::bail!("tell needs a message");
-        }
-        client::print_event(client::rpc(Request::Tell {
-            from,
-            to: String::new(),
-            text,
-            channel: Some(channel),
-        })?)
-    } else {
-        let to = to
-            .and_then(empty_to_none)
-            .ok_or_else(|| anyhow::anyhow!("tell needs a recipient or --channel <id>"))?;
-        let text = message.join(" ");
-        if text.trim().is_empty() {
-            anyhow::bail!("tell needs a message");
-        }
-        client::print_event(client::rpc(Request::Tell {
-            from,
-            to,
-            text,
-            channel: None,
-        })?)
+    let to = to.trim().to_string();
+    if to.is_empty() {
+        anyhow::bail!("tell needs a recipient");
     }
+    let text = message.join(" ");
+    if text.trim().is_empty() {
+        anyhow::bail!("tell needs a message");
+    }
+    client::print_event(client::rpc(Request::Tell { from, to, text })?)
 }
 
-fn existing_channel_ids(live: bool) -> anyhow::Result<Vec<String>> {
-    if !live {
-        return Ok(Config::load()
-            .unwrap_or_default()
-            .channels
-            .into_iter()
-            .map(|c| c.id)
-            .collect());
-    }
-    match client::rpc(Request::ListChannels)? {
-        Event::Channels { channels } => Ok(channels.into_iter().map(|c| c.id).collect()),
-        Event::Agents { channels, .. } => Ok(channels.into_iter().map(|c| c.id).collect()),
-        Event::Error { message } => anyhow::bail!("{message}"),
-        _ => anyhow::bail!("unexpected daemon response"),
-    }
-}
-
-/// A room's id and display name from what the caller typed. The id is optional
-/// so a bot can name a room the way a person does ("브라우저 QA"); the name then
-/// mints one. An empty name is the daemon's cue to reuse the id, so the CLI does
-/// not decide that a second time.
-fn resolve_channel_add(
-    id: Option<String>,
-    name: Option<String>,
-    existing: impl FnOnce() -> anyhow::Result<Vec<String>>,
-) -> anyhow::Result<(String, String)> {
-    match (id, name) {
-        (Some(id), name) => Ok((id, name.unwrap_or_default())),
-        (None, Some(name)) => Ok((unique_channel_id(&name, existing()?), name)),
-        (None, None) => anyhow::bail!("channel add needs an id or --name"),
-    }
-}
-
-fn run_channel(cmd: ChannelCmd) -> anyhow::Result<()> {
-    match cmd {
-        ChannelCmd::List => {
-            if paths::is_socket_live() {
-                match client::rpc(Request::ListChannels)? {
-                    Event::Channels { channels } => client::print_channels(&channels),
-                    Event::Agents { channels, .. } => client::print_channels(&channels),
-                    Event::Error { message } => anyhow::bail!("{message}"),
-                    ev => client::print_event(ev),
-                }
-            } else {
-                let cfg = Config::load()?;
-                client::print_channels_from_config(&cfg.channels)
-            }
-        }
-        ChannelCmd::Add { id, name, members } => {
-            let live = paths::is_socket_live();
-            let members = unique_ids(members);
-            let (id, name) = resolve_channel_add(id, name, || existing_channel_ids(live))?;
-            let ch = Channel::new(id, name.clone(), members.clone())?;
-            let id = ch.id.clone();
-            if live {
-                if let Event::Error { message } = client::rpc(Request::AddChannel {
-                    id: id.clone(),
-                    name,
-                    members,
-                })? {
-                    anyhow::bail!("{message}");
-                }
-            } else {
-                let mut cfg = Config::load()?;
-                if cfg.agents.is_empty() {
-                    anyhow::bail!("no agents configured");
-                }
-                if cfg.channels.iter().any(|c| c.id == ch.id) {
-                    anyhow::bail!("channel {} already exists", ch.id);
-                }
-                for m in &ch.members {
-                    if !cfg.agents.iter().any(|a| a.id == *m) {
-                        anyhow::bail!("unknown agent {m}");
-                    }
-                }
-                cfg.channels.push(ch);
-                cfg.save()?;
-                write_roster(&cfg.agents, &cfg.channels)?;
-            }
-            // The caller (often a bot) needs the id to post there next.
-            println!("{id}");
-            Ok(())
-        }
-        ChannelCmd::Join { channel, agent } => {
-            let agent = require_agent_id(agent, "join")?;
-            if paths::is_socket_live() {
-                match client::rpc(Request::JoinChannel { channel, agent })? {
-                    Event::Error { message } => anyhow::bail!("{message}"),
-                    ev => client::print_event(ev),
-                }
-            } else {
-                let mut cfg = Config::load()?;
-                if !cfg.agents.iter().any(|a| a.id == agent) {
-                    anyhow::bail!("unknown agent {agent}");
-                }
-                let slot = cfg
-                    .channels
-                    .iter_mut()
-                    .find(|c| c.id == channel)
-                    .ok_or_else(|| anyhow::anyhow!("unknown channel {channel}"))?;
-                if !slot.members.iter().any(|m| m == &agent) {
-                    slot.members.push(agent);
-                }
-                cfg.save()?;
-                write_roster(&cfg.agents, &cfg.channels)?;
-                Ok(())
-            }
-        }
-        ChannelCmd::Leave { channel, agent } => {
-            let agent = require_agent_id(agent, "leave")?;
-            if paths::is_socket_live() {
-                match client::rpc(Request::LeaveChannel { channel, agent })? {
-                    Event::Error { message } => anyhow::bail!("{message}"),
-                    ev => client::print_event(ev),
-                }
-            } else {
-                let mut cfg = Config::load()?;
-                if !cfg.agents.iter().any(|a| a.id == agent) {
-                    anyhow::bail!("unknown agent {agent}");
-                }
-                let slot = cfg
-                    .channels
-                    .iter_mut()
-                    .find(|c| c.id == channel)
-                    .ok_or_else(|| anyhow::anyhow!("unknown channel {channel}"))?;
-                let before = slot.members.len();
-                slot.members.retain(|m| m != &agent);
-                if slot.members.len() == before {
-                    anyhow::bail!("{agent} is not a member of channel {channel}");
-                }
-                cfg.save()?;
-                write_roster(&cfg.agents, &cfg.channels)?;
-                Ok(())
-            }
-        }
-        ChannelCmd::Set {
-            channel,
-            name,
-            brief,
-            unset_brief,
-            members,
-        } => {
-            if name.is_none() && brief.is_none() && !unset_brief && members.is_none() {
-                anyhow::bail!("nothing to set; pass --name, --brief, --unset-brief, or --members");
-            }
-            if paths::is_socket_live() {
-                match client::rpc(Request::SetChannel {
-                    id: channel,
-                    name,
-                    brief,
-                    unset_brief,
-                    members,
-                })? {
-                    Event::Error { message } => anyhow::bail!("{message}"),
-                    ev => client::print_event(ev),
-                }
-            } else {
-                let mut cfg = Config::load()?;
-                let known: Vec<String> = cfg.agents.iter().map(|a| a.id.clone()).collect();
-                let slot = cfg
-                    .channels
-                    .iter_mut()
-                    .find(|c| c.id == channel)
-                    .ok_or_else(|| anyhow::anyhow!("unknown channel {channel}"))?;
-                if let Some(name) = name {
-                    slot.set_name(name);
-                }
-                if unset_brief {
-                    slot.set_brief(None);
-                } else if let Some(brief) = brief {
-                    slot.set_brief(Some(brief));
-                }
-                if let Some(members) = members {
-                    slot.set_members(members, &known)?;
-                }
-                cfg.save()?;
-                write_roster(&cfg.agents, &cfg.channels)?;
-                Ok(())
-            }
-        }
-        ChannelCmd::Remove { channel } => {
-            if paths::is_socket_live() {
-                match client::rpc(Request::RemoveChannel { channel })? {
-                    Event::Error { message } => anyhow::bail!("{message}"),
-                    ev => client::print_event(ev),
-                }
-            } else {
-                let mut cfg = Config::load()?;
-                let before = cfg.channels.len();
-                cfg.channels.retain(|c| c.id != channel);
-                if cfg.channels.len() == before {
-                    anyhow::bail!("unknown channel {channel}");
-                }
-                cfg.save()?;
-                write_roster(&cfg.agents, &cfg.channels)?;
-                Ok(())
-            }
-        }
-        ChannelCmd::Send {
-            channel,
-            from,
-            message,
-        } => run_tell(None, from, Some(channel), message),
-    }
-}
 
 fn apply_agent_set(
     agent: &mut AgentConfig,
@@ -989,15 +698,15 @@ fn run_routine(cmd: RoutineCmd) -> anyhow::Result<()> {
         RoutineCmd::List { agent } => {
             if paths::is_socket_live() {
                 match client::rpc(Request::List)? {
-                    Event::Agents { agents, channels } => {
-                        client::print_routines(&agents, &channels, agent.as_deref())
+                    Event::Agents { agents } => {
+                        client::print_routines(&agents, agent.as_deref())
                     }
                     Event::Error { message } => anyhow::bail!("{message}"),
                     ev => client::print_event(ev),
                 }
             } else {
                 let cfg = Config::load()?;
-                client::print_routines_from_config(&cfg.agents, &cfg.channels, agent.as_deref())
+                client::print_routines_from_config(&cfg.agents, agent.as_deref())
             }
         }
         RoutineCmd::Add {
@@ -1074,25 +783,12 @@ fn add_offline_routine(
 ) -> anyhow::Result<()> {
     let routine = Routine::new(name, schedule, prompt)?;
     let mut cfg = Config::load()?;
-    match target.trim().strip_prefix('#') {
-        Some(channel) => {
-            let channel = channel.trim();
-            let slot = cfg
-                .channels
-                .iter_mut()
-                .find(|c| c.id == channel)
-                .ok_or_else(|| anyhow::anyhow!("unknown channel {channel}"))?;
-            slot.routines.push(routine);
-        }
-        None => {
-            let slot = cfg
-                .agents
-                .iter_mut()
-                .find(|a| a.id == target)
-                .ok_or_else(|| anyhow::anyhow!("unknown agent {target}"))?;
-            slot.routines.push(routine);
-        }
-    }
+    let slot = cfg
+        .agents
+        .iter_mut()
+        .find(|a| a.id == target)
+        .ok_or_else(|| anyhow::anyhow!("unknown agent {target}"))?;
+    slot.routines.push(routine);
     cfg.save()?;
     Ok(())
 }
@@ -1122,44 +818,6 @@ mod tests {
 
     fn parse_ok(args: &[&str]) -> Cli {
         Cli::try_parse_from(args).expect("parse")
-    }
-
-    fn taken() -> anyhow::Result<Vec<String>> {
-        Ok(vec!["qa".to_string()])
-    }
-
-    #[test]
-    fn channel_add_takes_an_id_or_mints_one_from_the_name() {
-        match parse_ok(&["crew", "channel", "add", "--name", "브라우저 QA"]).cmd {
-            Some(Cmd::Channel(ChannelCmd::Add { id, name, members })) => {
-                assert!(id.is_none(), "a bot names a room without picking an id");
-                assert_eq!(name.as_deref(), Some("브라우저 QA"));
-                assert!(members.is_empty());
-            }
-            _ => panic!("expected channel add"),
-        }
-
-        // Minted from the name, and suffixed past the id already in use.
-        let (id, name) =
-            resolve_channel_add(None, Some("브라우저 QA".into()), taken).expect("mint");
-        assert_eq!(id, "qa-2");
-        assert_eq!(name, "브라우저 QA");
-
-        // An explicit id is kept verbatim, and the empty name lets `Channel::new`
-        // decide the display name once, on the daemon's side of the wire.
-        let (id, name) = resolve_channel_add(Some("browser-qa".into()), None, || {
-            panic!("an explicit id must not cost a channel list")
-        })
-        .expect("explicit");
-        assert_eq!(id, "browser-qa");
-        assert_eq!(name, "");
-        assert_eq!(
-            Channel::new(id, name, Vec::new()).unwrap().name,
-            "browser-qa"
-        );
-
-        let err = resolve_channel_add(None, None, taken).expect_err("needs one of them");
-        assert!(err.to_string().contains("needs an id or --name"), "{err}");
     }
 
     #[test]

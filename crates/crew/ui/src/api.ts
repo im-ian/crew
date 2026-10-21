@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AgentInfo,
-  ChannelInfo,
   ChatMessage,
   Group,
   ModelList,
@@ -23,7 +22,6 @@ export function errMsg(err: unknown): string {
 
 export const api = {
   listAgents: () => invoke<AgentInfo[]>("list_agents"),
-  listChannels: () => invoke<ChannelInfo[]>("list_channels"),
   sendMessage: (agent: string, text: string) =>
     invoke<void>("send_message", { agent, text }),
   stopAgent: (agent: string) => invoke<void>("stop_agent", { agent }),
@@ -32,7 +30,6 @@ export const api = {
   answerChoice: (args: {
     agent: string;
     messageId: string;
-    channel?: string | null;
     answers: string[][];
     values?: string[][];
     closed: boolean;
@@ -40,18 +37,13 @@ export const api = {
     invoke<void>("answer_choice", {
       agent: args.agent,
       messageId: args.messageId,
-      channel: args.channel ?? null,
       answers: args.answers,
       values: args.values ?? [],
       closed: args.closed,
     }),
   tellMessage: (to: string, text: string, from = "user") =>
     invoke<void>("tell_message", { from, to, text }),
-  channelSend: (channel: string, text: string) =>
-    invoke<void>("channel_send", { channel, text }),
   getMessages: (agent: string) => invoke<ChatMessage[]>("get_messages", { agent }),
-  getChannelMessages: (channel: string) =>
-    invoke<ChatMessage[]>("get_channel_messages", { channel }),
   daemonPing: () => invoke<void>("daemon_ping"),
   resetAgent: (agent: string, dropRoutines: boolean) =>
     invoke<string>("reset_agent", { agent, dropRoutines }),
@@ -90,25 +82,6 @@ export const api = {
   setAvatar: (id: string, data: string, name?: string | null) =>
     invoke<void>("set_avatar", { id, data, name: name ?? null }),
   clearAvatar: (id: string) => invoke<void>("clear_avatar", { id }),
-  addChannel: (name: string, members: string[]) =>
-    invoke<string>("add_channel", { name, members }),
-  setChannel: (args: {
-    id: string;
-    name?: string | null;
-    brief?: string | null;
-    unsetBrief?: boolean;
-    members?: string[] | null;
-  }) =>
-    invoke<void>("set_channel", {
-      id: args.id,
-      name: args.name ?? null,
-      brief: args.brief ?? null,
-      unsetBrief: args.unsetBrief ?? false,
-      members: args.members ?? null,
-    }),
-  leaveChannel: (channel: string, agent?: string | null) =>
-    invoke<void>("leave_channel", { channel, agent: agent ?? null }),
-  removeChannel: (channel: string) => invoke<void>("remove_channel", { channel }),
   addRoutine: (agent: string, name: string, schedule: string, prompt: string) =>
     invoke<void>("add_routine", { agent, name, schedule, prompt }),
   removeRoutine: (agent: string, key: string) =>

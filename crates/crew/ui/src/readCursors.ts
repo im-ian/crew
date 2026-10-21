@@ -1,5 +1,5 @@
 import { itemKey } from "./groups";
-import type { AgentInfo, ChannelInfo, Kind } from "./types";
+import type { AgentInfo, Kind } from "./types";
 
 const KEY = "crew.read";
 
@@ -52,7 +52,6 @@ export function isUnread(
 export function unreadKeys(
   map: ReadMap,
   agents: AgentInfo[],
-  channels: ChannelInfo[],
   selectedKind: Kind | null,
   selectedId: string | null,
 ): string[] {
@@ -60,11 +59,6 @@ export function unreadKeys(
   for (const a of agents) {
     if (isUnread(map, "agent", a.id, a.last_ts || 0, selectedKind, selectedId)) {
       out.push(itemKey("agent", a.id));
-    }
-  }
-  for (const c of channels) {
-    if (isUnread(map, "channel", c.id, c.last_ts || 0, selectedKind, selectedId)) {
-      out.push(itemKey("channel", c.id));
     }
   }
   return out;

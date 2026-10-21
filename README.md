@@ -9,7 +9,7 @@
 설치 스크립트나 GitHub Releases의 `.dmg`로 설치할 수 있고, 설치된 앱은 새 버전이 나오면 직접 업데이트해요.
 
 <p align="center">
-  <img src="docs/readme/window.png" alt="Crew 채팅 창 — 봇과 채널, @멘션, 핸드오프" width="920">
+  <img src="docs/readme/window.png" alt="Crew 채팅 창 — 봇, @멘션, 핸드오프" width="920">
 </p>
 
 <p align="center">
@@ -31,9 +31,9 @@ Grok의 봇 기능에서 영감을 받았어요. 성격과 역할을 지정한 �
 이미 쓰는 CLI를 데스크톱 안에 모아 두면:
 
 - 1:1로 한 봇과 대화하거나
-- 채널에 여러 봇을 모아 두고 `@이름`으로 부르거나
+- 대화 중에 `@이름`으로 다른 봇을 부르거나
 - 봇이 `crew tell`로 다른 봇에게 직접 일을 넘기거나
-- 정해 둔 시각에 루틴이 채널이나 봇에게 일을 맡기게 할 수 있어요
+- 정해 둔 시각에 루틴이 봇에게 일을 맡기게 할 수 있어요
 
 ---
 
@@ -55,19 +55,6 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 
 `cat` 같은 스텁은 예외로 긴 PTY 세션으로 유지해요. 테스트나 간단한 에코 봇에 쓰면 돼요.
 
-### <img src="docs/readme/face-cloud.png" width="28" height="28" alt=""> 채널
-
-채널에는 멤버 봇, 브리프, 최근 대화가 있어요. 메시지를 보내면 Crew가 누가 답할 차례인지 정해 줘요.
-
-- `@이름` / `@id` → 그 멤버가. 여러 명이면 적힌 순서대로 한 명씩
-- `@everyone` / `@all` / `@here` / `@channel` → 멤버 순서대로 한 명씩
-- 멘션이 없으면 → 마지막으로 답한 멤버가, 그마저 없으면 첫 번째 멤버가
-- 봇이 멘션 없이 채널에 글을 남기면 → 아무도 답하지 않아요. 봇끼리 끝없이 주고받지 않도록요
-
-호출된 봇에게는 채널 이름, **멤버 id**, 브리프, 최근 대화 몇 줄이 함께 전달돼요.
-
-채널은 봇도 만들 수 있어요. "이 멤버 그대로 다른 방 하나 파 줘" 처럼 부탁하면, 봇이 `crew channel list`로 지금 방 멤버를 확인하고 `crew channel add`로 새 방을 열어요. 새 방에 브리프를 넣어 두면 그 방에서 깨어나는 멤버마다 그 룰을 같이 받아요. 방은 멤버가 아니면 글을 못 올리니까 봇이 그 방에서 말할 거면 자기 id도 멤버에 넣어야 하고, 봇이 올린 첫 글에 `@멤버`나 `@everyone`이 있어야 일이 시작돼요.
-
 ### <img src="docs/readme/face-square.png" width="28" height="28" alt=""> 핸드오프
 
 세션마다 `CREW_AGENT_ID`와 확장된 `PATH`가 들어가요. 시스템 프롬프트는 대략 이렇게 알려 줘요.
@@ -88,7 +75,7 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 
 **채팅**
 
-- 봇·채널 사이드바, 그룹, 드래그 앤 드롭, 검색 (`⌘K`)
+- 봇 사이드바, 그룹, 드래그 앤 드롭, 검색 (`⌘K`)
 - 스트리밍 말풍선, 연속 답변 분리, 마크다운, 로컬 이미지·파일 경로
 - `@멘션` 칩, 파일 첨부, `/스킬` 문구 삽입
 - 봇이 작업 중일 때 보낸 메시지는 순서대로 대기해요. 봇당 최대 32개
@@ -103,12 +90,6 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 - Grok Bot 스타일의 도형 아바타 (원, 물방울, 둥근 사각형, 육각형, 삼각형, 구름, 알약, 다이아몬드, 오각형, 별, 하트) + 색상. 사진으로 바꿀 수도 있어요
 - 작업 중에는 궤도 애니메이션, 확인을 기다릴 땐 회전 링
 - 복제, 대화 지우기 (루틴도 함께 지울지 선택), 삭제
-
-**채널**
-
-- 멤버·이름·브리프 설정
-- 채널 전용 루틴. 주소는 `#채널이름`
-- 채널에서 작업 중인 멤버 확인. 알림을 누르면 그 채널로 이동해요
 
 **루틴**
 
@@ -281,10 +262,9 @@ Grok이 PATH에 있다면 예시 `grok` 봇에게 바로 말을 걸 수 있어�
 
 1. `crew`를 실행해 창을 열어요.
 2. 사이드바에서 봇을 고르거나, **새 봇** (`⌘N`)으로 Grok / Claude / Codex 봇을 만들어요.
-3. 여러 봇을 함께 쓰려면 **새 채널** (`⌘⇧N`)을 만들고 멤버를 넣어요.
-4. 메시지, `@멘션`, 파일 첨부 (`⌘U`), `/스킬`을 사용해요.
-5. `⌘I`로 봇/채널 정보를 봐요 (역할, 모델, 메모리, 작업 폴더, 아바타).
-6. `⌘⇧R`로 루틴을 관리해요.
+3. 메시지, `@멘션`, 파일 첨부 (`⌘U`), `/스킬`을 사용해요.
+4. `⌘I`로 봇 정보를 봐요 (역할, 모델, 메모리, 작업 폴더, 아바타).
+5. `⌘⇧R`로 루틴을 관리해요.
 
 ### 단축키
 
@@ -299,7 +279,6 @@ Grok이 PATH에 있다면 예시 `grok` 봇에게 바로 말을 걸 수 있어�
 | `⌘⌥↑` / `⌘⌥↓` | 이전 / 다음 대화 |
 | `⌘⇧↓` | 맨 아래 |
 | `⌘N` | 새 봇 |
-| `⌘⇧N` | 새 채널 |
 | `⌘I` | 정보 |
 | `⌘⇧R` | 루틴 |
 | `⌘.` | 중지 |
@@ -311,7 +290,7 @@ Grok이 PATH에 있다면 예시 `grok` 봇에게 바로 말을 걸 수 있어�
 
 ## CLI
 
-CLI도 데스크톱과 같은 데몬, 같은 `agents.json`을 써요. 데몬이 꺼져 있어도 `agent` / `channel` / `memory` / `routine`의 설정 변경은 파일에 바로 반영돼요. `tell`, `send`, `reset`, `routine run`처럼 살아 있는 세션이 필요한 명령은 데몬을 띄운 뒤에 실행해요.
+CLI도 데스크톱과 같은 데몬, 같은 `agents.json`을 써요. 데몬이 꺼져 있어도 `agent` / `memory` / `routine`의 설정 변경은 파일에 바로 반영돼요. `tell`, `send`, `reset`, `routine run`처럼 살아 있는 세션이 필요한 명령은 데몬을 띄운 뒤에 실행해요.
 
 봇 세션 안에서 `crew tell`을 실행하면 `CREW_AGENT_ID`가 보낸 사람이 돼요. 에이전트 프로세스가 데몬을 새로 띄우지는 않아요.
 
@@ -332,20 +311,11 @@ crew agent remove shell
 
 crew tell grok 이 파일의 테스트를 보강해줘
 crew tell review --from grok 방금 패치 리뷰해줘
-crew tell --channel frontend @grok 오늘 보드 요약해줘
 crew ask --question "어느 쪽을 고를래?" --option A --option B --option C
 crew ask --question "로그인" --input 아이디 --input 비밀번호
 
-crew channel add frontend --name "프론트엔드" --members grok,review
-crew channel add --name "브라우저 QA" --members grok,review   # id를 생략하면 이름에서 만들고, 만든 id를 출력해요
-crew channel send frontend 스탠드업 시작
-crew channel set frontend --brief "이 방은 UI만"
-crew channel join frontend impl
-crew channel leave frontend review
-
 crew routine add grok --name "아침" --schedule "평일 8시에 브리핑" --prompt "오늘 할 일 브리핑"
 crew routine add grok --name "아침" --schedule "0 8 * * 1-5" --prompt "오늘 할 일 브리핑"
-crew routine add '#frontend' --name "스탠드업" --schedule "0 9 * * 1-5" --prompt "어제 한 일"
 crew routine run grok 아침
 
 crew memory show grok
@@ -359,8 +329,6 @@ crew reset grok --drop-routines
 
 `crew agent add`에는 `--cli grok|claude|codex` 또는 `--cmd …`가 필요해요. `--cmd`를 주면 `--cli`는 무시돼요. 작업 폴더를 생략하면 `/tmp/crew-demo/<id>`가 돼요.
 
-채널 루틴의 대상은 `#채널id` 형식으로 적어요.
-
 ---
 
 ## 데이터 위치
@@ -370,14 +338,13 @@ crew reset grok --drop-routines
 
 | 경로 | 내용 |
 | --- | --- |
-| `agents.json` | 봇·채널·루틴 |
+| `agents.json` | 봇·루틴 |
 | `groups.json` | 사이드바 그룹 |
 | `locale` | `ko` 또는 `en` (알림·CLI 라벨) |
 | `roster.md` | 봇에게 주입되는 최신 봇 명단 |
 | `memory/<id>.md` | 대화를 지워도 남는 기억 |
 | `skills/<이름>.md` | `/이름` 스킬 |
 | `transcripts/<id>.jsonl` | 1:1 대화 |
-| `channels/<id>.jsonl` | 채널 대화 |
 | `cli-sessions/<id>` | Grok/Claude/Codex 세션 id |
 | `archive/` | 지운 대화 |
 | `uploads/` | 첨부 파일 |

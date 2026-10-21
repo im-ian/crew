@@ -5,20 +5,18 @@ import type { ReplyTarget } from "../reply";
 import { splitReply } from "../reply";
 import type {
   AgentInfo,
-  ChannelInfo,
   ChatMessage,
   ChoiceCard as ChoiceCardData,
   ChoiceOption,
   Kind,
 } from "../types";
-import { busyInChannel } from "../busy";
 import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { noteRef, sentTarget } from "../peek";
 import { threadRows, toolArgs, toolSummary } from "../tools";
 import { clockLabels } from "../clock";
 import { ChevronDown, Reply, X } from "../icons";
-import { Avatar, ChannelAvatar } from "./Avatar";
+import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
 import { MdBody } from "./MdBody";
 import { WhoButton, whoColor } from "./WhoButton";
@@ -28,16 +26,13 @@ const STICK_PX = 24;
 type Props = {
   messages: ChatMessage[];
   agents: AgentInfo[];
-  channels?: ChannelInfo[];
   selected: string | null;
   selectedKind: Kind;
   currentAgent: AgentInfo | null;
-  currentChannel: ChannelInfo | null;
   stick: boolean;
   onStick: (stick: boolean) => void;
   streaming?: boolean;
   onSelectAgent?: (id: string) => void;
-  onSelectChannel?: (id: string) => void;
   onApprove?: (allow: boolean, agentId?: string) => void;
   onAnswerChoice?: (
     agentId: string,
@@ -57,16 +52,13 @@ type Props = {
 export function ChatThread({
   messages,
   agents,
-  channels = [],
   selected,
   selectedKind,
   currentAgent,
-  currentChannel,
   stick,
   onStick,
   streaming = false,
   onSelectAgent,
-  onSelectChannel,
   onApprove,
   onAnswerChoice,
   highlightId = null,
@@ -112,11 +104,7 @@ export function ChatThread({
     });
   const lastVisible = visible[visible.length - 1];
   function workingPlaceholders(): AgentInfo[] {
-    const live = currentChannel
-      ? busyInChannel(agents, currentChannel.id).filter((a) => a.status === "working")
-      : streaming && currentAgent
-        ? [currentAgent]
-        : [];
+    const live = streaming && currentAgent ? [currentAgent] : [];
     return live.filter((a) => {
       if (lastVisible?.role === "assistant" && lastVisible.from === a.id) {
         return false;
@@ -125,11 +113,8 @@ export function ChatThread({
     });
   }
   function blockedCards(): AgentInfo[] {
-    const live = currentChannel
-      ? busyInChannel(agents, currentChannel.id).filter((a) => a.status === "blocked")
-      : currentAgent?.status === "blocked"
-        ? [currentAgent]
-        : [];
+    const live =
+      currentAgent?.status === "blocked" ? [currentAgent] : [];
     return live.filter(
       (a) => !messages.some((m) => m.from === a.id && m.approval === "pending"),
     );
@@ -191,7 +176,7 @@ export function ChatThread({
     <div className="thread-wrap">
       <div className="thread" ref={ref} onScroll={syncStick}>
         {!messages.length ? (
-          <EmptyChat agent={currentAgent} channel={currentChannel} agents={agents} />
+          <EmptyChat agent={currentAgent} />
         ) : (
           rows.map((row) => {
             if (row.kind === "tools") {
@@ -210,10 +195,8 @@ export function ChatThread({
                   peerId={row.peerId}
                   items={row.msgs}
                   agents={agents}
-                  channels={channels}
                   selectedKind={selectedKind}
                   onSelectAgent={openAgent}
-                  onSelectChannel={onSelectChannel}
                   onReply={onReply}
                   onJump={onJump}
                   onPeek={onPeek}
@@ -233,10 +216,8 @@ export function ChatThread({
                   key={m.id}
                   message={m}
                   agents={agents}
-                  channels={channels}
                   selectedKind={selectedKind}
                   onSelectAgent={openAgent}
-                  onSelectChannel={onSelectChannel}
                   onReply={onReply}
                   onJump={onJump}
                   onPeek={onPeek}
@@ -250,13 +231,11 @@ export function ChatThread({
                 clock={clocks.get(m.id)}
                 message={m}
                 agents={agents}
-                channels={channels}
                 selected={selected}
                 selectedKind={selectedKind}
                 currentAgent={currentAgent}
                 caret={caret}
                 onSelectAgent={openAgent}
-                onSelectChannel={onSelectChannel}
                 onApprove={
                   onApprove
                     ? (allow) => onApprove(allow, m.from)
@@ -288,11 +267,9 @@ export function ChatThread({
             agent={agent}
             who={agent.name || agent.id}
             agents={agents}
-            channels={channels}
             caret
-            openName={selectedKind === "channel"}
+            openName={false}
             onSelectAgent={openAgent}
-            onSelectChannel={onSelectChannel}
           />
         ))}
         {blockedCards().map((agent) => (
@@ -321,25 +298,8 @@ export function ChatThread({
   );
 }
 
-function EmptyChat({
-  agent,
-  channel,
-  agents,
-}: {
-  agent: AgentInfo | null;
-  channel: ChannelInfo | null;
-  agents: AgentInfo[];
-}) {
+function EmptyChat({ agent }: { agent: AgentInfo | null }) {
   const t = useT();
-  if (channel) {
-    return (
-      <div className="empty-chat">
-        <ChannelAvatar channel={channel} agents={agents} />
-        <strong>{channel.name || channel.id}</strong>
-        <span>{t("thread.startChannel")}</span>
-      </div>
-    );
-  }
   if (agent) {
     return (
       <div className="empty-chat">
@@ -362,10 +322,8 @@ function EmptyChat({
 function SystemOrIncoming({
   message: m,
   agents,
-  channels,
   selectedKind,
   onSelectAgent,
-  onSelectChannel,
   onReply,
   onJump,
   onPeek,
@@ -373,10 +331,8 @@ function SystemOrIncoming({
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
-  channels: ChannelInfo[];
   selectedKind: Kind;
   onSelectAgent?: (id: string) => void;
-  onSelectChannel?: (id: string) => void;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
   onPeek?: (peerId: string) => void;
@@ -388,12 +344,10 @@ function SystemOrIncoming({
       <Bubble
         message={{ ...m, role: "user" }}
         agents={agents}
-        channels={channels}
         selected={null}
         selectedKind={selectedKind}
         currentAgent={null}
         onSelectAgent={onSelectAgent}
-        onSelectChannel={onSelectChannel}
         onReply={onReply}
         onJump={onJump}
         flash={flash}
@@ -417,9 +371,7 @@ function SystemOrIncoming({
         otherId={note.otherId}
         message={{ ...m, text: displayText(m) }}
         agents={agents}
-        channels={channels}
         onSelectAgent={onSelectAgent}
-        onSelectChannel={onSelectChannel}
         onReply={onReply}
         onJump={onJump}
         onPeek={onPeek}
@@ -444,9 +396,7 @@ function TransferNote({
   otherId,
   message: m,
   agents,
-  channels,
   onSelectAgent,
-  onSelectChannel,
   onReply,
   onJump,
   onPeek,
@@ -456,18 +406,15 @@ function TransferNote({
   otherId: string;
   message: ChatMessage;
   agents: AgentInfo[];
-  channels: ChannelInfo[];
   onSelectAgent?: (id: string) => void;
-  onSelectChannel?: (id: string) => void;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
   onPeek?: (peerId: string) => void;
   flash?: boolean;
 }) {
-  const fromChannel = otherId.startsWith("#");
   const agent = agents.find((a) => a.id === otherId) ?? null;
-  const who = fromChannel
-    ? `#${channelDisplayName(otherId, channels)}`
+  const who = otherId.startsWith("#")
+    ? otherId
     : displayWho({ ...m, from: otherId }, agent);
   const open =
     onSelectAgent && agent ? () => onSelectAgent(agent.id) : undefined;
@@ -527,9 +474,7 @@ function TransferNote({
             <XferBody
               text={body}
               agents={agents}
-              channels={channels}
               onMention={onSelectAgent}
-              onChannel={onSelectChannel}
               baseDir={agent?.cwd || undefined}
             />
           ) : null}
@@ -552,16 +497,12 @@ function TransferNote({
 function XferBody({
   text,
   agents,
-  channels = [],
   onMention,
-  onChannel,
   baseDir,
 }: {
   text: string;
   agents: AgentInfo[];
-  channels?: ChannelInfo[];
   onMention?: (id: string) => void;
-  onChannel?: (id: string) => void;
   baseDir?: string;
 }) {
   return (
@@ -570,9 +511,7 @@ function XferBody({
         className="xfer-text md"
         text={text}
         agents={agents}
-        channels={channels}
         onMention={onMention}
-        onChannel={onChannel}
         baseDir={baseDir}
       />
     </div>
@@ -584,11 +523,9 @@ function Incoming({
   agent,
   who,
   agents,
-  channels = [],
   caret = false,
   openName = true,
   onSelectAgent,
-  onSelectChannel,
   onApprove,
   onAnswerChoice,
   onReply,
@@ -600,11 +537,9 @@ function Incoming({
   agent: AgentInfo | null;
   who: string;
   agents: AgentInfo[];
-  channels?: ChannelInfo[];
   caret?: boolean;
   openName?: boolean;
   onSelectAgent?: (id: string) => void;
-  onSelectChannel?: (id: string) => void;
   onApprove?: (allow: boolean) => void;
   onAnswerChoice?: (
     answers: string[][],
@@ -689,9 +624,7 @@ function Incoming({
                   }
                   text={part}
                   agents={agents}
-                  channels={channels}
                   onMention={onSelectAgent}
-                  onChannel={onSelectChannel}
                   baseDir={agent?.cwd || undefined}
                 />
               );
@@ -704,9 +637,7 @@ function Incoming({
                   }
                   text=""
                   agents={agents}
-                  channels={channels}
                   onMention={onSelectAgent}
-                  onChannel={onSelectChannel}
                   baseDir={agent?.cwd || undefined}
                 />
               )
@@ -742,10 +673,8 @@ function NoteGroup({
   peerId,
   items,
   agents,
-  channels,
   selectedKind,
   onSelectAgent,
-  onSelectChannel,
   onReply,
   onJump,
   onPeek,
@@ -754,10 +683,8 @@ function NoteGroup({
   peerId: string;
   items: ChatMessage[];
   agents: AgentInfo[];
-  channels: ChannelInfo[];
   selectedKind: Kind;
   onSelectAgent?: (id: string) => void;
-  onSelectChannel?: (id: string) => void;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
   onPeek?: (peerId: string) => void;
@@ -771,10 +698,9 @@ function NoteGroup({
   // One note is not a run. The row is still a run so that a reply arriving
   // does not change the element type and remount the note under the reader.
   const folds = items.length > 1;
-  const fromChannel = peerId.startsWith("#");
   const agent = agents.find((a) => a.id === peerId) ?? null;
-  const who = fromChannel
-    ? `#${channelDisplayName(peerId, channels)}`
+  const who = peerId.startsWith("#")
+    ? peerId
     : displayWho({ from: peerId } as ChatMessage, agent);
   const queued = items.some((m) => m.queued);
   return (
@@ -807,10 +733,8 @@ function NoteGroup({
               key={m.id}
               message={m}
               agents={agents}
-              channels={channels}
               selectedKind={selectedKind}
               onSelectAgent={onSelectAgent}
-              onSelectChannel={onSelectChannel}
               onReply={onReply}
               onJump={onJump}
               onPeek={onPeek}
@@ -1194,13 +1118,11 @@ function optionView(o: ChoiceOption, i: number) {
 function Bubble({
   message: m,
   agents,
-  channels = [],
   selected,
   selectedKind,
   currentAgent,
   caret = false,
   onSelectAgent,
-  onSelectChannel,
   onApprove,
   onAnswerChoice,
   onReply,
@@ -1210,13 +1132,11 @@ function Bubble({
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
-  channels?: ChannelInfo[];
   selected: string | null;
   selectedKind: Kind;
   currentAgent: AgentInfo | null;
   caret?: boolean;
   onSelectAgent?: (id: string) => void;
-  onSelectChannel?: (id: string) => void;
   onApprove?: (allow: boolean) => void;
   onAnswerChoice?: (
     answers: string[][],
@@ -1241,11 +1161,9 @@ function Bubble({
         agent={agent}
         who={displayWho(m, agent)}
         agents={agents}
-        channels={channels}
         caret={caret}
         openName={!self}
         onSelectAgent={onSelectAgent}
-        onSelectChannel={onSelectChannel}
         onApprove={onApprove}
         onAnswerChoice={onAnswerChoice}
         onReply={onReply}
@@ -1276,9 +1194,7 @@ function Bubble({
             className={cls}
             text={body}
             agents={agents}
-            channels={channels}
             onMention={onSelectAgent}
-            onChannel={onSelectChannel}
             baseDir={currentAgent?.cwd || undefined}
           />
         ) : null}
@@ -1391,12 +1307,6 @@ function ReplyButton({ onClick }: { onClick: () => void }) {
 function displayWho(m: ChatMessage, agent: AgentInfo | null): string {
   if (agent) return agent.name || agent.id;
   return m.from || "";
-}
-
-function channelDisplayName(from: string, channels: ChannelInfo[]): string {
-  const id = from.startsWith("#") ? from.slice(1) : from;
-  const ch = channels.find((c) => c.id === id);
-  return (ch?.name || ch?.id || id).replace(/^#/, "");
 }
 
 function isCrewMarkerLine(line: string): boolean {

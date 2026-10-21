@@ -11,13 +11,13 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{broadcast, oneshot};
 
 use crate::config::{
-    empty_to_none, find_routine_index, parse_hex_color, roster_update_text, unique_ids,
-    write_roster, AgentConfig, AvatarShape, Channel, Config, Effort, Routine,
+    empty_to_none, find_routine_index, parse_hex_color, roster_update_text, write_roster,
+    AgentConfig, AvatarShape, Config, Effort, Routine,
 };
 use crate::cron;
 use crate::headless::{self, HeadlessSession};
 use crate::paths;
-use crate::protocol::{AgentInfo, AgentStatus, ChannelInfo, ChatMessage, Event, Request, Role};
+use crate::protocol::{AgentInfo, AgentStatus, ChatMessage, Event, Request, Role};
 use crate::pty_agent::{self, PtySession};
 use crate::targeting::{self, TurnOrigin};
 
@@ -164,10 +164,8 @@ impl LiveAgent {
 static EVENTS: OnceLock<broadcast::Sender<Event>> = OnceLock::new();
 static AGENTS: OnceLock<Mutex<HashMap<String, LiveAgent>>> = OnceLock::new();
 static CONFIGS: OnceLock<Mutex<HashMap<String, AgentConfig>>> = OnceLock::new();
-static CHANNELS: OnceLock<Mutex<HashMap<String, Channel>>> = OnceLock::new();
 static INBOX: OnceLock<Mutex<HashMap<String, VecDeque<PendingDelivery>>>> = OnceLock::new();
 static ORIGINS: OnceLock<Mutex<HashMap<String, TurnOrigin>>> = OnceLock::new();
-static WAKE_SEEN: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 static PENDING_HANDOFFS: OnceLock<Mutex<HashMap<String, Vec<PendingHandoff>>>> = OnceLock::new();
 /// Jobs that wait until `agent` is idle, then run one at a time in order.
 static SERIAL: OnceLock<Mutex<SerialBoard>> = OnceLock::new();
@@ -184,33 +182,7 @@ struct PendingHandoff {
     text: String,
 }
 
-fn wake_key(agent: &str, channel: &str) -> String {
-    format!("{agent}\x1f{channel}")
-}
-
-fn wake_seen() -> &'static Mutex<HashMap<String, String>> {
-    WAKE_SEEN.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn last_wake_id(agent: &str, channel: &str) -> Option<String> {
-    wake_seen()
-        .lock()
-        .ok()?
-        .get(&wake_key(agent, channel))
-        .cloned()
-}
-
-fn set_wake_id(agent: &str, channel: &str, id: &str) {
-    if let Ok(mut map) = wake_seen().lock() {
-        map.insert(wake_key(agent, channel), id.to_string());
-    }
-}
-
 fn clear_agent_context(id: &str) {
-    if let Ok(mut map) = wake_seen().lock() {
-        let prefix = format!("{id}\x1f");
-        map.retain(|k, _| !k.starts_with(&prefix));
-    }
     if let Ok(mut map) = pending_handoffs().lock() {
         map.remove(id);
     }
@@ -337,10 +309,6 @@ fn configs() -> &'static Mutex<HashMap<String, AgentConfig>> {
     CONFIGS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn channels() -> &'static Mutex<HashMap<String, Channel>> {
-    CHANNELS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
 fn inbox() -> &'static Mutex<HashMap<String, VecDeque<PendingDelivery>>> {
     INBOX.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -382,15 +350,6 @@ fn is_busy_err(err: &anyhow::Error) -> bool {
 
 fn agent_busy(id: &str) -> anyhow::Result<bool> {
     Ok(live_status(id)? == AgentStatus::Working)
-}
-
-/// Working, or blocked on an approval card. Either one still holds its place
-/// in a room's speaking order.
-fn holds_turn(id: &str) -> bool {
-    matches!(
-        live_status(id),
-        Ok(AgentStatus::Working | AgentStatus::Blocked)
-    )
 }
 
 fn live_status(id: &str) -> anyhow::Result<AgentStatus> {
@@ -463,14 +422,6 @@ fn approve_agent(id: &str, allow: bool) -> anyhow::Result<()> {
         crate::protocol::ApprovalState::Denied
     };
     crate::transcript::set_approval(id, &msg.id, state);
-    if let Some(channel) = get_origin(id).and_then(|o| o.reply_channel) {
-        let key = format!("ch:{channel}");
-        if let Some(ch_msg) = crate::transcript::pending_approval(&key) {
-            if ch_msg.from == id {
-                crate::transcript::set_approval(&key, &ch_msg.id, state);
-            }
-        }
-    }
     set_live_status(id, AgentStatus::Idle);
     if allow {
         let origin = get_origin(id).unwrap_or_else(TurnOrigin::user);
@@ -532,15 +483,6 @@ fn start_ask(
     let Some(choice) = msg.choice.clone() else {
         anyhow::bail!("failed to open choice");
     };
-    let pending = crate::transcript::pending_message_id(agent).as_deref() == Some(msg.id.as_str());
-    if !pending {
-        if let Some(ch) = get_origin(agent).and_then(|o| o.reply_channel) {
-            if known_channel(&ch) {
-                let ch_msg = crate::transcript::push_channel(&ch, Role::Assistant, agent, "");
-                crate::transcript::set_choice(&format!("ch:{ch}"), &ch_msg.id, choice.clone());
-            }
-        }
-    }
     let (tx, rx) = oneshot::channel();
     let id = choice.id.clone();
     ask_waiters()
@@ -553,16 +495,11 @@ fn start_ask(
 fn answer_choice(
     agent: &str,
     message_id: &str,
-    channel: Option<String>,
     answers: Vec<Vec<String>>,
     values: Vec<Vec<String>>,
     closed: bool,
 ) -> anyhow::Result<()> {
-    let key = match channel.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        Some(ch) => format!("ch:{ch}"),
-        None => agent.to_string(),
-    };
-    let Some(msg) = crate::transcript::choice_by_message(&key, message_id) else {
+    let Some(msg) = crate::transcript::choice_by_message(agent, message_id) else {
         anyhow::bail!("no choice on that message");
     };
     let Some(card) = msg.choice.as_ref() else {
@@ -614,8 +551,7 @@ fn answer_choice(
     if text.trim().is_empty() {
         anyhow::bail!("nothing selected");
     }
-    // The picker is for the human. Continue only the bot that asked;
-    // do not fan the pick out as a channel turn for other members.
+    // The picker is for the human. Continue only the bot that asked.
     send_agent_shown(agent, &crate::choice::format_answer_masked(&updated), &text)
 }
 
@@ -670,14 +606,7 @@ fn note_relay_stop(id: &str, origin: &TurnOrigin) {
     } else {
         "봇끼리 계속 주고받아서 여기서 멈췄습니다. 말을 걸면 다시 이어집니다."
     };
-    match origin.reply_channel.as_deref() {
-        Some(channel) if known_channel(channel) => {
-            crate::transcript::push_channel(channel, Role::System, "crew", line);
-        }
-        _ => {
-            crate::transcript::push_system(id, "crew", line);
-        }
-    }
+    crate::transcript::push_system(id, "crew", line);
 }
 
 pub(crate) fn pump_inbox(id: &str) {
@@ -739,12 +668,6 @@ struct SerialJob {
 
 #[derive(Clone, Debug)]
 enum SerialKind {
-    Channel {
-        channel: String,
-        from: String,
-        text: String,
-        origin: TurnOrigin,
-    },
     Tell {
         from: String,
         text: String,
@@ -832,19 +755,6 @@ fn clear_serial_after(agent: &str) {
         let epoch = board.epoch.entry(agent.to_string()).or_insert(0);
         *epoch = epoch.wrapping_add(1);
     }
-}
-
-fn cancel_serial_channel(channel: &str) {
-    let Ok(mut board) = serial_board().lock() else {
-        return;
-    };
-    for q in board.queues.values_mut() {
-        q.retain(|job| match &job.kind {
-            SerialKind::Channel { channel: id, .. } => id != channel,
-            SerialKind::Tell { .. } => true,
-        });
-    }
-    board.queues.retain(|_, q| !q.is_empty());
 }
 
 /// A tell from a bot that is still answering. If `to` is already in that bot's
@@ -944,85 +854,9 @@ fn claim_next_serial(finished: &str) -> Option<SerialJob> {
 }
 
 fn run_serial_job(job: &SerialJob) -> anyhow::Result<bool> {
-    match &job.kind {
-        SerialKind::Channel {
-            channel,
-            from,
-            text,
-            origin,
-        } => {
-            let ch = {
-                let chans = channels().lock().expect("channels mutex");
-                chans.get(channel).cloned()
-            };
-            let Some(ch) = ch else {
-                anyhow::bail!("unknown channel {channel}");
-            };
-            wake_channel_member(&ch, from, text, &job.to, origin.clone())
-        }
-        SerialKind::Tell { from, text, origin } => {
-            tell_agent_origin(from, &job.to, text, origin.clone(), false)?;
-            Ok(true)
-        }
-    }
-}
-
-/// Start the first job that can take a turn. The rest wait until that agent
-/// is idle, then the one after that.
-fn dispatch_serial(jobs: Vec<SerialJob>) -> anyhow::Result<()> {
-    let mut jobs: VecDeque<SerialJob> = jobs.into();
-    let mut last_err: Option<anyhow::Error> = None;
-    let mut handled = 0usize;
-    while let Some(job) = jobs.pop_front() {
-        mark_serial_arming(&job.to);
-        let started = run_serial_job(&job);
-        if matches!(started, Ok(true)) {
-            queue_serial_after(&job.to, jobs.drain(..).collect());
-        }
-        unmark_serial_arming(&job.to);
-        match started {
-            Ok(true) => {
-                if !agent_busy(&job.to).unwrap_or(true) {
-                    pump_inbox(&job.to);
-                }
-                return Ok(());
-            }
-            Ok(false) => handled += 1,
-            Err(err) => last_err = Some(err),
-        }
-    }
-    if handled > 0 {
-        return Ok(());
-    }
-    if let Some(err) = last_err {
-        return Err(err);
-    }
-    anyhow::bail!("no members received the message");
-}
-
-/// The member already speaking in this room, in member order.
-fn room_speaker(channel: &str, members: &[String]) -> Option<String> {
-    members
-        .iter()
-        .find(|id| {
-            holds_turn(id)
-                && get_origin(id)
-                    .and_then(|origin| origin.reply_channel)
-                    .as_deref()
-                    == Some(channel)
-        })
-        .cloned()
-}
-
-/// Attach `jobs` so they run when `agent` is next idle. If that turn ended
-/// while they were being attached, start them now.
-fn park_serial_on(agent: &str, jobs: Vec<SerialJob>) {
-    mark_serial_arming(agent);
-    queue_serial_after(agent, jobs);
-    unmark_serial_arming(agent);
-    if !holds_turn(agent) {
-        pump_inbox(agent);
-    }
+    let SerialKind::Tell { from, text, origin } = &job.kind;
+    tell_agent_origin(from, &job.to, text, origin.clone(), false)?;
+    Ok(true)
 }
 
 fn advance_serial(start: &str) {
@@ -1071,29 +905,19 @@ fn roster_vec() -> Vec<AgentConfig> {
     v
 }
 
-fn channel_vec() -> Vec<Channel> {
-    let chans = channels().lock().expect("channels mutex");
-    let mut v: Vec<Channel> = chans.values().cloned().collect();
-    v.sort_by(|a, b| a.id.cmp(&b.id));
-    v
-}
-
 fn save_state() -> anyhow::Result<()> {
     let agents = roster_vec();
-    let chans = channel_vec();
     Config {
         agents: agents.clone(),
-        channels: chans.clone(),
     }
     .save()?;
-    let _ = write_roster(&agents, &chans);
+    let _ = write_roster(&agents);
     Ok(())
 }
 
 fn snapshot_event() -> Event {
     Event::Agents {
         agents: list_agents(),
-        channels: list_channels(),
     }
 }
 
@@ -1154,15 +978,7 @@ fn notify_from_frame(ev: &Event) {
         .and_then(|m| m.get(agent).map(|c| c.display_name().to_string()))
         .unwrap_or_else(|| agent.clone());
     let interrupted = agent_interrupted(agent);
-    let channel = get_origin(agent).and_then(|o| o.reply_channel);
-    crate::notify::maybe_status_notify(
-        agent,
-        &name,
-        channel.as_deref(),
-        prev,
-        *status,
-        interrupted,
-    );
+    crate::notify::maybe_status_notify(agent, &name, prev, *status, interrupted);
 }
 
 fn agent_interrupted(id: &str) -> bool {
@@ -1240,17 +1056,12 @@ fn open_agent(
     }
 }
 
-/// Boot reads back what every configured id already owns on disk. The create
-/// paths do the opposite — `insert_spawned_agent` and `add_channel` drop first,
-/// so an id freed by a delete cannot open onto the old conversation. Keep the
-/// two loops here together: getting one of them backwards is how rooms came to
-/// be unlinked on every start.
+/// Boot reads back what every configured bot already owns on disk. Creating a
+/// bot drops that id's transcript first, so a freed id cannot open onto the
+/// old conversation.
 fn restore_transcripts(cfg: &Config) {
     for agent_cfg in &cfg.agents {
         crate::transcript::load_agent(&agent_cfg.id);
-    }
-    for ch in &cfg.channels {
-        crate::transcript::load_channel(&ch.id);
     }
 }
 
@@ -1279,10 +1090,6 @@ pub async fn run() -> anyhow::Result<()> {
         let mut cfgs = configs().lock().expect("configs mutex");
         for agent_cfg in &cfg.agents {
             cfgs.insert(agent_cfg.id.clone(), agent_cfg.clone());
-        }
-        let mut chans = channels().lock().expect("channels mutex");
-        for ch in &cfg.channels {
-            chans.insert(ch.id.clone(), ch.clone());
         }
     }
     restore_transcripts(&cfg);
@@ -1313,7 +1120,7 @@ pub async fn run() -> anyhow::Result<()> {
             }
         }
     }
-    let _ = write_roster(&cfg.agents, &cfg.channels);
+    let _ = write_roster(&cfg.agents);
 
     let listener = UnixListener::bind(paths::socket_path())
         .with_context(|| format!("bind {}", paths::socket_path().display()))?;
@@ -1530,37 +1337,16 @@ fn tick_routines() {
             }
         }
     }
-    {
-        let chans = match channels().lock() {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-        for ch in chans.values() {
-            for r in &ch.routines {
-                if r.is_due(&now) {
-                    due.push((
-                        format!("#{}", ch.id),
-                        r.id.clone(),
-                        r.name.clone(),
-                        r.prompt.clone(),
-                    ));
-                }
-            }
-        }
-    }
     let key = now.minute_key();
     for (target, rid, name, prompt) in due {
-        let exited = match routine_host(&target) {
-            RoutineHost::Channel(_) => false,
-            RoutineHost::Agent(id) => {
-                let map = match agents().lock() {
-                    Ok(m) => m,
-                    Err(_) => return,
-                };
-                match map.get(&id) {
-                    Some(live) => live.status() == AgentStatus::Exited,
-                    None => continue,
-                }
+        let exited = {
+            let map = match agents().lock() {
+                Ok(m) => m,
+                Err(_) => return,
+            };
+            match map.get(&target) {
+                Some(live) => live.status() == AgentStatus::Exited,
+                None => continue,
             }
         };
         // The minute is spent either way. Marking only on success let the 15s ticker
@@ -1571,7 +1357,7 @@ fn tick_routines() {
         let fired = if exited {
             Err(anyhow::anyhow!("agent {target} has exited"))
         } else {
-            fire_for_target(&target, &name, &prompt)
+            fire_routine(&target, &name, &prompt)
         };
         match fired {
             Ok(()) => {
@@ -1747,15 +1533,6 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
                         messages: crate::transcript::messages(&id),
                     });
                 }
-                out.push(Event::Channels {
-                    channels: list_channels(),
-                });
-                for ch in list_channels() {
-                    out.push(Event::ChannelMessages {
-                        channel: ch.id.clone(),
-                        messages: crate::transcript::channel_messages(&ch.id),
-                    });
-                }
             }
             out
         }
@@ -1783,11 +1560,10 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
         Request::AnswerChoice {
             agent,
             message_id,
-            channel,
             answers,
             values,
             closed,
-        } => match answer_choice(&agent, &message_id, channel, answers, values, closed) {
+        } => match answer_choice(&agent, &message_id, answers, values, closed) {
             Ok(()) => vec![Event::Ok],
             Err(err) => vec![Event::Error {
                 message: err.to_string(),
@@ -1796,42 +1572,15 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
         Request::Search { query } => vec![Event::Search {
             hits: search_corpus(&query),
         }],
-        Request::Tell {
-            from,
-            to,
-            text,
-            channel,
-        } => {
-            let channel = channel.and_then(|s| {
-                let t = s.trim().to_string();
-                if t.is_empty() {
-                    None
-                } else {
-                    Some(t)
-                }
-            });
-            if let Some(channel) = channel {
-                match send_channel(&channel, &from, &text) {
-                    Ok(()) => vec![Event::Told {
-                        from: from_id(&from),
-                        to: format!("#{channel}"),
-                    }],
-                    Err(err) => vec![Event::Error {
-                        message: err.to_string(),
-                    }],
-                }
-            } else {
-                match tell_agent(&from, &to, &text) {
-                    Ok(()) => vec![Event::Told {
-                        from: from_id(&from),
-                        to,
-                    }],
-                    Err(err) => vec![Event::Error {
-                        message: err.to_string(),
-                    }],
-                }
-            }
-        }
+        Request::Tell { from, to, text } => match tell_agent(&from, &to, &text) {
+            Ok(()) => vec![Event::Told {
+                from: from_id(&from),
+                to,
+            }],
+            Err(err) => vec![Event::Error {
+                message: err.to_string(),
+            }],
+        },
         Request::Input { agent, data } => match write_pty(&agent, &data, false) {
             Ok(()) => vec![Event::Ok],
             Err(err) => vec![Event::Error {
@@ -1991,81 +1740,6 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             key: key.clone(),
             runs: crate::routine_log::list(&agent, &key),
         }],
-        Request::ListChannels => vec![Event::Channels {
-            channels: list_channels(),
-        }],
-        Request::ChannelMessages { channel } => match channel_messages_event(&channel) {
-            Ok(ev) => vec![ev],
-            Err(err) => vec![Event::Error {
-                message: err.to_string(),
-            }],
-        },
-        Request::AddChannel { id, name, members } => match add_channel(id, name, members) {
-            Ok(()) => vec![
-                Event::Ok,
-                Event::Channels {
-                    channels: list_channels(),
-                },
-                snapshot_event(),
-            ],
-            Err(err) => vec![Event::Error {
-                message: err.to_string(),
-            }],
-        },
-        Request::JoinChannel { channel, agent } => match join_channel(&channel, &agent) {
-            Ok(()) => vec![
-                Event::Ok,
-                Event::Channels {
-                    channels: list_channels(),
-                },
-                snapshot_event(),
-            ],
-            Err(err) => vec![Event::Error {
-                message: err.to_string(),
-            }],
-        },
-        Request::LeaveChannel { channel, agent } => match leave_channel(&channel, &agent) {
-            Ok(()) => vec![
-                Event::Ok,
-                Event::Channels {
-                    channels: list_channels(),
-                },
-                snapshot_event(),
-            ],
-            Err(err) => vec![Event::Error {
-                message: err.to_string(),
-            }],
-        },
-        Request::RemoveChannel { channel } => match remove_channel(&channel) {
-            Ok(()) => vec![
-                Event::Ok,
-                Event::Channels {
-                    channels: list_channels(),
-                },
-                snapshot_event(),
-            ],
-            Err(err) => vec![Event::Error {
-                message: err.to_string(),
-            }],
-        },
-        Request::SetChannel {
-            id,
-            name,
-            brief,
-            unset_brief,
-            members,
-        } => match set_channel(&id, name, brief, unset_brief, members) {
-            Ok(()) => vec![
-                Event::Ok,
-                Event::Channels {
-                    channels: list_channels(),
-                },
-                snapshot_event(),
-            ],
-            Err(err) => vec![Event::Error {
-                message: err.to_string(),
-            }],
-        },
         Request::Shutdown => {
             let _ = shutdown.send(true);
             vec![Event::Shutdown]
@@ -2101,7 +1775,6 @@ fn list_agents() -> Vec<AgentInfo> {
                 role: cfg.and_then(|c| c.role.clone()),
                 routines: cfg.map(|c| c.routines.clone()).unwrap_or_default(),
                 preview: None,
-                origin_channel: get_origin(s.id()).and_then(|o| o.reply_channel),
                 last_ts: 0,
             }
         })
@@ -2167,12 +1840,7 @@ fn send_agent_shown(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
     let roster = roster_vec();
     let msg = crate::transcript::push_user(id, "user", shown);
     let mentions = targeting::one_on_one_tell_targets(crate::rows::reply_body(text), id, &roster);
-    let rooms: Vec<Channel> = channels()
-        .lock()
-        .ok()
-        .map(|m| m.values().cloned().collect())
-        .unwrap_or_default();
-    let delivered = crate::config::with_mention_hint(text, id, &roster, &rooms);
+    let delivered = crate::config::with_mention_hint(text, id, &roster);
     // Install the followers before the turn starts. A fast turn can finish
     // inside `submit_delivery`, and the arming flag keeps that finish from
     // running the chain before it is in place.
@@ -2501,11 +2169,6 @@ fn remove_agent(id: &str) -> anyhow::Result<()> {
     // After the kill: an in-flight headless turn persists through
     // `push_tool`, which would write the file back moments after we unlink it.
     crate::transcript::drop_agent(id);
-    if let Ok(mut chans) = channels().lock() {
-        for ch in chans.values_mut() {
-            ch.members.retain(|m| m != id);
-        }
-    }
     save_state()?;
     inject_roster_update(None);
     Ok(())
@@ -2618,58 +2281,14 @@ fn set_agent(
     Ok(())
 }
 
-/// A routine list hangs off a bot, or off a channel addressed as `#room`.
-enum RoutineHost {
-    Agent(String),
-    Channel(String),
+fn read_routines(agent: &str) -> anyhow::Result<Vec<Routine>> {
+    Ok(clone_agent_cfg(agent)?.routines)
 }
 
-fn routine_host(target: &str) -> RoutineHost {
-    match target.trim().strip_prefix('#') {
-        Some(channel) => RoutineHost::Channel(channel.trim().to_string()),
-        None => RoutineHost::Agent(target.trim().to_string()),
-    }
-}
-
-fn read_routines(target: &str) -> anyhow::Result<Vec<Routine>> {
-    match routine_host(target) {
-        RoutineHost::Agent(id) => Ok(clone_agent_cfg(&id)?.routines),
-        RoutineHost::Channel(id) => {
-            let chans = channels().lock().expect("channels mutex");
-            chans
-                .get(&id)
-                .map(|c| c.routines.clone())
-                .with_context(|| format!("unknown channel {id}"))
-        }
-    }
-}
-
-fn write_routines(target: &str, routines: Vec<Routine>) -> anyhow::Result<()> {
-    match routine_host(target) {
-        RoutineHost::Agent(id) => {
-            let mut cfg = clone_agent_cfg(&id)?;
-            cfg.routines = routines;
-            persist_config(&cfg)
-        }
-        RoutineHost::Channel(id) => {
-            {
-                let mut chans = channels().lock().expect("channels mutex");
-                let ch = chans
-                    .get_mut(&id)
-                    .with_context(|| format!("unknown channel {id}"))?;
-                ch.routines = routines;
-            }
-            save_state()
-        }
-    }
-}
-
-/// Run one routine now: a bot gets a turn, a channel gets the post.
-fn fire_for_target(target: &str, name: &str, prompt: &str) -> anyhow::Result<()> {
-    match routine_host(target) {
-        RoutineHost::Agent(id) => fire_routine(&id, name, prompt),
-        RoutineHost::Channel(id) => send_channel(&id, "user", prompt),
-    }
+fn write_routines(agent: &str, routines: Vec<Routine>) -> anyhow::Result<()> {
+    let mut cfg = clone_agent_cfg(agent)?;
+    cfg.routines = routines;
+    persist_config(&cfg)
 }
 
 fn clone_agent_cfg(id: &str) -> anyhow::Result<AgentConfig> {
@@ -2748,7 +2367,7 @@ fn run_routine(target: &str, key: &str) -> anyhow::Result<()> {
     let name = r.name.clone();
     let prompt = r.prompt.clone();
     let rid = r.id.clone();
-    match fire_for_target(target, &name, &prompt) {
+    match fire_routine(target, &name, &prompt) {
         Ok(()) => {
             let _ = crate::routine_log::record(target, &rid, true, "ok");
         }
@@ -2837,328 +2456,8 @@ fn reset_agent(id: &str, drop_routines: bool) -> anyhow::Result<String> {
     Ok(dir.display().to_string())
 }
 
-fn list_channels() -> Vec<ChannelInfo> {
-    let mut list: Vec<ChannelInfo> = channel_vec()
-        .into_iter()
-        .map(|c| ChannelInfo {
-            id: c.id.clone(),
-            name: c.name.clone(),
-            members: c.members.clone(),
-            routines: c.routines.clone(),
-            brief: c.brief.clone(),
-            preview: crate::transcript::channel_preview(&c.id),
-            last_ts: crate::transcript::channel_last_ts(&c.id),
-        })
-        .collect();
-    list.sort_by(|a, b| a.id.cmp(&b.id));
-    list
-}
-
-fn channel_messages_event(id: &str) -> anyhow::Result<Event> {
-    let id = id.trim();
-    {
-        let chans = channels().lock().expect("channels mutex");
-        if !chans.contains_key(id) {
-            anyhow::bail!("unknown channel {id}");
-        }
-    }
-    Ok(Event::ChannelMessages {
-        channel: id.to_string(),
-        messages: crate::transcript::channel_messages(id),
-    })
-}
-
 fn known_agent(id: &str) -> bool {
     configs()
-        .lock()
-        .ok()
-        .map(|m| m.contains_key(id))
-        .unwrap_or(false)
-}
-
-fn add_channel(id: String, name: String, members: Vec<String>) -> anyhow::Result<()> {
-    let members = unique_ids(members);
-    for m in &members {
-        if !known_agent(m) {
-            anyhow::bail!("unknown agent {m}");
-        }
-    }
-    let ch = Channel::new(id, name, members)?;
-    {
-        let chans = channels().lock().expect("channels mutex");
-        if chans.contains_key(&ch.id) {
-            anyhow::bail!("channel {} already exists", ch.id);
-        }
-    }
-    // Same as a new agent: a room id freed by a deleted channel must not open
-    // onto that channel's messages. Outside the lock — this unlinks a file, and
-    // every RPC that reads the roster waits on that guard.
-    crate::transcript::drop_channel(&ch.id);
-    {
-        let mut chans = channels().lock().expect("channels mutex");
-        chans.insert(ch.id.clone(), ch);
-    }
-    save_state()?;
-    Ok(())
-}
-
-fn join_channel(channel: &str, agent: &str) -> anyhow::Result<()> {
-    let channel = channel.trim();
-    let agent = agent.trim();
-    if channel.is_empty() {
-        anyhow::bail!("channel id is empty");
-    }
-    if agent.is_empty() {
-        anyhow::bail!("agent id is empty");
-    }
-    if !known_agent(agent) {
-        anyhow::bail!("unknown agent {agent}");
-    }
-    {
-        let mut chans = channels().lock().expect("channels mutex");
-        let ch = chans
-            .get_mut(channel)
-            .with_context(|| format!("unknown channel {channel}"))?;
-        if !ch.members.iter().any(|m| m == agent) {
-            ch.members.push(agent.to_string());
-        }
-    }
-    save_state()?;
-    Ok(())
-}
-
-fn set_channel(
-    id: &str,
-    name: Option<String>,
-    brief: Option<String>,
-    unset_brief: bool,
-    members: Option<Vec<String>>,
-) -> anyhow::Result<()> {
-    let id = id.trim();
-    if id.is_empty() {
-        anyhow::bail!("channel id is empty");
-    }
-    let known: Vec<String> = roster_vec().into_iter().map(|a| a.id).collect();
-    {
-        let mut chans = channels().lock().expect("channels mutex");
-        let ch = chans
-            .get_mut(id)
-            .with_context(|| format!("unknown channel {id}"))?;
-        if let Some(name) = name {
-            ch.set_name(name);
-        }
-        if unset_brief {
-            ch.set_brief(None);
-        } else if let Some(brief) = brief {
-            ch.set_brief(Some(brief));
-        }
-        if let Some(members) = members {
-            ch.set_members(members, &known)?;
-        }
-    }
-    save_state()?;
-    Ok(())
-}
-
-fn leave_channel(channel: &str, agent: &str) -> anyhow::Result<()> {
-    let channel = channel.trim();
-    let agent = agent.trim();
-    if channel.is_empty() {
-        anyhow::bail!("channel id is empty");
-    }
-    if agent.is_empty() {
-        anyhow::bail!("agent id is empty");
-    }
-    if !known_agent(agent) {
-        anyhow::bail!("unknown agent {agent}");
-    }
-    {
-        let mut chans = channels().lock().expect("channels mutex");
-        let ch = chans
-            .get_mut(channel)
-            .with_context(|| format!("unknown channel {channel}"))?;
-        let before = ch.members.len();
-        ch.members.retain(|m| m != agent);
-        if ch.members.len() == before {
-            anyhow::bail!("{agent} is not a member of channel {channel}");
-        }
-    }
-    save_state()?;
-    Ok(())
-}
-
-fn remove_channel(channel: &str) -> anyhow::Result<()> {
-    let channel = channel.trim();
-    if channel.is_empty() {
-        anyhow::bail!("channel id is empty");
-    }
-    {
-        let mut chans = channels().lock().expect("channels mutex");
-        if chans.remove(channel).is_none() {
-            anyhow::bail!("unknown channel {channel}");
-        }
-    }
-    crate::transcript::drop_channel(channel);
-    save_state()?;
-    Ok(())
-}
-
-fn send_channel(channel: &str, from: &str, text: &str) -> anyhow::Result<()> {
-    let channel = channel.trim();
-    if channel.is_empty() {
-        anyhow::bail!("unknown channel {channel}");
-    }
-    let ch = {
-        let chans = channels().lock().expect("channels mutex");
-        chans
-            .get(channel)
-            .cloned()
-            .with_context(|| format!("unknown channel {channel}"))?
-    };
-    let from = from_id(from);
-    if from != "user" && !ch.members.iter().any(|m| m == &from) {
-        anyhow::bail!("{from} is not a member of channel {channel}");
-    }
-    if ch.members.is_empty() {
-        anyhow::bail!("channel {channel} has no members");
-    }
-    let role = if from == "user" {
-        Role::User
-    } else {
-        Role::Assistant
-    };
-    crate::transcript::push_channel(&ch.id, role, &from, text);
-    let default_one = from == "user";
-    let last = if default_one {
-        channel_last_member_speaker(&ch.id, &ch.members)
-    } else {
-        None
-    };
-    let mut pool = ch.members.clone();
-    if from != "user" {
-        pool.retain(|m| m != &from);
-    }
-    let targets = targeting::channel_wake_targets(
-        crate::rows::reply_body(text),
-        &pool,
-        &roster_vec(),
-        last.as_deref(),
-        default_one,
-    );
-    if targets.is_empty() {
-        return Ok(());
-    }
-    // A bot posting to the room continues whatever chain it is already in; a user
-    // post starts a fresh one.
-    let parent = if from == "user" {
-        None
-    } else {
-        get_origin(&from)
-    };
-    let origin = targeting::inherit_origin(parent.as_ref(), TurnOrigin::channel(&ch.id, &from));
-    // The previous message's remaining members would otherwise answer this one too.
-    cancel_serial_channel(&ch.id);
-    if from == "user" && crate::interrupt::is_stop_command(text) {
-        let mut stopped = 0usize;
-        for to in &targets {
-            if apply_user_interrupt(to, text).is_ok() {
-                stopped += 1;
-            }
-        }
-        if stopped == 0 {
-            anyhow::bail!("no members received the message");
-        }
-        return Ok(());
-    }
-    let jobs = targets
-        .iter()
-        .map(|to| SerialJob {
-            to: to.clone(),
-            kind: SerialKind::Channel {
-                channel: ch.id.clone(),
-                from: from.clone(),
-                text: text.to_string(),
-                origin: origin.clone(),
-            },
-        })
-        .collect::<Vec<_>>();
-    // This room already has a speaker. The new names wait behind that turn and
-    // then go in order. Another room keeps its own order.
-    if let Some(speaker) = room_speaker(&ch.id, &ch.members) {
-        park_serial_on(&speaker, jobs);
-        return Ok(());
-    }
-    // The bot who just posted is still in its turn. Ask the room after that
-    // turn ends, so its reply is already in the channel when the next member starts.
-    if from != "user" && agent_busy(&from).unwrap_or(false) {
-        park_serial_on(&from, jobs);
-        return Ok(());
-    }
-    dispatch_serial(jobs)
-}
-
-/// Wake one member with the channel as it stands now, including replies the
-/// members ahead of them already posted.
-fn wake_channel_member(
-    ch: &Channel,
-    from: &str,
-    text: &str,
-    to: &str,
-    origin: TurnOrigin,
-) -> anyhow::Result<bool> {
-    if from == "user" && !apply_user_interrupt(to, text)? {
-        return Ok(false);
-    }
-    if ensure_accepts_turn(to).is_err() {
-        anyhow::bail!("agent {to} is not accepting a turn");
-    }
-    let stored = crate::transcript::channel_messages(&ch.id);
-    let recent_text: Vec<String> = stored
-        .iter()
-        .map(|m| crate::rows::display_text(m))
-        .collect();
-    let recent: Vec<_> = stored
-        .iter()
-        .zip(recent_text.iter())
-        .map(|(m, t)| crate::channel_context::WakeLine {
-            id: m.id.as_str(),
-            from: m.from.as_str(),
-            text: t.as_str(),
-        })
-        .collect();
-    let last_id = stored.last().map(|m| m.id.clone());
-    let envelope = crate::channel_context::wake_text(
-        &ch.id,
-        &ch.name,
-        &ch.members,
-        ch.brief.as_deref(),
-        &recent,
-        last_wake_id(to, &ch.id).as_deref(),
-        from,
-        text,
-    );
-    let msg = crate::transcript::push_system(to, &format!("#{}", ch.id), text);
-    submit_delivery(to, &envelope, true, Some(msg.id), origin)?;
-    if let Some(id) = last_id.as_deref() {
-        set_wake_id(to, &ch.id, id);
-    }
-    Ok(true)
-}
-
-fn channel_last_member_speaker(channel: &str, members: &[String]) -> Option<String> {
-    crate::transcript::channel_messages(channel)
-        .into_iter()
-        .rev()
-        .find_map(|m| {
-            if m.from == "user" || m.role == Role::User {
-                return None;
-            }
-            members.iter().find(|id| *id == &m.from).cloned()
-        })
-}
-
-fn known_channel(id: &str) -> bool {
-    channels()
         .lock()
         .ok()
         .map(|m| m.contains_key(id))
@@ -3177,45 +2476,6 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
         return;
     };
     let targets = targeting::postback_targets(&origin, agent);
-    if let Some(channel) = targets.channel {
-        if known_channel(&channel) {
-            let already = msg
-                .choice
-                .as_ref()
-                .map(|c| {
-                    crate::transcript::channel_messages(&channel)
-                        .iter()
-                        .any(|m| m.choice.as_ref().map(|x| x.id == c.id).unwrap_or(false))
-                })
-                .unwrap_or(false);
-            let dup = crate::transcript::channel_messages(&channel)
-                .last()
-                .map(|m| m.from == agent && !text.is_empty() && m.text.trim() == text)
-                .unwrap_or(false);
-            if !dup && !already {
-                let ch_msg =
-                    crate::transcript::push_channel(&channel, Role::Assistant, agent, &text);
-                if let Some(choice) = &msg.choice {
-                    crate::transcript::set_choice(
-                        &format!("ch:{channel}"),
-                        &ch_msg.id,
-                        choice.clone(),
-                    );
-                }
-            }
-            if crate::interrupt::looks_like_judgment_question(&text) {
-                if let Some(ch_msg) = crate::transcript::channel_messages(&channel).last() {
-                    if ch_msg.from == agent {
-                        crate::transcript::set_approval(
-                            &format!("ch:{channel}"),
-                            &ch_msg.id,
-                            crate::protocol::ApprovalState::Pending,
-                        );
-                    }
-                }
-            }
-        }
-    }
     if let Some(peer) = targets.agent {
         if known_agent(&peer) && !text.is_empty() && msg.choice.is_none() {
             crate::transcript::push_handoff(&peer, agent, &text);
@@ -3232,9 +2492,9 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
 mod daemon_tests {
     use super::*;
 
-    /// A per-test id. The agent, channel and pending-handoff maps are all
-    /// process-wide, so two tests sharing a key drain each other's state
-    /// under the parallel harness — which is how CI failed here.
+    /// A per-test id. The agent and pending-handoff maps are process-wide,
+    /// so two tests sharing a key drain each other's state under the
+    /// parallel harness — which is how CI failed here.
     fn test_id(prefix: &str) -> String {
         format!(
             "{prefix}-{}",
@@ -3245,20 +2505,15 @@ mod daemon_tests {
         )
     }
 
-    /// Both arms, because the bug was one arm doing the opposite of the other.
+    /// Boot reads a bot's transcript back. Creating a bot drops the file
+    /// first, so this path must not.
     #[test]
-    fn boot_keeps_the_messages_a_room_and_a_bot_already_have() {
+    fn boot_keeps_the_messages_a_bot_already_has() {
         paths::testing::with_home("daemon-restore", || {
-            let room = test_id("room");
             let bot = test_id("bot");
-            crate::transcript::push_channel(&room, Role::User, "user", "어제 한 말");
             crate::transcript::push_user(&bot, "user", "어제 시킨 일");
-            let room_path = paths::channel_transcript_path(&room);
             let bot_path = paths::transcript_path(&bot);
-            assert!(
-                room_path.exists() && bot_path.exists(),
-                "both should persist"
-            );
+            assert!(bot_path.exists(), "should persist");
 
             let cfg = Config {
                 agents: vec![AgentConfig::new(
@@ -3267,36 +2522,12 @@ mod daemon_tests {
                     vec!["cat".into()],
                     None,
                 )],
-                channels: vec![
-                    Channel::new(room.clone(), "방".into(), Vec::new()).expect("channel")
-                ],
             };
             restore_transcripts(&cfg);
 
-            assert!(
-                room_path.exists(),
-                "boot must not unlink a room's transcript"
-            );
             assert!(bot_path.exists(), "boot must not unlink a bot's transcript");
-            assert_eq!(crate::transcript::channel_messages(&room).len(), 1);
             assert_eq!(crate::transcript::messages(&bot).len(), 1);
-            crate::transcript::drop_channel(&room);
             crate::transcript::drop_agent(&bot);
-        });
-    }
-
-    /// The other half of the swap: a room minted on a freed id starts empty.
-    #[test]
-    fn a_new_room_does_not_open_onto_a_freed_id() {
-        paths::testing::with_home("daemon-add-channel", || {
-            let room = test_id("room");
-            crate::transcript::push_channel(&room, Role::User, "user", "지난 방 대화");
-            assert!(paths::channel_transcript_path(&room).exists());
-
-            add_channel(room.clone(), "방".into(), Vec::new()).expect("add");
-
-            assert!(crate::transcript::channel_messages(&room).is_empty());
-            let _ = remove_channel(&room);
         });
     }
 
@@ -3315,39 +2546,7 @@ mod daemon_tests {
     }
 
     #[test]
-    fn a_hash_prefix_addresses_a_channel() {
-        assert!(matches!(routine_host("alpha"), RoutineHost::Agent(id) if id == "alpha"));
-        assert!(matches!(routine_host("#room"), RoutineHost::Channel(id) if id == "room"));
-        assert!(matches!(routine_host("  #room  "), RoutineHost::Channel(id) if id == "room"));
-        // A bot id cannot start with '#', so there is nothing to disambiguate.
-        assert!(matches!(routine_host(" alpha "), RoutineHost::Agent(id) if id == "alpha"));
-    }
-
-    #[test]
-    fn a_channel_keeps_the_routines_written_to_it() {
-        crate::paths::testing::with_home("channel-routines", || {
-            let id = "test-room";
-            let target = format!("#{id}");
-            channels().lock().unwrap().insert(
-                id.to_string(),
-                crate::config::Channel::new(id.into(), "방".into(), Vec::new()).unwrap(),
-            );
-            assert!(read_routines(&target).unwrap().is_empty());
-            let r = Routine::new("스탠드업".into(), "0 9 * * *".into(), "brief".into()).unwrap();
-            write_routines(&target, vec![r]).unwrap();
-            let back = read_routines(&target).unwrap();
-            assert_eq!(back.len(), 1);
-            assert_eq!(back[0].name, "스탠드업");
-            assert!(list_channels()
-                .iter()
-                .any(|c| c.id == id && c.routines.len() == 1));
-            channels().lock().unwrap().remove(id);
-        });
-    }
-
-    #[test]
     fn routines_on_an_unknown_host_are_an_error() {
-        assert!(read_routines("#definitely-missing-room").is_err());
         assert!(read_routines("definitely-missing-bot").is_err());
     }
 
@@ -3390,96 +2589,6 @@ mod daemon_tests {
         let err = enqueue_delivery(id, "overflow", true, None, TurnOrigin::user()).unwrap_err();
         assert!(err.to_string().contains("inbox full"), "{err}");
         clear_inbox(id);
-    }
-
-    #[test]
-    fn sealed_reply_posts_back_to_origin_channel() {
-        let ch = test_id("room");
-        let speaker = format!("beta-{ch}");
-        channels().lock().unwrap().insert(
-            ch.clone(),
-            crate::config::Channel::new(ch.clone(), ch.clone(), vec![speaker.clone()]).unwrap(),
-        );
-        configs().lock().unwrap().insert(
-            speaker.clone(),
-            crate::config::AgentConfig::new(
-                speaker.clone(),
-                speaker.clone(),
-                vec!["cat".into()],
-                None,
-            ),
-        );
-        crate::transcript::load_channel(&ch);
-        crate::transcript::push_channel(&ch, Role::User, "user", "hello");
-        set_origin(&speaker, TurnOrigin::channel(&ch, "user"));
-        let reply = ChatMessage {
-            id: "r1".into(),
-            role: Role::Assistant,
-            from: speaker.clone(),
-            text: "on it".into(),
-            ts: 1,
-            queued: false,
-            kind: None,
-            approval: None,
-            choice: None,
-        };
-        on_assistant_sealed(&speaker, &reply);
-        let msgs = crate::transcript::channel_messages(&ch);
-        let last = msgs.last().expect("channel reply");
-        assert_eq!(last.from, speaker);
-        assert_eq!(last.role, Role::Assistant);
-        assert_eq!(last.text, "on it");
-        let kept = get_origin(&speaker).expect("origin stays while the turn is this room");
-        assert_eq!(kept.reply_channel.as_deref(), Some(ch.as_str()));
-        crate::transcript::drop_channel(&ch);
-        channels().lock().unwrap().remove(&ch);
-        configs().lock().unwrap().remove(&speaker);
-        take_origin(&speaker);
-    }
-
-    #[test]
-    fn sealed_judgment_marks_channel_approval() {
-        let ch = test_id("room-ask");
-        let speaker = format!("beta-{ch}");
-        channels().lock().unwrap().insert(
-            ch.clone(),
-            crate::config::Channel::new(ch.clone(), ch.clone(), vec![speaker.clone()]).unwrap(),
-        );
-        configs().lock().unwrap().insert(
-            speaker.clone(),
-            crate::config::AgentConfig::new(
-                speaker.clone(),
-                speaker.clone(),
-                vec!["cat".into()],
-                None,
-            ),
-        );
-        crate::transcript::load_channel(&ch);
-        set_origin(&speaker, TurnOrigin::channel(&ch, "user"));
-        let reply = ChatMessage {
-            id: "ask1".into(),
-            role: Role::Assistant,
-            from: speaker.clone(),
-            text: "이 변경을 실행할까요?".into(),
-            ts: 1,
-            queued: false,
-            kind: None,
-            approval: None,
-            choice: None,
-        };
-        on_assistant_sealed(&speaker, &reply);
-        let ch_last = crate::transcript::channel_messages(&ch)
-            .last()
-            .cloned()
-            .expect("channel ask");
-        assert_eq!(
-            ch_last.approval,
-            Some(crate::protocol::ApprovalState::Pending)
-        );
-        crate::transcript::drop_channel(&ch);
-        channels().lock().unwrap().remove(&ch);
-        configs().lock().unwrap().remove(&speaker);
-        take_origin(&speaker);
     }
 
     #[test]
@@ -3641,18 +2750,6 @@ mod daemon_tests {
         }
     }
 
-    fn channel_job(to: &str, channel: &str) -> SerialJob {
-        SerialJob {
-            to: to.to_string(),
-            kind: SerialKind::Channel {
-                channel: channel.to_string(),
-                from: "user".into(),
-                text: "go".into(),
-                origin: TurnOrigin::channel(channel, "user"),
-            },
-        }
-    }
-
     #[test]
     fn a_chain_answers_a_then_b_then_c() {
         let anchor = test_id("serial-anchor");
@@ -3701,187 +2798,13 @@ mod daemon_tests {
         let third = take_next_serial(&b).unwrap();
         assert_eq!(first.to, a);
         assert_eq!(second.to, b);
-        match second.kind {
-            SerialKind::Tell { text, .. } => assert_eq!(text, "from the bot"),
-            other => panic!("expected a tell, got {other:?}"),
-        }
+        let SerialKind::Tell { text, .. } = second.kind;
+        assert_eq!(text, "from the bot");
         assert_eq!(third.to, c);
         clear_serial_after(&anchor);
         clear_serial_after(&a);
         clear_serial_after(&b);
         clear_serial_after(&c);
-    }
-
-    #[test]
-    fn a_new_channel_message_drops_the_old_answer_order() {
-        let anchor = test_id("serial-cancel");
-        let room = test_id("serial-room");
-        let other = test_id("serial-other-room");
-        let keep = test_id("serial-keep");
-        let rest = test_id("serial-rest");
-        queue_serial_after(
-            &anchor,
-            vec![
-                channel_job("a", &room),
-                tell_job(&keep, "stay"),
-                channel_job("b", &room),
-                channel_job(&rest, &other),
-            ],
-        );
-        cancel_serial_channel(&room);
-        let next = take_next_serial(&anchor).expect("tell stays");
-        assert_eq!(next.to, keep);
-        let after = take_next_serial(&keep).expect("other room stays");
-        assert_eq!(after.to, rest);
-        assert!(take_next_serial(&rest).is_none());
-        clear_serial_after(&anchor);
-        clear_serial_after(&keep);
-        clear_serial_after(&rest);
-    }
-
-    struct Speaking(String, String);
-
-    impl Speaking {
-        fn hold(channel: &str, status: AgentStatus) -> Self {
-            let id = test_id("speaker");
-            let session = std::sync::Arc::new(crate::headless::HeadlessSession {
-                id: id.clone(),
-                name: id.clone(),
-                cmd: vec!["grok".into()],
-                cwd: std::path::PathBuf::from("/tmp"),
-                inner: Mutex::new(crate::headless::HeadlessInner {
-                    status,
-                    last_output: Instant::now(),
-                    seq: 1,
-                    cols: 80,
-                    rows: 24,
-                    session_id: None,
-                    child: None,
-                    generation: 0,
-                    interrupted: false,
-                }),
-            });
-            agents()
-                .lock()
-                .unwrap()
-                .insert(id.clone(), LiveAgent::Headless(session));
-            set_origin(&id, TurnOrigin::channel(channel, "user"));
-            Self(id, channel.to_string())
-        }
-    }
-
-    impl Drop for Speaking {
-        fn drop(&mut self) {
-            agents().lock().unwrap().remove(&self.0);
-            take_origin(&self.0);
-            clear_serial_after(&self.0);
-            clear_inbox(&self.0);
-            cancel_serial_channel(&self.1);
-        }
-    }
-
-    fn insert_cfg(id: &str) {
-        configs().lock().unwrap().insert(
-            id.to_string(),
-            crate::config::AgentConfig::new(id.into(), id.into(), vec!["grok".into()], None),
-        );
-    }
-
-    /// A named bot who is not live. Starting them would be the concurrency bug;
-    /// parking must not reach `submit_delivery`.
-    fn roster_only(ids: &[&str]) -> Vec<String> {
-        ids.iter()
-            .map(|id| {
-                let id = test_id(id);
-                insert_cfg(&id);
-                id
-            })
-            .collect()
-    }
-
-    fn open_room(members: &[String]) -> String {
-        let id = test_id("room");
-        channels().lock().unwrap().insert(
-            id.clone(),
-            crate::config::Channel::new(id.clone(), id.clone(), members.to_vec()).unwrap(),
-        );
-        crate::transcript::load_channel(&id);
-        id
-    }
-
-    fn close_room(id: &str, members: &[String]) {
-        channels().lock().unwrap().remove(id);
-        crate::transcript::drop_channel(id);
-        cancel_serial_channel(id);
-        for member in members {
-            configs().lock().unwrap().remove(member);
-            clear_serial_after(member);
-        }
-    }
-
-    #[test]
-    fn a_room_speaks_in_order_behind_whoever_is_already_talking() {
-        paths::testing::with_home("room-order", || {
-            let mut members = roster_only(&["beta", "gamma"]);
-            let room = open_room(&members);
-            let speaking = Speaking::hold(&room, AgentStatus::Working);
-            members.push(speaking.0.clone());
-            insert_cfg(&speaking.0);
-            channels().lock().unwrap().insert(
-                room.clone(),
-                crate::config::Channel::new(room.clone(), room.clone(), members.clone()).unwrap(),
-            );
-            queue_serial_after(&speaking.0, vec![channel_job("old", &room)]);
-
-            let beta = &members[0];
-            let gamma = &members[1];
-            send_channel(&room, "user", &format!("@{beta} then @{gamma}"))
-                .expect("the new names wait behind the current speaker");
-
-            let first = take_next_serial(&speaking.0).expect("beta is next");
-            assert_eq!(first.to, *beta);
-            let second = take_next_serial(beta).expect("gamma follows beta");
-            assert_eq!(second.to, *gamma);
-            assert!(
-                take_next_serial(gamma).is_none(),
-                "the previous lineup does not answer this message too"
-            );
-
-            let other_members = roster_only(&["delta"]);
-            let other = open_room(&other_members);
-            let err = send_channel(&other, "user", &format!("@{}", other_members[0]))
-                .expect_err("another room keeps its own order and tries to start");
-            assert!(err.to_string().contains(&other_members[0]), "{err}");
-            assert!(
-                take_next_serial(&speaking.0).is_none(),
-                "the other room must not join this room's order"
-            );
-
-            close_room(&room, &members);
-            close_room(&other, &other_members);
-        });
-    }
-
-    #[test]
-    fn a_blocked_speaker_still_holds_the_rooms_place() {
-        paths::testing::with_home("room-blocked", || {
-            let members = roster_only(&["beta"]);
-            let room = open_room(&members);
-            let speaking = Speaking::hold(&room, AgentStatus::Blocked);
-            let mut all = members.clone();
-            all.push(speaking.0.clone());
-            insert_cfg(&speaking.0);
-            channels().lock().unwrap().insert(
-                room.clone(),
-                crate::config::Channel::new(room.clone(), room.clone(), all.clone()).unwrap(),
-            );
-
-            send_channel(&room, "user", &format!("@{}", members[0]))
-                .expect("a blocked speaker keeps the next name waiting");
-            let next = take_next_serial(&speaking.0).expect("parked");
-            assert_eq!(next.to, members[0]);
-            close_room(&room, &all);
-        });
     }
 
     #[test]
@@ -3937,10 +2860,8 @@ mod daemon_tests {
         ));
         let job = take_next_serial(&anchor).expect("kept");
         assert_eq!(job.to, b);
-        match job.kind {
-            SerialKind::Tell { text, .. } => assert_eq!(text, "kept"),
-            other => panic!("expected a tell, got {other:?}"),
-        }
+        let SerialKind::Tell { text, .. } = job.kind;
+        assert_eq!(text, "kept");
         clear_serial_after(&anchor);
         clear_serial_after(&b);
     }

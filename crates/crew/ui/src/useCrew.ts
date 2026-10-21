@@ -26,7 +26,6 @@ import {
 } from "./groups";
 import type {
   AgentInfo,
-  ChannelInfo,
   ChatMessage,
   CliKind,
   ConfirmKind,
@@ -50,7 +49,6 @@ type Ctx = {
 export function useCrew() {
   const t = useT();
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [channels, setChannels] = useState<ChannelInfo[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedKind, setSelectedKind] = useState<Kind>("agent");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -64,7 +62,6 @@ export function useCrew() {
   const [confirmKind, setConfirmKind] = useState<ConfirmKind>("reset");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [newBotOpen, setNewBotOpen] = useState(false);
-  const [newChannelOpen, setNewChannelOpen] = useState(false);
   const [toast, setToast] = useState<{
     text: string;
     show: boolean;
@@ -90,8 +87,6 @@ export function useCrew() {
   paneOpenRef.current = paneOpen;
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
-  const channelsRef = useRef(channels);
-  channelsRef.current = channels;
   const groupsRef = useRef<RailLayout>({ groups, ungrouped });
   groupsRef.current = { groups, ungrouped };
   const groupsLoaded = useRef(false);
@@ -102,22 +97,14 @@ export function useCrew() {
     return agents.find((a) => a.id === selected) ?? null;
   }, [agents, selected, selectedKind]);
 
-  const currentChannel = useMemo(() => {
-    if (selectedKind !== "channel" || !selected) return null;
-    return channels.find((c) => c.id === selected) ?? null;
-  }, [channels, selected, selectedKind]);
-
   const unread = useMemo(
-    () => unreadKeys(readMap, agents, channels, selectedKind, selected),
-    [readMap, agents, channels, selectedKind, selected],
+    () => unreadKeys(readMap, agents, selectedKind, selected),
+    [readMap, agents, selectedKind, selected],
   );
 
   useEffect(() => {
     if (!selected) return;
-    const ts =
-      selectedKind === "channel"
-        ? currentChannel?.last_ts || 0
-        : currentAgent?.last_ts || 0;
+    const ts = currentAgent?.last_ts || 0;
     if (!ts) return;
     setReadMap((prev) => {
       const next = markRead(prev, selectedKind, selected, ts);
@@ -125,22 +112,14 @@ export function useCrew() {
       saveRead(next);
       return next;
     });
-  }, [
-    selected,
-    selectedKind,
-    currentAgent?.last_ts,
-    currentChannel?.last_ts,
-  ]);
+  }, [selected, selectedKind, currentAgent?.last_ts]);
 
   useEffect(() => {
     void api.setDockBadge(unread.length).catch(() => null);
   }, [unread.length]);
 
-  const placeholder = currentChannel
-    ? t("composer.placeholder.channel", {
-        name: currentChannel.name || currentChannel.id,
-      })
-    : currentAgent?.status === "working"
+  const placeholder =
+    currentAgent?.status === "working"
       ? t("composer.placeholder.redirect")
       : currentAgent
         ? t("composer.placeholder.agent", {
@@ -193,24 +172,10 @@ export function useCrew() {
     setNewBotOpen(false);
   }
 
-  function closeNewChannel() {
-    setNewChannelOpen(false);
-  }
-
   function selectAgent(id: string, highlight: string | null = null) {
     selectedRef.current = { id, kind: "agent" };
     setSelected(id);
     setSelectedKind("agent");
-    setStick(!highlight);
-    setHighlightId(highlight);
-    closePane();
-    void refreshMessages();
-  }
-
-  function selectChannel(id: string, highlight: string | null = null) {
-    selectedRef.current = { id, kind: "channel" };
-    setSelected(id);
-    setSelectedKind("channel");
     setStick(!highlight);
     setHighlightId(highlight);
     closePane();
@@ -228,28 +193,10 @@ export function useCrew() {
   }
 
   function openInfo(id: string) {
-    const ch = channelsRef.current.find((c) => c.id === id);
-    if (ch) {
-      selectedRef.current = { id, kind: "channel" };
-      setSelected(id);
-      setSelectedKind("channel");
-      setPaneTab("info");
-      setPaneOpen(true);
-      return;
-    }
     openPane(id, "info");
   }
 
   function openRoutines(id: string) {
-    const ch = channelsRef.current.find((c) => c.id === id);
-    if (ch) {
-      selectedRef.current = { id, kind: "channel" };
-      setSelected(id);
-      setSelectedKind("channel");
-      setPaneTab("routines");
-      setPaneOpen(true);
-      return;
-    }
     openPane(id, "routines");
   }
 
@@ -305,7 +252,6 @@ export function useCrew() {
         current.groups,
         current.ungrouped,
         agentsRef.current,
-        channelsRef.current,
       );
       const stripped = moveItem(current, key, null, null, visual);
       persistLayout({
@@ -350,7 +296,6 @@ export function useCrew() {
       current.groups,
       current.ungrouped,
       agentsRef.current,
-      channelsRef.current,
     );
     persistLayout(moveItem(current, itemKey(kind, id), groupId, beforeKey, visual));
   }
@@ -396,88 +341,43 @@ export function useCrew() {
     if (hit.kind === "message") {
       const parsed = parseMessageHit(hit.id);
       if (!parsed) return;
-      if (parsed.kind === "channel") selectChannel(parsed.id, parsed.messageId);
-      else selectAgent(parsed.id, parsed.messageId);
+      selectAgent(parsed.id, parsed.messageId);
     }
   }
 
   const refreshList = useCallback(async () => {
-    const [list, chans] = await Promise.all([
-      api.listAgents(),
-      api.listChannels().catch(() => [] as ChannelInfo[]),
-    ]);
-    let { id: sel, kind } = selectedRef.current;
-    if (!sel) {
-      if (list.length) {
-        sel = list[0].id;
-        kind = "agent";
-      } else if (chans.length) {
-        sel = chans[0].id;
-        kind = "channel";
-      }
-    } else if (kind === "agent") {
-      if (!list.some((a) => a.id === sel)) {
-        if (list[0]) {
-          sel = list[0].id;
-          kind = "agent";
-        } else if (chans[0]) {
-          sel = chans[0].id;
-          kind = "channel";
-        } else {
-          sel = null;
-        }
-      }
-    } else if (!chans.some((c) => c.id === sel)) {
-      if (chans[0]) {
-        sel = chans[0].id;
-        kind = "channel";
-      } else if (list[0]) {
-        sel = list[0].id;
-        kind = "agent";
-      } else {
-        sel = null;
-      }
+    const list = await api.listAgents();
+    let { id: sel } = selectedRef.current;
+    if (!sel || !list.some((a) => a.id === sel)) {
+      sel = list[0]?.id ?? null;
     }
-    selectedRef.current = { id: sel, kind };
+    selectedRef.current = { id: sel, kind: "agent" };
     setAgents(list);
-    setChannels(chans || []);
     if (groupsLoaded.current) {
-      const pruned = pruneLayout(groupsRef.current, list, chans || []);
+      const pruned = pruneLayout(groupsRef.current, list);
       if (layoutChanged(pruned, groupsRef.current)) persistLayout(pruned);
     }
     setSelected(sel);
-    setSelectedKind(kind);
-    if (paneOpenRef.current) {
-      const still =
-        kind === "agent"
-          ? list.some((x) => x.id === sel)
-          : (chans || []).some((c) => c.id === sel);
-      if (!still) setPaneOpen(false);
+    setSelectedKind("agent");
+    if (paneOpenRef.current && !list.some((x) => x.id === sel)) {
+      setPaneOpen(false);
     }
   }, []);
 
   const refreshMessages = useCallback(async () => {
-    const { id, kind } = selectedRef.current;
+    const { id } = selectedRef.current;
     if (!id) {
       setMessages([]);
       return;
     }
-    if (kind === "channel") {
-      setMessages(await api.getChannelMessages(id));
-    } else {
-      setMessages(await api.getMessages(id));
-    }
+    setMessages(await api.getMessages(id));
   }, []);
 
   async function onSend(raw: string) {
-    const { id: sel, kind } = selectedRef.current;
+    const { id: sel } = selectedRef.current;
     if (!sel) return;
     try {
-      if (kind === "channel") {
-        await api.channelSend(sel, raw);
-      } else {
-        await api.sendMessage(sel, raw);
-      }
+      await api.sendMessage(sel, raw);
       await refreshMessages();
     } catch (err) {
       showError(err);
@@ -519,12 +419,10 @@ export function useCrew() {
     values: string[][],
     closed: boolean,
   ) {
-    const { id: sel, kind } = selectedRef.current;
     try {
       await api.answerChoice({
         agent: agentId,
         messageId,
-        channel: kind === "channel" ? sel : null,
         answers,
         values,
         closed,
@@ -579,29 +477,6 @@ export function useCrew() {
     }
   }
 
-  async function saveChannel(fields: {
-    name: string;
-    brief: string;
-    members: string[];
-  }) {
-    const id = selectedRef.current.id;
-    if (!id || selectedRef.current.kind !== "channel") return;
-    const name = fields.name.trim();
-    const brief = fields.brief.trim();
-    try {
-      await api.setChannel({
-        id,
-        name: name || null,
-        brief,
-        unsetBrief: !brief,
-        members: fields.members,
-      });
-      await refreshList();
-    } catch (err) {
-      showError(err);
-    }
-  }
-
   async function saveAgentFace(shape?: string | null, color?: string | null) {
     const id = selectedRef.current.id;
     if (!id || selectedRef.current.kind !== "agent") return;
@@ -629,11 +504,10 @@ export function useCrew() {
     }
   }
 
-  // Channels host routines too; the daemon addresses them as `#room`.
   function routineTarget(): string | null {
     const { id, kind } = selectedRef.current;
-    if (!id) return null;
-    return kind === "channel" ? `#${id}` : id;
+    if (!id || kind !== "agent") return null;
+    return id;
   }
 
   async function addRoutine(name: string, schedule: string, prompt: string) {
@@ -748,31 +622,11 @@ export function useCrew() {
           setSelected(null);
           setMessages([]);
         }
-      } else if (kind === "leave-channel") {
-        await api.leaveChannel(id);
-        if (
-          selectedRef.current.id === id &&
-          selectedRef.current.kind === "channel"
-        ) {
-          selectedRef.current = { id: null, kind: "agent" };
-          setSelected(null);
-          setMessages([]);
-        }
       } else if (kind === "remove-group") {
         removeGroup(id);
         await refreshList();
         await refreshMessages();
         return;
-      } else if (kind === "remove-channel") {
-        await api.removeChannel(id);
-        if (
-          selectedRef.current.id === id &&
-          selectedRef.current.kind === "channel"
-        ) {
-          selectedRef.current = { id: null, kind: "agent" };
-          setSelected(null);
-          setMessages([]);
-        }
       } else {
         await api.resetAgent(id, dropRoutines);
       }
@@ -855,29 +709,6 @@ export function useCrew() {
       selectedRef.current = { id, kind: "agent" };
       setSelected(id);
       setSelectedKind("agent");
-      setStick(true);
-      setMessages([]);
-      closePane();
-      await refreshList();
-      await refreshMessages();
-    } catch (err) {
-      showError(err);
-      await refreshList();
-    }
-  }
-
-  async function createChannel(name: string, members: string[]) {
-    const trimmed = name.trim();
-    if (!trimmed) {
-      showError(t("error.nameRequired"));
-      return;
-    }
-    try {
-      const id = await api.addChannel(trimmed, members);
-      closeNewChannel();
-      selectedRef.current = { id, kind: "channel" };
-      setSelected(id);
-      setSelectedKind("channel");
       setStick(true);
       setMessages([]);
       closePane();
@@ -977,7 +808,6 @@ export function useCrew() {
       closeConfirm();
       closePane();
       closeNewBot();
-      closeNewChannel();
       hideCtx();
     }
     function onClick() {
@@ -993,8 +823,7 @@ export function useCrew() {
 
   function openFocus(hit: FocusTarget) {
     void api.takePendingFocus().catch(() => null);
-    if (hit.kind === "channel") selectChannel(hit.id);
-    else selectAgent(hit.id);
+    selectAgent(hit.id);
   }
 
   function clickToast() {
@@ -1009,8 +838,7 @@ export function useCrew() {
     let noticeKey = "";
     function go(hit: FocusTarget) {
       void api.takePendingFocus().catch(() => null);
-      if (hit.kind === "channel") selectChannel(hit.id);
-      else selectAgent(hit.id);
+      selectAgent(hit.id);
     }
     function fireNotice(hit: FocusTarget) {
       const Ctor = window.Notification;
@@ -1075,7 +903,6 @@ export function useCrew() {
 
   return {
     agents,
-    channels,
     selected,
     selectedKind,
     messages,
@@ -1100,7 +927,6 @@ export function useCrew() {
     confirmOpen,
     confirmKind,
     newBotOpen,
-    newChannelOpen,
     toast,
     clickToast,
     ctx,
@@ -1109,10 +935,8 @@ export function useCrew() {
     pendingRenameId,
     clearPendingRename: () => setPendingRenameId(null),
     currentAgent,
-    currentChannel,
     placeholder,
     selectAgent,
-    selectChannel,
     openInfo,
     openRoutines,
     closePane,
@@ -1121,10 +945,7 @@ export function useCrew() {
     doConfirm,
     openNewBot: () => setNewBotOpen(true),
     closeNewBot,
-    openNewChannel: () => setNewChannelOpen(true),
-    closeNewChannel,
     createBot,
-    createChannel,
     cloneBot,
     showCtx,
     showCreateMenu,
@@ -1140,7 +961,6 @@ export function useCrew() {
     approveAgent,
     answerChoice,
     saveAgentInfo,
-    saveChannel,
     saveAgentFace,
     addRoutine,
     toggleRoutine,
@@ -1162,10 +982,6 @@ function parseMessageHit(
   const messageId = id.slice(last + 1);
   const scope = id.slice(0, last);
   if (!messageId || !scope) return null;
-  if (scope.startsWith("ch:")) {
-    const channel = scope.slice(3);
-    if (!channel) return null;
-    return { kind: "channel", id: channel, messageId };
-  }
+  if (scope.startsWith("ch:")) return null;
   return { kind: "agent", id: scope, messageId };
 }

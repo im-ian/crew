@@ -12,10 +12,6 @@ use crate::protocol::{
 };
 use crate::rows::{is_crew_marker_line, strip_crew_markers};
 
-fn channel_key(id: &str) -> String {
-    format!("ch:{id}")
-}
-
 const EMIT_INTERVAL: Duration = Duration::from_millis(60);
 const SEAL_IDLE: Duration = Duration::from_millis(650);
 const EXPECT_TIMEOUT: Duration = Duration::from_millis(2000);
@@ -81,11 +77,7 @@ fn new_id() -> String {
 }
 
 fn persist_path(key: &str) -> std::path::PathBuf {
-    if let Some(id) = key.strip_prefix("ch:") {
-        paths::channel_transcript_path(id)
-    } else {
-        paths::transcript_path(key)
-    }
+    paths::transcript_path(key)
 }
 
 fn load_key(key: &str, path: &Path) {
@@ -125,26 +117,16 @@ pub fn load_agent(agent: &str) {
     load_key(agent, &paths::transcript_path(agent));
 }
 
-pub fn load_channel(id: &str) {
-    load_key(&channel_key(id), &paths::channel_transcript_path(id));
-}
-
 pub fn drop_agent(agent: &str) {
     drop_key(agent, &paths::transcript_path(agent));
-}
-
-pub fn drop_channel(id: &str) {
-    drop_key(&channel_key(id), &paths::channel_transcript_path(id));
 }
 
 /// Removal is final: forget the chat and its file, so an id reused by a
 /// later agent of the same name does not inherit the old session.
 ///
 /// The path is passed in rather than derived, so this agrees with
-/// `load_agent` / `load_channel` on where a key's file lives — deriving it
-/// would read an agent id that happens to start with `ch:` as a channel and
-/// unlink a real room. The guard is held across the unlink so a concurrent
-/// push cannot write a file that this call then deletes.
+/// `load_agent` on where a key's file lives. The guard is held across the
+/// unlink so a concurrent push cannot write a file that this call then deletes.
 fn drop_key(key: &str, path: &Path) {
     let Ok(mut map) = chats().lock() else {
         return;
@@ -152,7 +134,7 @@ fn drop_key(key: &str, path: &Path) {
     map.remove(key);
     if let Err(err) = fs::remove_file(path) {
         if err.kind() != std::io::ErrorKind::NotFound {
-            // Swallowing this would show an empty room now and replay the
+            // Swallowing this would show an empty chat now and replay the
             // dead conversation on the next daemon start.
             eprintln!("[crew] could not remove {}: {err}", path.display());
         }
@@ -169,10 +151,6 @@ pub fn messages(agent: &str) -> Vec<ChatMessage> {
 
 pub fn last_ts(key: &str) -> u64 {
     messages(key).last().map(|m| m.ts).unwrap_or(0)
-}
-
-pub fn channel_last_ts(id: &str) -> u64 {
-    last_ts(&channel_key(id))
 }
 
 pub fn preview(agent: &str) -> Option<String> {
@@ -599,28 +577,6 @@ pub fn expect_echo(agent: &str, text: &str) {
     }
 }
 
-pub fn channel_messages(id: &str) -> Vec<ChatMessage> {
-    messages(&channel_key(id))
-}
-
-pub fn channel_preview(id: &str) -> Option<String> {
-    preview(&channel_key(id))
-}
-
-pub fn push_channel(id: &str, role: Role, from: &str, text: &str) -> ChatMessage {
-    let key = channel_key(id);
-    let kind = match role {
-        Role::System => infer_system_kind(from),
-        _ => None,
-    };
-    let msg = push_role(&key, role, from, text, false, kind);
-    let _ = crate::daemon::events().send(Event::ChannelMessage {
-        channel: id.to_string(),
-        message: msg.clone(),
-    });
-    msg
-}
-
 fn push_role(
     agent: &str,
     role: Role,
@@ -652,9 +608,7 @@ fn push_role(
         chat.last_byte = Instant::now();
         persist(agent, chat);
     }
-    if !agent.starts_with("ch:") {
-        emit(agent, msg.clone());
-    }
+    emit(agent, msg.clone());
     msg
 }
 
@@ -1088,14 +1042,7 @@ fn emit(agent: &str, message: ChatMessage) {
 }
 
 fn emit_row(key: &str, message: ChatMessage) {
-    if let Some(channel) = key.strip_prefix("ch:") {
-        let _ = crate::daemon::events().send(Event::ChannelMessage {
-            channel: channel.to_string(),
-            message,
-        });
-    } else {
-        emit(key, message);
-    }
+    emit(key, message);
 }
 
 fn emit_sealed(agent: &str, message: ChatMessage) {
@@ -1271,37 +1218,6 @@ mod tests {
             load_agent(agent);
             assert!(messages(agent).is_empty());
             drop_agent(agent);
-        });
-    }
-
-    #[test]
-    fn dropping_a_channel_deletes_its_transcript_file() {
-        crate::paths::testing::with_home("transcript-drop-room", || {
-            let ch = "designroom";
-            push_channel(ch, Role::User, "someone", "old room");
-            let path = paths::channel_transcript_path(ch);
-            assert!(path.exists(), "channel transcript should persist");
-            drop_channel(ch);
-            assert!(!path.exists(), "a removed room must not leave its file");
-            load_channel(ch);
-            assert!(channel_messages(ch).is_empty());
-        });
-    }
-
-    #[test]
-    fn an_agent_id_starting_with_ch_leaves_the_room_alone() {
-        crate::paths::testing::with_home("transcript-drop-ch", || {
-            // `ch:` is how a channel is keyed internally, and the CLI takes an
-            // id verbatim. Deriving the path from the key would read this
-            // agent as the room and unlink the room's file.
-            push_channel("general", Role::User, "someone", "room talk");
-            let room = paths::channel_transcript_path("general");
-            assert!(room.exists());
-            push_user("ch:general", "user", "not a room");
-            drop_agent("ch:general");
-            assert!(room.exists(), "dropping an agent must not unlink a room");
-            drop_channel("general");
-            assert!(!room.exists());
         });
     }
 

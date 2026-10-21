@@ -4,7 +4,7 @@ import { splitBubbles } from "../bubbles";
 import { useT } from "../LocaleContext";
 import { Lock } from "../icons";
 import { peekMessages } from "../peek";
-import type { AgentInfo, ChannelInfo, ChatMessage } from "../types";
+import type { AgentInfo, ChatMessage } from "../types";
 import { Avatar } from "./Avatar";
 import { MdBody } from "./MdBody";
 import { WhoButton, whoColor } from "./WhoButton";
@@ -14,7 +14,6 @@ type Props = {
   self: AgentInfo;
   messages: ChatMessage[];
   agents: AgentInfo[];
-  channels?: ChannelInfo[];
   onClose: () => void;
 };
 
@@ -23,7 +22,6 @@ export function PeekRoom({
   self,
   messages,
   agents,
-  channels = [],
   onClose,
 }: Props) {
   const t = useT();
@@ -96,7 +94,6 @@ export function PeekRoom({
               agent={agent}
               who={who}
               agents={agents}
-              channels={channels}
             />
           );
         })}
@@ -119,13 +116,11 @@ function PeekBubble({
   agent,
   who,
   agents,
-  channels,
 }: {
   message: ChatMessage;
   agent: AgentInfo | null;
   who: string;
   agents: AgentInfo[];
-  channels: ChannelInfo[];
 }) {
   const color = agent
     ? whoColor(
@@ -170,7 +165,6 @@ function PeekBubble({
               className={"bubble md incoming" + stack}
               text={part}
               agents={agents}
-              channels={channels}
               baseDir={agent?.cwd || undefined}
             />
           );

@@ -46,12 +46,12 @@ describe("numberDuplicateNames", () => {
     );
   });
 
-  it("numbers rooms and bots in one space, so no two rows read alike", () => {
+  it("numbers every row that shares a name in one space", () => {
     const list = items(
-      ["room-a", "출시", "channel"],
-      ["room-b", "출시", "channel"],
       ["bot-a", "출시", "agent"],
       ["bot-b", "출시", "agent"],
+      ["bot-c", "출시", "agent"],
+      ["bot-d", "출시", "agent"],
     );
     numberDuplicateNames(list);
     expect(list.map((i) => i.ordinal).sort()).toEqual([1, 2, 3, 4]);

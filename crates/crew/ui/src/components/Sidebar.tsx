@@ -12,10 +12,10 @@ import {
 import { createPortal } from "react-dom";
 import { useLocale, useT } from "../LocaleContext";
 import { itemKey, parseItemKey } from "../groups";
-import type { AgentInfo, ChannelInfo, Group, Kind, SearchHit } from "../types";
-import { mentionLabel, mentionRuns, mentionText, resolveMention } from "../mentions";
+import type { AgentInfo, Group, Kind, SearchHit } from "../types";
+import { mentionRuns, mentionText } from "../mentions";
 import { numberDuplicateNames } from "../rail";
-import { Avatar, ChannelAvatar } from "./Avatar";
+import { Avatar } from "./Avatar";
 import { ChevronDown, Plus, Settings } from "../icons";
 
 const RAIL_DEFAULT = 232;
@@ -61,7 +61,6 @@ type RailItem = {
   /** Set only when another item shares this name. */
   ordinal?: number;
   agent?: AgentInfo;
-  channel?: ChannelInfo;
 };
 
 type RailDrop = {
@@ -186,7 +185,6 @@ function autoScrollLists(y: number) {
 
 type Props = {
   agents: AgentInfo[];
-  channels: ChannelInfo[];
   groups: Group[];
   ungrouped: string[];
   selected: string | null;
@@ -197,10 +195,8 @@ type Props = {
   onQuery: (q: string) => void;
   onSearchHit?: (hit: SearchHit) => void;
   onSelectAgent: (id: string) => void;
-  onSelectChannel: (id: string) => void;
   onCreateMenu: (e: MouseEvent) => void;
   onAgentCtx: (e: MouseEvent, id: string) => void;
-  onChannelCtx: (e: MouseEvent, id: string) => void;
   onGroupCtx: (e: MouseEvent, id: string) => void;
   onToggleGroup: (id: string) => void;
   onRenameGroup: (id: string, name: string) => void;
@@ -217,16 +213,7 @@ function matches(parts: Array<string | null | undefined>, query: string): boolea
   return parts.filter(Boolean).join(" ").toLowerCase().includes(q);
 }
 
-function memberNames(members: string[], agents: AgentInfo[]): string {
-  return members
-    .map((id) => {
-      const agent = resolveMention(id, agents);
-      return agent ? mentionLabel(agent) : id;
-    })
-    .join(", ");
-}
-
-function toItems(agents: AgentInfo[], channels: ChannelInfo[]): RailItem[] {
+function toItems(agents: AgentInfo[]): RailItem[] {
   const items: RailItem[] = [];
   for (const a of agents) {
     items.push({
@@ -236,16 +223,6 @@ function toItems(agents: AgentInfo[], channels: ChannelInfo[]): RailItem[] {
       name: a.name || a.id,
       preview: a.preview,
       agent: a,
-    });
-  }
-  for (const c of channels) {
-    items.push({
-      key: itemKey("channel", c.id),
-      kind: "channel",
-      id: c.id,
-      name: c.name || c.id,
-      preview: c.preview || memberNames(c.members || [], agents),
-      channel: c,
     });
   }
   numberDuplicateNames(items);
@@ -269,7 +246,6 @@ function orderItems(items: RailItem[], order: string[], locale: string): RailIte
 
 export function Sidebar({
   agents,
-  channels,
   groups,
   ungrouped,
   selected,
@@ -280,10 +256,8 @@ export function Sidebar({
   onQuery,
   onSearchHit,
   onSelectAgent,
-  onSelectChannel,
   onCreateMenu,
   onAgentCtx,
-  onChannelCtx,
   onGroupCtx,
   onToggleGroup,
   onRenameGroup,
@@ -297,33 +271,20 @@ export function Sidebar({
   const { locale } = useLocale();
   // Rebuilding the list numbers every duplicate name and re-sorts each group;
   // a drag re-renders this on every pointermove and none of it can change.
-  const built = useMemo(() => toItems(agents, channels), [agents, channels]);
-  const all = built.filter((item) => {
-    if (item.agent) {
-      return matches(
-        [
-          item.agent.name,
-          item.agent.id,
-          item.agent.title,
-          item.agent.role,
-          // The row shows resolved names, so the query has to see them too.
-          mentionText(item.agent.preview || "", agents, channels),
-        ],
-        query,
-      );
-    }
-    const c = item.channel;
-    return matches(
+  const built = useMemo(() => toItems(agents), [agents]);
+  const all = built.filter((item) =>
+    matches(
       [
-        c?.name,
-        c?.id,
-        (c?.members || []).join(" "),
-        memberNames(c?.members || [], agents),
-        mentionText(c?.preview || "", agents, channels),
+        item.agent?.name,
+        item.agent?.id,
+        item.agent?.title,
+        item.agent?.role,
+        // The row shows resolved names, so the query has to see them too.
+        mentionText(item.preview || "", agents),
       ],
       query,
-    );
-  });
+    ),
+  );
   const byKey = new Map(all.map((item) => [item.key, item]));
   const used = new Set<string>();
   const grouped = groups.map((group) => {
@@ -443,13 +404,11 @@ export function Sidebar({
   }, []);
 
   function select(item: RailItem) {
-    if (item.kind === "channel") onSelectChannel(item.id);
-    else onSelectAgent(item.id);
+    onSelectAgent(item.id);
   }
 
   function ctx(e: MouseEvent, item: RailItem) {
-    if (item.kind === "channel") onChannelCtx(e, item.id);
-    else onAgentCtx(e, item.id);
+    onAgentCtx(e, item.id);
   }
 
   function clearExpandTimer() {
@@ -628,7 +587,7 @@ export function Sidebar({
       <div className="rail-lists">
         {empty ? (
           <div className="empty-rail">
-            {agents.length || channels.length ? t("sidebar.noResults") : t("sidebar.empty")}
+            {agents.length ? t("sidebar.noResults") : t("sidebar.empty")}
           </div>
         ) : (
           <>
@@ -668,7 +627,6 @@ export function Sidebar({
                         key={item.key}
                         item={item}
                         agents={agents}
-                        channels={channels}
                         active={selectedKind === item.kind && selected === item.id}
                         unread={unread.includes(item.key)}
                         dragging={drag?.key === item.key && drag.armed}
@@ -699,7 +657,6 @@ export function Sidebar({
                     key={item.key}
                     item={item}
                     agents={agents}
-                    channels={channels}
                     active={selectedKind === item.kind && selected === item.id}
                     unread={unread.includes(item.key)}
                     dragging={drag?.key === item.key && drag.armed}
@@ -775,7 +732,7 @@ export function Sidebar({
                   ["--ghost-oy" as string]: `${drag.grabY}px`,
                 }}
               >
-                <ItemRow item={drag.item} agents={agents} channels={channels} ghost />
+                <ItemRow item={drag.item} agents={agents} ghost />
               </div>
             </>,
             document.body,
@@ -880,7 +837,6 @@ function GroupHead({
 function ItemRow({
   item,
   agents,
-  channels,
   active,
   unread,
   dragging,
@@ -891,7 +847,6 @@ function ItemRow({
 }: {
   item: RailItem;
   agents: AgentInfo[];
-  channels: ChannelInfo[];
   active?: boolean;
   unread?: boolean;
   dragging?: boolean;
@@ -904,23 +859,20 @@ function ItemRow({
   // ItemRow re-renders on every pointermove while a drag is armed, so the scan
   // does not want to run per frame per visible row.
   const previewRuns = useMemo(
-    () => mentionRuns(item.preview || "", agents, channels),
-    [item.preview, agents, channels],
+    () => mentionRuns(item.preview || "", agents),
+    [item.preview, agents],
   );
-  const face =
-    item.kind === "channel" && item.channel ? (
-      <ChannelAvatar channel={item.channel} agents={agents} />
-    ) : (
-      <Avatar
-        id={item.id}
-        name={item.name}
-        src={a?.avatar}
-        shape={a?.avatar_shape}
-        color={a?.avatar_color}
-        badge={a?.status || undefined}
-        status={a?.status}
-      />
-    );
+  const face = (
+    <Avatar
+      id={item.id}
+      name={item.name}
+      src={a?.avatar}
+      shape={a?.avatar_shape}
+      color={a?.avatar_color}
+      badge={a?.status || undefined}
+      status={a?.status}
+    />
+  );
   const inner = (
     <>
       {face}

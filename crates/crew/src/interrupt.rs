@@ -40,8 +40,8 @@ pub fn user_send_action(_status: AgentStatus, text: &str) -> UserSendAction {
     UserSendAction::Start
 }
 
-/// Channel (and 1:1) user follow-ups queue if the member is busy. Bot-originated
-/// posts also enqueue. Explicit stop phrases end the in-flight turn.
+/// A user follow-up queues if the bot is busy. A bot-originated post also
+/// enqueues. Explicit stop phrases end the in-flight turn.
 pub fn member_turn_action(from_user: bool, status: AgentStatus, text: &str) -> UserSendAction {
     if from_user {
         user_send_action(status, text)
@@ -120,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    fn channel_user_send_queues_working_member() {
+    fn user_send_queues_working_member() {
         assert_eq!(
             member_turn_action(true, AgentStatus::Working, "follow up"),
             UserSendAction::Start

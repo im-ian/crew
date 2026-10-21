@@ -10,22 +10,19 @@ import {
   toPersist,
   visibleUngroupedKeys,
 } from "./groups";
-import type { AgentInfo, ChannelInfo, Group } from "./types";
+import type { AgentInfo, Group } from "./types";
 
 function agent(id: string, name = id): AgentInfo {
   return { id, name, status: "idle", cmd: ["cat"], cwd: "/tmp", routines: [] };
-}
-function channel(id: string, name = id): ChannelInfo {
-  return { id, name, members: [] };
 }
 function group(id: string, items: string[], collapsed = false): Group {
   return { id, name: id, collapsed, items };
 }
 
 describe("parseItemKey", () => {
-  it("round-trips the two kinds and rejects junk", () => {
+  it("round-trips an agent key and rejects a room key", () => {
     expect(parseItemKey("agent:a1")).toEqual({ kind: "agent", id: "a1" });
-    expect(parseItemKey("channel:room")).toEqual({ kind: "channel", id: "room" });
+    expect(parseItemKey("channel:room")).toBeNull();
     expect(parseItemKey("agent:a:1")).toEqual({ kind: "agent", id: "a:1" });
     for (const bad of ["", "a1", "agent:", ":a1", "group:g1"]) {
       expect(parseItemKey(bad), bad).toBeNull();
@@ -51,10 +48,10 @@ describe("normalizeGroups", () => {
   it("pulls the ungrouped bucket out of the saved list", () => {
     const { groups, ungrouped } = normalizeGroups([
       { id: "g1", name: "One", items: ["agent:a1"] },
-      { id: UNGROUPED_ID, name: "", items: ["channel:room", "channel:room"] },
+      { id: UNGROUPED_ID, name: "", items: ["channel:room", "agent:a2", "agent:a2"] },
     ]);
     expect(groups.map((g) => g.id)).toEqual(["g1"]);
-    expect(ungrouped).toEqual(["channel:room"]);
+    expect(ungrouped).toEqual(["agent:a2"]);
   });
 
   it("gives an empty layout for anything that is not a list", () => {
@@ -65,7 +62,7 @@ describe("normalizeGroups", () => {
   it("survives a save/load round trip", () => {
     const layout = {
       groups: [group("g1", ["agent:a1"])],
-      ungrouped: ["channel:room"],
+      ungrouped: ["agent:a2"],
     };
     expect(normalizeGroups(toPersist(layout))).toEqual(layout);
   });
@@ -78,72 +75,76 @@ describe("normalizeGroups", () => {
 describe("moveItem", () => {
   const layout = {
     groups: [group("g1", ["agent:a1", "agent:a2"]), group("g2", [])],
-    ungrouped: ["channel:room"],
+    ungrouped: ["agent:a3"],
   };
 
   it("drops an item before the key it was dropped on", () => {
-    const next = moveItem(layout, "channel:room", "g1", "agent:a2", ["channel:room"]);
-    expect(next.groups[0].items).toEqual(["agent:a1", "channel:room", "agent:a2"]);
+    const next = moveItem(layout, "agent:a3", "g1", "agent:a2", ["agent:a3"]);
+    expect(next.groups[0].items).toEqual(["agent:a1", "agent:a3", "agent:a2"]);
     expect(next.ungrouped).toEqual([]);
   });
 
   it("appends when it was dropped on the group itself", () => {
-    const next = moveItem(layout, "channel:room", "g2", null, ["channel:room"]);
-    expect(next.groups[1].items).toEqual(["channel:room"]);
+    const next = moveItem(layout, "agent:a3", "g2", null, ["agent:a3"]);
+    expect(next.groups[1].items).toEqual(["agent:a3"]);
   });
 
   it("takes an item out of its group when dropped outside", () => {
-    const next = moveItem(layout, "agent:a1", null, "channel:room", ["channel:room"]);
+    const next = moveItem(layout, "agent:a1", null, "agent:a3", ["agent:a3"]);
     expect(next.groups[0].items).toEqual(["agent:a2"]);
-    expect(next.ungrouped).toEqual(["agent:a1", "channel:room"]);
+    expect(next.ungrouped).toEqual(["agent:a1", "agent:a3"]);
   });
 
-  it("refuses a bad key, a self drop, or a group that is gone", () => {
+  it("refuses a bad key, a room key, a self drop, or a group that is gone", () => {
     expect(moveItem(layout, "junk", "g1", null, [])).toBe(layout);
+    expect(moveItem(layout, "channel:room", "g1", null, [])).toBe(layout);
     expect(moveItem(layout, "agent:a1", "g1", "agent:a1", [])).toBe(layout);
     expect(moveItem(layout, "agent:a1", "missing", null, [])).toBe(layout);
   });
 });
 
 describe("railOrder", () => {
-  const agents = [agent("a1"), agent("a2")];
-  const channels = [channel("room")];
+  const agents = [agent("a1"), agent("a2"), agent("a3")];
 
   it("walks groups first, then the ungrouped rest", () => {
     const order = railOrder(
       [group("g1", ["agent:a2"])],
-      ["channel:room"],
+      ["agent:a3"],
       agents,
-      channels,
     );
     expect(order).toEqual([
       { kind: "agent", id: "a2" },
-      { kind: "channel", id: "room" },
+      { kind: "agent", id: "a3" },
       { kind: "agent", id: "a1" },
     ]);
   });
 
   it("skips the children of a collapsed group without listing them again", () => {
-    const order = railOrder([group("g1", ["agent:a2"], true)], [], agents, channels);
+    const order = railOrder([group("g1", ["agent:a2"], true)], [], agents);
     expect(order.some((o) => o.id === "a2")).toBe(false);
   });
 
-  it("ignores items whose bot or channel is gone", () => {
-    const order = railOrder([group("g1", ["agent:ghost"])], [], agents, channels);
+  it("ignores a missing bot and a leftover room key", () => {
+    const order = railOrder(
+      [group("g1", ["agent:ghost", "channel:room"])],
+      [],
+      agents,
+    );
     expect(order.map((o) => o.id)).not.toContain("ghost");
+    expect(order.map((o) => o.id)).not.toContain("room");
   });
 });
 
 describe("visibleUngroupedKeys", () => {
   it("keeps the saved order, then sorts newcomers by name", () => {
     const agents = [agent("a1", "나비"), agent("a2", "가람"), agent("a3", "다올")];
-    const keys = visibleUngroupedKeys([], ["agent:a3"], agents, []);
+    const keys = visibleUngroupedKeys([], ["agent:a3"], agents);
     expect(keys).toEqual(["agent:a3", "agent:a2", "agent:a1"]);
   });
 
   it("leaves out whatever already sits in a group", () => {
     const agents = [agent("a1"), agent("a2")];
-    expect(visibleUngroupedKeys([group("g1", ["agent:a1"])], [], agents, [])).toEqual([
+    expect(visibleUngroupedKeys([group("g1", ["agent:a1"])], [], agents)).toEqual([
       "agent:a2",
     ]);
   });
@@ -152,9 +153,11 @@ describe("visibleUngroupedKeys", () => {
 describe("pruneLayout and groupIdOf", () => {
   it("forgets rows for bots that no longer exist", () => {
     const pruned = pruneLayout(
-      { groups: [group("g1", ["agent:a1", "agent:ghost"])], ungrouped: ["channel:gone"] },
+      {
+        groups: [group("g1", ["agent:a1", "agent:ghost", "channel:room"])],
+        ungrouped: ["channel:gone"],
+      },
       [agent("a1")],
-      [],
     );
     expect(pruned.groups[0].items).toEqual(["agent:a1"]);
     expect(pruned.ungrouped).toEqual([]);

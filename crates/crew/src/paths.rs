@@ -324,14 +324,6 @@ pub fn roster_path() -> PathBuf {
     home_dir().join("roster.md")
 }
 
-pub fn channels_dir() -> PathBuf {
-    home_dir().join("channels")
-}
-
-pub fn channel_transcript_path(channel_id: &str) -> PathBuf {
-    channels_dir().join(format!("{}.jsonl", safe_agent_id(channel_id)))
-}
-
 pub fn memory_dir() -> PathBuf {
     home_dir().join("memory")
 }
