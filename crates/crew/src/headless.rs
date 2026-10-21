@@ -666,6 +666,10 @@ fn claude_text(v: &Value, state: &mut ParseState) -> Option<String> {
         state.got_text = true;
         return Some(delta);
     }
+    if let Some(out) = local_command_output(v) {
+        state.got_text = true;
+        return Some(out);
+    }
     if state.used_deltas {
         return None;
     }
@@ -677,6 +681,23 @@ fn claude_text(v: &Value, state: &mut ParseState) -> Option<String> {
         }
     }
     None
+}
+
+/// What a slash command such as `/compact` printed. The CLI answers it itself,
+/// as a user row in this tag, and the model says nothing: without it the turn
+/// ended blank, and the bot read as having ignored or hung on the request.
+fn local_command_output(v: &Value) -> Option<String> {
+    if v.get("type").and_then(Value::as_str) != Some("user") {
+        return None;
+    }
+    let out = v
+        .pointer("/message/content")?
+        .as_str()?
+        .trim()
+        .strip_prefix("<local-command-stdout>")?
+        .strip_suffix("</local-command-stdout>")?
+        .trim();
+    (!out.is_empty()).then(|| out.to_string())
 }
 
 fn claude_text_delta(v: &Value) -> Option<String> {
@@ -1020,6 +1041,26 @@ mod tests {
         );
         let d = ingest_line(CliKind::Claude, &delta("It says 42."), &mut st);
         assert_eq!(d.as_deref(), Some("\n\nIt says 42."));
+    }
+
+    /// What `claude -p --resume <id> /compact` prints: a summary row, the
+    /// command's own output, and a result with no text.
+    #[test]
+    fn a_slash_command_answers_with_what_the_cli_printed() {
+        let mut st = ParseState::default();
+        let summary = r#"{"type":"user","message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context."}}"#;
+        assert!(ingest_line(CliKind::Claude, summary, &mut st).is_none());
+        let tool = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"<local-command-stdout>ls</local-command-stdout>"}]}}"#;
+        assert!(ingest_line(CliKind::Claude, tool, &mut st).is_none());
+        assert!(!st.got_text);
+        let out = r#"{"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted </local-command-stdout>"}}"#;
+        assert_eq!(
+            ingest_line(CliKind::Claude, out, &mut st).as_deref(),
+            Some("Compacted")
+        );
+        assert!(st.got_text, "the turn has its answer");
+        let end = r#"{"type":"result","subtype":"success","is_error":false,"result":""}"#;
+        assert!(ingest_line(CliKind::Claude, end, &mut st).is_none());
     }
 
     #[test]
