@@ -809,7 +809,7 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         "To change your display name, actually run `crew agent set --name \"New Name\"` (id defaults to CREW_AGENT_ID). Do not only claim you renamed yourself.\n",
     );
     s.push_str(
-        "To schedule recurring work, actually run `crew routine add --name \"...\" --schedule \"0 8 * * 1-5\" --prompt \"...\"`. Turn the user's words into 5-field cron (minute hour day month weekday, local time) yourself; if the day or time is unclear, ask with `crew ask` first. Change yours with `crew routine list|edit|remove|pause|resume <name>` (`crew routine --help`). Each prints your routines with their next run; tell the user the schedule and next run it shows. That creates a Crew routine, not a chat reminder.\n",
+        "To schedule recurring work, actually run `crew routine add --name \"...\" --schedule \"0 8 * * 1-5\" --prompt \"...\"`. Turn the user's words into 5-field cron yourself: numbers only, minute hour day month weekday (0 = Sunday), local time. If the day or time is unclear, ask with `crew ask` first. `crew routine list` shows yours; change one with `crew routine edit|remove|pause|resume <name>` (`crew routine --help`). Each prints your routines with their next run; tell the user the schedule and next run it shows. That creates a Crew routine, not a chat reminder.\n",
     );
     s.push_str(
         "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew system]` / `[crew handoff from:…]` / `[crew reply:…]` are real messages. A `[crew reply:…]` line is the user answering an earlier message; the next line is the quote, then their new text. A handoff is a teammate's finished reply; do not crew tell them that same text back.\n",
@@ -1103,7 +1103,7 @@ pub fn format_roster(agents: &[AgentConfig]) -> String {
     out.push_str("crew is on PATH; CREW_AGENT_ID is set in each agent session.\n");
     out.push_str("Rename yourself with `crew agent set --name \"New Name\"`.\n");
     out.push_str(
-        "Schedule work with `crew routine add --name \"...\" --schedule \"0 8 * * 1-5\" --prompt \"...\"` (5-field cron); change it with `crew routine list|edit|remove|pause|resume <name>`.\n",
+        "Schedule work with `crew routine add --name \"...\" --schedule \"0 8 * * 1-5\" --prompt \"...\"` (numeric 5-field cron); see yours with `crew routine list`, change one with `crew routine edit|remove|pause|resume <name>`.\n",
     );
     out.push_str(
         "Ask the human user to pick with `crew ask --question \"...\" --option A --option B`, or to type with `--input 아이디`. Do not use this to ask a teammate.\n\n",
@@ -1803,7 +1803,9 @@ mod tests {
         assert!(rules.contains("in the order they were written"));
         assert!(rules.contains("crew routine add"));
         assert!(rules.contains("into 5-field cron"));
-        assert!(rules.contains("crew routine list|edit|remove|pause|resume"));
+        assert!(rules.contains("numbers only"));
+        assert!(rules.contains("`crew routine list` shows yours"));
+        assert!(rules.contains("crew routine edit|remove|pause|resume <name>"));
         assert!(rules.contains("tell the user the schedule and next run"));
         assert!(rules.contains("crew ask --question"));
         assert!(rules.contains("human user"));
