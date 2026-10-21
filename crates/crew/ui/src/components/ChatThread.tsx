@@ -583,7 +583,8 @@ function Incoming({
   const t = useT();
   const queued = !!m.queued;
   const { reply, body } = splitReply(m.text || "");
-  const parts = splitBubbles(body);
+  // The wait dots get a bubble of their own under the text, not a tail on it.
+  const parts = caret ? [...splitBubbles(body), ""] : splitBubbles(body);
   return (
     <div
       className={
@@ -624,46 +625,32 @@ function Incoming({
           </div>
         )}
         {reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
-        {parts.length
-          ? parts.map((part, i) => {
-              const last = i === parts.length - 1;
-              const stack =
-                parts.length > 1
-                  ? i === 0
-                    ? " stack-first"
-                    : last
-                      ? " stack-last"
-                      : " stack-mid"
-                  : "";
-              return (
-                <MdBody
-                  key={m.id + "-" + i}
-                  className={
-                    "bubble md incoming" +
-                    stack +
-                    (caret && last ? " streaming" : "") +
-                    (queued ? " queued" : "")
-                  }
-                  text={part}
-                  agents={agents}
-                  onMention={onSelectAgent}
-                  baseDir={agent?.cwd || undefined}
-                />
-              );
-            })
-          : caret
-            ? (
-                <MdBody
-                  className={
-                    "bubble md incoming streaming" + (queued ? " queued" : "")
-                  }
-                  text=""
-                  agents={agents}
-                  onMention={onSelectAgent}
-                  baseDir={agent?.cwd || undefined}
-                />
-              )
-            : null}
+        {parts.map((part, i) => {
+          const last = i === parts.length - 1;
+          const stack =
+            parts.length > 1
+              ? i === 0
+                ? " stack-first"
+                : last
+                  ? " stack-last"
+                  : " stack-mid"
+              : "";
+          return (
+            <MdBody
+              key={m.id + "-" + i}
+              className={
+                "bubble md incoming" +
+                stack +
+                (caret && last ? " streaming" : "") +
+                (queued ? " queued" : "")
+              }
+              text={part}
+              agents={agents}
+              onMention={onSelectAgent}
+              baseDir={agent?.cwd || undefined}
+            />
+          );
+        })}
         {queued ? <QueueWait /> : null}
         {m.choice ? (
           <ChoiceCard
