@@ -41,3 +41,22 @@ describe("api.setAgent", () => {
     expect(args).toMatchObject({ unsetCwd: true });
   });
 });
+
+describe("api.listModels", () => {
+  beforeEach(() => {
+    mocks.invoke.mockReset();
+  });
+
+  it("keeps an installed CLI's list but asks again for a missing one", async () => {
+    mocks.invoke.mockResolvedValue({ models: ["sonnet"], installed: true });
+    await api.listModels("claude");
+    await api.listModels("claude");
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+
+    mocks.invoke.mockReset();
+    mocks.invoke.mockResolvedValue({ models: [], installed: false });
+    await api.listModels("grok");
+    await api.listModels("grok");
+    expect(mocks.invoke).toHaveBeenCalledTimes(2);
+  });
+});

@@ -111,10 +111,17 @@ export const api = {
   listModels: (cli: string) => {
     let pending = modelLists.get(cli);
     if (!pending) {
-      pending = invoke<ModelList>("list_models", { cli }).catch((err) => {
-        modelLists.delete(cli);
-        throw err;
-      });
+      pending = invoke<ModelList>("list_models", { cli }).then(
+        (list) => {
+          // Ask again next time: the CLI may be installed while the app runs.
+          if (!list.installed) modelLists.delete(cli);
+          return list;
+        },
+        (err) => {
+          modelLists.delete(cli);
+          throw err;
+        },
+      );
       modelLists.set(cli, pending);
     }
     return pending;
