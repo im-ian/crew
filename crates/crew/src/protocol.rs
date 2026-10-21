@@ -107,6 +107,9 @@ pub enum Request {
         agent: String,
         key: String,
         enabled: bool,
+        /// Flipped by hand in the routine sheet: say so in the bot's chat.
+        #[serde(default)]
+        notify: bool,
     },
     RunRoutine {
         agent: String,

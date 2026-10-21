@@ -835,6 +835,7 @@ fn set_routine_enabled(agent: &str, key: String, enabled: bool) -> anyhow::Resul
             agent: agent.to_string(),
             key,
             enabled,
+            notify: false,
         })
     } else {
         mutate_offline_routine(agent, &key, |routines, idx| {

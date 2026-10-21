@@ -1711,8 +1711,14 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             agent,
             key,
             enabled,
+            notify,
         } => match set_routine_enabled(&agent, &key, enabled) {
-            Ok(()) => vec![Event::Ok, snapshot_event()],
+            Ok(moved) => {
+                if let (true, Some(name)) = (notify, moved) {
+                    note_routine_switch(&agent, &name, enabled);
+                }
+                vec![Event::Ok, snapshot_event()]
+            }
             Err(err) => vec![Event::Error {
                 message: err.to_string(),
             }],
@@ -2334,12 +2340,41 @@ fn remove_routine(target: &str, key: &str) -> anyhow::Result<()> {
     write_routines(target, routines)
 }
 
-fn set_routine_enabled(target: &str, key: &str, enabled: bool) -> anyhow::Result<()> {
+/// The routine's name when the switch actually moved.
+fn set_routine_enabled(target: &str, key: &str, enabled: bool) -> anyhow::Result<Option<String>> {
     let mut routines = read_routines(target)?;
     let idx = find_routine_index(&routines, key)
         .ok_or_else(|| anyhow::anyhow!("unknown routine {key}"))?;
+    if routines[idx].enabled == enabled {
+        return Ok(None);
+    }
     routines[idx].enabled = enabled;
-    write_routines(target, routines)
+    let name = routines[idx].name.clone();
+    write_routines(target, routines)?;
+    Ok(Some(name))
+}
+
+/// A switch flipped in the routine sheet happens outside the chat. Note it in
+/// the thread and give the bot a turn to acknowledge it, so the conversation
+/// knows what the sheet knows. The bot's own `crew routine pause` never comes
+/// here: its reply already says so.
+fn note_routine_switch(id: &str, name: &str, enabled: bool) {
+    let line = match (crate::paths::locale() == "en", enabled) {
+        (true, true) => format!("Turned on the “{name}” routine."),
+        (true, false) => format!("Turned off the “{name}” routine."),
+        (false, true) => format!("‘{name}’ 루틴을 켰습니다."),
+        (false, false) => format!("‘{name}’ 루틴을 껐습니다."),
+    };
+    let msg = crate::transcript::push_system(id, "crew", &line);
+    let note = crate::protocol::system_envelope(&format!(
+        "The user turned {} your routine \"{name}\" in the routine sheet. Acknowledge it in one short sentence. Do not run crew routine.",
+        if enabled { "on" } else { "off" }
+    ));
+    let started = ensure_accepts_turn(id)
+        .and_then(|()| submit_delivery(id, &note, true, Some(msg.id), TurnOrigin::user()));
+    if let Err(err) = started {
+        eprintln!("[crew] routine switch note for {id}: {err:#}");
+    }
 }
 
 fn run_routine(target: &str, key: &str) -> anyhow::Result<()> {
@@ -2526,6 +2561,46 @@ mod daemon_tests {
         assert!(!note_loss(&mut strikes, false), "found it again");
         assert!(!note_loss(&mut strikes, true), "counting starts over");
         assert!(note_loss(&mut strikes, true));
+    }
+
+    /// The bot's own `crew routine pause` must stay quiet, or the bot would
+    /// answer its own pause.
+    #[test]
+    fn only_a_switch_flipped_in_the_sheet_is_said_in_the_chat() {
+        paths::testing::with_home("routine-switch", || {
+            let bot = test_id("switch");
+            let mut cfg = AgentConfig::new(bot.clone(), bot.clone(), vec!["cat".into()], None);
+            cfg.routines
+                .push(Routine::new("아침".into(), "0 8 * * *".into(), "브리핑".into()).unwrap());
+            persist_config(&cfg).unwrap();
+            let (shutdown, _) = tokio::sync::watch::channel(false);
+            let flip = |enabled, notify| {
+                let req = Request::SetRoutineEnabled {
+                    agent: bot.clone(),
+                    key: "아침".into(),
+                    enabled,
+                    notify,
+                };
+                let out = dispatch(req, &shutdown);
+                assert!(matches!(out[0], Event::Ok), "{:?}", out[0].to_line());
+            };
+            let said = || -> Vec<String> {
+                crate::transcript::messages(&bot)
+                    .into_iter()
+                    .filter(|m| m.from == "crew")
+                    .map(|m| m.text)
+                    .collect()
+            };
+
+            flip(false, false);
+            assert!(said().is_empty(), "a CLI pause says nothing");
+            flip(true, true);
+            flip(true, true); // already on, so nothing moved
+            assert_eq!(said(), ["‘아침’ 루틴을 켰습니다."]);
+
+            configs().lock().unwrap().remove(&bot);
+            crate::transcript::drop_agent(&bot);
+        });
     }
 
     #[test]
