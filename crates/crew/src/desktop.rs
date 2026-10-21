@@ -567,6 +567,13 @@ fn set_locale(locale: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Mirror the settings switch so alerts still respect it after the window closes.
+#[tauri::command]
+fn set_notifications(enabled: bool) -> Result<(), String> {
+    crate::paths::write_notifications_enabled(enabled);
+    Ok(())
+}
+
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
     let raw = path.trim();
@@ -684,7 +691,8 @@ pub fn run() -> anyhow::Result<()> {
             take_pending_focus,
             open_path,
             set_dock_badge,
-            set_locale
+            set_locale,
+            set_notifications
         ])
         .run(tauri::generate_context!())
         .map_err(|e| anyhow::anyhow!(e))?;

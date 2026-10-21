@@ -50,6 +50,7 @@
     "allow-open-path",
     "allow-set-dock-badge",
     "allow-set-locale",
+    "allow-set-notifications",
     "updater:allow-check",
     "updater:allow-download",
     "updater:allow-install",
