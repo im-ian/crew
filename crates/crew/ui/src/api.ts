@@ -67,6 +67,7 @@ export const api = {
     // optional marker is what let a caller drop it.
     unsetCwd: boolean;
   }) => invoke<void>("set_agent", args),
+  setAgentCli: (id: string, cli: string) => invoke<void>("set_agent_cli", { id, cli }),
   addAgent: (args: {
     name: string;
     cli: string;
@@ -110,10 +111,17 @@ export const api = {
   listModels: (cli: string) => {
     let pending = modelLists.get(cli);
     if (!pending) {
-      pending = invoke<ModelList>("list_models", { cli }).catch((err) => {
-        modelLists.delete(cli);
-        throw err;
-      });
+      pending = invoke<ModelList>("list_models", { cli }).then(
+        (list) => {
+          // Ask again next time: the CLI may be installed while the app runs.
+          if (!list.installed) modelLists.delete(cli);
+          return list;
+        },
+        (err) => {
+          modelLists.delete(cli);
+          throw err;
+        },
+      );
       modelLists.set(cli, pending);
     }
     return pending;

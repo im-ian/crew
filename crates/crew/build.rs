@@ -17,6 +17,7 @@ fn main() {
             "daemon_ping",
             "reset_agent",
             "set_agent",
+            "set_agent_cli",
             "add_agent",
             "clone_agent",
             "remove_agent",

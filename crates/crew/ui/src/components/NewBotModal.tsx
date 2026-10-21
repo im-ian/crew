@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { randomFace, type AvatarShape } from "../avatar";
 import { useT } from "../LocaleContext";
-import { CLIS, effortOptions } from "../options";
 import type { CliKind } from "../types";
 import { Avatar } from "./Avatar";
 import { FacePop } from "./FacePicker";
 import { Field } from "./Field";
 import { Modal } from "./Modal";
-import { ModelSelect } from "./ModelSelect";
-import { Seg } from "./Seg";
+import { ModelPicker } from "./ModelPicker";
 
 type Props = {
   open: boolean;
@@ -140,26 +138,19 @@ export function NewBotModal({
           />
         </Field>
         <Field label={t("field.ai")}>
-          <Seg
-            value={cli}
-            options={CLIS}
-            onChange={(next) => {
+          <ModelPicker
+            cli={cli}
+            model={model}
+            effort={effort}
+            active={open}
+            pickInstalled
+            onCli={(next) => {
               setCli(next);
               setModel("");
             }}
+            onModel={setModel}
+            onEffort={setEffort}
           />
-        </Field>
-        <Field label={t("field.model")} htmlFor="new-model">
-          <ModelSelect
-            id="new-model"
-            cli={cli}
-            value={model}
-            onChange={setModel}
-            active={open}
-          />
-        </Field>
-        <Field label={t("field.effort")}>
-          <Seg value={effort} options={effortOptions(t)} onChange={setEffort} />
         </Field>
       </div>
       <div className="actions spread">

@@ -357,6 +357,10 @@ pub fn cli_session_path(agent_id: &str) -> PathBuf {
     cli_sessions_dir().join(safe_agent_id(agent_id))
 }
 
+pub fn cli_recap_path(agent_id: &str) -> PathBuf {
+    home_dir().join("cli-recaps").join(safe_agent_id(agent_id))
+}
+
 #[cfg(test)]
 pub(crate) mod testing {
     use std::fs;

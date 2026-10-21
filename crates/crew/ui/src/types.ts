@@ -17,6 +17,7 @@ export type CliKind = "grok" | "claude" | "codex";
 export type ModelList = {
   models: string[];
   default?: string | null;
+  installed: boolean;
 };
 
 export type Routine = {

@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { AvatarShape } from "../avatar";
 import { useT } from "../LocaleContext";
-import { cliFromCmd, effortOptions } from "../options";
-import type { AgentInfo } from "../types";
+import { cliFromCmd } from "../options";
+import type { AgentInfo, CliKind } from "../types";
 import { Avatar } from "./Avatar";
 import { FacePop } from "./FacePicker";
 import { Field } from "./Field";
-import { ModelSelect } from "./ModelSelect";
-import { Seg } from "./Seg";
+import { ModelPicker } from "./ModelPicker";
 
 type Props = {
   open: boolean;
@@ -22,6 +21,7 @@ type Props = {
     effort: string;
     cwd: string;
   }) => Promise<void>;
+  onSetCli: (cli: CliKind) => Promise<boolean>;
 };
 
 export function InfoPane({
@@ -30,8 +30,10 @@ export function InfoPane({
   onReset,
   onSetFace,
   onSave,
+  onSetCli,
 }: Props) {
   const t = useT();
+  const cli = cliFromCmd(agent?.cmd);
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [description, setDescription] = useState("");
@@ -39,6 +41,9 @@ export function InfoPane({
   const [effort, setEffort] = useState("");
   const [cwd, setCwd] = useState("");
   const saveTimer = useRef<number | null>(null);
+  // Until the list refreshes the card still shows the old CLI's models, and a
+  // pick from it would land on the new CLI.
+  const switching = useRef(false);
   const fieldsRef = useRef({ name, role, description, model, effort, cwd });
   fieldsRef.current = { name, role, description, model, effort, cwd };
 
@@ -140,18 +145,38 @@ export function InfoPane({
           onBlur={() => void flushSave()}
         />
       </Field>
-      <Field label={t("field.model")} htmlFor="model">
-        <ModelSelect
-          id="model"
-          cli={cliFromCmd(agent?.cmd)}
-          value={model}
-          onChange={(next) => {
-            setModel(next);
-            void flushSave({ model: next });
-          }}
-          active={open}
-        />
-      </Field>
+      {/* A bot on its own command has no CLI to pick for. */}
+      {cli ? (
+        <Field label={t("field.ai")}>
+          <ModelPicker
+            cli={cli}
+            model={model}
+            effort={effort}
+            active={open}
+            onCli={async (next) => {
+              if (switching.current) return;
+              switching.current = true;
+              try {
+                // Land pending edits under the old CLI; the switch drops its model.
+                await flushSave();
+                if (await onSetCli(next)) setModel("");
+              } finally {
+                switching.current = false;
+              }
+            }}
+            onModel={(next) => {
+              if (switching.current) return;
+              setModel(next);
+              void flushSave({ model: next });
+            }}
+            onEffort={(next) => {
+              if (switching.current) return;
+              setEffort(next);
+              void flushSave({ effort: next });
+            }}
+          />
+        </Field>
+      ) : null}
       <Field label={t("field.cwd")} htmlFor="info-cwd">
         <input
           id="info-cwd"
@@ -163,16 +188,6 @@ export function InfoPane({
             scheduleSave({ cwd: e.target.value });
           }}
           onBlur={() => void flushSave()}
-        />
-      </Field>
-      <Field label={t("field.effort")}>
-        <Seg
-          value={effort}
-          options={effortOptions(t)}
-          onChange={(next) => {
-            setEffort(next);
-            void flushSave({ effort: next });
-          }}
         />
       </Field>
       <p className="apply-note">{t("info.applyNote")}</p>

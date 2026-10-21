@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/readme/new-bot.png" alt="새 봇 만들기 — 이름, 역할, Grok/Claude/Codex, 모델, 아바타" width="920">
+  <img src="docs/readme/new-bot.png" alt="새 봇 만들기 — 이름, 역할, 아바타, 그리고 AI·모델·생각을 고르는 한 줄" width="920">
 </p>
 
 <p align="center">
@@ -86,7 +86,8 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 
 **봇**
 
-- Grok / Claude / Codex 중에서 선택. 모델·생각(effort)·역할·작업 폴더 설정
+- Grok / Claude / Codex 중에서 선택. AI·모델·생각(effort)은 한 줄에서 고르고, 역할·작업 폴더도 설정
+- AI는 나중에 봇 정보에서 바꿔도 돼요. 새 AI가 지금까지의 대화를 한 번 읽고 이어가요
 - Grok Bot 스타일의 도형 아바타 (원, 물방울, 둥근 사각형, 육각형, 삼각형, 구름, 알약, 다이아몬드, 오각형, 별, 하트) + 색상. 사진으로 바꿀 수도 있어요
 - 작업 중에는 궤도 애니메이션, 확인을 기다릴 땐 회전 링
 - 복제, 대화 지우기 (루틴도 함께 지울지 선택), 삭제

@@ -84,6 +84,8 @@
     .modal {
       position: absolute;
     }
+    /* A screenshot is taken at load, before the open animation would end. */
+    .modal.open, .modal.open > .dialog { animation: none; }
     textarea.textin { resize: none; }
   </style>
 </head>
@@ -155,6 +157,8 @@
         </aside>
         <main>
           <div class="titlebar-align"></div>
+          <div class="update-banner-slot"></div>
+          <div class="conn-banner-slot"></div>
           <header>
             <div class="head-identity">
               <button class="who-btn" type="button">
@@ -210,25 +214,15 @@
             </div>
             <div class="field-block">
               <label class="field">AI</label>
-              <div class="seg" data-cols="3">
-                <button type="button" class="on">grok</button>
-                <button type="button">claude</button>
-                <button type="button">codex</button>
-              </div>
-            </div>
-            <div class="field-block">
-              <label class="field" for="new-model">모델</label>
-              <select id="new-model" class="textin">
-                <option selected>기본값 (grok-4)</option>
-              </select>
-            </div>
-            <div class="field-block">
-              <label class="field">생각</label>
-              <div class="seg" data-cols="4">
-                <button type="button" class="on">기본</button>
-                <button type="button">가볍게</button>
-                <button type="button">보통</button>
-                <button type="button">꼼꼼하게</button>
+              <div class="model-pick">
+                <button type="button" class="textin model-pick-hit" aria-expanded="false">
+                  <span class="model-pick-name">Claude · sonnet</span>
+                  <span class="model-pick-meta">생각 보통</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </button>
               </div>
             </div>
           </div>

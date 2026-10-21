@@ -179,6 +179,53 @@ pub fn preview(agent: &str) -> Option<String> {
     }
 }
 
+/// Characters of chat a CLI that joins mid-conversation reads before its first turn.
+const RECAP_BUDGET: usize = 12_000;
+
+/// The chat so far as `who: text` lines, oldest first, for a bot that moved
+/// to another CLI. Tool rows are left out, and the newest messages win when it
+/// runs long. None when there is nothing to read.
+pub fn recap(agent: &str) -> Option<String> {
+    recap_of(&messages(agent))
+}
+
+fn recap_of(msgs: &[ChatMessage]) -> Option<String> {
+    let mut lines = Vec::new();
+    let mut used = 0;
+    let mut cut = false;
+    for msg in msgs.iter().rev() {
+        if msg.queued || msg.kind == Some(MessageKind::Tool) {
+            continue;
+        }
+        let text = crate::rows::display_text(msg);
+        if text.is_empty() {
+            continue;
+        }
+        let who = if msg.role == Role::Assistant { "assistant" } else { &msg.from };
+        let line = format!("{who}: {text}");
+        let len = line.chars().count();
+        if used + len > RECAP_BUDGET {
+            // The newest message alone is too long: its end is what comes next.
+            if lines.is_empty() {
+                let tail: String = text.chars().skip(len - RECAP_BUDGET).collect();
+                lines.push(format!("{who}: (start left out) {tail}"));
+            }
+            cut = true;
+            break;
+        }
+        used += len;
+        lines.push(line);
+    }
+    if lines.is_empty() {
+        return None;
+    }
+    if cut {
+        lines.push("(earlier messages left out)".into());
+    }
+    lines.reverse();
+    Some(lines.join("\n\n"))
+}
+
 pub fn push_user(agent: &str, from: &str, text: &str) -> ChatMessage {
     push_role(agent, Role::User, from, text, true, None)
 }
@@ -1219,6 +1266,47 @@ mod tests {
             assert!(messages(agent).is_empty());
             drop_agent(agent);
         });
+    }
+
+    #[test]
+    fn recap_reads_the_chat_without_tool_rows_and_keeps_the_newest() {
+        let row = |role, from: &str, text: &str, kind| ChatMessage {
+            id: new_id(),
+            role,
+            from: from.into(),
+            text: text.into(),
+            ts: 0,
+            queued: false,
+            kind,
+            approval: None,
+            choice: None,
+        };
+        let msgs = vec![
+            row(Role::System, "user", "review this", Some(MessageKind::Received)),
+            row(Role::Assistant, "bot", "", Some(MessageKind::Tool)),
+            row(Role::Assistant, "bot", "looks fine", None),
+        ];
+        assert_eq!(
+            recap_of(&msgs).as_deref(),
+            Some("user: review this\n\nassistant: looks fine")
+        );
+        assert_eq!(recap_of(&msgs[1..2]), None);
+
+        let long = "x".repeat(RECAP_BUDGET);
+        let msgs = vec![
+            row(Role::System, "user", "first", None),
+            row(Role::Assistant, "bot", &long, None),
+        ];
+        let recap = recap_of(&msgs).unwrap();
+        assert!(recap.starts_with("(earlier messages left out)\n\nassistant: (start left out) x"));
+        assert!(!recap.contains("first"));
+
+        // One message over the budget keeps its end, where a report concludes.
+        let report = format!("{}the conclusion", "y".repeat(RECAP_BUDGET));
+        let msgs = vec![row(Role::Assistant, "bot", &report, None)];
+        let recap = recap_of(&msgs).unwrap();
+        assert!(recap.ends_with("the conclusion"), "{recap}");
+        assert!(recap.contains("assistant: (start left out) y"));
     }
 
     #[test]

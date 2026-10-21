@@ -90,6 +90,47 @@ pub fn save_session(agent_id: &str, session_id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Chat a bot had before it moved to this CLI, for the new session to read once.
+pub fn save_recap(agent_id: &str, recap: &str) -> anyhow::Result<()> {
+    let path = paths::cli_recap_path(agent_id);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, recap)?;
+    Ok(())
+}
+
+fn load_recap(agent_id: &str) -> Option<String> {
+    fs::read_to_string(paths::cli_recap_path(agent_id))
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+}
+
+pub fn clear_recap(agent_id: &str) {
+    let _ = fs::remove_file(paths::cli_recap_path(agent_id));
+}
+
+fn with_recap(recap: &str, prompt: &str) -> String {
+    format!(
+        "[crew recap] This bot just moved to you from another AI CLI. Below is the chat \
+         so far, oldest first; `assistant` lines are the bot's earlier replies, errors \
+         its old CLI printed included. Read it for context only; do not answer it. \
+         Answer the message after it.\n<chat>\n{recap}\n</chat>\n\n{prompt}"
+    )
+}
+
+/// Drop the CLI session so the next turn opens a new one. Refused mid-turn:
+/// that turn would save its session back when it ends.
+pub fn forget_session(session: &HeadlessSession) -> anyhow::Result<()> {
+    let mut inner = session.inner.lock().expect("headless inner");
+    if inner.status == AgentStatus::Working || inner.child.is_some() {
+        anyhow::bail!("agent {} is working; switch once it finishes", session.id);
+    }
+    inner.session_id = None;
+    clear_session(&session.id);
+    Ok(())
+}
+
 pub fn kill(session: &HeadlessSession) {
     interrupt(session);
     if let Ok(mut inner) = session.inner.lock() {
@@ -219,6 +260,16 @@ fn run_turn(
         }
     }
 
+    // Only a new CLI session reads the recap: a resumed one already has it.
+    let recap = if turn_session.as_ref().map_or(true, |s| !s.resume) {
+        load_recap(&session.id)
+    } else {
+        None
+    };
+    let prompt = match recap.as_deref() {
+        Some(recap) => with_recap(recap, &prompt),
+        None => prompt,
+    };
     let argv = cfg.turn_cmd(&prompt, turn_session.as_ref(), &roster);
     let cwd = crate::config::Config::default_cwd(&cfg);
     if let Err(err) = crate::paths::create_cwd(&cwd) {
@@ -248,6 +299,11 @@ fn run_turn(
                     .filter(|s| s.resume)
                     .map(|s| s.id.as_str()),
             );
+            // Used up by a turn that answered; one that failed leaves it for the
+            // next. Codex may never name a thread, so a saved session is not the test.
+            if recap.is_some() && outcome.got_text {
+                clear_recap(&session.id);
+            }
             if dead {
                 if let Ok(mut inner) = session.inner.lock() {
                     inner.session_id = None;
@@ -374,7 +430,8 @@ fn spawn_and_stream(
         })
     });
 
-    let cli = CliKind::from_program(&session.cmd.first().cloned().unwrap_or_default());
+    // This turn's command, not the session's first one: a bot changes CLI in place.
+    let cli = CliKind::from_program(&argv[0]);
     let mut state = ParseState::default();
     let mut plain = String::new();
     let reader = BufReader::new(stdout);

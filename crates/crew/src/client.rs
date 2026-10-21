@@ -46,6 +46,7 @@ fn answer_timeout(req: &Request) -> Option<Duration> {
         | Request::CloneAgent { .. }
         | Request::RemoveAgent { .. }
         | Request::SetAgent { .. }
+        | Request::SetCli { .. }
         | Request::Reset { .. }
         | Request::AddRoutine { .. }
         | Request::RemoveRoutine { .. }
@@ -113,6 +114,7 @@ fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
             )
             | (Request::RemoveAgent { .. }, Event::Ok | Event::Agents { .. })
             | (Request::SetAgent { .. }, Event::Ok | Event::Agents { .. })
+            | (Request::SetCli { .. }, Event::Ok | Event::Agents { .. })
             | (Request::Reset { .. }, Event::Reset { .. } | Event::Ok)
             | (Request::AddRoutine { .. }, Event::Ok | Event::Agents { .. })
             | (Request::RemoveRoutine { .. }, Event::Ok | Event::Agents { .. })

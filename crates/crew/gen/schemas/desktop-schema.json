@@ -351,6 +351,12 @@
           "markdownDescription": "Enables the set_agent command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_agent_cli command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-agent-cli",
+          "markdownDescription": "Enables the set_agent_cli command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_avatar command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-avatar",
@@ -583,6 +589,12 @@
           "type": "string",
           "const": "deny-set-agent",
           "markdownDescription": "Denies the set_agent command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_agent_cli command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-agent-cli",
+          "markdownDescription": "Denies the set_agent_cli command without any pre-configured scope."
         },
         {
           "description": "Denies the set_avatar command without any pre-configured scope.",

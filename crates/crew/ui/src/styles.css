@@ -2841,6 +2841,102 @@ button.mention-chip:active {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
   z-index: 5;
 }
+/* Sits at the foot of its dialog, so the card opens upward over the fields:
+   downward it would spill past the scrolling dialog's edge. */
+.model-pick { position: relative; }
+.model-pick-hit {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  text-align: left;
+  cursor: pointer;
+}
+.model-pick.open .model-pick-hit { border-color: var(--field-focus); }
+.model-pick-hit svg {
+  flex-shrink: 0;
+  color: var(--faint);
+  transition: rotate var(--dur) var(--ease);
+}
+.model-pick.open .model-pick-hit svg { rotate: 180deg; }
+.model-pick-name,
+.model-pick-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-pick-meta {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: var(--text-md);
+}
+/* The card covers the field label but for its rounded corner. */
+.field-block:has(> .model-pick.open) > .field { visibility: hidden; }
+.model-pick-card {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + var(--space-8));
+  background: var(--menu);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  padding: var(--space-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  z-index: 5;
+}
+.model-pick-cols {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: var(--space-8);
+}
+.model-pick-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  /* Five rows; a long codex list scrolls rather than leaving the dialog. */
+  max-height: 188px;
+  overflow-y: auto;
+}
+.model-pick-col + .model-pick-col {
+  border-left: 1px solid var(--line);
+  padding-left: var(--space-8);
+}
+.model-pick-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  padding: var(--space-8) var(--space-10);
+  font-size: var(--text-lg);
+  text-align: left;
+  cursor: pointer;
+}
+.model-pick-row:hover:not(:disabled) { background: var(--chip); }
+.model-pick-row.on {
+  background: var(--chip-hover);
+  font-weight: 600;
+}
+.model-pick-row:disabled {
+  color: var(--btn-disabled-ink);
+  cursor: default;
+}
+.model-pick-hint {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--faint);
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
+.model-pick-row.on .model-pick-hint { color: var(--muted); }
 .info-avatar {
   width: 72px;
   height: 72px;

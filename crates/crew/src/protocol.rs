@@ -88,6 +88,11 @@ pub enum Request {
         #[serde(default)]
         unset_cwd: bool,
     },
+    /// Move a bot to another CLI: `grok`, `claude`, or `codex`.
+    SetCli {
+        id: String,
+        cli: String,
+    },
     Reset {
         agent: String,
         #[serde(default)]

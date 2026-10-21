@@ -12,7 +12,7 @@ use tokio::sync::{broadcast, oneshot};
 
 use crate::config::{
     empty_to_none, find_routine_index, parse_hex_color, roster_update_text, write_roster,
-    AgentConfig, AvatarShape, Config, Effort, Routine,
+    AgentCli, AgentConfig, AvatarShape, Config, Effort, Routine,
 };
 use crate::cron;
 use crate::headless::{self, HeadlessSession};
@@ -1674,6 +1674,12 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
                 message: err.to_string(),
             }],
         },
+        Request::SetCli { id, cli } => match set_cli(&id, &cli) {
+            Ok(()) => vec![Event::Ok, snapshot_event()],
+            Err(err) => vec![Event::Error {
+                message: err.to_string(),
+            }],
+        },
         Request::Reset {
             agent,
             drop_routines,
@@ -2151,6 +2157,7 @@ fn insert_spawned_agent(mut cfg: AgentConfig) -> anyhow::Result<()> {
     // would answer with a dead bot's context that the user cannot even see.
     crate::transcript::drop_agent(&id);
     crate::headless::clear_session(&id);
+    crate::headless::clear_recap(&id);
     let live = open_agent(&cfg, DEFAULT_COLS, DEFAULT_ROWS, false, &roster)?;
     agents()
         .lock()
@@ -2175,6 +2182,7 @@ fn remove_agent(id: &str) -> anyhow::Result<()> {
     crate::avatar::clear(id);
     crate::memory::remove(id);
     crate::headless::clear_session(id);
+    crate::headless::clear_recap(id);
     clear_inbox(id);
     clear_agent_context(id);
     session.kill();
@@ -2290,6 +2298,40 @@ fn set_agent(
     }
     crate::avatar::apply(&mut cfg, avatar, unset_avatar)?;
     persist_config(&cfg)?;
+    Ok(())
+}
+
+/// Moves a bot to another CLI in place: each turn builds its command and picks
+/// its parser from the config. The old CLI's session cannot follow, so the
+/// chat as it stands is saved for the new CLI's first turn.
+fn set_cli(id: &str, cli: &str) -> anyhow::Result<()> {
+    let cli = AgentCli::from_key(cli)?;
+    let mut cfg = clone_agent_cfg(id)?;
+    if AgentCli::from_cmd(&cfg.cmd) == Some(cli) {
+        return Ok(());
+    }
+    let session = {
+        let map = agents().lock().expect("agents mutex");
+        match map.get(id) {
+            Some(LiveAgent::Headless(session)) => session.clone(),
+            Some(LiveAgent::Pty(_)) => anyhow::bail!("agent {id} runs its own command, not a CLI"),
+            None => anyhow::bail!("unknown agent {id}"),
+        }
+    };
+    // Forgotten before the config moves, so a failed save below leaves the old
+    // CLI on a fresh session that reads the recap: still a working bot.
+    // ponytail: a turn that starts between here and persist_config runs on the
+    // old CLI and takes the recap; a per-agent config lock would close that.
+    headless::forget_session(&session)?;
+    headless::clear_recap(id);
+    if let Some(recap) = crate::transcript::recap(id) {
+        headless::save_recap(id, &recap)?;
+    }
+    cfg.cmd = cli.default_cmd();
+    // Model names belong to the old CLI.
+    cfg.model = None;
+    persist_config(&cfg)?;
+    emit_agent_frame(id);
     Ok(())
 }
 
@@ -2457,6 +2499,7 @@ fn reset_agent(id: &str, drop_routines: bool) -> anyhow::Result<String> {
 
     let roster = roster_vec();
     crate::headless::clear_session(id);
+    crate::headless::clear_recap(id);
     clear_inbox(id);
     clear_agent_context(id);
     let new_session = open_agent(&cfg, cols, rows, true, &roster)?;
@@ -2546,6 +2589,48 @@ mod daemon_tests {
             assert!(bot_path.exists(), "boot must not unlink a bot's transcript");
             assert_eq!(crate::transcript::messages(&bot).len(), 1);
             crate::transcript::drop_agent(&bot);
+        });
+    }
+
+    /// A bot that moves CLI keeps its chat for the new one to read; the old
+    /// CLI's session and model do not follow it.
+    #[test]
+    fn switching_cli_leaves_the_chat_for_the_new_one() {
+        paths::testing::with_home("set-cli", || {
+            let bot = test_id("cli");
+            let mut cfg = AgentConfig::new(
+                bot.clone(),
+                bot.clone(),
+                AgentCli::Claude.default_cmd(),
+                Some("/tmp/crew-demo/set-cli".into()),
+            );
+            cfg.model = Some("opus".into());
+            insert_spawned_agent(cfg).unwrap();
+            crate::transcript::push_user(&bot, "user", "어제 시킨 일");
+            let Some(LiveAgent::Headless(session)) = agents().lock().unwrap().get(&bot).cloned()
+            else {
+                panic!("claude runs headless");
+            };
+            session.inner.lock().unwrap().session_id = Some("claude-session".into());
+            headless::save_session(&bot, "claude-session").unwrap();
+
+            session.inner.lock().unwrap().status = AgentStatus::Working;
+            assert!(set_cli(&bot, "codex").unwrap_err().to_string().contains("working"));
+            assert_eq!(headless::load_session(&bot).as_deref(), Some("claude-session"));
+            session.inner.lock().unwrap().status = AgentStatus::Idle;
+
+            set_cli(&bot, "codex").unwrap();
+
+            let cfg = clone_agent_cfg(&bot).unwrap();
+            assert_eq!(AgentCli::from_cmd(&cfg.cmd), Some(AgentCli::Codex));
+            assert_eq!(cfg.model, None);
+            assert_eq!(headless::load_session(&bot), None);
+            assert_eq!(session.inner.lock().unwrap().session_id, None);
+            let recap = fs::read_to_string(paths::cli_recap_path(&bot)).unwrap();
+            assert!(recap.contains("user: 어제 시킨 일"), "{recap}");
+
+            remove_agent(&bot).unwrap();
+            assert!(!paths::cli_recap_path(&bot).exists());
         });
     }
 
