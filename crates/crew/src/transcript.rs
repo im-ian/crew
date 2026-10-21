@@ -798,6 +798,10 @@ pub fn set_queued(agent: &str, id: &str, queued: bool) {
 pub fn cancel_expect(agent: &str) {
     if let Ok(mut map) = chats().lock() {
         if let Some(chat) = map.get_mut(agent) {
+            // A delivery that failed on a bot mid-turn: the stream is that turn's.
+            if chat.hold {
+                return;
+            }
             chat.expecting = false;
             chat.echo_skip.clear();
         }
@@ -1605,6 +1609,28 @@ mod tests {
             assert_eq!(preview(&agent).as_deref(), Some("working on it, done"));
             drop_agent(&agent);
         });
+    }
+
+    /// A delivery that fails while a turn is under way is not that turn's. It
+    /// switched the turn's stream off, and the whole reply was lost.
+    #[test]
+    fn a_failed_delivery_leaves_the_turn_in_flight_alone() {
+        let agent = format!(
+            "inflight-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let turn = begin_turn(&agent);
+        cancel_expect(&agent);
+        on_assistant_delta(&agent, "still here");
+        end_turn_gen(&agent, Some(turn));
+        assert_eq!(
+            messages(&agent).last().map(|m| m.text.as_str()),
+            Some("still here")
+        );
+        drop_agent(&agent);
     }
 
     #[test]

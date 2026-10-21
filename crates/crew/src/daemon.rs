@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -577,12 +577,14 @@ fn is_slash_command(text: &str) -> bool {
 /// `then` goes on the bot with the turn, and stays with the caller when the
 /// turn does not start.
 fn start_delivery(
-    id: &str,
+    start: Starting,
     text: &str,
     newline: bool,
     origin: TurnOrigin,
     then: &mut VecDeque<SerialJob>,
 ) -> anyhow::Result<()> {
+    let id = start.0.clone();
+    let id = id.as_str();
     // Teammates' replies in front of a command turn it into words. They wait
     // for the next prompt instead.
     let pending = if is_slash_command(text) {
@@ -598,24 +600,10 @@ fn start_delivery(
     let prev_peer = crate::transcript::set_peer(id, asked_by(&origin, id));
     let prev_origin = get_origin(id);
     set_origin(id, origin);
-    // Arming keeps a turn that ends before its followers are in place from
-    // looking past them.
-    mark_serial_arming(id);
     let started = deliver(id, &text, newline);
-    if started.is_ok() {
-        queue_serial_after(id, std::mem::take(then));
-    }
-    unmark_serial_arming(id);
-    match started {
-        Ok(()) => {
-            crate::transcript::drop_pending_approval(id);
-            // Already over, and its end found nothing to hand on.
-            if !agent_busy(id).unwrap_or(true) {
-                advance_serial(id);
-            }
-            Ok(())
-        }
-        Err(err) => {
+    match &started {
+        Ok(()) => queue_serial_after(id, std::mem::take(then)),
+        Err(_) => {
             restore_handoffs(id, pending);
             crate::transcript::cancel_expect(id);
             // A busy agent is still in the turn these belong to.
@@ -626,9 +614,18 @@ fn start_delivery(
                     take_origin(id);
                 }
             }
-            Err(err)
         }
     }
+    drop(start);
+    if started.is_ok() {
+        crate::transcript::drop_pending_approval(id);
+    }
+    // Over already, or never begun: what waits here goes on, and a message
+    // that queued while this start held the bot begins.
+    if !agent_busy(id).unwrap_or(true) {
+        pump_inbox(id);
+    }
+    started
 }
 
 fn submit_delivery(
@@ -659,17 +656,17 @@ fn submit_delivery_then(
         );
     }
     if !agent_busy(id)? {
-        match start_delivery(id, text, newline, origin.clone(), then) {
-            Err(err) if is_busy_err(&err) => {}
-            started => return started,
+        if let Some(start) = claim_start(id) {
+            match start_delivery(start, text, newline, origin.clone(), then) {
+                Err(err) if is_busy_err(&err) => {}
+                started => return started,
+            }
         }
     }
     enqueue_delivery(id, text, newline, msg_id, origin, then)?;
-    // The turn that was in the way can end before the push, and its pump found
-    // nothing to start. Nothing else would start this one.
-    if !agent_busy(id).unwrap_or(true) {
-        pump_inbox_inner(id);
-    }
+    // The turn that was in the way, or a start under way, can finish before
+    // the push and find nothing to start. Nothing else would start this one.
+    pump_inbox_inner(id);
     Ok(())
 }
 
@@ -695,6 +692,11 @@ fn pump_inbox_inner(id: &str) {
         Ok(false) => {}
         _ => return,
     }
+    // Claimed before the pop, so two pumps cannot start this bot's queue out
+    // of order.
+    let Some(start) = claim_start(id) else {
+        return;
+    };
     let next = {
         let mut map = match inbox().lock() {
             Ok(m) => m,
@@ -706,7 +708,7 @@ fn pump_inbox_inner(id: &str) {
         return;
     };
     match start_delivery(
-        id,
+        start,
         &item.text,
         item.newline,
         item.origin.clone(),
@@ -770,9 +772,10 @@ struct SerialBoard {
     /// What waits on each bot's turn in progress: the teammates its message
     /// named, the tells it ran, and the rest of a chain it is part of.
     queues: HashMap<String, VecDeque<SerialJob>>,
-    /// Callers currently attaching followers. A count, so one caller finishing
-    /// does not expose the tail while another is still attaching it.
-    arming: HashMap<String, u32>,
+    /// Bots whose next turn is being started. One start at a time per bot: only
+    /// the one under way sets the turn's origin and peer, and what waits on the
+    /// bot stays put until that turn is up.
+    starting: HashSet<String>,
     /// Bumped when an agent's chain is cleared. A tell that observed an older
     /// value belongs to a turn that was stopped.
     epoch: HashMap<String, u64>,
@@ -782,35 +785,30 @@ fn serial_board() -> &'static Mutex<SerialBoard> {
     SERIAL.get_or_init(|| {
         Mutex::new(SerialBoard {
             queues: HashMap::new(),
-            arming: HashMap::new(),
+            starting: HashSet::new(),
             epoch: HashMap::new(),
         })
     })
 }
 
-fn mark_serial_arming(agent: &str) {
-    if agent.is_empty() {
-        return;
-    }
-    if let Ok(mut board) = serial_board().lock() {
-        *board.arming.entry(agent.to_string()).or_insert(0) += 1;
+/// A turn being started on the bot it names. Dropping it lets the next start in.
+struct Starting(String);
+
+impl Drop for Starting {
+    fn drop(&mut self) {
+        if let Ok(mut board) = serial_board().lock() {
+            board.starting.remove(&self.0);
+        }
     }
 }
 
-fn unmark_serial_arming(agent: &str) {
-    if let Ok(mut board) = serial_board().lock() {
-        let done = match board.arming.get_mut(agent) {
-            Some(n) if *n > 1 => {
-                *n -= 1;
-                false
-            }
-            Some(_) => true,
-            None => false,
-        };
-        if done {
-            board.arming.remove(agent);
-        }
-    }
+/// None while another start is under way on `agent`.
+fn claim_start(agent: &str) -> Option<Starting> {
+    let mut board = serial_board().lock().ok()?;
+    board
+        .starting
+        .insert(agent.to_string())
+        .then(|| Starting(agent.to_string()))
 }
 
 fn serial_epoch(agent: &str) -> u64 {
@@ -927,7 +925,7 @@ fn take_followers(agent: &str) -> VecDeque<SerialJob> {
     let Ok(mut board) = serial_board().lock() else {
         return VecDeque::new();
     };
-    if board.arming.contains_key(agent) {
+    if board.starting.contains(agent) {
         return VecDeque::new();
     }
     board.queues.remove(agent).unwrap_or_default()
@@ -3372,6 +3370,34 @@ exec sleep 5"#,
         });
     }
 
+    /// Two callers can find a bot idle at once, and only one turn starts. The
+    /// other undid the winner's origin and peer on its way out.
+    #[test]
+    fn a_start_under_way_makes_another_wait() {
+        paths::testing::with_home("one-start", || {
+            paths::write_notifications_enabled(false);
+            let bot = test_id("contended");
+            insert_spawned_agent(AgentConfig::new(
+                bot.clone(),
+                bot.clone(),
+                AgentCli::Claude.default_cmd(),
+                None,
+            ))
+            .unwrap();
+            let running = TurnOrigin::mention_tell("asker");
+            set_origin(&bot, running.clone());
+            let start = claim_start(&bot).expect("nothing is starting");
+            assert!(claim_start(&bot).is_none(), "one start at a time");
+            submit_delivery(&bot, "second", true, None, TurnOrigin::user()).unwrap();
+            assert_eq!(get_origin(&bot), Some(running));
+            assert!(!inbox_is_empty(&bot), "it waits for the start under way");
+            drop(start);
+            clear_inbox(&bot);
+            take_origin(&bot);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
     #[test]
     fn a_stop_takes_the_approval_card_down() {
         paths::testing::with_home("blocked-stop", || {
@@ -3437,7 +3463,14 @@ exec sleep 5"#,
         let running = TurnOrigin::mention_tell("asker");
         set_origin(&id, running.clone());
         crate::transcript::set_peer(&id, Some("asker".into()));
-        assert!(start_delivery(&id, "hi", true, TurnOrigin::user(), &mut VecDeque::new()).is_err());
+        assert!(start_delivery(
+            claim_start(&id).unwrap(),
+            "hi",
+            true,
+            TurnOrigin::user(),
+            &mut VecDeque::new()
+        )
+        .is_err());
         assert_eq!(get_origin(&id), Some(running));
         assert_eq!(
             crate::transcript::set_peer(&id, None).as_deref(),
@@ -3697,9 +3730,9 @@ exec sleep 5"#,
     fn followers_stay_while_their_turn_is_being_started() {
         let anchor = test_id("serial-arming");
         queue_serial_after(&anchor, VecDeque::from([tell_job("someone", "x")]));
-        mark_serial_arming(&anchor);
+        let start = claim_start(&anchor);
         assert!(take_followers(&anchor).is_empty());
-        unmark_serial_arming(&anchor);
+        drop(start);
         assert_eq!(take_followers(&anchor).len(), 1);
     }
 
