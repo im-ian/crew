@@ -497,6 +497,7 @@ struct ParseState {
     error: Option<String>,
     last_codex_item: Option<String>,
     last_codex_text: Option<String>,
+    tool_after_text: bool,
 }
 
 fn ingest_line(cli: CliKind, line: &str, state: &mut ParseState) -> Option<String> {
@@ -509,12 +510,22 @@ fn ingest_line(cli: CliKind, line: &str, state: &mut ParseState) -> Option<Strin
     if let Some(err) = json_error(&v) {
         state.error = Some(err);
     }
-    match cli {
+    if state.got_text && !crate::tool_card::from_events(&v).is_empty() {
+        state.tool_after_text = true;
+    }
+    let chunk = match cli {
         CliKind::Grok => grok_text(&v, state),
         CliKind::Claude => claude_text(&v, state),
-        CliKind::Codex => codex_text(&v, state),
+        // Each codex message replaces the last, so there is nothing to glue.
+        CliKind::Codex => return codex_text(&v, state),
         CliKind::Other => None,
+    }?;
+    // Text before and after a tool call arrives as one stream; without a break
+    // "I'll check." and the answer run together into one sentence.
+    if std::mem::take(&mut state.tool_after_text) {
+        return Some(format!("\n\n{chunk}"));
     }
+    Some(chunk)
 }
 
 fn grok_text(v: &Value, state: &mut ParseState) -> Option<String> {
@@ -832,6 +843,32 @@ mod tests {
         assert!(chunk.is_none());
         let (chunk, _) = grok_line(r#"{"type":"available_commands","commands":["help"]}"#);
         assert!(chunk.is_none());
+    }
+
+    #[test]
+    fn tool_call_between_text_starts_a_new_paragraph() {
+        let mut st = ParseState::default();
+        let tool = r#"{"type":"tool_call","toolCallId":"1","toolName":"read_file"}"#;
+        ingest_line(CliKind::Grok, tool, &mut st);
+        let d = ingest_line(
+            CliKind::Grok,
+            r#"{"type":"text","data":"Let me check."}"#,
+            &mut st,
+        );
+        assert_eq!(
+            d.as_deref(),
+            Some("Let me check."),
+            "a tool before any text adds nothing"
+        );
+        ingest_line(CliKind::Grok, tool, &mut st);
+        let d = ingest_line(CliKind::Grok, r#"{"type":"text","data":"Hi."}"#, &mut st);
+        assert_eq!(d.as_deref(), Some("\n\nHi."));
+        let d = ingest_line(CliKind::Grok, r#"{"type":"text","data":" More."}"#, &mut st);
+        assert_eq!(
+            d.as_deref(),
+            Some(" More."),
+            "only the first chunk after the tool"
+        );
     }
 
     #[test]
