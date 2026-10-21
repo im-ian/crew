@@ -1996,6 +1996,7 @@ fn send_agent_shown(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
             })
             .collect();
     let delivered = crate::config::with_mention_hint(text, id, &roster);
+    let named_here = then.len();
     if matches!(live_status(id), Ok(AgentStatus::Blocked)) {
         // A message to a bot waiting on allow / deny answers it, as Allow
         // does: the turn goes on in this one, and what waited on it waits on
@@ -2012,9 +2013,19 @@ fn send_agent_shown(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
         TurnOrigin::user(),
         &mut then,
     );
-    // Not delivered: the named teammates still answer, in order, instead of
-    // the chain dying with this bot.
-    release(then);
+    if started.is_err() {
+        let held = then.split_off(named_here.min(then.len()));
+        if agent_busy(id).unwrap_or(true) {
+            // Refused (its inbox is full): the teammates it named go with it,
+            // and what waited on the blocked turn keeps waiting.
+            queue_serial_after(id, held);
+        } else {
+            // It could not start: they still answer, in order, instead of the
+            // chain dying with this bot.
+            then.extend(held);
+            release(then);
+        }
+    }
     started
 }
 
@@ -3676,6 +3687,34 @@ exec sleep 1"#,
             clear_inbox(&builder);
             wait_idle(&bot);
             for id in [&bot, &builder] {
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// A message refused because the bot's inbox is full did not reach it, so
+    /// the teammates it named do not answer it either.
+    #[test]
+    fn a_refused_message_sends_nobody_it_named() {
+        paths::testing::with_home("refused", || {
+            paths::write_notifications_enabled(false);
+            let [bot, reviewer] = ["full-bot", "full-reviewer"].map(test_id);
+            for id in [&bot, &reviewer] {
+                claude_bot(id);
+                headless_status(id, AgentStatus::Working);
+            }
+            for i in 0..MAX_INBOX {
+                let mut none = VecDeque::new();
+                enqueue_delivery(&bot, &i.to_string(), true, None, TurnOrigin::user(), &mut none)
+                    .unwrap();
+            }
+            let text = format!("@{reviewer} 봐줘");
+            assert!(send_agent(&bot, &text).is_err(), "the inbox is full");
+            assert!(!told(&reviewer, &text), "the teammate answered a refused message");
+
+            for id in [&bot, &reviewer] {
+                headless_status(id, AgentStatus::Idle);
+                clear_inbox(id);
                 remove_agent(id).unwrap();
             }
         });
