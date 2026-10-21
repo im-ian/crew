@@ -28,7 +28,9 @@ fn parse_shape(shape: Option<String>) -> Result<Option<AvatarShape>, String> {
     }
 }
 
-#[tauri::command]
+// Off the main thread: `grok models` is a subprocess, and the picker asks
+// for every CLI each time it opens.
+#[tauri::command(async)]
 fn list_models(cli: String) -> Result<crate::models::ModelList, String> {
     let cli = AgentCli::from_key(&cli).map_err(|e| e.to_string())?;
     crate::models::list_models(cli).map_err(|e| e.to_string())
