@@ -10,9 +10,9 @@ export function formatClock(hour: number, minute: number, t: TFn): string {
 
 export function formatSchedule(expr: string, t: TFn): string {
   const parts = expr.trim().split(/\s+/);
-  if (parts.length !== 5) return t("schedule.custom");
+  if (parts.length !== 5) return t("schedule.custom", { expr: expr.trim() });
   const [min, hour, dom, month, dow] = parts;
-  if (dom !== "*" || month !== "*") return t("schedule.custom");
+  if (dom !== "*" || month !== "*") return t("schedule.custom", { expr: expr.trim() });
 
   const minStep = min.match(/^\*\/(\d+)$/);
   if (minStep && hour === "*" && (dow === "*" || !dow)) {
@@ -29,7 +29,7 @@ export function formatSchedule(expr: string, t: TFn): string {
   }
 
   const time = clockFromFields(hour, min, t);
-  if (!time) return t("schedule.custom");
+  if (!time) return t("schedule.custom", { expr: expr.trim() });
   if (dow === "*") return t("schedule.dailyAt", { time });
   if (dow === "1-5") return t("schedule.weekdaysAt", { time });
   if (dow === "0,6" || dow === "6,0") return t("schedule.weekendAt", { time });

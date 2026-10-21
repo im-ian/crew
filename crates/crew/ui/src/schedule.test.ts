@@ -23,9 +23,11 @@ describe("formatSchedule", () => {
     expect(formatSchedule("15 * * * *", t)).toBe("schedule.hourlyAtMinute(n=15)");
   });
 
-  it("gives up on expressions the picker cannot draw", () => {
+  // A bot writes any cron, and the sheet has no form left to open it in, so
+  // "Scheduled time" alone would hide when a monthly routine runs.
+  it("shows the cron itself for shapes it cannot name", () => {
     for (const expr of ["", "0 9 * *", "0 9 1 * *", "0 9 * 3 *", "0 99 * * *", "@daily"]) {
-      expect(formatSchedule(expr, t), expr).toBe("schedule.custom");
+      expect(formatSchedule(expr, t), expr).toBe(`schedule.custom(expr=${expr})`);
     }
   });
 
