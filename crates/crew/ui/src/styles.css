@@ -41,6 +41,9 @@
   --field-focus: #4a4a4c;
   --shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
   --bubble-edge: none;
+  --group: #19191c;
+  --group-hover: #212125;
+  --group-active: #2a2a2e;
   --titlebar: 28px;
   --rail-w: 232px;
   --rail-pad: 8px;
@@ -149,6 +152,11 @@ html[data-theme="light"] {
   --field-hover: #d5d5dc;
   --field-focus: #a8a8b0;
   --shadow: 0 8px 24px rgba(20, 20, 32, 0.1);
+  /* Rows on the group layer lift toward white: a darker grey than the layer
+     would sink the preview text under AA. */
+  --group: #e4e4e9;
+  --group-hover: #ececf0;
+  --group-active: #fafafc;
   /* A white balloon on a near-white thread needs an edge to read as one. */
   --bubble-edge: 0 0 0 1px rgba(20, 20, 32, 0.06), 0 1px 2px rgba(20, 20, 32, 0.04);
 }
@@ -286,7 +294,7 @@ html.rail-resizing * {
   flex: 1;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 0 var(--rail-pad) var(--rail-pad);
+  padding: var(--rail-pad);
   min-height: 0;
 }
 .rail-foot {
@@ -365,10 +373,16 @@ button.linkish {
   font: inherit;
 }
 .rail-section + .rail-section { margin-top: var(--space-8); }
-.rail-section.grouped .rail-row,
-.rail-section.grouped .empty-rail {
-  margin-left: var(--space-12);
-  width: calc(100% - 12px);
+/* A group is a layer, so its rows no longer need an indent to belong to it.
+   Re-pointing --rail/--hover/--active here lets the row, toggle and badge
+   rules below follow the layer without a grouped copy of each. */
+.rail-section.grouped {
+  --rail: var(--group);
+  --hover: var(--group-hover);
+  --active: var(--group-active);
+  padding: 0 var(--space-4) var(--space-4);
+  background: var(--rail);
+  border-radius: var(--radius-xl);
 }
 .rail-head {
   display: flex;
@@ -415,7 +429,7 @@ button.linkish {
   min-width: 0;
   border: 0;
   background: transparent;
-  color: var(--faint);
+  color: var(--muted);
   font-size: var(--text-sm);
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -426,7 +440,7 @@ button.linkish {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.group-name:hover { color: var(--muted); }
+.group-name:hover { color: var(--ink); }
 .group-name-input {
   flex: 1;
   min-width: 0;
@@ -440,17 +454,18 @@ button.linkish {
   padding: 0 var(--space-6);
   outline: none;
 }
+/* Tinted over the section's own fill, so a group keeps its layer under a drop. */
 .rail-section.drop-into {
-  background: var(--drop-into);
+  background: linear-gradient(var(--drop-into), var(--drop-into)) var(--rail);
   box-shadow: inset 0 0 0 1px var(--resize);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
 }
 .group-head.drop-into {
   color: var(--ink);
 }
 .group-head.drop-into .group-name,
 .group-head.drop-into .group-chevron {
-  color: var(--muted);
+  color: var(--ink);
 }
 .rail-drop-line {
   position: fixed;
