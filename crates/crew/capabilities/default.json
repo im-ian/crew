@@ -23,6 +23,7 @@
     "allow-daemon-ping",
     "allow-reset-agent",
     "allow-set-agent",
+    "allow-set-agent-cli",
     "allow-add-agent",
     "allow-clone-agent",
     "allow-remove-agent",

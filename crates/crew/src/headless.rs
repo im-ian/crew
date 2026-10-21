@@ -90,6 +90,34 @@ pub fn save_session(agent_id: &str, session_id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Chat a bot had before it moved to this CLI, for the new session to read once.
+pub fn save_recap(agent_id: &str, recap: &str) -> anyhow::Result<()> {
+    let path = paths::cli_recap_path(agent_id);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, recap)?;
+    Ok(())
+}
+
+fn load_recap(agent_id: &str) -> Option<String> {
+    fs::read_to_string(paths::cli_recap_path(agent_id))
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+}
+
+pub fn clear_recap(agent_id: &str) {
+    let _ = fs::remove_file(paths::cli_recap_path(agent_id));
+}
+
+fn with_recap(recap: &str, prompt: &str) -> String {
+    format!(
+        "[crew recap] This bot just moved to you from another AI CLI. Below is the chat \
+         so far, oldest first. Read it for context only; do not answer it. Answer the \
+         message after it.\n<chat>\n{recap}\n</chat>\n\n{prompt}"
+    )
+}
+
 pub fn kill(session: &HeadlessSession) {
     interrupt(session);
     if let Ok(mut inner) = session.inner.lock() {
@@ -219,6 +247,16 @@ fn run_turn(
         }
     }
 
+    // Only a new CLI session reads the recap: a resumed one already has it.
+    let recap = if turn_session.as_ref().map_or(true, |s| !s.resume) {
+        load_recap(&session.id)
+    } else {
+        None
+    };
+    let prompt = match recap.as_deref() {
+        Some(recap) => with_recap(recap, &prompt),
+        None => prompt,
+    };
     let argv = cfg.turn_cmd(&prompt, turn_session.as_ref(), &roster);
     let cwd = crate::config::Config::default_cwd(&cfg);
     if let Err(err) = crate::paths::create_cwd(&cwd) {
@@ -264,6 +302,9 @@ fn run_turn(
                         inner.session_id = Some(id.to_string());
                     }
                     let _ = save_session(&session.id, id);
+                    if recap.is_some() {
+                        clear_recap(&session.id);
+                    }
                 }
             }
             if !outcome.got_text {

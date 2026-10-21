@@ -279,6 +279,16 @@ fn set_agent(
 }
 
 #[tauri::command]
+fn set_agent_cli(id: String, cli: String) -> Result<(), String> {
+    match client::rpc(Request::SetCli { id, cli }) {
+        Ok(Event::Ok) | Ok(Event::Agents { .. }) => Ok(()),
+        Ok(Event::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected daemon response".into()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+#[tauri::command]
 fn add_agent(
     name: String,
     cli: String,
@@ -666,6 +676,7 @@ pub fn run() -> anyhow::Result<()> {
             daemon_ping,
             reset_agent,
             set_agent,
+            set_agent_cli,
             add_agent,
             clone_agent,
             remove_agent,
