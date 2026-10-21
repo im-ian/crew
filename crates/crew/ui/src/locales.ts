@@ -82,8 +82,9 @@ export const KO = {
 
   "header.pickChat": "대화를 선택하세요",
   "header.botInfo": "봇 정보 ⌘I",
-  "header.needsReview": "{name} 확인이 필요합니다",
-  "header.working": "{name} 작업 중",
+  "header.statusWorking": "작업 중",
+  "header.statusBlocked": "확인 필요",
+  "header.statusExited": "종료됨",
   "header.stop": "중지",
   "header.stopTitle": "중지 ⌘.",
   "header.botSettings": "봇 설정",
@@ -352,8 +353,9 @@ export const EN: { [K in MessageKey]: string } = {
 
   "header.pickChat": "Select a chat",
   "header.botInfo": "Bot info ⌘I",
-  "header.needsReview": "{name} needs review",
-  "header.working": "{name} is working",
+  "header.statusWorking": "Working",
+  "header.statusBlocked": "Needs review",
+  "header.statusExited": "Exited",
   "header.stop": "Stop",
   "header.stopTitle": "Stop ⌘.",
   "header.botSettings": "Bot settings",

@@ -442,7 +442,7 @@ function TransferNote({
             aria-expanded={show}
             onClick={() => setOpenBody(!openBody)}
           >
-            <span className="note-caret">{show ? "\u25be" : "\u25b8"}</span>
+            <ChevronDown className="note-caret" size={12} />
             {label}
           </button>
         ) : (
@@ -713,7 +713,7 @@ function NoteGroup({
             aria-expanded={show}
             onClick={() => setOpen(!open)}
           >
-            <span className="note-caret">{show ? "\u25be" : "\u25b8"}</span>
+            <ChevronDown className="note-caret" size={12} />
             {t("thread.noteRun", { n: items.length })}
           </button>
           <WhoButton
@@ -766,7 +766,7 @@ function ToolGroup({
         aria-expanded={show}
         onClick={() => setOpen(!open)}
       >
-        <span className="note-caret">{show ? "\u25be" : "\u25b8"}</span>
+        <ChevronDown className="note-caret" size={12} />
         {t("thread.toolUsed", { n: items.length })}
       </button>
       {show ? (
@@ -804,7 +804,7 @@ function ToolRow({
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="note-caret">{open ? "\u25be" : "\u25b8"}</span>
+        <ChevronDown className="note-caret" size={12} />
         <span className="tool-row-name">{name}</span>
         <span className="tool-row-summary">{open ? "" : summary}</span>
       </button>
@@ -976,6 +976,9 @@ function ChoiceCard({
           (open ||
             (card.state === "answered" && (q.multi || questions.length > 1)));
         const picked = (q.options || []).filter((o) => selected.includes(o.id));
+        // Per question, not per option: "A" beside "백오프" as a badge reads as
+        // two kinds of answer.
+        const short = shortLabels(q.options || []);
         return (
           <div className="choice-q" key={q.question + qi}>
             <div className="choice-head">
@@ -1035,7 +1038,7 @@ function ChoiceCard({
             {showList ? (
               <div className="choice-list">
                 {(q.options || []).map((o, oi) => {
-                  const view = optionView(o, oi);
+                  const view = optionView(o, oi, short);
                   const on = selected.includes(o.id);
                   return (
                     <button
@@ -1063,7 +1066,7 @@ function ChoiceCard({
             ) : picked.length ? (
               <div className="choice-picked">
                 {picked.map((o, oi) => {
-                  const view = optionView(o, oi);
+                  const view = optionView(o, oi, short);
                   return (
                     <div className="choice-option is-on" key={o.id}>
                       <span className="choice-badge">{view.badge}</span>
@@ -1105,10 +1108,13 @@ function ChoiceCard({
   );
 }
 
-function optionView(o: ChoiceOption, i: number) {
+function shortLabels(options: ChoiceOption[]): boolean {
+  return options.every((o) => (o.label || "").trim().length <= 3);
+}
+
+function optionView(o: ChoiceOption, i: number, short: boolean) {
   const label = (o.label || "").trim() || String.fromCharCode(65 + i);
   const desc = (o.description || "").trim();
-  const short = label.length <= 3;
   const badge = short ? label : String.fromCharCode(65 + (i % 26));
   const title = short ? desc : label;
   const sub = !short && desc && desc !== label ? desc : null;

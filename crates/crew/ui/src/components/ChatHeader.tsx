@@ -20,6 +20,15 @@ export function ChatHeader({
   const t = useT();
   const stopId =
     currentAgent && isBusyStatus(currentAgent.status) ? currentAgent.id : null;
+  const status = currentAgent?.status;
+  const statusKey =
+    status === "working"
+      ? "header.statusWorking"
+      : status === "blocked"
+        ? "header.statusBlocked"
+        : status === "exited"
+          ? "header.statusExited"
+          : null;
 
   const identity = currentAgent ? (
     <WhoButton
@@ -34,7 +43,12 @@ export function ChatHeader({
 
   return (
     <header>
-      <div className="head-identity">{identity}</div>
+      <div className="head-identity">
+        {identity}
+        {statusKey ? (
+          <span className={"head-status is-" + status}>{t(statusKey)}</span>
+        ) : null}
+      </div>
       {stopId && onStop ? (
         <button
           type="button"
