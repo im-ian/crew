@@ -23,11 +23,36 @@ impl LocalTime {
 }
 
 pub fn now_local() -> anyhow::Result<LocalTime> {
-    unsafe {
-        let mut t: libc::time_t = 0;
-        if libc::time(&mut t) == -1 {
-            bail!("time() failed");
+    local_at(unix_now()?)
+}
+
+pub fn unix_now() -> anyhow::Result<libc::time_t> {
+    let mut t: libc::time_t = 0;
+    if unsafe { libc::time(&mut t) } == -1 {
+        bail!("time() failed");
+    }
+    Ok(t)
+}
+
+/// The first minute after `after` (unix seconds) that `expr` fires, looking a
+/// year ahead. `None` for a schedule that never comes round, like `0 0 31 2 *`.
+// ponytail: walks minute by minute, half a million steps for a schedule that
+// never fires; skip whole hours and days if a listing ever feels slow.
+pub fn next_after(expr: &str, after: libc::time_t) -> anyhow::Result<Option<LocalTime>> {
+    validate(expr)?;
+    let mut t = after - after.rem_euclid(60) + 60;
+    for _ in 0..366 * 24 * 60 {
+        let local = local_at(t)?;
+        if matches(expr, &local)? {
+            return Ok(Some(local));
         }
+        t += 60;
+    }
+    Ok(None)
+}
+
+fn local_at(t: libc::time_t) -> anyhow::Result<LocalTime> {
+    unsafe {
         let mut tm: libc::tm = std::mem::zeroed();
         if libc::localtime_r(&t, &mut tm).is_null() {
             bail!("localtime_r failed");
@@ -188,6 +213,19 @@ mod tests {
         assert!(validate("* * * * * *").is_err());
         assert!(validate("60 * * * *").is_err());
         assert!(validate("*/0 * * * *").is_err());
+    }
+
+    #[test]
+    fn next_after_lands_on_a_matching_minute_after_the_start() {
+        let start: libc::time_t = 1_790_000_000;
+        let every = next_after("* * * * *", start).unwrap().unwrap();
+        assert_eq!(every, local_at(start - start % 60 + 60).unwrap());
+        for expr in ["0 9 * * 1-5", "30 18 * * 0", "0 0 1 * *"] {
+            let next = next_after(expr, start).unwrap().unwrap();
+            assert!(matches(expr, &next).unwrap(), "{expr}");
+        }
+        assert_eq!(next_after("0 0 31 2 *", start).unwrap(), None);
+        assert!(next_after("nope", start).is_err());
     }
 
     #[test]

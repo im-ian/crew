@@ -719,21 +719,10 @@ fn apply_agent_set(
 }
 
 fn run_routine(cmd: RoutineCmd) -> anyhow::Result<()> {
-    match cmd {
+    let agent = match cmd {
         RoutineCmd::List { agent } => {
             let agent = agent.and_then(empty_to_none).or_else(session_agent_id);
-            if paths::is_socket_live() {
-                match client::rpc(Request::List)? {
-                    Event::Agents { agents } => {
-                        client::print_routines(&agents, agent.as_deref())
-                    }
-                    Event::Error { message } => anyhow::bail!("{message}"),
-                    ev => client::print_event(ev),
-                }
-            } else {
-                let cfg = Config::load()?;
-                client::print_routines_from_config(&cfg.agents, agent.as_deref())
-            }
+            return print_routine_list(agent.as_deref());
         }
         RoutineCmd::Add {
             agent,
@@ -745,18 +734,16 @@ fn run_routine(cmd: RoutineCmd) -> anyhow::Result<()> {
             let (name, schedule, prompt) =
                 crate::nl_routine::resolve_routine_fields(name, schedule, prompt)?;
             if paths::is_socket_live() {
-                match client::rpc(Request::AddRoutine {
-                    agent,
+                routine_rpc(Request::AddRoutine {
+                    agent: agent.clone(),
                     name,
                     schedule,
                     prompt,
-                })? {
-                    Event::Error { message } => anyhow::bail!("{message}"),
-                    ev => client::print_event(ev),
-                }
+                })?;
             } else {
-                add_offline_routine(&agent, name, schedule, prompt)
+                add_offline_routine(&agent, name, schedule, prompt)?;
             }
+            agent
         }
         RoutineCmd::Edit {
             target,
@@ -769,67 +756,88 @@ fn run_routine(cmd: RoutineCmd) -> anyhow::Result<()> {
                 anyhow::bail!("routine edit needs --name, --schedule, or --prompt");
             }
             if paths::is_socket_live() {
-                match client::rpc(Request::EditRoutine {
-                    agent,
+                routine_rpc(Request::EditRoutine {
+                    agent: agent.clone(),
                     key,
                     name,
                     schedule,
                     prompt,
-                })? {
-                    Event::Error { message } => anyhow::bail!("{message}"),
-                    ev => client::print_event(ev),
-                }
+                })?;
             } else {
                 mutate_offline_routine(&agent, &key, |routines, idx| {
                     routines[idx].edit(name, schedule, prompt)
-                })
+                })?;
             }
+            agent
         }
         RoutineCmd::Remove(target) => {
             let (agent, key) = target.resolve("routine remove")?;
             if paths::is_socket_live() {
-                match client::rpc(Request::RemoveRoutine { agent, key })? {
-                    Event::Error { message } => anyhow::bail!("{message}"),
-                    ev => client::print_event(ev),
-                }
+                routine_rpc(Request::RemoveRoutine {
+                    agent: agent.clone(),
+                    key,
+                })?;
             } else {
                 mutate_offline_routine(&agent, &key, |routines, idx| {
                     routines.remove(idx);
                     Ok(())
-                })
+                })?;
             }
+            agent
         }
         RoutineCmd::Pause(target) => {
             let (agent, key) = target.resolve("routine pause")?;
-            set_routine_enabled(agent, key, false)
+            set_routine_enabled(&agent, key, false)?;
+            agent
         }
         RoutineCmd::Resume(target) => {
             let (agent, key) = target.resolve("routine resume")?;
-            set_routine_enabled(agent, key, true)
+            set_routine_enabled(&agent, key, true)?;
+            agent
         }
         RoutineCmd::Run(target) => {
             let (agent, key) = target.resolve("routine run")?;
             client::ensure_daemon()?;
-            match client::rpc(Request::RunRoutine { agent, key })? {
+            return match client::rpc(Request::RunRoutine { agent, key })? {
                 Event::Error { message } => anyhow::bail!("{message}"),
                 ev => client::print_event(ev),
-            }
+            };
         }
-    }
+    };
+    // The caller is often a bot in chat. A bare "ok" let it report a schedule
+    // it never saw; the saved row and its next run let a misread show.
+    print_routine_list(Some(&agent))
 }
 
-fn set_routine_enabled(agent: String, key: String, enabled: bool) -> anyhow::Result<()> {
+fn print_routine_list(agent: Option<&str>) -> anyhow::Result<()> {
     if paths::is_socket_live() {
-        match client::rpc(Request::SetRoutineEnabled {
-            agent,
-            key,
-            enabled,
-        })? {
+        match client::rpc(Request::List)? {
+            Event::Agents { agents } => client::print_routines(&agents, agent),
             Event::Error { message } => anyhow::bail!("{message}"),
             ev => client::print_event(ev),
         }
     } else {
-        mutate_offline_routine(&agent, &key, |routines, idx| {
+        let cfg = Config::load()?;
+        client::print_routines_from_config(&cfg.agents, agent)
+    }
+}
+
+fn routine_rpc(req: Request) -> anyhow::Result<()> {
+    match client::rpc(req)? {
+        Event::Error { message } => anyhow::bail!("{message}"),
+        _ => Ok(()),
+    }
+}
+
+fn set_routine_enabled(agent: &str, key: String, enabled: bool) -> anyhow::Result<()> {
+    if paths::is_socket_live() {
+        routine_rpc(Request::SetRoutineEnabled {
+            agent: agent.to_string(),
+            key,
+            enabled,
+        })
+    } else {
+        mutate_offline_routine(agent, &key, |routines, idx| {
             routines[idx].enabled = enabled;
             Ok(())
         })
