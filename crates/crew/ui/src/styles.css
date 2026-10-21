@@ -15,6 +15,8 @@
   --btn-hover: #48484a;
   --chip: #3a3a3c;
   --chip-hover: #48484a;
+  --chip-me: rgba(0, 0, 0, 0.32);
+  --chip-me-hover: rgba(0, 0, 0, 0.48);
   --btn-disabled: #2c2c2e;
   --btn-disabled-ink: #6e6e70;
   --user: #3a424e;
@@ -127,6 +129,8 @@ html[data-theme="light"] {
   --btn-hover: #2c2c2e;
   --chip: #e8e8ed;
   --chip-hover: #dedee5;
+  --chip-me: #c4d3ea;
+  --chip-me-hover: #b6c8e3;
   --btn-disabled: #ececf1;
   --btn-disabled-ink: #909098;
   --user: #d9e4f5;
@@ -2544,7 +2548,11 @@ button.who-btn:focus-visible {
   background: var(--chip);
   color: var(--ink);
   font: inherit;
+  /* middle centres on the x-height; Hangul and the name sit on the cap
+     height, so lift the pill the difference or it hangs low. */
   vertical-align: middle;
+  position: relative;
+  top: calc(0.5ex - 0.5cap);
   line-height: 1;
   white-space: nowrap;
   user-select: none;
@@ -2564,10 +2572,10 @@ button.mention-chip:active {
   transform: scale(0.97);
 }
 .row.me .mention-chip {
-  background: rgba(0, 0, 0, 0.32);
+  background: var(--chip-me);
 }
 .row.me button.mention-chip:hover {
-  background: rgba(0, 0, 0, 0.48);
+  background: var(--chip-me-hover);
 }
 @keyframes mention-chip-in {
   from {
