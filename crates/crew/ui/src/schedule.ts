@@ -39,11 +39,13 @@ export function formatSchedule(expr: string, t: TFn): string {
       if (!Number.isInteger(i)) return "";
       return t(`dow.${i}` as MessageKey);
     });
-    if (names.some((n) => !n)) return time;
+    if (names.some((n) => !n)) return t("schedule.custom", { expr: expr.trim() });
     if (names.length === 1) return t("schedule.weeklyAt", { day: names[0], time });
     return t("schedule.daysAt", { days: names.join(" · "), time });
   }
-  return time;
+  // A day range or step ("1-3", "*/2") would otherwise read as a bare time,
+  // which looks daily.
+  return t("schedule.custom", { expr: expr.trim() });
 }
 
 function clockFromFields(hour: string, min: string, t: TFn): string | null {

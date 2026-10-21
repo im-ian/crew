@@ -26,7 +26,7 @@ describe("formatSchedule", () => {
   // A bot writes any cron, and the sheet has no form left to open it in, so
   // "Scheduled time" alone would hide when a monthly routine runs.
   it("shows the cron itself for shapes it cannot name", () => {
-    for (const expr of ["", "0 9 * *", "0 9 1 * *", "0 9 * 3 *", "0 99 * * *", "@daily"]) {
+    for (const expr of ["", "0 9 * *", "0 9 1 * *", "0 9 * 3 *", "0 99 * * *", "@daily", "0 9 * * 1-3", "0 9 * * */2"]) {
       expect(formatSchedule(expr, t), expr).toBe(`schedule.custom(expr=${expr})`);
     }
   });
