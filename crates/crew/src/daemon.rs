@@ -410,6 +410,7 @@ fn interrupt_turn(id: &str) -> anyhow::Result<()> {
     crate::transcript::end_turn(id);
     let closed = crate::transcript::close_pending_choices(id);
     fail_asks(&closed, "interrupted");
+    crate::transcript::drop_pending_approval(id);
     emit_agent_frame(id);
     pump_inbox(id);
     Ok(())
@@ -569,7 +570,10 @@ fn start_delivery(id: &str, text: &str, newline: bool, origin: TurnOrigin) -> an
     let prev_origin = get_origin(id);
     set_origin(id, origin);
     match deliver(id, &text, newline) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            crate::transcript::drop_pending_approval(id);
+            Ok(())
+        }
         Err(err) => {
             restore_handoffs(id, pending);
             crate::transcript::cancel_expect(id);
@@ -2607,7 +2611,8 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
             enqueue_handoff(&peer, agent, &text);
         }
     }
-    if crate::interrupt::looks_like_judgment_question(&text) {
+    // A reply the user cut off with a stop is not a question waiting on them.
+    if crate::interrupt::looks_like_judgment_question(&text) && !agent_interrupted(agent) {
         crate::transcript::set_approval(agent, &msg.id, crate::protocol::ApprovalState::Pending);
         set_live_status(agent, AgentStatus::Blocked);
     }
@@ -3057,6 +3062,126 @@ mod daemon_tests {
                 set_status(id, AgentStatus::Idle);
                 remove_agent(id).unwrap();
             }
+        });
+    }
+
+    /// A stand-in `claude` in the test home, so a turn runs without the real
+    /// CLI. It prints `lines` and keeps the prompt it got in `prompt` beside it.
+    /// Notifications go off first: a turn's finish would post a real one.
+    fn fake_claude(lines: &str) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        paths::write_notifications_enabled(false);
+        let dir = paths::home_dir();
+        let bin = dir.join("claude");
+        let script = format!(
+            "#!/bin/sh\nfor arg; do last=$arg; done\nprintf '%s' \"$last\" > '{}'\ncat <<'EOF'\n{lines}\nEOF\n",
+            dir.join("prompt").display()
+        );
+        fs::write(&bin, script).unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        bin.display().to_string()
+    }
+
+    fn fake_bot(id: &str, lines: &str) {
+        let cwd = paths::home_dir().display().to_string();
+        insert_spawned_agent(AgentConfig::new(
+            id.into(),
+            id.into(),
+            vec![fake_claude(lines)],
+            Some(cwd),
+        ))
+        .unwrap();
+    }
+
+    fn wait_idle(id: &str) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while agent_busy(id).unwrap_or(false) {
+            assert!(Instant::now() < deadline, "{id} never finished its turn");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// A reply that asks "진행할까요?" waits on allow / deny. A user who
+    /// answers in words instead starts a new turn, and the card has nothing
+    /// left to hold back: a click on it later flipped the bot to idle in the
+    /// middle of that turn and sent "Continue." after it.
+    #[test]
+    fn talking_to_a_blocked_bot_takes_its_card_down() {
+        paths::testing::with_home("blocked-talk", || {
+            let bot = test_id("blocked");
+            fake_bot(&bot, "");
+            crate::transcript::begin_turn(&bot);
+            crate::transcript::on_assistant_delta(&bot, "이대로 진행할까요?");
+            crate::transcript::end_turn(&bot);
+            let ask = crate::transcript::messages(&bot).pop().unwrap();
+            crate::transcript::set_approval(&bot, &ask.id, crate::protocol::ApprovalState::Pending);
+            set_live_status(&bot, AgentStatus::Blocked);
+
+            send_agent(&bot, "응, 진행해").unwrap();
+            assert!(crate::transcript::pending_approval(&bot).is_none());
+            wait_idle(&bot);
+            assert!(
+                approve_agent(&bot, true).is_err(),
+                "nothing left to approve"
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    #[test]
+    fn a_stop_takes_the_approval_card_down() {
+        paths::testing::with_home("blocked-stop", || {
+            paths::write_notifications_enabled(false);
+            let bot = test_id("blocked");
+            insert_spawned_agent(AgentConfig::new(
+                bot.clone(),
+                bot.clone(),
+                AgentCli::Claude.default_cmd(),
+                None,
+            ))
+            .unwrap();
+            let ask = crate::transcript::push_system(&bot, "crew", "삭제할까요?", None);
+            crate::transcript::set_approval(&bot, &ask.id, crate::protocol::ApprovalState::Pending);
+            set_live_status(&bot, AgentStatus::Blocked);
+
+            interrupt_turn(&bot).unwrap();
+            assert!(crate::transcript::pending_approval(&bot).is_none());
+            assert_eq!(live_status(&bot).unwrap(), AgentStatus::Idle);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// The stop seals what the reply got to. Read as a question, the cut-off
+    /// words left the bot blocked on a card right after the user stopped it.
+    #[test]
+    fn a_reply_cut_off_by_a_stop_is_not_a_question() {
+        paths::testing::with_home("stopped-ask", || {
+            paths::write_notifications_enabled(false);
+            let bot = test_id("stopped");
+            insert_spawned_agent(AgentConfig::new(
+                bot.clone(),
+                bot.clone(),
+                AgentCli::Claude.default_cmd(),
+                None,
+            ))
+            .unwrap();
+            let Some(LiveAgent::Headless(session)) = agents().lock().unwrap().get(&bot).cloned()
+            else {
+                panic!("claude runs headless");
+            };
+            set_origin(&bot, TurnOrigin::user());
+            headless::interrupt(&session);
+            let cut = crate::transcript::push_system(&bot, "crew", "x", None);
+            let reply = ChatMessage {
+                role: Role::Assistant,
+                text: "파일을 지우기 전에 확인해도 될까".into(),
+                ..cut
+            };
+            on_assistant_sealed(&bot, &reply);
+            assert!(crate::transcript::pending_approval(&bot).is_none());
+            assert_eq!(live_status(&bot).unwrap(), AgentStatus::Idle);
+            take_origin(&bot);
+            remove_agent(&bot).unwrap();
         });
     }
 

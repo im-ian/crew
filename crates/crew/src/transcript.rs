@@ -741,6 +741,35 @@ pub fn pending_approval(agent: &str) -> Option<ChatMessage> {
         .find(|m| m.approval == Some(ApprovalState::Pending))
 }
 
+/// The bot moved on without an allow or a deny: a new turn started, or it was
+/// stopped. The card holds nothing back any more, and a click on it later
+/// would answer a question nobody is waiting on.
+pub fn drop_pending_approval(agent: &str) {
+    let rows: Vec<ChatMessage> = {
+        let mut map = match chats().lock() {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        let Some(chat) = map.get_mut(agent) else {
+            return;
+        };
+        let mut rows = Vec::new();
+        for m in chat.messages.iter_mut() {
+            if m.approval == Some(ApprovalState::Pending) {
+                m.approval = None;
+                rows.push(m.clone());
+            }
+        }
+        if !rows.is_empty() {
+            persist(agent, chat);
+        }
+        rows
+    };
+    for row in rows {
+        emit(agent, row);
+    }
+}
+
 pub fn set_queued(agent: &str, id: &str, queued: bool) {
     let msg = {
         let mut map = match chats().lock() {
