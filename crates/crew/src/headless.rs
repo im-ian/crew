@@ -118,6 +118,18 @@ fn with_recap(recap: &str, prompt: &str) -> String {
     )
 }
 
+/// Drop the CLI session so the next turn opens a new one. Refused mid-turn:
+/// that turn would save its session back when it ends.
+pub fn forget_session(session: &HeadlessSession) -> anyhow::Result<()> {
+    let mut inner = session.inner.lock().expect("headless inner");
+    if inner.status == AgentStatus::Working || inner.child.is_some() {
+        anyhow::bail!("agent {} is working; switch once it finishes", session.id);
+    }
+    inner.session_id = None;
+    clear_session(&session.id);
+    Ok(())
+}
+
 pub fn kill(session: &HeadlessSession) {
     interrupt(session);
     if let Ok(mut inner) = session.inner.lock() {
@@ -415,7 +427,8 @@ fn spawn_and_stream(
         })
     });
 
-    let cli = CliKind::from_program(&session.cmd.first().cloned().unwrap_or_default());
+    // This turn's command, not the session's first one: a bot changes CLI in place.
+    let cli = CliKind::from_program(&argv[0]);
     let mut state = ParseState::default();
     let mut plain = String::new();
     let reader = BufReader::new(stdout);

@@ -2301,32 +2301,28 @@ fn set_agent(
     Ok(())
 }
 
-/// The old CLI's session cannot follow the bot, and the live session parses
-/// output by its CLI, so this reopens it fresh, the way a reset does, but keeps
-/// the chat. The new CLI reads that chat on its first turn.
+/// Moves a bot to another CLI in place: each turn builds its command and picks
+/// its parser from the config. The old CLI's session cannot follow, so the
+/// chat as it stands is saved for the new CLI's first turn.
 fn set_cli(id: &str, cli: &str) -> anyhow::Result<()> {
     let cli = AgentCli::from_key(cli)?;
     let mut cfg = clone_agent_cfg(id)?;
     if AgentCli::from_cmd(&cfg.cmd) == Some(cli) {
         return Ok(());
     }
-    let old = {
+    let session = {
         let map = agents().lock().expect("agents mutex");
-        map.get(id)
-            .cloned()
-            .with_context(|| format!("unknown agent {id}"))?
-    };
-    let (cols, rows) = match &old {
-        LiveAgent::Headless(session) => {
-            let inner = session.inner.lock().expect("headless inner");
-            // The running turn would save its CLI's session over the fresh one.
-            if inner.status == AgentStatus::Working || inner.child.is_some() {
-                anyhow::bail!("agent {id} is working; switch once it finishes");
-            }
-            (inner.cols, inner.rows)
+        match map.get(id) {
+            Some(LiveAgent::Headless(session)) => session.clone(),
+            Some(LiveAgent::Pty(_)) => anyhow::bail!("agent {id} runs its own command, not a CLI"),
+            None => anyhow::bail!("unknown agent {id}"),
         }
-        LiveAgent::Pty(_) => anyhow::bail!("agent {id} runs its own command, not a CLI"),
     };
+    // Forgotten before the config moves, so a failed save below leaves the old
+    // CLI on a fresh session that reads the recap: still a working bot.
+    // ponytail: a turn that starts between here and persist_config runs on the
+    // old CLI and takes the recap; a per-agent config lock would close that.
+    headless::forget_session(&session)?;
     headless::clear_recap(id);
     if let Some(recap) = crate::transcript::recap(id) {
         headless::save_recap(id, &recap)?;
@@ -2335,12 +2331,6 @@ fn set_cli(id: &str, cli: &str) -> anyhow::Result<()> {
     // Model names belong to the old CLI.
     cfg.model = None;
     persist_config(&cfg)?;
-    let new_session = open_agent(&cfg, cols, rows, true, &roster_vec())?;
-    agents()
-        .lock()
-        .expect("agents mutex")
-        .insert(id.to_string(), new_session);
-    old.kill();
     emit_agent_frame(id);
     Ok(())
 }
@@ -2617,7 +2607,17 @@ mod daemon_tests {
             cfg.model = Some("opus".into());
             insert_spawned_agent(cfg).unwrap();
             crate::transcript::push_user(&bot, "user", "어제 시킨 일");
+            let Some(LiveAgent::Headless(session)) = agents().lock().unwrap().get(&bot).cloned()
+            else {
+                panic!("claude runs headless");
+            };
+            session.inner.lock().unwrap().session_id = Some("claude-session".into());
             headless::save_session(&bot, "claude-session").unwrap();
+
+            session.inner.lock().unwrap().status = AgentStatus::Working;
+            assert!(set_cli(&bot, "codex").unwrap_err().to_string().contains("working"));
+            assert_eq!(headless::load_session(&bot).as_deref(), Some("claude-session"));
+            session.inner.lock().unwrap().status = AgentStatus::Idle;
 
             set_cli(&bot, "codex").unwrap();
 
@@ -2625,8 +2625,7 @@ mod daemon_tests {
             assert_eq!(AgentCli::from_cmd(&cfg.cmd), Some(AgentCli::Codex));
             assert_eq!(cfg.model, None);
             assert_eq!(headless::load_session(&bot), None);
-            let live = agents().lock().unwrap().get(&bot).cloned().unwrap();
-            assert_eq!(live.cmd()[0], "codex", "output is parsed by the live cmd");
+            assert_eq!(session.inner.lock().unwrap().session_id, None);
             let recap = fs::read_to_string(paths::cli_recap_path(&bot)).unwrap();
             assert!(recap.contains("user: 어제 시킨 일"), "{recap}");
 
