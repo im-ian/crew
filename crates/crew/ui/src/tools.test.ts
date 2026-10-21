@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { momentStamp, threadRows, toolNames, toolSummary } from "./tools";
+import {
+  dotsAfter,
+  momentStamp,
+  threadRows,
+  toolNames,
+  toolSummary,
+} from "./tools";
 import type { AgentInfo, ChatMessage } from "./types";
 
 function msg(id: string, kind?: ChatMessage["kind"]): ChatMessage {
@@ -32,6 +38,28 @@ describe("threadRows", () => {
   it("keeps runs split by a message between them", () => {
     const rows = threadRows([msg("t1", "tool"), msg("a"), msg("t2", "tool")], []);
     expect(rows.map((r) => r.kind)).toEqual(["tools", "msg", "tools"]);
+  });
+});
+
+describe("dotsAfter", () => {
+  it("passes over what lands below a reply still being written", () => {
+    const reply: ChatMessage = { id: "r", role: "assistant", from: "jordy", text: "working", ts: 2 };
+    const list: ChatMessage[] = [
+      { id: "p", role: "user", from: "user", text: "check this", ts: 1 },
+      reply,
+      note("h", "chunsik", "handoff"),
+      note("n", "to:chunsik", "sent"),
+      { id: "q", role: "user", from: "user", text: "how is it going?", ts: 3, queued: true },
+    ];
+    expect(dotsAfter(list)?.id).toBe("r");
+  });
+
+  it("stays on the prompt while nothing has been written yet", () => {
+    const list: ChatMessage[] = [
+      { id: "p", role: "user", from: "user", text: "check this", ts: 1 },
+      { id: "q", role: "user", from: "user", text: "and this", ts: 2, queued: true },
+    ];
+    expect(dotsAfter(list)?.id).toBe("p");
   });
 });
 

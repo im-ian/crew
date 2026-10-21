@@ -14,6 +14,7 @@ import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { noteRef, sentTarget } from "../peek";
 import {
+  dotsAfter,
   momentStamp,
   runPeer,
   threadRows,
@@ -122,9 +123,7 @@ export function ChatThread({
       if (selectedKind === "agent" && selected === id) return;
       onSelectAgent(id);
     });
-  // A queued message has not reached the bot yet: the reply still coming sits
-  // above it, and the wait dots belong under that reply.
-  const lastVisible = [...visible].reverse().find((m) => !m.queued);
+  const lastVisible = dotsAfter(visible);
   const quiet = useQuiet(
     lastVisible ? lastVisible.id + "\n" + lastVisible.text : "",
     QUIET_MS,
