@@ -24,6 +24,7 @@ import {
   saveThemePref,
   type ThemePref,
 } from "./theme";
+import { loadShowTools, saveShowTools } from "./tools";
 import { useCrew } from "./useCrew";
 import { useUpdater } from "./updater";
 
@@ -37,6 +38,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [theme, setTheme] = useState<ThemePref>(loadThemePref);
+  const [showTools, setShowTools] = useState(loadShowTools);
   const [jumpSeq, setJumpSeq] = useState(0);
   // `focus` is the run that was clicked, so the panel opens on it rather than
   // at the bottom of everything the two bots ever said.
@@ -187,7 +189,11 @@ export function App() {
         selected={crew.selected}
         selectedKind={crew.selectedKind}
         query={crew.query}
-        searchHits={crew.searchHits}
+        searchHits={
+          showTools
+            ? crew.searchHits
+            : crew.searchHits.filter((hit) => hit.kind !== "tool")
+        }
         renamingId={renamingId}
         onQuery={crew.setQuery}
         onSearchHit={crew.openSearchHit}
@@ -254,6 +260,7 @@ export function App() {
           onJump={crew.highlightMessage}
           peekFocus={peekOpen ? peek?.focus[0] ?? null : null}
           onPeek={togglePeek}
+          showTools={showTools}
         />
         <Composer
           ref={composerRef}
@@ -323,6 +330,11 @@ export function App() {
         open={settingsOpen}
         theme={theme}
         onTheme={setTheme}
+        showTools={showTools}
+        onShowTools={(show) => {
+          setShowTools(show);
+          saveShowTools(show);
+        }}
         onClose={() => setSettingsOpen(false)}
         onOpenShortcuts={() => {
           setSettingsOpen(false);

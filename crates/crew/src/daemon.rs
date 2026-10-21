@@ -1026,6 +1026,7 @@ fn search_corpus(query: &str) -> Vec<crate::search::SearchHit> {
             id: m.id.as_str(),
             from: m.from.as_str(),
             text: m.text.as_str(),
+            tool: m.kind == Some(crate::protocol::MessageKind::Tool),
         })
         .collect();
     crate::search::search(query, &bots, &routines, &messages)

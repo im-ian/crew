@@ -1,6 +1,25 @@
 import { noteRef } from "./peek";
 import type { AgentInfo, ChatMessage } from "./types";
 
+const SHOW_KEY = "crew.tools";
+
+/** Tool cards are noise for most readers, so they stay hidden until asked for. */
+export function loadShowTools(): boolean {
+  try {
+    return localStorage.getItem(SHOW_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+export function saveShowTools(show: boolean) {
+  try {
+    localStorage.setItem(SHOW_KEY, show ? "on" : "off");
+  } catch {
+    /* private mode */
+  }
+}
+
 export type ThreadRow =
   | { kind: "msg"; msg: ChatMessage }
   | { kind: "tools"; msgs: ChatMessage[] }
