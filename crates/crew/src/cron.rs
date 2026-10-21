@@ -118,9 +118,20 @@ pub fn matches(expr: &str, t: &LocalTime) -> anyhow::Result<bool> {
     }
     Ok(field_matches(parts[0], t.minute, 0, 59)?
         && field_matches(parts[1], t.hour, 0, 23)?
-        && field_matches(parts[2], t.day, 1, 31)?
-        && field_matches(parts[3], t.month, 1, 12)?
-        && dow_matches(parts[4], t.wday)?)
+        && day_matches(parts[2], parts[4], t)?
+        && field_matches(parts[3], t.month, 1, 12)?)
+}
+
+/// As standard cron reads it: with both day of month and weekday restricted,
+/// either one is enough, so `0 9 1 * 1` is the 1st and every Monday.
+fn day_matches(dom: &str, dow: &str, t: &LocalTime) -> anyhow::Result<bool> {
+    let by_date = field_matches(dom, t.day, 1, 31)?;
+    let by_weekday = dow_matches(dow, t.wday)?;
+    Ok(if dom.starts_with('*') || dow.starts_with('*') {
+        by_date && by_weekday
+    } else {
+        by_date || by_weekday
+    })
 }
 
 fn field_matches(expr: &str, value: u8, min: u8, max: u8) -> anyhow::Result<bool> {
@@ -230,6 +241,18 @@ mod tests {
         assert!(matches("0 0 * * 0", &t(0, 0, 1, 1, 0)).unwrap());
         assert!(matches("0 0 * * 7", &t(0, 0, 1, 1, 0)).unwrap());
         assert!(!matches("0 0 * * 7", &t(0, 0, 1, 1, 1)).unwrap());
+    }
+
+    #[test]
+    fn date_or_weekday_when_both_are_set() {
+        let expr = "0 9 1 * 1";
+        assert!(matches(expr, &t(0, 9, 1, 10, 4)).unwrap(), "the 1st, a Thursday");
+        assert!(matches(expr, &t(0, 9, 5, 10, 1)).unwrap(), "a Monday, the 5th");
+        assert!(!matches(expr, &t(0, 9, 6, 10, 2)).unwrap(), "neither");
+        // One side left open still narrows by the other.
+        assert!(!matches("0 9 1-7 * *", &t(0, 9, 8, 10, 1)).unwrap());
+        assert!(!matches("0 9 * * 1", &t(0, 9, 1, 10, 4)).unwrap());
+        assert!(matches("0 9 */2 * *", &t(0, 9, 3, 10, 6)).unwrap());
     }
 
     #[test]
