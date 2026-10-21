@@ -803,7 +803,7 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         }
     }
     s.push_str(
-        "When the user writes @id or @display-name, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too.\n",
+        "When the user writes @id or @display-name, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, and the reply comes back to you as a new `[crew handoff from:…]` message. So after `crew tell`, end your turn. Do not wait, sleep, or check for the reply.\n",
     );
     s.push_str(
         "To change your display name, actually run `crew agent set --name \"New Name\"` (id defaults to CREW_AGENT_ID). Do not only claim you renamed yourself.\n",
@@ -1801,6 +1801,7 @@ mod tests {
         assert!(rules.contains("crew agent set --name"));
         assert!(!rules.contains("crew channel"));
         assert!(rules.contains("in the order they were written"));
+        assert!(rules.contains("after `crew tell`, end your turn"));
         assert!(rules.contains("crew routine add"));
         assert!(rules.contains("into 5-field cron"));
         assert!(rules.contains("numbers only"));

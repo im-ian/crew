@@ -337,7 +337,13 @@ pub fn print_event(ev: Event) -> anyhow::Result<()> {
                 println!();
             }
         }
-        Event::Told { from, to } => println!("ok {from} → {to}"),
+        Event::Told { from, to } => {
+            println!("ok {from} → {to}");
+            // A bot reads this mid-turn, and its tell starts only once that turn ends.
+            if from != "user" {
+                println!("{to} answers after your turn ends, and the reply comes back to you as a new message. End your turn now. Do not wait or check for it.");
+            }
+        }
         Event::Cloned { id } => println!("ok {id}"),
         Event::Messages { agent, messages } => {
             println!("# {agent} ({} messages)", messages.len());
