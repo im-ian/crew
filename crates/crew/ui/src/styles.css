@@ -1039,9 +1039,6 @@ header .who-name {
   background: var(--active);
   color: var(--ink);
 }
-.head-action.is-stop {
-  color: var(--ink);
-}
 .head-action:active {
   transform: scale(0.94);
 }

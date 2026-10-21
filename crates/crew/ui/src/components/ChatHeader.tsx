@@ -1,25 +1,20 @@
-import { isBusyStatus } from "../busy";
 import { useT } from "../LocaleContext";
 import type { AgentInfo } from "../types";
 import { WhoButton } from "./WhoButton";
-import { Info, StopSquare } from "../icons";
+import { Info } from "../icons";
 
 type Props = {
   currentAgent: AgentInfo | null;
   onOpenInfo: () => void;
   onOpenRoutines: () => void;
-  onStop?: (agentId?: string) => void;
 };
 
 export function ChatHeader({
   currentAgent,
   onOpenInfo,
   onOpenRoutines,
-  onStop,
 }: Props) {
   const t = useT();
-  const stopId =
-    currentAgent && isBusyStatus(currentAgent.status) ? currentAgent.id : null;
   const status = currentAgent?.status;
   const statusKey =
     status === "working"
@@ -49,17 +44,6 @@ export function ChatHeader({
           <span className={"head-status is-" + status}>{t(statusKey)}</span>
         ) : null}
       </div>
-      {stopId && onStop ? (
-        <button
-          type="button"
-          className="head-action is-stop"
-          title={t("header.stopTitle")}
-          aria-label={t("header.stop")}
-          onClick={() => onStop(stopId)}
-        >
-          <StopSquare />
-        </button>
-      ) : null}
       {currentAgent ? (
         <button
           type="button"
