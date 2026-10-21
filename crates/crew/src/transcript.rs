@@ -668,7 +668,6 @@ fn push_role(
     kind: Option<MessageKind>,
     peer: Option<String>,
 ) -> ChatMessage {
-    seal_now(agent);
     let msg = ChatMessage {
         id: new_id(),
         role,
@@ -681,16 +680,32 @@ fn push_role(
         approval: None,
         choice: None,
     };
-    if let Ok(mut map) = chats().lock() {
-        let chat = map
-            .entry(agent.to_string())
-            .or_insert_with(AgentChat::empty);
-        chat.messages.push(msg.clone());
-        chat.expecting = expect;
-        chat.pending_idx = None;
-        chat.dirty = false;
-        chat.last_byte = Instant::now();
-        persist(agent, chat);
+    let sealed = match chats().lock() {
+        Ok(mut map) => {
+            let chat = map
+                .entry(agent.to_string())
+                .or_insert_with(AgentChat::empty);
+            // A headless turn still answering keeps its reply and its stream.
+            // Sealing here split the reply around this row, and a row that
+            // expects no turn left the rest of the reply nowhere to go.
+            let sealed = if chat.hold {
+                None
+            } else {
+                finish_pending(agent, chat)
+            };
+            chat.messages.push(msg.clone());
+            if !chat.hold {
+                chat.expecting = expect;
+                chat.dirty = false;
+                chat.last_byte = Instant::now();
+            }
+            persist(agent, chat);
+            sealed
+        }
+        Err(_) => None,
+    };
+    if let Some(sealed) = sealed {
+        emit_sealed(agent, sealed);
     }
     emit(agent, msg.clone());
     msg
@@ -1495,6 +1510,45 @@ mod tests {
         let sealed = messages(&agent);
         assert_eq!(sealed.last().unwrap().text, "hello");
         drop_agent(&agent);
+    }
+
+    /// A teammate's reply or the user's follow-up can land while this bot is
+    /// still answering. Sealing there split the reply around the row, handed
+    /// the first half on as the whole answer, and a row that expects no turn
+    /// (the teammate's reply) left the rest of the answer nowhere to go.
+    #[test]
+    fn a_row_landing_mid_turn_leaves_the_reply_whole() {
+        crate::paths::testing::with_home("mid-turn", || {
+            let agent = format!(
+                "midturn-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            );
+            push_user(&agent, "user", "first");
+            let turn = begin_turn(&agent);
+            on_assistant_delta(&agent, "one");
+            push_handoff(&agent, "peer", "their answer");
+            on_assistant_delta(&agent, " two");
+            push_user(&agent, "user", "follow-up");
+            on_assistant_delta(&agent, " three");
+            end_turn_gen(&agent, Some(turn));
+            let rows: Vec<(Role, String)> = messages(&agent)
+                .into_iter()
+                .map(|m| (m.role, m.text))
+                .collect();
+            assert_eq!(
+                rows,
+                [
+                    (Role::User, "first".to_string()),
+                    (Role::Assistant, "one two three".to_string()),
+                    (Role::System, "their answer".to_string()),
+                    (Role::User, "follow-up".to_string()),
+                ]
+            );
+            drop_agent(&agent);
+        });
     }
 
     #[test]
