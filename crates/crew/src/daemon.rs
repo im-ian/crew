@@ -840,13 +840,19 @@ fn clear_serial_after(agent: &str) {
     }
 }
 
-/// A newer message from the user drops the teammates their last one named
-/// that have not started. The tells the bot ran itself, and another chat's
-/// chain running on through this bot, are not that message's to drop.
+/// A newer message from the user drops the teammates their earlier ones named
+/// that have not started, whether that message is answered or still waiting.
+/// The tells the bot ran itself, and another chat's chain running on through
+/// this bot, are not that message's to drop.
 fn drop_mention_followers(agent: &str) {
     if let Ok(mut board) = serial_board().lock() {
         if let Some(q) = board.queues.get_mut(agent) {
             q.retain(|job| !job.named_in(agent));
+        }
+    }
+    if let Ok(mut map) = inbox().lock() {
+        for item in map.get_mut(agent).into_iter().flatten() {
+            item.then.retain(|job| !job.named_in(agent));
         }
     }
 }
@@ -3395,6 +3401,44 @@ exec sleep 5"#,
             clear_inbox(&bot);
             take_origin(&bot);
             remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// "@B @C 리뷰해줘" waits while the bot is busy, then "리뷰는 취소": the
+    /// newer message drops the teammates the waiting one named (#27).
+    #[test]
+    fn a_newer_message_drops_whom_a_waiting_one_named() {
+        paths::testing::with_home("named-queued", || {
+            paths::write_notifications_enabled(false);
+            let [bot, b, c] = ["named-bot", "named-b", "named-c"].map(test_id);
+            for id in [&bot, &b, &c] {
+                insert_spawned_agent(AgentConfig::new(
+                    id.clone(),
+                    id.clone(),
+                    AgentCli::Claude.default_cmd(),
+                    None,
+                ))
+                .unwrap();
+            }
+            let Some(LiveAgent::Headless(session)) = agents().lock().unwrap().get(&bot).cloned()
+            else {
+                panic!("claude runs headless");
+            };
+            // Busy, so both messages wait in the inbox instead of starting a CLI.
+            session.inner.lock().unwrap().status = AgentStatus::Working;
+            send_agent(&bot, &format!("@{b} @{c} 리뷰해줘")).unwrap();
+            send_agent(&bot, "리뷰는 취소").unwrap();
+            let named: Vec<String> = inbox().lock().unwrap()[&bot]
+                .iter()
+                .flat_map(|item| item.then.iter().map(|job| job.to.clone()))
+                .collect();
+            assert!(named.is_empty(), "{named:?}");
+
+            session.inner.lock().unwrap().status = AgentStatus::Idle;
+            clear_inbox(&bot);
+            for id in [&bot, &b, &c] {
+                remove_agent(id).unwrap();
+            }
         });
     }
 
