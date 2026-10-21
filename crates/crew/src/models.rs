@@ -18,16 +18,16 @@ pub struct ModelList {
 const CLAUDE_MODELS: &[&str] = &["sonnet", "opus", "haiku", "fable"];
 
 pub fn list_models(cli: AgentCli) -> anyhow::Result<ModelList> {
-    // A missing CLI is an answer the picker shows, not an error.
-    if !paths::resolve_program(&cli.default_cmd()[0]).is_file() {
-        return Ok(ModelList::default());
-    }
+    // A missing CLI is an answer the picker shows, not an error. Its models
+    // still list where that needs no binary: a bot can run one off the PATH.
+    let installed = paths::resolve_program(&cli.default_cmd()[0]).is_file();
     let mut list = match cli {
+        AgentCli::Grok if !installed => ModelList::default(),
         AgentCli::Grok => list_grok_models()?,
         AgentCli::Claude => claude_models(),
         AgentCli::Codex => list_codex_models(),
     };
-    list.installed = true;
+    list.installed = installed;
     Ok(list)
 }
 
