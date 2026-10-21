@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 mod avatar;
 mod choice;
@@ -170,9 +170,11 @@ enum AgentCmd {
 
 #[derive(Subcommand)]
 enum RoutineCmd {
+    /// List routines. Defaults to $CREW_AGENT_ID, or every bot outside a session.
     List {
         agent: Option<String>,
     },
+    /// Add a routine. --schedule is 5-field cron or a short Korean/English sentence.
     Add {
         /// Agent id. Defaults to $CREW_AGENT_ID.
         #[arg(value_name = "AGENT")]
@@ -184,23 +186,46 @@ enum RoutineCmd {
         #[arg(long)]
         prompt: String,
     },
-    Remove {
-        agent: String,
-        key: String,
+    /// Change a routine's name, schedule, or prompt. Fields left out stay.
+    Edit {
+        #[command(flatten)]
+        target: RoutineRef,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        schedule: Option<String>,
+        #[arg(long)]
+        prompt: Option<String>,
     },
-    Pause {
-        agent: String,
-        key: String,
-    },
-    Resume {
-        agent: String,
-        key: String,
-    },
+    /// Delete a routine.
+    Remove(RoutineRef),
+    /// Stop a routine from firing until it is resumed.
+    Pause(RoutineRef),
+    /// Let a paused routine fire again.
+    Resume(RoutineRef),
     /// Fire immediately (test hook). Does not wait for cron.
-    Run {
-        agent: String,
-        key: String,
-    },
+    Run(RoutineRef),
+}
+
+// `KEY` alone is a routine of $CREW_AGENT_ID, so a bot can name its own
+// routine without knowing its id. `AGENT KEY` still works from a terminal.
+#[derive(Args)]
+struct RoutineRef {
+    /// Routine id or name, or the bot id when KEY follows
+    #[arg(value_name = "AGENT|KEY")]
+    first: String,
+    /// Routine id or name
+    #[arg(value_name = "KEY")]
+    second: Option<String>,
+}
+
+impl RoutineRef {
+    fn resolve(self, what: &str) -> anyhow::Result<(String, String)> {
+        match self.second {
+            Some(key) => Ok((self.first, key)),
+            None => Ok((require_agent_id(None, what)?, self.first)),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -696,6 +721,7 @@ fn apply_agent_set(
 fn run_routine(cmd: RoutineCmd) -> anyhow::Result<()> {
     match cmd {
         RoutineCmd::List { agent } => {
+            let agent = agent.and_then(empty_to_none).or_else(session_agent_id);
             if paths::is_socket_live() {
                 match client::rpc(Request::List)? {
                     Event::Agents { agents } => {
@@ -732,7 +758,35 @@ fn run_routine(cmd: RoutineCmd) -> anyhow::Result<()> {
                 add_offline_routine(&agent, name, schedule, prompt)
             }
         }
-        RoutineCmd::Remove { agent, key } => {
+        RoutineCmd::Edit {
+            target,
+            name,
+            schedule,
+            prompt,
+        } => {
+            let (agent, key) = target.resolve("routine edit")?;
+            if name.is_none() && schedule.is_none() && prompt.is_none() {
+                anyhow::bail!("routine edit needs --name, --schedule, or --prompt");
+            }
+            if paths::is_socket_live() {
+                match client::rpc(Request::EditRoutine {
+                    agent,
+                    key,
+                    name,
+                    schedule,
+                    prompt,
+                })? {
+                    Event::Error { message } => anyhow::bail!("{message}"),
+                    ev => client::print_event(ev),
+                }
+            } else {
+                mutate_offline_routine(&agent, &key, |routines, idx| {
+                    routines[idx].edit(name, schedule, prompt)
+                })
+            }
+        }
+        RoutineCmd::Remove(target) => {
+            let (agent, key) = target.resolve("routine remove")?;
             if paths::is_socket_live() {
                 match client::rpc(Request::RemoveRoutine { agent, key })? {
                     Event::Error { message } => anyhow::bail!("{message}"),
@@ -745,9 +799,16 @@ fn run_routine(cmd: RoutineCmd) -> anyhow::Result<()> {
                 })
             }
         }
-        RoutineCmd::Pause { agent, key } => set_routine_enabled(agent, key, false),
-        RoutineCmd::Resume { agent, key } => set_routine_enabled(agent, key, true),
-        RoutineCmd::Run { agent, key } => {
+        RoutineCmd::Pause(target) => {
+            let (agent, key) = target.resolve("routine pause")?;
+            set_routine_enabled(agent, key, false)
+        }
+        RoutineCmd::Resume(target) => {
+            let (agent, key) = target.resolve("routine resume")?;
+            set_routine_enabled(agent, key, true)
+        }
+        RoutineCmd::Run(target) => {
+            let (agent, key) = target.resolve("routine run")?;
             client::ensure_daemon()?;
             match client::rpc(Request::RunRoutine { agent, key })? {
                 Event::Error { message } => anyhow::bail!("{message}"),
@@ -980,5 +1041,43 @@ mod tests {
             require_agent_id(Some("grok".into()), "agent set").unwrap(),
             "grok"
         );
+    }
+
+    #[test]
+    fn routine_ref_takes_a_bot_and_key_or_just_a_key() {
+        match parse_ok(&["crew", "routine", "remove", "grok", "아침"]).cmd {
+            Some(Cmd::Routine(RoutineCmd::Remove(target))) => {
+                assert_eq!(
+                    target.resolve("routine remove").unwrap(),
+                    ("grok".into(), "아침".into())
+                );
+            }
+            _ => panic!("expected routine remove"),
+        }
+        match parse_ok(&["crew", "routine", "edit", "아침", "--schedule", "0 9 * * 1-5"]).cmd {
+            Some(Cmd::Routine(RoutineCmd::Edit {
+                target,
+                name,
+                schedule,
+                prompt,
+            })) => {
+                assert_eq!(target.first, "아침");
+                assert!(target.second.is_none());
+                assert!(name.is_none() && prompt.is_none());
+                assert_eq!(schedule.as_deref(), Some("0 9 * * 1-5"));
+            }
+            _ => panic!("expected routine edit"),
+        }
+    }
+
+    #[test]
+    fn routine_edit_keeps_fields_left_out() {
+        let mut r = Routine::new("아침".into(), "0 8 * * *".into(), "브리핑".into()).unwrap();
+        r.edit(None, Some("0 9 * * 1-5".into()), Some("  ".into()))
+            .unwrap();
+        assert_eq!(r.name, "아침");
+        assert_eq!(r.schedule, "0 9 * * 1-5");
+        assert_eq!(r.prompt, "브리핑");
+        assert!(r.edit(None, Some("61 * * * *".into()), None).is_err());
     }
 }

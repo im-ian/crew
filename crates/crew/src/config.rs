@@ -290,6 +290,41 @@ impl Routine {
         })
     }
 
+    /// Replace the fields that are given and non-blank. A schedule may be cron
+    /// or a short Korean/English sentence.
+    pub fn edit(
+        &mut self,
+        name: Option<String>,
+        schedule: Option<String>,
+        prompt: Option<String>,
+    ) -> anyhow::Result<()> {
+        if let Some(name) = name {
+            let name = name.trim();
+            if !name.is_empty() {
+                self.name = name.to_string();
+            }
+        }
+        if let Some(schedule) = schedule {
+            let schedule = schedule.trim();
+            if !schedule.is_empty() {
+                let resolved = if cron::validate(schedule).is_ok() {
+                    schedule.to_string()
+                } else {
+                    crate::nl_routine::parse_nl_routine(schedule)?.schedule
+                };
+                cron::validate(&resolved)?;
+                self.schedule = resolved;
+            }
+        }
+        if let Some(prompt) = prompt {
+            let prompt = prompt.trim();
+            if !prompt.is_empty() {
+                self.prompt = prompt.to_string();
+            }
+        }
+        Ok(())
+    }
+
     pub fn is_due(&self, now: &cron::LocalTime) -> bool {
         if !self.enabled {
             return false;

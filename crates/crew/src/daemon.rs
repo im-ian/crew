@@ -2317,30 +2317,7 @@ fn edit_routine(
     let mut routines = read_routines(target)?;
     let idx = find_routine_index(&routines, key)
         .ok_or_else(|| anyhow::anyhow!("unknown routine {key}"))?;
-    if let Some(name) = name {
-        let name = name.trim();
-        if !name.is_empty() {
-            routines[idx].name = name.to_string();
-        }
-    }
-    if let Some(schedule) = schedule {
-        let schedule = schedule.trim();
-        if !schedule.is_empty() {
-            let resolved = if cron::validate(schedule).is_ok() {
-                schedule.to_string()
-            } else {
-                crate::nl_routine::parse_nl_routine(schedule)?.schedule
-            };
-            cron::validate(&resolved)?;
-            routines[idx].schedule = resolved;
-        }
-    }
-    if let Some(prompt) = prompt {
-        let prompt = prompt.trim();
-        if !prompt.is_empty() {
-            routines[idx].prompt = prompt.to_string();
-        }
-    }
+    routines[idx].edit(name, schedule, prompt)?;
     write_routines(target, routines)
 }
 
