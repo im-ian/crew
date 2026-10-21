@@ -41,6 +41,9 @@ export function InfoPane({
   const [effort, setEffort] = useState("");
   const [cwd, setCwd] = useState("");
   const saveTimer = useRef<number | null>(null);
+  // Until the list refreshes the card still shows the old CLI's models, and a
+  // pick from it would land on the new CLI.
+  const switching = useRef(false);
   const fieldsRef = useRef({ name, role, description, model, effort, cwd });
   fieldsRef.current = { name, role, description, model, effort, cwd };
 
@@ -151,15 +154,23 @@ export function InfoPane({
             effort={effort}
             active={open}
             onCli={async (next) => {
-              // Land pending edits under the old CLI; the switch drops its model.
-              await flushSave();
-              if (await onSetCli(next)) setModel("");
+              if (switching.current) return;
+              switching.current = true;
+              try {
+                // Land pending edits under the old CLI; the switch drops its model.
+                await flushSave();
+                if (await onSetCli(next)) setModel("");
+              } finally {
+                switching.current = false;
+              }
             }}
             onModel={(next) => {
+              if (switching.current) return;
               setModel(next);
               void flushSave({ model: next });
             }}
             onEffort={(next) => {
+              if (switching.current) return;
               setEffort(next);
               void flushSave({ effort: next });
             }}
