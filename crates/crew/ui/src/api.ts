@@ -81,8 +81,6 @@ export const api = {
   setAvatar: (id: string, data: string, name?: string | null) =>
     invoke<void>("set_avatar", { id, data, name: name ?? null }),
   clearAvatar: (id: string) => invoke<void>("clear_avatar", { id }),
-  addRoutine: (agent: string, name: string, schedule: string, prompt: string) =>
-    invoke<void>("add_routine", { agent, name, schedule, prompt }),
   removeRoutine: (agent: string, key: string) =>
     invoke<void>("remove_routine", { agent, key }),
   setRoutineEnabled: (agent: string, key: string, enabled: boolean) =>

@@ -28,7 +28,6 @@ type Props = {
     effort: string;
     cwd: string;
   }) => Promise<void>;
-  onAddRoutine: (name: string, schedule: string, prompt: string) => Promise<void>;
   onToggleRoutine: (r: Routine) => Promise<void>;
   onDeleteRoutine: (r: Routine) => Promise<void>;
   onRunRoutine: (r: Routine) => Promise<void>;
@@ -45,7 +44,6 @@ export function AgentPane({
   onReset,
   onSetFace,
   onSave,
-  onAddRoutine,
   onToggleRoutine,
   onDeleteRoutine,
   onRunRoutine,
@@ -101,7 +99,6 @@ export function AgentPane({
             <RoutinesModal
               open={open}
               agent={agent}
-              onAdd={onAddRoutine}
               onToggle={onToggleRoutine}
               onDelete={onDeleteRoutine}
               onRun={onRunRoutine}
