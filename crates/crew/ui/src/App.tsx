@@ -233,7 +233,6 @@ export function App() {
           onOpenRoutines={() => {
             if (crew.selected) crew.openRoutines(crew.selected);
           }}
-          onStop={(id) => void crew.stopAgent(id)}
         />
         <ChatThread
           messages={crew.messages}
