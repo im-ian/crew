@@ -205,8 +205,10 @@ fn recap_of(msgs: &[ChatMessage]) -> Option<String> {
         let line = format!("{who}: {text}");
         let len = line.chars().count();
         if used + len > RECAP_BUDGET {
+            // The newest message alone is too long: its end is what comes next.
             if lines.is_empty() {
-                lines.push(line.chars().take(RECAP_BUDGET).collect());
+                let tail: String = text.chars().skip(len - RECAP_BUDGET).collect();
+                lines.push(format!("{who}: (start left out) {tail}"));
             }
             cut = true;
             break;
@@ -1296,8 +1298,15 @@ mod tests {
             row(Role::Assistant, "bot", &long, None),
         ];
         let recap = recap_of(&msgs).unwrap();
-        assert!(recap.starts_with("(earlier messages left out)\n\nassistant: x"));
+        assert!(recap.starts_with("(earlier messages left out)\n\nassistant: (start left out) x"));
         assert!(!recap.contains("first"));
+
+        // One message over the budget keeps its end, where a report concludes.
+        let report = format!("{}the conclusion", "y".repeat(RECAP_BUDGET));
+        let msgs = vec![row(Role::Assistant, "bot", &report, None)];
+        let recap = recap_of(&msgs).unwrap();
+        assert!(recap.ends_with("the conclusion"), "{recap}");
+        assert!(recap.contains("assistant: (start left out) y"));
     }
 
     #[test]

@@ -113,8 +113,9 @@ pub fn clear_recap(agent_id: &str) {
 fn with_recap(recap: &str, prompt: &str) -> String {
     format!(
         "[crew recap] This bot just moved to you from another AI CLI. Below is the chat \
-         so far, oldest first. Read it for context only; do not answer it. Answer the \
-         message after it.\n<chat>\n{recap}\n</chat>\n\n{prompt}"
+         so far, oldest first; `assistant` lines are the bot's earlier replies, errors \
+         its old CLI printed included. Read it for context only; do not answer it. \
+         Answer the message after it.\n<chat>\n{recap}\n</chat>\n\n{prompt}"
     )
 }
 
