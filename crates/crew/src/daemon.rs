@@ -559,8 +559,22 @@ fn answer_choice(
     send_agent_shown(agent, &crate::choice::format_answer_masked(&updated), &text)
 }
 
+/// `/compact`, `/context`: a CLI command, which reads as one only when the
+/// prompt starts with it. A path is not one.
+fn is_slash_command(text: &str) -> bool {
+    text.strip_prefix('/')
+        .and_then(|rest| rest.split(char::is_whitespace).next())
+        .is_some_and(|name| !name.is_empty() && !name.contains('/'))
+}
+
 fn start_delivery(id: &str, text: &str, newline: bool, origin: TurnOrigin) -> anyhow::Result<()> {
-    let pending = take_handoffs(id);
+    // Teammates' replies in front of a command turn it into words. They wait
+    // for the next prompt instead.
+    let pending = if is_slash_command(text) {
+        Vec::new()
+    } else {
+        take_handoffs(id)
+    };
     let text = if pending.is_empty() {
         text.to_string()
     } else {
@@ -3123,6 +3137,42 @@ mod daemon_tests {
             assert!(
                 approve_agent(&bot, true).is_err(),
                 "nothing left to approve"
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// `/compact` reads as a command only when the prompt starts with it. A
+    /// teammate's reply waiting for the next prompt went in front of it, and
+    /// the CLI took the command for words.
+    #[test]
+    fn a_slash_command_goes_out_alone() {
+        assert!(is_slash_command("/compact keep the API notes"));
+        assert!(!is_slash_command("/Users/me/shot.png 이거 봐줘"));
+        assert!(!is_slash_command("/ 안녕"));
+        assert!(!is_slash_command("이거 /compact"));
+        paths::testing::with_home("slash", || {
+            let bot = test_id("slash");
+            fake_bot(
+                &bot,
+                r#"{"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted </local-command-stdout>"}}
+{"type":"result","subtype":"success","is_error":false,"result":""}"#,
+            );
+            enqueue_handoff(&bot, "peer", "their answer");
+
+            send_agent(&bot, "/compact").unwrap();
+            wait_idle(&bot);
+            let prompt = fs::read_to_string(paths::home_dir().join("prompt")).unwrap();
+            assert_eq!(prompt, "/compact");
+            let last = crate::transcript::messages(&bot).pop().unwrap();
+            assert_eq!(
+                (last.role, last.text.as_str()),
+                (Role::Assistant, "Compacted")
+            );
+            let next = flush_handoffs(&bot, "hi");
+            assert!(
+                next.contains("their answer"),
+                "it rides the next prompt: {next}"
             );
             remove_agent(&bot).unwrap();
         });
