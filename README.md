@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/readme/routines.png" alt="루틴 설정 — 예약된 일, 말로 추가, 매일·평일·매주 피커" width="920">
+  <img src="docs/readme/routines.png" alt="루틴 — 채팅으로 등록하고, 패널은 목록과 켜기/끄기 스위치" width="920">
 </p>
 
 ---
