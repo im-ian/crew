@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clockLabel, clockLabels } from "./clock";
+import { clockLabel, clockLabels, listStamp } from "./clock";
 
 const at = (h: number, m: number, day = 9) =>
   new Date(2026, 8, day, h, m).getTime();
@@ -66,5 +66,34 @@ describe("clockLabels", () => {
     expect(out[0]).toContain("3:24");
     expect(out[1]).toBe("");
     expect(out[2]).toContain("4:25");
+  });
+});
+
+describe("listStamp", () => {
+  const now = new Date(2026, 9, 21, 16, 0).getTime();
+
+  it("is the wall clock on the same day", () => {
+    const ts = new Date(2026, 9, 21, 15, 24).getTime();
+    expect(listStamp(ts, "en", now)).toMatch(/^3:24\s?PM$/);
+    expect(listStamp(ts, "ko", now)).toContain("3:24");
+  });
+
+  it("is the date once the day has passed", () => {
+    const label = listStamp(new Date(2026, 9, 20, 15, 24).getTime(), "en", now);
+    expect(label).toMatch(/10/);
+    expect(label).toMatch(/20/);
+    expect(label).not.toMatch(/2026/);
+    expect(label).not.toMatch(/PM/);
+  });
+
+  it("keeps the year when the row is from another year", () => {
+    const label = listStamp(new Date(2025, 9, 20, 15, 24).getTime(), "ko", now);
+    expect(label).toContain("2025");
+    expect(label).toMatch(/10/);
+    expect(label).toMatch(/20/);
+  });
+
+  it("has nothing to say without a stamp", () => {
+    expect(listStamp(0, "en", now)).toBe("");
   });
 });

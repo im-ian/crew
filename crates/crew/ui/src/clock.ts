@@ -2,6 +2,8 @@
 // on every streaming chunk, so keep one per locale.
 const times = new Map<string, Intl.DateTimeFormat | null>();
 const days = new Map<string, Intl.DateTimeFormat | null>();
+const listDays = new Map<string, Intl.DateTimeFormat | null>();
+const listYears = new Map<string, Intl.DateTimeFormat | null>();
 
 function cached(
   store: Map<string, Intl.DateTimeFormat | null>,
@@ -62,4 +64,32 @@ export function clockLabels(
     const day = dayLabel(ts, locale);
     return day ? `${day} ${time}` : time;
   });
+}
+
+/**
+ * What a chat row in the rail shows. Today is the wall clock. An older row is
+ * only the date: the rail is too narrow for the thread's date-and-time stamp.
+ * A row from another year keeps the year.
+ */
+export function listStamp(ts: number, locale: string, now = Date.now()): string {
+  if (!ts) return "";
+  const at = new Date(ts);
+  const today = new Date(now);
+  if (
+    at.getFullYear() === today.getFullYear() &&
+    at.getMonth() === today.getMonth() &&
+    at.getDate() === today.getDate()
+  ) {
+    return clockLabel(ts, locale);
+  }
+  const withYear = at.getFullYear() !== today.getFullYear();
+  return (
+    cached(
+      withYear ? listYears : listDays,
+      locale,
+      withYear
+        ? { year: "numeric", month: "numeric", day: "numeric" }
+        : { month: "numeric", day: "numeric" },
+    )?.format(at) ?? ""
+  );
 }
