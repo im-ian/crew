@@ -759,7 +759,8 @@ export function useCrew() {
     const expecting = lastRole === "user";
     const hot = working || expecting;
     const msgMs = hot ? 200 : 2000;
-    const listMs = hot ? 1000 : 2000;
+    // Status ends the wait dots, so it must not lag the messages while hot.
+    const listMs = hot ? 200 : 2000;
     const msgId = window.setInterval(() => void tickMessages(), msgMs);
     const listId = window.setInterval(() => void tickList(), listMs);
     return () => {

@@ -22,6 +22,20 @@ import { MdBody } from "./MdBody";
 import { WhoButton, whoColor } from "./WhoButton";
 
 const STICK_PX = 24;
+// Streaming text is its own sign of life, so the wait dots only cover a bot
+// that has gone quiet this long. It must outlast a CLI's tail after the last
+// word (grok sends `end` ~0.5s later), or the dots flash as a reply ends.
+const QUIET_MS = 1000;
+
+/** True once `value` has held still for `ms`. */
+function useQuiet(value: string, ms: number): boolean {
+  const [still, setStill] = useState<string | null>(null);
+  useEffect(() => {
+    const t = setTimeout(() => setStill(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return still === value;
+}
 
 type Props = {
   messages: ChatMessage[];
@@ -108,6 +122,10 @@ export function ChatThread({
       onSelectAgent(id);
     });
   const lastVisible = visible[visible.length - 1];
+  const quiet = useQuiet(
+    lastVisible ? lastVisible.id + "\n" + lastVisible.text : "",
+    QUIET_MS,
+  );
   function workingPlaceholders(): AgentInfo[] {
     const live = streaming && currentAgent ? [currentAgent] : [];
     return live.filter((a) => {
@@ -152,6 +170,7 @@ export function ChatThread({
     selected,
     selectedKind,
     streaming,
+    quiet,
     highlightId,
     showTools,
   ]);
@@ -221,6 +240,7 @@ export function ChatThread({
             const m = row.msg;
             const caret =
               streaming &&
+              quiet &&
               m.role === "assistant" &&
               m.id === lastVisible?.id;
             const flash = highlightId === m.id;
@@ -583,7 +603,8 @@ function Incoming({
   const t = useT();
   const queued = !!m.queued;
   const { reply, body } = splitReply(m.text || "");
-  const parts = splitBubbles(body);
+  // The wait dots get a bubble of their own under the text, not a tail on it.
+  const parts = caret ? [...splitBubbles(body), ""] : splitBubbles(body);
   return (
     <div
       className={
@@ -624,46 +645,32 @@ function Incoming({
           </div>
         )}
         {reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
-        {parts.length
-          ? parts.map((part, i) => {
-              const last = i === parts.length - 1;
-              const stack =
-                parts.length > 1
-                  ? i === 0
-                    ? " stack-first"
-                    : last
-                      ? " stack-last"
-                      : " stack-mid"
-                  : "";
-              return (
-                <MdBody
-                  key={m.id + "-" + i}
-                  className={
-                    "bubble md incoming" +
-                    stack +
-                    (caret && last ? " streaming" : "") +
-                    (queued ? " queued" : "")
-                  }
-                  text={part}
-                  agents={agents}
-                  onMention={onSelectAgent}
-                  baseDir={agent?.cwd || undefined}
-                />
-              );
-            })
-          : caret
-            ? (
-                <MdBody
-                  className={
-                    "bubble md incoming streaming" + (queued ? " queued" : "")
-                  }
-                  text=""
-                  agents={agents}
-                  onMention={onSelectAgent}
-                  baseDir={agent?.cwd || undefined}
-                />
-              )
-            : null}
+        {parts.map((part, i) => {
+          const last = i === parts.length - 1;
+          const stack =
+            parts.length > 1
+              ? i === 0
+                ? " stack-first"
+                : last
+                  ? " stack-last"
+                  : " stack-mid"
+              : "";
+          return (
+            <MdBody
+              key={m.id + "-" + i}
+              className={
+                "bubble md incoming" +
+                stack +
+                (caret && last ? " streaming" : "") +
+                (queued ? " queued" : "")
+              }
+              text={part}
+              agents={agents}
+              onMention={onSelectAgent}
+              baseDir={agent?.cwd || undefined}
+            />
+          );
+        })}
         {queued ? <QueueWait /> : null}
         {m.choice ? (
           <ChoiceCard

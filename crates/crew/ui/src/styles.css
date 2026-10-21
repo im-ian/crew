@@ -1219,9 +1219,7 @@ button.msg-avatar {
 .bubble.md .code-wrap:last-child > pre {
   margin-bottom: 0;
 }
-.bubble.streaming p:last-child::after,
-.bubble.streaming:empty::after,
-.bubble.streaming:not(:has(p, pre, ul, ol, h1, h2, h3))::after {
+.bubble.streaming::after {
   content: ".";
   display: inline-block;
   min-width: 1.45em;
@@ -1231,9 +1229,6 @@ button.msg-avatar {
   letter-spacing: 0.08em;
   text-align: left;
   animation: wait-dots 1.4s infinite;
-}
-.bubble.streaming p:last-child::after {
-  min-width: 0;
 }
 @keyframes wait-dots {
   0%, 20% { content: "."; }
@@ -1502,9 +1497,7 @@ button.channel-who:hover {
 }
 @media (prefers-reduced-motion: reduce) {
   .queue-dots i { animation: none; opacity: 0.55; }
-  .bubble.streaming p:last-child::after,
-  .bubble.streaming:empty::after,
-  .bubble.streaming:not(:has(p, pre, ul, ol, h1, h2, h3))::after {
+  .bubble.streaming::after {
     animation: none;
     content: "...";
   }

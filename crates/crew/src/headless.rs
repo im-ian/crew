@@ -275,7 +275,7 @@ fn run_turn(
     if let Err(err) = crate::paths::create_cwd(&cwd) {
         eprintln!("[crew] cwd {}: {err:#}", cwd.display());
     }
-    let result = spawn_and_stream(&session, &argv, generation, &cwd);
+    let result = spawn_and_stream(&session, &argv, generation, turn, &cwd);
 
     let stale = session
         .inner
@@ -387,6 +387,7 @@ fn spawn_and_stream(
     session: &HeadlessSession,
     argv: &[String],
     generation: u64,
+    turn: u64,
     cwd: &std::path::Path,
 ) -> anyhow::Result<TurnOutcome> {
     if argv.is_empty() {
@@ -437,6 +438,7 @@ fn spawn_and_stream(
     let cli = CliKind::from_program(&argv[0]);
     let mut state = ParseState::default();
     let mut plain = String::new();
+    let mut sealed = false;
     let reader = BufReader::new(stdout);
     for line in reader.lines() {
         let line = match line {
@@ -444,6 +446,11 @@ fn spawn_and_stream(
             Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(err) => return Err(err.into()),
         };
+        // Keep draining so the CLI never blocks on a full pipe while it exits.
+        if sealed {
+            continue;
+        }
+        let mut turn_end = false;
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
             for card in crate::tool_card::from_events(&v) {
                 crate::transcript::push_tool(
@@ -453,6 +460,7 @@ fn spawn_and_stream(
                     &card.detail,
                 );
             }
+            turn_end = is_turn_end(cli, &v);
         }
         if let Some(chunk) = ingest_line(cli, &line, &mut state) {
             feed_text(cli, session, &chunk);
@@ -472,6 +480,11 @@ fn spawn_and_stream(
             if let Ok(mut inner) = session.inner.lock() {
                 inner.session_id = Some(id.clone());
             }
+        }
+        // Without text the exit path still has an error to post, so wait for it.
+        if turn_end && state.got_text {
+            end_turn_early(session, generation, turn);
+            sealed = true;
         }
     }
 
@@ -513,6 +526,35 @@ fn spawn_and_stream(
         got_text: state.got_text,
         error,
     })
+}
+
+/// Each CLI's own "turn over" event. The process outlives it by about a second
+/// (session save, MCP shutdown), and the chat should not wait for that.
+fn is_turn_end(cli: CliKind, v: &Value) -> bool {
+    let ty = v.get("type").and_then(Value::as_str);
+    match cli {
+        CliKind::Grok => ty == Some("end"),
+        CliKind::Claude => ty == Some("result"),
+        CliKind::Codex => ty == Some("turn.completed"),
+        CliKind::Other => false,
+    }
+}
+
+/// Seal the reply and show the agent idle before the CLI exits. `inner.child`
+/// stays set until exit, so a send in that gap still queues instead of resuming
+/// a session the CLI is still writing; run_turn pumps the inbox after exit.
+fn end_turn_early(session: &HeadlessSession, generation: u64, turn: u64) {
+    crate::transcript::end_turn_gen(&session.id, Some(turn));
+    if let Ok(mut inner) = session.inner.lock() {
+        if inner.generation != generation {
+            return;
+        }
+        if inner.status == AgentStatus::Working {
+            inner.status = AgentStatus::Idle;
+        }
+        inner.seq += 1;
+    }
+    crate::daemon::emit_agent_frame(&session.id);
 }
 
 fn feed_text(cli: CliKind, session: &HeadlessSession, chunk: &str) {
@@ -853,6 +895,18 @@ mod tests {
         let mut st = ParseState::default();
         let chunk = ingest_line(CliKind::Grok, line, &mut st);
         (chunk, st)
+    }
+
+    #[test]
+    fn turn_end_is_each_clis_own_event() {
+        let end = |cli, line: &str| is_turn_end(cli, &serde_json::from_str(line).unwrap());
+        assert!(end(CliKind::Grok, r#"{"type":"end"}"#));
+        assert!(end(CliKind::Claude, r#"{"type":"result","subtype":"success"}"#));
+        assert!(end(CliKind::Codex, r#"{"type":"turn.completed"}"#));
+        // a failed codex turn has no text, so it waits for exit to post the error
+        assert!(!end(CliKind::Codex, r#"{"type":"turn.failed"}"#));
+        assert!(!end(CliKind::Claude, r#"{"type":"assistant"}"#));
+        assert!(!end(CliKind::Other, r#"{"type":"end"}"#));
     }
 
     #[test]
