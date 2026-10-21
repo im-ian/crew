@@ -165,25 +165,15 @@ pub fn last_ts(key: &str) -> u64 {
         .unwrap_or(0)
 }
 
-/// The bot that asked for the turn starting here, or None for the user's own.
-pub fn set_peer(agent: &str, peer: Option<String>) {
-    if let Ok(mut map) = chats().lock() {
-        map.entry(agent.to_string())
-            .or_insert_with(AgentChat::empty)
-            .peer = peer;
-    }
-}
-
-/// Another bot's tell lands before the turn it starts, so it is tagged here.
-pub fn mark_peer(agent: &str, id: &str, peer: &str) {
-    if let Ok(mut map) = chats().lock() {
-        if let Some(chat) = map.get_mut(agent) {
-            if let Some(m) = chat.messages.iter_mut().find(|m| m.id == id) {
-                m.peer = Some(peer.to_string());
-                persist(agent, chat);
-            }
-        }
-    }
+/// The bot that asked for the turn starting here, or None for the user's own
+/// and once a turn ends. Returns what it replaces, for a delivery that did not
+/// go out.
+pub fn set_peer(agent: &str, peer: Option<String>) -> Option<String> {
+    let mut map = chats().lock().ok()?;
+    let chat = map
+        .entry(agent.to_string())
+        .or_insert_with(AgentChat::empty);
+    std::mem::replace(&mut chat.peer, peer)
 }
 
 pub fn preview(agent: &str) -> Option<String> {
@@ -260,10 +250,11 @@ fn recap_of(msgs: &[ChatMessage]) -> Option<String> {
 }
 
 pub fn push_user(agent: &str, from: &str, text: &str) -> ChatMessage {
-    push_role(agent, Role::User, from, text, true, None)
+    push_role(agent, Role::User, from, text, true, None, None)
 }
 
-pub fn push_system(agent: &str, from: &str, text: &str) -> ChatMessage {
+/// `peer` is the bot that asked for the turn this row starts, if one did.
+pub fn push_system(agent: &str, from: &str, text: &str, peer: Option<String>) -> ChatMessage {
     push_role(
         agent,
         Role::System,
@@ -271,11 +262,13 @@ pub fn push_system(agent: &str, from: &str, text: &str) -> ChatMessage {
         text,
         true,
         infer_system_kind(from),
+        peer,
     )
 }
 
 /// System row that must not open a turn, e.g. a "sent to other session" receipt.
-pub fn push_notice(agent: &str, from: &str, text: &str) -> ChatMessage {
+/// `peer` is the bot that asked for the turn it was sent from, if one did.
+pub fn push_notice(agent: &str, from: &str, text: &str, peer: Option<String>) -> ChatMessage {
     push_role(
         agent,
         Role::System,
@@ -283,6 +276,7 @@ pub fn push_notice(agent: &str, from: &str, text: &str) -> ChatMessage {
         text,
         false,
         Some(MessageKind::Sent),
+        peer,
     )
 }
 
@@ -294,6 +288,7 @@ pub fn push_handoff(agent: &str, from: &str, text: &str) -> ChatMessage {
         text,
         false,
         Some(MessageKind::Handoff),
+        None,
     )
 }
 
@@ -637,6 +632,7 @@ pub fn push_routine(agent: &str, name: &str, text: &str) -> ChatMessage {
         text,
         true,
         Some(MessageKind::Routine),
+        None,
     )
 }
 
@@ -670,16 +666,17 @@ fn push_role(
     text: &str,
     expect: bool,
     kind: Option<MessageKind>,
+    peer: Option<String>,
 ) -> ChatMessage {
     seal_now(agent);
-    let mut msg = ChatMessage {
+    let msg = ChatMessage {
         id: new_id(),
         role,
         from: from.to_string(),
         text: text.to_string(),
         ts: now_ms(),
         queued: false,
-        peer: None,
+        peer,
         kind,
         approval: None,
         choice: None,
@@ -688,11 +685,6 @@ fn push_role(
         let chat = map
             .entry(agent.to_string())
             .or_insert_with(AgentChat::empty);
-        // A tell the bot sends belongs to the exchange its turn is part of.
-        // The rest written here is for the user, or tagged by the caller.
-        if msg.kind == Some(MessageKind::Sent) {
-            msg.peer = chat.peer.clone();
-        }
         chat.messages.push(msg.clone());
         chat.expecting = expect;
         chat.pending_idx = None;
@@ -1387,12 +1379,13 @@ mod tests {
         );
         drop_agent(&agent);
         let seen = push_user(&agent, "user", "안녕");
-        let tell = push_system(&agent, "rival", "가위바위보 한 판");
-        mark_peer(&agent, &tell.id, "rival");
+        push_system(&agent, "rival", "가위바위보 한 판", Some("rival".into()));
         set_peer(&agent, Some("rival".into()));
         on_assistant_delta(&agent, "보");
         seal_now(&agent);
-        push_notice(&agent, "to:rival", "보");
+        // The turn ends before its tell back goes out.
+        set_peer(&agent, None);
+        push_notice(&agent, "to:rival", "보", Some("rival".into()));
         assert_eq!(last_ts(&agent), seen.ts);
         let rows = messages(&agent);
         assert!(rows[1..].iter().all(|m| m.peer.as_deref() == Some("rival")));
@@ -1407,7 +1400,6 @@ mod tests {
 
         let typed = push_user(&agent, "user", "누가 이겼어?");
         assert_eq!(typed.peer, None, "what the user typed is news");
-        set_peer(&agent, None);
         on_assistant_delta(&agent, "내가 이겼어");
         seal_now(&agent);
         assert!(last_ts(&agent) >= typed.ts);
@@ -1564,7 +1556,7 @@ mod tests {
                 .unwrap_or(0)
         );
         drop_agent(&agent);
-        let msg = push_notice(&agent, "to:pm", "hello");
+        let msg = push_notice(&agent, "to:pm", "hello", None);
         assert_eq!(msg.role, Role::System);
         assert_eq!(msg.from, "to:pm");
         assert_eq!(msg.text, "hello");
@@ -1586,7 +1578,7 @@ mod tests {
                 .unwrap_or(0)
         );
         drop_agent(&agent);
-        let msg = push_system(&agent, "alpha", "wait");
+        let msg = push_system(&agent, "alpha", "wait", None);
         assert!(!msg.queued);
         set_queued(&agent, &msg.id, true);
         assert!(messages(&agent).last().unwrap().queued);
@@ -1662,7 +1654,7 @@ mod tests {
                 .unwrap_or(0)
         );
         drop_agent(&agent);
-        push_system(&agent, "user", "안녕?");
+        push_system(&agent, "user", "안녕?", None);
         expect_echo(&agent, "[crew from:user]\n안녕?");
         on_pty_bytes(
             &agent,

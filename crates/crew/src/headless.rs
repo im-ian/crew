@@ -356,7 +356,7 @@ fn run_turn(
     }
     crate::daemon::emit_agent_frame(&session.id);
     // Before the inbox: the next turn replaces this origin.
-    crate::daemon::wake_asker(&session.id);
+    crate::daemon::turn_ended(&session.id);
     crate::daemon::pump_inbox(&session.id);
 }
 

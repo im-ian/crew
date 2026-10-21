@@ -208,10 +208,6 @@ fn enqueue_handoff(peer: &str, from: &str, text: &str) {
     }
 }
 
-fn drop_pending_from(peer: &str, from: &str) {
-    take_handoff_from(peer, from);
-}
-
 /// `enqueue_handoff` keeps one entry per sender, so this is all of them.
 fn take_handoff_from(peer: &str, from: &str) -> Option<PendingHandoff> {
     let mut map = pending_handoffs().lock().ok()?;
@@ -397,8 +393,10 @@ fn set_live_status(id: &str, status: AgentStatus) {
 }
 
 fn interrupt_turn(id: &str) -> anyhow::Result<()> {
-    // A stop ends the chain. The members still waiting must not answer it.
+    // A stop ends the chain. The members still waiting must not answer it, and
+    // the bot that asked is not woken with what was said before the stop.
     clear_serial_after(id);
+    take_wake(id);
     let live = {
         let map = agents().lock().expect("agents mutex");
         map.get(id)
@@ -567,14 +565,22 @@ fn start_delivery(id: &str, text: &str, newline: bool, origin: TurnOrigin) -> an
     } else {
         crate::protocol::attach_after_marker(text, &render_handoffs(&pending))
     };
-    crate::transcript::set_peer(id, asked_by(&origin, id));
+    let prev_peer = crate::transcript::set_peer(id, asked_by(&origin, id));
+    let prev_origin = get_origin(id);
     set_origin(id, origin);
     match deliver(id, &text, newline) {
         Ok(()) => Ok(()),
         Err(err) => {
             restore_handoffs(id, pending);
             crate::transcript::cancel_expect(id);
-            take_origin(id);
+            // A busy agent is still in the turn these belong to.
+            crate::transcript::set_peer(id, prev_peer);
+            match prev_origin {
+                Some(prev) => set_origin(id, prev),
+                None => {
+                    take_origin(id);
+                }
+            }
             Err(err)
         }
     }
@@ -611,7 +617,7 @@ fn note_relay_stop(id: &str, origin: &TurnOrigin) {
     } else {
         "봇끼리 계속 주고받아서 여기서 멈췄습니다. 말을 걸면 다시 이어집니다."
     };
-    crate::transcript::push_system(id, "crew", line);
+    crate::transcript::push_system(id, "crew", line, None);
 }
 
 pub(crate) fn pump_inbox(id: &str) {
@@ -995,18 +1001,43 @@ fn notify_from_frame(ev: &Event) {
         .ok()
         .and_then(|m| m.get(agent).map(|c| c.display_name().to_string()))
         .unwrap_or_else(|| agent.clone());
-    // The bot that asked for this turn finishes it, in its own chat.
-    let asked = get_origin(agent)
-        .and_then(|o| asked_by(&o, agent))
-        .is_some();
+    // A bot waiting on this turn is woken with the reply and finishes in its
+    // own chat. Without that wake, this finish is the user's only notice.
+    let waited = get_origin(agent)
+        .and_then(|o| owed_wake(&o, agent))
+        .is_some_and(|(asker, wake)| known_agent(&asker) && !targeting::relay_exhausted(&wake));
     let interrupted = agent_interrupted(agent);
-    crate::notify::maybe_status_notify(agent, &name, prev, *status, interrupted || asked);
+    crate::notify::maybe_status_notify(agent, &name, prev, *status, interrupted || waited);
 }
 
 /// The bot that asked for this turn, when the reply is copied into its chat.
 /// The turn is that chat's news, not this one's.
 fn asked_by(origin: &TurnOrigin, agent: &str) -> Option<String> {
     targeting::postback_targets(origin, agent).agent
+}
+
+/// The wake `id`'s turn still owes: the bot that ran `crew tell` and is
+/// waiting, and the origin the reply reaches it with. The wake is a hop.
+fn owed_wake(origin: &TurnOrigin, id: &str) -> Option<(String, TurnOrigin)> {
+    if origin.wake_spent {
+        return None;
+    }
+    let asker = targeting::waiting_asker(origin, id)?;
+    let wake = TurnOrigin {
+        from: id.to_string(),
+        hops: origin.hops + 1,
+        ..TurnOrigin::default()
+    };
+    Some((asker, wake))
+}
+
+/// Use up the wake `id`'s turn owes, and say what it was.
+fn take_wake(id: &str) -> Option<(String, TurnOrigin)> {
+    let mut map = origins().lock().ok()?;
+    let origin = map.get_mut(id)?;
+    let owed = owed_wake(origin, id);
+    origin.wake_spent = true;
+    owed
 }
 
 fn agent_interrupted(id: &str) -> bool {
@@ -1298,7 +1329,7 @@ fn spawn_status_ticker() {
                     emit_frame(&session);
                     if idle {
                         // Before the chain moves on: the next turn replaces this origin.
-                        wake_asker(&id);
+                        turn_ended(&id);
                         advance_serial(&id);
                     }
                 }
@@ -1960,7 +1991,7 @@ fn tell_agent_origin(
     }
     let from = from_id(from);
     if from != "user" && from != to {
-        drop_pending_from(to, &from);
+        take_handoff_from(to, &from);
     }
     ensure_accepts_turn(to)?;
     // Hold this tell until the sender is idle so it does not overlap that turn.
@@ -1988,14 +2019,11 @@ fn tell_agent_origin(
             None
         }
     });
-    let msg = crate::transcript::push_system(to, &from, text);
     let envelope = crate::protocol::envelope(&from, text);
     let parsed = targeting::origin_from_envelope(&envelope);
     let parent = origin.or_else(|| get_origin(&from));
     let origin = targeting::inherit_origin(parent.as_ref(), parsed);
-    if let Some(peer) = asked_by(&origin, to) {
-        crate::transcript::mark_peer(to, &msg.id, &peer);
-    }
+    let msg = crate::transcript::push_system(to, &from, text, asked_by(&origin, to));
     submit_delivery(to, &envelope, true, Some(msg.id), origin)?;
     if from != "user" && from != to {
         let known = agents()
@@ -2004,7 +2032,9 @@ fn tell_agent_origin(
             .map(|map| map.contains_key(&from))
             .unwrap_or(false);
         if known {
-            crate::transcript::push_notice(&from, &format!("to:{to}"), text);
+            // Sent from a turn another bot asked for, it is part of that exchange.
+            let peer = parent.as_ref().and_then(|p| asked_by(p, &from));
+            crate::transcript::push_notice(&from, &format!("to:{to}"), text, peer);
         }
     } else if let Some(owner) = mention_owner.as_deref() {
         if owner != to {
@@ -2014,7 +2044,7 @@ fn tell_agent_origin(
                 .map(|map| map.contains_key(owner))
                 .unwrap_or(false);
             if known {
-                crate::transcript::push_notice(owner, &format!("to:{to}"), text);
+                crate::transcript::push_notice(owner, &format!("to:{to}"), text, None);
             }
         }
     }
@@ -2441,7 +2471,7 @@ fn note_routine_switch(id: &str, name: &str, enabled: bool) {
         (false, true) => format!("‘{name}’ 루틴을 켰습니다."),
         (false, false) => format!("‘{name}’ 루틴을 껐습니다."),
     };
-    let msg = crate::transcript::push_system(id, "crew", &line);
+    let msg = crate::transcript::push_system(id, "crew", &line, None);
     let note = crate::protocol::system_envelope(&format!(
         "The user turned {} your routine \"{name}\" in the routine sheet. Acknowledge it in one short sentence. Do not run crew routine.",
         if enabled { "on" } else { "off" }
@@ -2583,18 +2613,23 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
     }
 }
 
-/// `id`'s turn just ended. A bot that asked it with `crew tell` is waiting on
-/// the answer, so the reply becomes that bot's next turn instead of sitting
-/// until the user talks to it again. A user's @mention leaves the reply for
-/// the next prompt. Each wake is a hop, so two bots cannot go on forever.
-pub(crate) fn wake_asker(id: &str) {
-    let Some(origin) = get_origin(id) else {
+/// `id`'s turn is over: wake the bot waiting on its answer, and stop tagging
+/// the rows that come after with the bot that asked for the turn.
+pub(crate) fn turn_ended(id: &str) {
+    wake_asker(id);
+    crate::transcript::set_peer(id, None);
+}
+
+/// A bot that asked `id` with `crew tell` is waiting on the answer, so the
+/// reply becomes that bot's next turn instead of sitting until the user talks
+/// to it again. A user's @mention leaves the reply for the next prompt. Each
+/// wake is a hop, so two bots cannot go on forever, and a turn wakes once, so
+/// output it leaves behind cannot wake the asker again.
+fn wake_asker(id: &str) {
+    let Some((asker, wake)) = take_wake(id) else {
         return;
     };
-    let Some(asker) = origin.reply_agent.clone() else {
-        return;
-    };
-    if asker != origin.from || !known_agent(&asker) {
+    if !known_agent(&asker) {
         return;
     }
     // It also ran `crew tell` back. That tell drops this reply on arrival, so
@@ -2604,11 +2639,6 @@ pub(crate) fn wake_asker(id: &str) {
     }
     let Some(reply) = take_handoff_from(&asker, id) else {
         return;
-    };
-    let wake = TurnOrigin {
-        from: id.to_string(),
-        hops: origin.hops + 1,
-        ..TurnOrigin::default()
     };
     let text = crate::protocol::handoff_envelope(id, &reply.text);
     if submit_delivery(&asker, &text, true, None, wake).is_err() {
@@ -2901,16 +2931,15 @@ mod daemon_tests {
                 from: asker.clone(),
                 ..TurnOrigin::default()
             };
-            set_origin(
-                &speaker,
-                targeting::inherit_origin(Some(&TurnOrigin::user()), asked),
-            );
+            let turn = targeting::inherit_origin(Some(&TurnOrigin::user()), asked);
+            set_origin(&speaker, turn.clone());
             // 빵셔틀 answered and also ran `crew tell` back with "보".
             defer_tell(&speaker, &asker, &speaker, "보", None);
             wake_asker(&speaker);
             assert!(inbox_is_empty(&asker), "its own tell is the one turn");
             clear_serial_after(&speaker);
 
+            set_origin(&speaker, turn);
             wake_asker(&speaker);
             let item = inbox()
                 .lock()
@@ -2926,6 +2955,11 @@ mod daemon_tests {
                 take_handoffs(&asker).is_empty(),
                 "not again on the next prompt"
             );
+            // A terminal printing after its turn ended is not another answer.
+            enqueue_handoff(&asker, &speaker, "또");
+            wake_asker(&speaker);
+            assert!(inbox_is_empty(&asker), "a turn wakes its asker once");
+            take_handoffs(&asker);
 
             take_origin(&speaker);
             session.inner.lock().unwrap().status = AgentStatus::Idle;
@@ -2964,12 +2998,30 @@ mod daemon_tests {
         });
     }
 
+    /// A delivery that does not go out leaves the turn already running as it
+    /// was: where its reply goes, and which bot its rows belong to.
+    #[test]
+    fn a_failed_delivery_keeps_the_running_turn() {
+        let id = test_id("unknown");
+        let running = TurnOrigin::mention_tell("asker");
+        set_origin(&id, running.clone());
+        crate::transcript::set_peer(&id, Some("asker".into()));
+        assert!(start_delivery(&id, "hi", true, TurnOrigin::user()).is_err());
+        assert_eq!(get_origin(&id), Some(running));
+        assert_eq!(
+            crate::transcript::set_peer(&id, None).as_deref(),
+            Some("asker")
+        );
+        take_origin(&id);
+        crate::transcript::drop_agent(&id);
+    }
+
     #[test]
     fn a_direct_tell_drops_that_peer_pending_handoff() {
         let caller = test_id("drop-pending");
         enqueue_handoff(&caller, "review", "stale review");
         enqueue_handoff(&caller, "impl", "still relevant");
-        drop_pending_from(&caller, "review");
+        take_handoff_from(&caller, "review");
         let next = flush_handoffs(&caller, "hello");
         assert!(next.contains("hello"), "the prompt must survive: {next}");
         assert!(!next.contains("stale review"), "{next}");
