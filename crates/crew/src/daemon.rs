@@ -332,16 +332,17 @@ fn enqueue_delivery(
     if q.len() >= MAX_INBOX {
         anyhow::bail!("agent {id} is busy (inbox full)");
     }
+    // Marked before anyone can pop it. A turn that ends right after the push
+    // starts it and clears the mark, and a mark set after that stayed up.
+    if let Some(mid) = msg_id.as_deref() {
+        crate::transcript::set_queued(id, mid, true);
+    }
     q.push_back(PendingDelivery {
         text: text.to_string(),
         newline,
-        msg_id: msg_id.clone(),
+        msg_id,
         origin,
     });
-    drop(map);
-    if let Some(mid) = msg_id {
-        crate::transcript::set_queued(id, &mid, true);
-    }
     Ok(())
 }
 
@@ -618,14 +619,19 @@ fn submit_delivery(
             targeting::MAX_RELAY_HOPS
         );
     }
-    if agent_busy(id)? {
-        return enqueue_delivery(id, text, newline, msg_id, origin);
+    if !agent_busy(id)? {
+        match start_delivery(id, text, newline, origin.clone()) {
+            Err(err) if is_busy_err(&err) => {}
+            started => return started,
+        }
     }
-    match start_delivery(id, text, newline, origin.clone()) {
-        Ok(()) => Ok(()),
-        Err(err) if is_busy_err(&err) => enqueue_delivery(id, text, newline, msg_id, origin),
-        Err(err) => Err(err),
+    enqueue_delivery(id, text, newline, msg_id, origin)?;
+    // The turn that was in the way can end before the push, and its pump found
+    // nothing to start. Nothing else would start this one.
+    if !agent_busy(id).unwrap_or(true) {
+        pump_inbox_inner(id, false);
     }
+    Ok(())
 }
 
 /// Say once, where the user is looking, that a bot-to-bot chain was cut short.
