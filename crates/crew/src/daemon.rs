@@ -730,7 +730,7 @@ fn pump_inbox_inner(id: &str) {
             }
             eprintln!("[crew] inbox {id}: {err:#}");
             // The rest of its chain goes on without this bot.
-            run_chain(item.then);
+            release(item.then);
             pump_inbox_inner(id);
         }
     }
@@ -749,6 +749,9 @@ fn inbox_is_empty(id: &str) -> bool {
 struct SerialJob {
     to: String,
     kind: SerialKind,
+    /// A tell the bot ran itself. Those go out in a line of their own, not
+    /// behind the teammates its message named.
+    own: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -904,6 +907,7 @@ fn defer_tell_if_epoch(
                 text: text.to_string(),
                 origin,
             },
+            own: true,
         });
     true
 }
@@ -937,7 +941,7 @@ fn take_followers(agent: &str) -> VecDeque<SerialJob> {
     board.queues.remove(agent).unwrap_or_default()
 }
 
-/// `start`'s turn is over: what waited on it goes on, one at a time.
+/// `start`'s turn is over: what waited on it goes on.
 fn advance_serial(start: &str) {
     if matches!(
         live_status(start),
@@ -945,7 +949,16 @@ fn advance_serial(start: &str) {
     ) {
         return;
     }
-    run_chain(take_followers(start));
+    release(take_followers(start));
+}
+
+/// What waited on a turn that is over: the tells the bot ran, and the
+/// teammates its message named with the rest of any chain. Each line goes
+/// one at a time, and neither waits on the other.
+fn release(jobs: VecDeque<SerialJob>) {
+    let (own, named): (VecDeque<_>, VecDeque<_>) = jobs.into_iter().partition(|job| job.own);
+    run_chain(own);
+    run_chain(named);
 }
 
 /// Deliver the head. The rest rides with that delivery and goes on when its
@@ -1964,6 +1977,7 @@ fn send_agent_shown(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
                     text: text.to_string(),
                     origin: Some(TurnOrigin::mention_tell(id)),
                 },
+                own: false,
             })
             .collect();
     let delivered = crate::config::with_mention_hint(text, id, &roster);
@@ -1978,7 +1992,7 @@ fn send_agent_shown(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
     );
     // Not delivered: the named teammates still answer, in order, instead of
     // the chain dying with this bot.
-    run_chain(named);
+    release(named);
     started
 }
 
@@ -2038,7 +2052,10 @@ fn tell_agent_origin(
     if allow_defer && from != "user" && from != to {
         let epoch = serial_epoch(&from);
         if agent_busy(&from).unwrap_or(false) {
-            if defer_tell_if_epoch(&from, epoch, to, &from, text, origin.clone())
+            // It runs once this turn is over, when the bot may be on another:
+            // the reply goes where this turn's would.
+            let sent_from = origin.clone().or_else(|| get_origin(&from));
+            if defer_tell_if_epoch(&from, epoch, to, &from, text, sent_from)
                 && !matches!(
                     live_status(&from),
                     Ok(AgentStatus::Working | AgentStatus::Blocked)
@@ -3442,6 +3459,61 @@ exec sleep 5"#,
         });
     }
 
+    /// The tells a bot ran go out when its turn ends, in a line of their own:
+    /// not behind the teammates its message named, where a stop of one of
+    /// those teammates dropped them.
+    #[test]
+    fn a_bots_own_tells_do_not_wait_behind_whom_it_named() {
+        paths::testing::with_home("own-line", || {
+            paths::write_notifications_enabled(false);
+            let [bot, reviewer, builder] = ["own-bot", "own-reviewer", "own-builder"].map(test_id);
+            for id in [&bot, &reviewer, &builder] {
+                insert_spawned_agent(AgentConfig::new(
+                    id.clone(),
+                    id.clone(),
+                    AgentCli::Claude.default_cmd(),
+                    None,
+                ))
+                .unwrap();
+            }
+            let set_status = |id: &str, to: AgentStatus| match agents().lock().unwrap().get(id) {
+                Some(LiveAgent::Headless(s)) => s.inner.lock().unwrap().status = to,
+                _ => panic!("claude runs headless"),
+            };
+            // Busy, so what reaches them waits in their inboxes.
+            set_status(&reviewer, AgentStatus::Working);
+            set_status(&builder, AgentStatus::Working);
+            queue_serial_after(
+                &bot,
+                VecDeque::from([SerialJob {
+                    to: reviewer.clone(),
+                    kind: SerialKind::Tell {
+                        from: "user".into(),
+                        text: "리뷰해줘".into(),
+                        origin: Some(TurnOrigin::mention_tell(&bot)),
+                    },
+                    own: false,
+                }]),
+            );
+            defer_tell(&bot, &builder, &bot, "구현해줘", None);
+
+            advance_serial(&bot);
+            assert!(!inbox_is_empty(&reviewer));
+            assert!(
+                !inbox_is_empty(&builder),
+                "the tell waited behind the reviewer"
+            );
+
+            for id in [&reviewer, &builder] {
+                set_status(id, AgentStatus::Idle);
+                clear_inbox(id);
+            }
+            for id in [&bot, &reviewer, &builder] {
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
     #[test]
     fn a_stop_takes_the_approval_card_down() {
         paths::testing::with_home("blocked-stop", || {
@@ -3614,6 +3686,7 @@ exec sleep 5"#,
                 text: text.to_string(),
                 origin: None,
             },
+            own: false,
         }
     }
 
@@ -3667,6 +3740,7 @@ exec sleep 5"#,
                     text: "같이 봐줘".into(),
                     origin: Some(TurnOrigin::mention_tell(&a)),
                 },
+                own: false,
             };
             queue_serial_after(&a, VecDeque::from([ask(&b), ask(&c)]));
             advance_serial(&a);
@@ -3758,6 +3832,7 @@ exec sleep 5"#,
                 text: "봐줘".into(),
                 origin: Some(TurnOrigin::mention_tell(chat)),
             },
+            own: false,
         };
         queue_serial_after(
             &bot,
