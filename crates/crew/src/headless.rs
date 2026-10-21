@@ -298,6 +298,11 @@ fn run_turn(
                     .filter(|s| s.resume)
                     .map(|s| s.id.as_str()),
             );
+            // Used up by a turn that answered; one that failed leaves it for the
+            // next. Codex may never name a thread, so a saved session is not the test.
+            if recap.is_some() && outcome.got_text {
+                clear_recap(&session.id);
+            }
             if dead {
                 if let Ok(mut inner) = session.inner.lock() {
                     inner.session_id = None;
@@ -314,9 +319,6 @@ fn run_turn(
                         inner.session_id = Some(id.to_string());
                     }
                     let _ = save_session(&session.id, id);
-                    if recap.is_some() {
-                        clear_recap(&session.id);
-                    }
                 }
             }
             if !outcome.got_text {
