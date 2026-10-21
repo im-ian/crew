@@ -34,7 +34,7 @@ export type Skill = {
 };
 
 export type SearchHit = {
-  kind: "bot" | "routine" | "message" | string;
+  kind: "bot" | "routine" | "message" | "tool" | string;
   id: string;
   title: string;
   snippet: string;

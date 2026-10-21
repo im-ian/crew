@@ -29,6 +29,8 @@ pub struct SearchMessage<'a> {
     pub id: &'a str,
     pub from: &'a str,
     pub text: &'a str,
+    /// A tool card, so the UI can drop it while tool cards are hidden.
+    pub tool: bool,
 }
 
 pub fn search(
@@ -69,7 +71,7 @@ pub fn search(
     for m in messages {
         if matches_q(&q, &[m.from, m.text, m.scope]) {
             hits.push(SearchHit {
-                kind: "message".into(),
+                kind: if m.tool { "tool" } else { "message" }.into(),
                 id: format!("{}:{}", m.scope, m.id),
                 title: m.scope.to_string(),
                 snippet: snippet(m.text, &q),
@@ -124,12 +126,22 @@ mod tests {
             name: "브리핑",
             prompt: "weekday standup notes",
         }];
-        let messages = [SearchMessage {
-            scope: "alpha",
-            id: "m1",
-            from: "user",
-            text: "please review the login bug",
-        }];
+        let messages = [
+            SearchMessage {
+                scope: "alpha",
+                id: "m1",
+                from: "user",
+                text: "please review the login bug",
+                tool: false,
+            },
+            SearchMessage {
+                scope: "alpha",
+                id: "m2",
+                from: "Read",
+                text: "{\"file_path\":\"login.rs\"}",
+                tool: true,
+            },
+        ];
         let bots_hits = search("review", &bots, &routines, &messages);
         assert!(
             bots_hits.iter().any(|h| h.kind == "bot" && h.id == "alpha"),
@@ -141,6 +153,9 @@ mod tests {
                 .any(|h| h.kind == "message" && h.snippet.contains("login")),
             "{bots_hits:?}"
         );
+        let file = search("login.rs", &bots, &routines, &messages);
+        assert_eq!(file.len(), 1);
+        assert_eq!(file[0].kind, "tool");
         let brief = search("브리핑", &bots, &routines, &messages);
         assert_eq!(brief.len(), 1);
         assert_eq!(brief[0].kind, "routine");

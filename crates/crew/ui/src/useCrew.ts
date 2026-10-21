@@ -339,7 +339,7 @@ export function useCrew() {
       }
       return;
     }
-    if (hit.kind === "message") {
+    if (hit.kind === "message" || hit.kind === "tool") {
       const parsed = parseMessageHit(hit.id);
       if (!parsed) return;
       selectAgent(parsed.id, parsed.messageId);
