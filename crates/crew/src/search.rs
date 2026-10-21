@@ -79,7 +79,7 @@ pub fn search(
     hits
 }
 
-/// Split a message hit id `{scope}:{messageId}` where scope may be `ch:{channel}`.
+/// Split a message hit id `{scope}:{messageId}`.
 pub fn parse_message_hit(id: &str) -> Option<(&str, &str)> {
     let (scope, msg) = id.rsplit_once(':')?;
     if scope.is_empty() || msg.is_empty() {
@@ -87,10 +87,6 @@ pub fn parse_message_hit(id: &str) -> Option<(&str, &str)> {
     } else {
         Some((scope, msg))
     }
-}
-
-pub fn channel_id_from_scope(scope: &str) -> Option<&str> {
-    scope.strip_prefix("ch:").filter(|s| !s.is_empty())
 }
 
 fn matches_q(q: &str, fields: &[&str]) -> bool {
@@ -153,17 +149,11 @@ mod tests {
     }
 
     #[test]
-    fn message_hit_id_keeps_channel_scope() {
-        let id = format!("{}:{}", "ch:launch", "171000-3");
+    fn message_hit_id_splits_scope_and_message() {
+        let id = format!("{}:{}", "alpha", "171000-3");
         let (scope, msg) = parse_message_hit(&id).expect("split");
-        assert_eq!(scope, "ch:launch");
-        assert_eq!(msg, "171000-3");
-        assert_eq!(channel_id_from_scope(scope), Some("launch"));
-        let dm = format!("{}:{}", "alpha", "171000-3");
-        let (scope, msg) = parse_message_hit(&dm).expect("dm");
         assert_eq!(scope, "alpha");
         assert_eq!(msg, "171000-3");
-        assert!(channel_id_from_scope(scope).is_none());
         assert!(parse_message_hit("nocolon").is_none());
         assert!(parse_message_hit(":only").is_none());
     }

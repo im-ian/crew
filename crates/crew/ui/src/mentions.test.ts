@@ -3,20 +3,16 @@ import {
   injectMentionChips,
   mentionRuns,
   mentionText,
-  resolveChannel,
   resolveMention,
   trimMentionPunct,
 } from "./mentions";
-import type { AgentInfo, ChannelInfo } from "./types";
+import type { AgentInfo } from "./types";
 
 function agent(id: string, name: string): AgentInfo {
   return { id, name, status: "idle", cmd: ["cat"], cwd: "/tmp", routines: [] };
 }
 
 const agents = [agent("alpha", "Alpha"), agent("gamma", "춘식이")];
-const channels: ChannelInfo[] = [
-  { id: "ship", name: "출시", members: ["alpha"] },
-];
 
 describe("resolveMention", () => {
   it("matches an id or a display name, either case", () => {
@@ -24,14 +20,6 @@ describe("resolveMention", () => {
     expect(resolveMention("ALPHA", agents)?.id).toBe("alpha");
     expect(resolveMention("춘식이", agents)?.id).toBe("gamma");
     expect(resolveMention("nobody", agents)).toBeUndefined();
-  });
-});
-
-describe("resolveChannel", () => {
-  it("matches an id or a display name, with or without a leading hash", () => {
-    expect(resolveChannel("ship", channels)?.id).toBe("ship");
-    expect(resolveChannel("#출시", channels)?.id).toBe("ship");
-    expect(resolveChannel("nobody", channels)).toBeUndefined();
   });
 });
 
@@ -84,16 +72,8 @@ describe("injectMentionChips", () => {
     expect(injectMentionChips("<p>@alpha</p>", [])).toBe("<p>@alpha</p>");
   });
 
-  it("turns a known channel into a chip", () => {
-    expect(injectMentionChips("<p>#출시 올려</p>", agents, channels)).toBe(
-      '<p><span class="mention-chip" data-channel="ship"></span> 올려</p>',
-    );
-  });
-
-  it("leaves an unknown hash as written", () => {
-    expect(injectMentionChips("<p>#nobody</p>", agents, channels)).toBe(
-      "<p>#nobody</p>",
-    );
+  it("leaves a hash as written", () => {
+    expect(injectMentionChips("<p>#출시 올려</p>", agents)).toBe("<p>#출시 올려</p>");
   });
 });
 
@@ -112,10 +92,9 @@ describe("mentionRuns", () => {
     ]);
   });
 
-  it("names a channel too", () => {
-    expect(mentionRuns("#ship 에 올렸어", agents, channels)).toEqual([
-      { text: "#출시", mention: true },
-      { text: " 에 올렸어", mention: false },
+  it("leaves a hash as written", () => {
+    expect(mentionRuns("#ship 에 올렸어", agents)).toEqual([
+      { text: "#ship 에 올렸어", mention: false },
     ]);
   });
 
@@ -134,7 +113,7 @@ describe("mentionRuns", () => {
 
 describe("mentionRuns edge cases", () => {
   it("does not swallow a character on a doubled hash", () => {
-    expect(mentionRuns("##ship 올려", agents, channels)).toEqual([
+    expect(mentionRuns("##ship 올려", agents)).toEqual([
       { text: "##ship 올려", mention: false },
     ]);
   });
@@ -150,6 +129,6 @@ describe("mentionRuns edge cases", () => {
 describe("mentionText", () => {
   it("reads back what the row shows, so a search can match it", () => {
     expect(mentionText("@gamma 확인해줘", agents)).toBe("@춘식이 확인해줘");
-    expect(mentionText("#ship 올려", agents, channels)).toBe("#출시 올려");
+    expect(mentionText("#ship 올려", agents)).toBe("#ship 올려");
   });
 });

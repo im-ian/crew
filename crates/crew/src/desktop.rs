@@ -4,11 +4,10 @@ use tauri::Manager;
 
 use crate::client;
 use crate::config::{
-    empty_to_none, resolve_add_cmd, unique_agent_id, unique_channel_id, AgentCli, AvatarShape,
-    Effort,
+    empty_to_none, resolve_add_cmd, unique_agent_id, AgentCli, AvatarShape, Effort,
 };
 use crate::groups::SidebarGroup;
-use crate::protocol::{AgentInfo, ChannelInfo, ChatMessage, Event, Request};
+use crate::protocol::{AgentInfo, ChatMessage, Event, Request};
 
 fn parse_effort(effort: Option<String>) -> Result<Option<Effort>, String> {
     match effort.as_deref() {
@@ -85,7 +84,6 @@ fn approve_agent(agent: String, allow: bool) -> Result<(), String> {
 fn answer_choice(
     agent: String,
     message_id: String,
-    channel: Option<String>,
     answers: Vec<Vec<String>>,
     closed: bool,
     values: Option<Vec<Vec<String>>>,
@@ -93,7 +91,6 @@ fn answer_choice(
     match client::rpc(Request::AnswerChoice {
         agent,
         message_id,
-        channel,
         answers,
         values: values.unwrap_or_default(),
         closed,
@@ -108,12 +105,7 @@ fn answer_choice(
 #[tauri::command]
 fn tell_message(from: Option<String>, to: String, text: String) -> Result<(), String> {
     let from = client::tell_from(from);
-    match client::rpc(Request::Tell {
-        from,
-        to,
-        text,
-        channel: None,
-    }) {
+    match client::rpc(Request::Tell { from, to, text }) {
         Ok(Event::Told { .. }) | Ok(Event::Ok) => Ok(()),
         Ok(Event::Error { message }) => Err(message),
         Ok(_) => Err("unexpected daemon response".into()),
@@ -141,127 +133,6 @@ fn get_snapshot(agent: String) -> Result<SnapshotView, String> {
             text,
             status,
         }),
-        Ok(Event::Error { message }) => Err(message),
-        Ok(_) => Err("unexpected daemon response".into()),
-        Err(err) => Err(err.to_string()),
-    }
-}
-
-#[tauri::command]
-fn list_channels() -> Result<Vec<ChannelInfo>, String> {
-    client::ensure_daemon().map_err(|e| e.to_string())?;
-    match client::rpc(Request::ListChannels) {
-        Ok(Event::Channels { channels }) => Ok(channels),
-        Ok(Event::Agents { channels, .. }) => Ok(channels),
-        Ok(Event::Error { message }) => Err(message),
-        Ok(_) => Err("unexpected daemon response".into()),
-        Err(err) => Err(err.to_string()),
-    }
-}
-
-#[tauri::command]
-fn get_channel_messages(channel: String) -> Result<Vec<ChatMessage>, String> {
-    match client::rpc(Request::ChannelMessages { channel }) {
-        Ok(Event::ChannelMessages { messages, .. }) => Ok(messages),
-        Ok(Event::Error { message }) => Err(message),
-        Ok(_) => Err("unexpected daemon response".into()),
-        Err(err) => Err(err.to_string()),
-    }
-}
-
-#[tauri::command]
-fn add_channel(name: String, members: Vec<String>) -> Result<String, String> {
-    client::ensure_daemon().map_err(|e| e.to_string())?;
-    let name = name.trim().to_string();
-    if name.is_empty() {
-        return Err("name is required".into());
-    }
-    let existing = list_channels()?;
-    let id = unique_channel_id(&name, existing.iter().map(|c| c.id.as_str()));
-    match client::rpc(Request::AddChannel {
-        id: id.clone(),
-        name,
-        members,
-    }) {
-        Ok(Event::Ok) | Ok(Event::Channels { .. }) | Ok(Event::Agents { .. }) => Ok(id),
-        Ok(Event::Error { message }) => Err(message),
-        Ok(_) => Err("unexpected daemon response".into()),
-        Err(err) => Err(err.to_string()),
-    }
-}
-
-#[tauri::command]
-fn set_channel(
-    id: String,
-    name: Option<String>,
-    brief: Option<String>,
-    unset_brief: bool,
-    members: Option<Vec<String>>,
-) -> Result<(), String> {
-    client::ensure_daemon().map_err(|e| e.to_string())?;
-    let id = id.trim().to_string();
-    if id.is_empty() {
-        return Err("channel is required".into());
-    }
-    match client::rpc(Request::SetChannel {
-        id,
-        name: name.and_then(empty_to_none),
-        brief: brief.and_then(empty_to_none),
-        unset_brief,
-        members,
-    }) {
-        Ok(Event::Ok) | Ok(Event::Channels { .. }) | Ok(Event::Agents { .. }) => Ok(()),
-        Ok(Event::Error { message }) => Err(message),
-        Ok(_) => Err("unexpected daemon response".into()),
-        Err(err) => Err(err.to_string()),
-    }
-}
-
-#[tauri::command]
-fn leave_channel(channel: String, agent: Option<String>) -> Result<(), String> {
-    client::ensure_daemon().map_err(|e| e.to_string())?;
-    let channel = channel.trim().to_string();
-    if channel.is_empty() {
-        return Err("channel is required".into());
-    }
-    if let Some(agent) = agent.and_then(empty_to_none) {
-        match client::rpc(Request::LeaveChannel { channel, agent }) {
-            Ok(Event::Ok) | Ok(Event::Channels { .. }) | Ok(Event::Agents { .. }) => Ok(()),
-            Ok(Event::Error { message }) => Err(message),
-            Ok(_) => Err("unexpected daemon response".into()),
-            Err(err) => Err(err.to_string()),
-        }
-    } else {
-        // Desktop user is not a channel member; leaving the room removes it.
-        remove_channel(channel)
-    }
-}
-
-#[tauri::command]
-fn remove_channel(channel: String) -> Result<(), String> {
-    client::ensure_daemon().map_err(|e| e.to_string())?;
-    let channel = channel.trim().to_string();
-    if channel.is_empty() {
-        return Err("channel is required".into());
-    }
-    match client::rpc(Request::RemoveChannel { channel }) {
-        Ok(Event::Ok) | Ok(Event::Channels { .. }) | Ok(Event::Agents { .. }) => Ok(()),
-        Ok(Event::Error { message }) => Err(message),
-        Ok(_) => Err("unexpected daemon response".into()),
-        Err(err) => Err(err.to_string()),
-    }
-}
-
-#[tauri::command]
-fn channel_send(channel: String, text: String) -> Result<(), String> {
-    let from = client::tell_from(Some("user".into()));
-    match client::rpc(Request::Tell {
-        from,
-        to: String::new(),
-        text,
-        channel: Some(channel),
-    }) {
-        Ok(Event::Told { .. }) | Ok(Event::Ok) => Ok(()),
         Ok(Event::Error { message }) => Err(message),
         Ok(_) => Err("unexpected daemon response".into()),
         Err(err) => Err(err.to_string()),
@@ -777,20 +648,13 @@ pub fn run() -> anyhow::Result<()> {
         })
         .invoke_handler(tauri::generate_handler![
             list_agents,
-            list_channels,
             send_message,
             stop_agent,
             approve_agent,
             answer_choice,
             tell_message,
-            add_channel,
-            set_channel,
-            leave_channel,
-            remove_channel,
-            channel_send,
             get_snapshot,
             get_messages,
-            get_channel_messages,
             daemon_ping,
             reset_agent,
             set_agent,

@@ -183,12 +183,6 @@
           "markdownDescription": "Enables the add_agent command without any pre-configured scope."
         },
         {
-          "description": "Enables the add_channel command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-add-channel",
-          "markdownDescription": "Enables the add_channel command without any pre-configured scope."
-        },
-        {
           "description": "Enables the add_routine command without any pre-configured scope.",
           "type": "string",
           "const": "allow-add-routine",
@@ -205,12 +199,6 @@
           "type": "string",
           "const": "allow-approve-agent",
           "markdownDescription": "Enables the approve_agent command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the channel_send command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-channel-send",
-          "markdownDescription": "Enables the channel_send command without any pre-configured scope."
         },
         {
           "description": "Enables the clear_avatar command without any pre-configured scope.",
@@ -237,12 +225,6 @@
           "markdownDescription": "Enables the edit_routine command without any pre-configured scope."
         },
         {
-          "description": "Enables the get_channel_messages command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-get-channel-messages",
-          "markdownDescription": "Enables the get_channel_messages command without any pre-configured scope."
-        },
-        {
           "description": "Enables the get_memory command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-memory",
@@ -261,22 +243,10 @@
           "markdownDescription": "Enables the get_snapshot command without any pre-configured scope."
         },
         {
-          "description": "Enables the leave_channel command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-leave-channel",
-          "markdownDescription": "Enables the leave_channel command without any pre-configured scope."
-        },
-        {
           "description": "Enables the list_agents command without any pre-configured scope.",
           "type": "string",
           "const": "allow-list-agents",
           "markdownDescription": "Enables the list_agents command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the list_channels command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-list-channels",
-          "markdownDescription": "Enables the list_channels command without any pre-configured scope."
         },
         {
           "description": "Enables the list_groups command without any pre-configured scope.",
@@ -325,12 +295,6 @@
           "type": "string",
           "const": "allow-remove-agent",
           "markdownDescription": "Enables the remove_agent command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the remove_channel command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-remove-channel",
-          "markdownDescription": "Enables the remove_channel command without any pre-configured scope."
         },
         {
           "description": "Enables the remove_routine command without any pre-configured scope.",
@@ -393,12 +357,6 @@
           "markdownDescription": "Enables the set_avatar command without any pre-configured scope."
         },
         {
-          "description": "Enables the set_channel command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-set-channel",
-          "markdownDescription": "Enables the set_channel command without any pre-configured scope."
-        },
-        {
           "description": "Enables the set_dock_badge command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-dock-badge",
@@ -453,12 +411,6 @@
           "markdownDescription": "Denies the add_agent command without any pre-configured scope."
         },
         {
-          "description": "Denies the add_channel command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-add-channel",
-          "markdownDescription": "Denies the add_channel command without any pre-configured scope."
-        },
-        {
           "description": "Denies the add_routine command without any pre-configured scope.",
           "type": "string",
           "const": "deny-add-routine",
@@ -475,12 +427,6 @@
           "type": "string",
           "const": "deny-approve-agent",
           "markdownDescription": "Denies the approve_agent command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the channel_send command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-channel-send",
-          "markdownDescription": "Denies the channel_send command without any pre-configured scope."
         },
         {
           "description": "Denies the clear_avatar command without any pre-configured scope.",
@@ -507,12 +453,6 @@
           "markdownDescription": "Denies the edit_routine command without any pre-configured scope."
         },
         {
-          "description": "Denies the get_channel_messages command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-get-channel-messages",
-          "markdownDescription": "Denies the get_channel_messages command without any pre-configured scope."
-        },
-        {
           "description": "Denies the get_memory command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-memory",
@@ -531,22 +471,10 @@
           "markdownDescription": "Denies the get_snapshot command without any pre-configured scope."
         },
         {
-          "description": "Denies the leave_channel command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-leave-channel",
-          "markdownDescription": "Denies the leave_channel command without any pre-configured scope."
-        },
-        {
           "description": "Denies the list_agents command without any pre-configured scope.",
           "type": "string",
           "const": "deny-list-agents",
           "markdownDescription": "Denies the list_agents command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the list_channels command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-list-channels",
-          "markdownDescription": "Denies the list_channels command without any pre-configured scope."
         },
         {
           "description": "Denies the list_groups command without any pre-configured scope.",
@@ -595,12 +523,6 @@
           "type": "string",
           "const": "deny-remove-agent",
           "markdownDescription": "Denies the remove_agent command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the remove_channel command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-remove-channel",
-          "markdownDescription": "Denies the remove_channel command without any pre-configured scope."
         },
         {
           "description": "Denies the remove_routine command without any pre-configured scope.",
@@ -661,12 +583,6 @@
           "type": "string",
           "const": "deny-set-avatar",
           "markdownDescription": "Denies the set_avatar command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the set_channel command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-set-channel",
-          "markdownDescription": "Denies the set_channel command without any pre-configured scope."
         },
         {
           "description": "Denies the set_dock_badge command without any pre-configured scope.",

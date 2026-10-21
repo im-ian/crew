@@ -8,9 +8,8 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context};
 
 use crate::config::AgentConfig;
-use crate::config::Channel;
 use crate::paths;
-use crate::protocol::{AgentInfo, ChannelInfo, Event, Request};
+use crate::protocol::{AgentInfo, Event, Request};
 
 /// A request the daemon answers out of its own state. Everything it does for
 /// one is bounded, so silence past this means wedged rather than busy.
@@ -58,13 +57,6 @@ fn answer_timeout(req: &Request) -> Option<Duration> {
         | Request::Approve { .. }
         | Request::AnswerChoice { .. }
         | Request::Search { .. }
-        | Request::ListChannels
-        | Request::ChannelMessages { .. }
-        | Request::AddChannel { .. }
-        | Request::JoinChannel { .. }
-        | Request::LeaveChannel { .. }
-        | Request::RemoveChannel { .. }
-        | Request::SetChannel { .. }
         | Request::Shutdown => Some(ANSWER_TIMEOUT),
     }
 }
@@ -133,28 +125,6 @@ fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
             | (Request::Ask { .. }, Event::Answered { .. } | Event::Error { .. })
             | (Request::AnswerChoice { .. }, Event::Ok)
             | (Request::Search { .. }, Event::Search { .. })
-            | (Request::ListChannels, Event::Channels { .. } | Event::Agents { .. })
-            | (Request::ChannelMessages { .. }, Event::ChannelMessages { .. })
-            | (
-                Request::AddChannel { .. },
-                Event::Ok | Event::Channels { .. } | Event::Agents { .. },
-            )
-            | (
-                Request::JoinChannel { .. },
-                Event::Ok | Event::Channels { .. } | Event::Agents { .. },
-            )
-            | (
-                Request::LeaveChannel { .. },
-                Event::Ok | Event::Channels { .. } | Event::Agents { .. },
-            )
-            | (
-                Request::RemoveChannel { .. },
-                Event::Ok | Event::Channels { .. } | Event::Agents { .. },
-            )
-            | (
-                Request::SetChannel { .. },
-                Event::Ok | Event::Channels { .. } | Event::Agents { .. },
-            )
             | (Request::Shutdown, Event::Shutdown | Event::Ok)
             | (_, Event::Error { .. }) => return Ok(ev),
             _ => continue,
@@ -367,25 +337,6 @@ pub fn print_event(ev: Event) -> anyhow::Result<()> {
         }
         Event::Told { from, to } => println!("ok {from} → {to}"),
         Event::Cloned { id } => println!("ok {id}"),
-        Event::Channels { channels } => return print_channels(&channels),
-        Event::ChannelMessages { channel, messages } => {
-            println!("# #{channel} ({} messages)", messages.len());
-            for m in messages {
-                let text = m.text.replace('\n', "\\n");
-                println!("{}  {}  {text}", m.role.as_str(), m.from);
-            }
-        }
-        Event::ChannelMessage {
-            channel, message, ..
-        } => {
-            let text = message.text.replace('\n', "\\n");
-            println!(
-                "#{channel}\t{}\t{}\t{}\t{text}",
-                message.role.as_str(),
-                message.from,
-                message.id
-            );
-        }
         Event::Messages { agent, messages } => {
             println!("# {agent} ({} messages)", messages.len());
             for m in messages {
@@ -415,32 +366,22 @@ pub fn print_event(ev: Event) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn print_routines(
-    agents: &[AgentInfo],
-    channels: &[ChannelInfo],
-    filter: Option<&str>,
-) -> anyhow::Result<()> {
-    let mut hosts: Vec<(String, Vec<crate::config::Routine>)> = agents
+pub fn print_routines(agents: &[AgentInfo], filter: Option<&str>) -> anyhow::Result<()> {
+    let hosts: Vec<(String, Vec<crate::config::Routine>)> = agents
         .iter()
         .map(|a| (a.id.clone(), a.routines.clone()))
         .collect();
-    hosts.extend(
-        channels
-            .iter()
-            .map(|c| (format!("#{}", c.id), c.routines.clone())),
-    );
     print_routine_rows(&hosts, filter)
 }
 
-/// One row per routine: host, id, name, schedule, on/off, last run. Channels are
-/// listed as `#room`.
+/// One row per routine: host, id, name, schedule, on/off, last run.
 fn routine_rows(
     hosts: &[(String, Vec<crate::config::Routine>)],
     filter: Option<&str>,
 ) -> anyhow::Result<Vec<String>> {
     if let Some(id) = filter {
         if !hosts.iter().any(|(host, _)| host == id) {
-            bail!("unknown bot or channel {id}");
+            bail!("unknown bot {id}");
         }
     }
     let mut rows = Vec::new();
@@ -479,60 +420,14 @@ fn print_routine_rows(
     Ok(())
 }
 
-pub fn print_channels(channels: &[ChannelInfo]) -> anyhow::Result<()> {
-    if channels.is_empty() {
-        println!("(no channels)");
-        return Ok(());
-    }
-    for c in channels {
-        println!(
-            "{}\t{}\t{}",
-            c.id,
-            c.name,
-            if c.members.is_empty() {
-                "-".to_string()
-            } else {
-                c.members.join(",")
-            }
-        );
-    }
-    Ok(())
-}
-
-pub fn print_channels_from_config(channels: &[Channel]) -> anyhow::Result<()> {
-    if channels.is_empty() {
-        println!("(no channels)");
-        return Ok(());
-    }
-    for c in channels {
-        println!(
-            "{}\t{}\t{}",
-            c.id,
-            c.name,
-            if c.members.is_empty() {
-                "-".to_string()
-            } else {
-                c.members.join(",")
-            }
-        );
-    }
-    Ok(())
-}
-
 pub fn print_routines_from_config(
     agents: &[AgentConfig],
-    channels: &[Channel],
     filter: Option<&str>,
 ) -> anyhow::Result<()> {
-    let mut hosts: Vec<(String, Vec<crate::config::Routine>)> = agents
+    let hosts: Vec<(String, Vec<crate::config::Routine>)> = agents
         .iter()
         .map(|a| (a.id.clone(), a.routines.clone()))
         .collect();
-    hosts.extend(
-        channels
-            .iter()
-            .map(|c| (format!("#{}", c.id), c.routines.clone())),
-    );
     print_routine_rows(&hosts, filter)
 }
 
@@ -612,27 +507,26 @@ mod tests {
     fn hosts() -> Vec<(String, Vec<Routine>)> {
         vec![
             ("alpha".into(), vec![routine("daily")]),
-            ("#room".into(), vec![routine("standup")]),
-            ("beta".into(), Vec::new()),
+            ("beta".into(), vec![routine("standup")]),
+            ("gamma".into(), Vec::new()),
         ]
     }
 
     #[test]
-    fn rows_cover_bots_and_channels() {
+    fn rows_cover_each_bots_routines() {
         let rows = routine_rows(&hosts(), None).unwrap();
         assert_eq!(rows.len(), 2);
         assert!(rows[0].starts_with("alpha\tid-daily\tdaily\t0 9 * * *\ton\t-"));
-        assert!(rows[1].starts_with("#room\tid-standup\tstandup"));
+        assert!(rows[1].starts_with("beta\tid-standup\tstandup"));
     }
 
     #[test]
     fn a_filter_picks_one_host_and_rejects_unknown_ones() {
-        let rows = routine_rows(&hosts(), Some("#room")).unwrap();
+        let rows = routine_rows(&hosts(), Some("beta")).unwrap();
         assert_eq!(rows.len(), 1);
-        assert!(rows[0].starts_with("#room\t"));
+        assert!(rows[0].starts_with("beta\t"));
         // A host with no routines still resolves; it just prints nothing.
-        assert!(routine_rows(&hosts(), Some("beta")).unwrap().is_empty());
-        assert!(routine_rows(&hosts(), Some("room")).is_err());
+        assert!(routine_rows(&hosts(), Some("gamma")).unwrap().is_empty());
         assert!(routine_rows(&hosts(), Some("nope")).is_err());
     }
 }

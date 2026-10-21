@@ -17,8 +17,6 @@ pub enum Request {
         #[serde(default)]
         to: String,
         text: String,
-        #[serde(default)]
-        channel: Option<String>,
     },
     Input {
         agent: String,
@@ -128,38 +126,6 @@ pub enum Request {
         agent: String,
         key: String,
     },
-    ListChannels,
-    ChannelMessages {
-        channel: String,
-    },
-    AddChannel {
-        id: String,
-        name: String,
-        #[serde(default)]
-        members: Vec<String>,
-    },
-    JoinChannel {
-        channel: String,
-        agent: String,
-    },
-    LeaveChannel {
-        channel: String,
-        agent: String,
-    },
-    RemoveChannel {
-        channel: String,
-    },
-    SetChannel {
-        id: String,
-        #[serde(default)]
-        name: Option<String>,
-        #[serde(default)]
-        brief: Option<String>,
-        #[serde(default)]
-        unset_brief: bool,
-        #[serde(default)]
-        members: Option<Vec<String>>,
-    },
     /// End the in-flight turn. Does not undo already-sealed assistant text.
     Interrupt {
         agent: String,
@@ -183,8 +149,6 @@ pub enum Request {
     AnswerChoice {
         agent: String,
         message_id: String,
-        #[serde(default)]
-        channel: Option<String>,
         /// Option ids chosen for each question, in order. Ignored when `closed`.
         #[serde(default)]
         answers: Vec<Vec<String>>,
@@ -213,8 +177,6 @@ pub enum Event {
     },
     Agents {
         agents: Vec<AgentInfo>,
-        #[serde(default)]
-        channels: Vec<ChannelInfo>,
     },
     Frame {
         agent: String,
@@ -247,17 +209,6 @@ pub enum Event {
     Told {
         from: String,
         to: String,
-    },
-    Channels {
-        channels: Vec<ChannelInfo>,
-    },
-    ChannelMessages {
-        channel: String,
-        messages: Vec<ChatMessage>,
-    },
-    ChannelMessage {
-        channel: String,
-        message: ChatMessage,
     },
     RoutineRuns {
         agent: String,
@@ -300,31 +251,12 @@ pub struct AgentInfo {
     pub routines: Vec<Routine>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
-    /// Channel this bot is currently working for, if the turn started there.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin_channel: Option<String>,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub last_ts: u64,
 }
 
 fn is_zero(n: &u64) -> bool {
     *n == 0
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChannelInfo {
-    pub id: String,
-    pub name: String,
-    #[serde(default)]
-    pub members: Vec<String>,
-    #[serde(default)]
-    pub routines: Vec<Routine>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub brief: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preview: Option<String>,
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub last_ts: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -511,13 +443,6 @@ pub fn routine_envelope(name: &str, prompt: &str) -> String {
     format!("[crew routine:{name}]\n{prompt}")
 }
 
-/// Group-chat envelope injected into each member's PTY.
-pub fn channel_envelope(channel: &str, from: &str, text: &str) -> String {
-    let from = from.trim();
-    let from = if from.is_empty() { "user" } else { from };
-    format!("[crew channel:{channel} from:{from}]\n{text}")
-}
-
 /// Live roster / system note injected into a running PTY (does not kill the session).
 pub fn system_envelope(text: &str) -> String {
     format!("[crew system]\n{text}")
@@ -574,14 +499,6 @@ mod tests {
     }
 
     #[test]
-    fn channel_info_reads_a_file_written_before_routines_existed() {
-        let raw = r#"{"id":"room","name":"방","members":["a1"]}"#;
-        let info: ChannelInfo = serde_json::from_str(raw).expect("old channel info");
-        assert!(info.routines.is_empty());
-        assert_eq!(info.members, vec!["a1".to_string()]);
-    }
-
-    #[test]
     fn tell_envelope_format() {
         assert_eq!(envelope("alpha", "hello"), "[crew from:alpha]\nhello");
         assert_eq!(envelope("  ", "x"), "[crew from:user]\nx");
@@ -605,139 +522,23 @@ mod tests {
             from: "alpha".into(),
             to: "beta".into(),
             text: "hi".into(),
-            channel: None,
         };
         let line = req.to_line().unwrap();
         assert!(line.contains("\"type\":\"tell\""));
         let back: Request = serde_json::from_str(&line).unwrap();
         match back {
-            Request::Tell {
-                from,
-                to,
-                text,
-                channel,
-            } => {
+            Request::Tell { from, to, text } => {
                 assert_eq!(
                     (from, to, text),
                     ("alpha".into(), "beta".into(), "hi".into())
                 );
-                assert!(channel.is_none());
             }
             other => panic!("unexpected {other:?}"),
         }
         let old = r#"{"type":"tell","from":"alpha","to":"beta","text":"hi"}"#;
         let back: Request = serde_json::from_str(old).unwrap();
         match back {
-            Request::Tell { channel, to, .. } => {
-                assert_eq!(to, "beta");
-                assert!(channel.is_none());
-            }
-            other => panic!("unexpected {other:?}"),
-        }
-    }
-
-    #[test]
-    fn channel_envelope_format() {
-        assert_eq!(
-            channel_envelope("room", "alpha", "hello"),
-            "[crew channel:room from:alpha]\nhello"
-        );
-        assert_eq!(
-            channel_envelope("room", "  ", "x"),
-            "[crew channel:room from:user]\nx"
-        );
-    }
-
-    #[test]
-    fn add_channel_roundtrip() {
-        let req = Request::AddChannel {
-            id: "room".into(),
-            name: "Room".into(),
-            members: vec!["alpha".into(), "beta".into()],
-        };
-        let line = req.to_line().unwrap();
-        assert!(line.contains("\"type\":\"add_channel\""));
-        let back: Request = serde_json::from_str(&line).unwrap();
-        match back {
-            Request::AddChannel { id, members, .. } => {
-                assert_eq!(id, "room");
-                assert_eq!(members, vec!["alpha", "beta"]);
-            }
-            other => panic!("unexpected {other:?}"),
-        }
-    }
-
-    #[test]
-    fn set_channel_roundtrip() {
-        let req = Request::SetChannel {
-            id: "room".into(),
-            name: Some("Room".into()),
-            brief: Some("standup notes".into()),
-            unset_brief: false,
-            members: Some(vec!["alpha".into(), "beta".into()]),
-        };
-        let line = req.to_line().unwrap();
-        assert!(line.contains("\"type\":\"set_channel\""));
-        let back: Request = serde_json::from_str(&line).unwrap();
-        match back {
-            Request::SetChannel {
-                id,
-                name,
-                brief,
-                unset_brief,
-                members,
-            } => {
-                assert_eq!(id, "room");
-                assert_eq!(name.as_deref(), Some("Room"));
-                assert_eq!(brief.as_deref(), Some("standup notes"));
-                assert!(!unset_brief);
-                assert_eq!(members, Some(vec!["alpha".into(), "beta".into()]));
-            }
-            other => panic!("unexpected {other:?}"),
-        }
-        let old = r#"{"type":"set_channel","id":"room"}"#;
-        let back: Request = serde_json::from_str(old).unwrap();
-        match back {
-            Request::SetChannel {
-                name,
-                brief,
-                unset_brief,
-                members,
-                ..
-            } => {
-                assert!(name.is_none());
-                assert!(brief.is_none());
-                assert!(!unset_brief);
-                assert!(members.is_none());
-            }
-            other => panic!("unexpected {other:?}"),
-        }
-    }
-
-    #[test]
-    fn leave_and_remove_channel_roundtrip() {
-        let leave = Request::LeaveChannel {
-            channel: "room".into(),
-            agent: "alpha".into(),
-        };
-        let line = leave.to_line().unwrap();
-        assert!(line.contains("\"type\":\"leave_channel\""));
-        let back: Request = serde_json::from_str(&line).unwrap();
-        match back {
-            Request::LeaveChannel { channel, agent } => {
-                assert_eq!(channel, "room");
-                assert_eq!(agent, "alpha");
-            }
-            other => panic!("unexpected {other:?}"),
-        }
-        let remove = Request::RemoveChannel {
-            channel: "room".into(),
-        };
-        let line = remove.to_line().unwrap();
-        assert!(line.contains("\"type\":\"remove_channel\""));
-        let back: Request = serde_json::from_str(&line).unwrap();
-        match back {
-            Request::RemoveChannel { channel } => assert_eq!(channel, "room"),
+            Request::Tell { to, .. } => assert_eq!(to, "beta"),
             other => panic!("unexpected {other:?}"),
         }
     }
@@ -818,7 +619,6 @@ mod tests {
         let req = Request::AnswerChoice {
             agent: "alpha".into(),
             message_id: "1".into(),
-            channel: None,
             answers: Vec::new(),
             values: vec![vec!["id".into(), "pw".into()]],
             closed: false,

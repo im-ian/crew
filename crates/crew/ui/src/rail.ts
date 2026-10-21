@@ -18,9 +18,8 @@ function nameKey(name: string): string {
  * Two bots may share a name on purpose, and the rail is where that stops being
  * readable — three rows reading 춘식이 with nothing to tell them apart.
  *
- * Only names that repeat are numbered, so the common case stays clean. Rooms
- * and bots share one numbering space; numbering them separately would put two
- * rows reading "출시 1" on screen, which is worse than not numbering at all.
+ * Only names that repeat are numbered, so the common case stays clean.
+ * Every row shares one numbering space.
  *
  * Order comes from the id under numeric collation rather than list order, so
  * regrouping or dragging a row does not renumber the others — and `bot-10`

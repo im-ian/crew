@@ -15,81 +15,6 @@ const DEFAULT_AGENTS: &str = include_str!("../../../agents.example.json");
 pub struct Config {
     #[serde(default)]
     pub agents: Vec<AgentConfig>,
-    #[serde(default)]
-    pub channels: Vec<Channel>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Channel {
-    pub id: String,
-    pub name: String,
-    #[serde(default)]
-    pub members: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub brief: Option<String>,
-    /// Scheduled posts into the room. Same shape as a bot's routines.
-    #[serde(default)]
-    pub routines: Vec<Routine>,
-}
-
-impl Channel {
-    pub fn new(id: String, name: String, members: Vec<String>) -> anyhow::Result<Self> {
-        let id = id.trim().to_string();
-        if id.is_empty() {
-            anyhow::bail!("channel id is empty");
-        }
-        if !valid_agent_id(&id) {
-            anyhow::bail!("{}", id_rule(&id));
-        }
-        let name = {
-            let n = name.trim();
-            if n.is_empty() {
-                id.clone()
-            } else {
-                n.to_string()
-            }
-        };
-        Ok(Self {
-            id,
-            name,
-            members: unique_ids(members),
-            brief: None,
-            routines: Vec::new(),
-        })
-    }
-
-    pub fn set_name(&mut self, name: String) {
-        let n = name.trim();
-        self.name = if n.is_empty() {
-            self.id.clone()
-        } else {
-            n.to_string()
-        };
-    }
-
-    pub fn set_brief(&mut self, brief: Option<String>) {
-        self.brief = brief.and_then(empty_to_none);
-    }
-
-    pub fn set_members(
-        &mut self,
-        members: Vec<String>,
-        known: impl IntoIterator<Item = impl AsRef<str>>,
-    ) -> anyhow::Result<()> {
-        let known: HashSet<String> = known
-            .into_iter()
-            .map(|s| s.as_ref().trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        let members = unique_ids(members);
-        for m in &members {
-            if !known.contains(m) {
-                anyhow::bail!("unknown agent {m}");
-            }
-        }
-        self.members = members;
-        Ok(())
-    }
 }
 
 pub fn unique_ids(ids: impl IntoIterator<Item = String>) -> Vec<String> {
@@ -344,7 +269,7 @@ pub fn slug_id(name: &str) -> String {
 
 /// Caps a minted slug well short of `valid_agent_id`'s 64, leaving room for the
 /// `-2` … `-N` suffix `unique_from_base` appends. Without it a long name mints
-/// an id that `Channel::new` then rejects — naming an id the caller never typed.
+/// an id the id rule then rejects.
 const SLUG_MAX: usize = 48;
 
 fn slug_with_fallback(name: &str, fallback: &str) -> String {
@@ -413,8 +338,8 @@ pub fn unique_agent_id<S: AsRef<str>>(name: &str, existing: impl IntoIterator<It
     agent_id_at(name, std::time::SystemTime::now(), existing)
 }
 
-/// One wording for one rule, so the CLI, the daemon and `Channel::new` do not
-/// each phrase the same refusal differently.
+/// One wording for one rule, so the CLI and the daemon do not each phrase the
+/// same refusal differently.
 pub fn id_rule(id: &str) -> String {
     format!("id {id} must be 1-64 of a-z, 0-9, '-' or '_'")
 }
@@ -433,13 +358,6 @@ pub fn valid_agent_id(id: &str) -> bool {
         && id
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
-}
-
-pub fn unique_channel_id<S: AsRef<str>>(
-    name: &str,
-    existing: impl IntoIterator<Item = S>,
-) -> String {
-    unique_from_base(slug_with_fallback(name, "channel"), existing)
 }
 
 fn unique_from_base<S: AsRef<str>>(base: String, existing: impl IntoIterator<Item = S>) -> String {
@@ -763,22 +681,13 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         "When the user writes @id or @display-name, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too.\n",
     );
     s.push_str(
-        "When the user writes #id or #display-name, they are naming a channel. Stay in this session. To post there, run `crew channel send <id> <text>` or `crew tell --channel <id> <text>`.\n",
-    );
-    s.push_str(
-        "Rooms are yours to make, not only the user's. `crew channel list` prints `id<TAB>name<TAB>members`. `crew channel add --name \"브라우저 QA\" --members alpha,beta` opens one and prints its id. A room only takes posts from its members, so put your own id in `--members` when you will speak there. Pass an explicit id first (`crew channel add browser-qa --name ...`) only when you want to choose it, and then it must be 1-64 of a-z, 0-9, '-' or '_'. `crew channel set <id> --brief \"...\"` gives the room standing rules every member sees on every wake, and `crew channel join <id> <agent>` / `crew channel leave <id> <agent>` change who is in it. Actually run these. Do not describe a room you did not create.\n",
-    );
-    s.push_str(
-        "A channel wake prompt lists that room's `Members:` by id — that is who \"the same people\" means when the user asks for another room with them; your teammate list above is every agent, not this room. Your own post to a room wakes nobody unless you name someone (@id, @display-name, or @everyone), so once a room exists, send the first message there with the mentions that should start the work. A channel message that names several members is handed out one member at a time, in the order the names were written, or in member order for @everyone. You are asked when it is your turn. If someone in that room is already speaking, the next message waits until they finish, then its names go in that same order. Another room keeps its own order.\n",
-    );
-    s.push_str(
         "To change your display name, actually run `crew agent set --name \"New Name\"` (id defaults to CREW_AGENT_ID). Do not only claim you renamed yourself.\n",
     );
     s.push_str(
         "To schedule recurring work, actually run `crew routine add --name \"...\" --schedule \"평일 8시에 브리핑\" --prompt \"...\"`. Schedule may be cron or a short Korean/English sentence. That creates a Crew routine, not a chat reminder.\n",
     );
     s.push_str(
-        "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew channel:…]` / `[crew system]` / `[crew handoff from:…]` / `[crew reply:…]` are real messages. A `[crew reply:…]` line is the user answering an earlier message; the next line is the quote, then their new text. A handoff is a teammate's finished reply; do not crew tell them that same text back.\n",
+        "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew system]` / `[crew handoff from:…]` / `[crew reply:…]` are real messages. A `[crew reply:…]` line is the user answering an earlier message; the next line is the quote, then their new text. A handoff is a teammate's finished reply; do not crew tell them that same text back.\n",
     );
     s.push_str(
         "To ask the human user in this chat to pick, actually run `crew ask --question \"어느 쪽을 고를래?\" --option A --option B --option C`. To ask them to type a value, run `crew ask --question \"로그인\" --input 아이디 --input 비밀번호`. Crew shows a card and prints their answer. Never send this to a teammate. Do not crew tell the options. Do not ask the user to type the letter. This is not a substitute for `crew tell`, `crew agent set`, or `crew routine add`.\n",
@@ -811,7 +720,6 @@ pub fn roster_update_text(agent: &AgentConfig, roster: &[AgentConfig]) -> String
         body.push('.');
     }
     body.push_str(" When the user writes @id or @display-name they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>`. Do not ask the user to switch chats. Do not pretend.");
-    body.push_str(" When the user writes #id or #display-name they are naming a channel. To post there, run `crew channel send <id> <text>`.");
     body
 }
 
@@ -830,63 +738,18 @@ pub fn mentioned_teammate_ids(text: &str, self_id: &str, roster: &[AgentConfig])
 }
 
 /// Prompt for the CLI: raw user text, plus a short `[crew system]` hint when
-/// the user @mentioned teammates or #mentioned channels. Transcript keeps the raw message.
-pub fn with_mention_hint(
-    text: &str,
-    self_id: &str,
-    roster: &[AgentConfig],
-    channels: &[Channel],
-) -> String {
+/// the user @mentioned teammates. Transcript keeps the raw message.
+pub fn with_mention_hint(text: &str, self_id: &str, roster: &[AgentConfig]) -> String {
     let scan = crate::rows::reply_body(text);
     let ids = mentioned_teammate_ids(scan, self_id, roster);
-    let rooms = mentioned_channel_ids(scan, channels);
-    if ids.is_empty() && rooms.is_empty() {
+    if ids.is_empty() {
         return text.to_string();
     }
-    let mut note = String::new();
-    if !ids.is_empty() {
-        note.push_str(&format!(
-            "User already messaged teammates via crew: {}. They have this request. Stay in this session. Do not ask the user to switch chats. Do not pretend.",
-            ids.join(", ")
-        ));
-    }
-    if !rooms.is_empty() {
-        if !note.is_empty() {
-            note.push(' ');
-        }
-        note.push_str(&format!(
-            "User named channel(s): {}. To post there, run `crew channel send <id> <text>`. Stay in this session.",
-            rooms.join(", ")
-        ));
-    }
+    let note = format!(
+        "User already messaged teammates via crew: {}. They have this request. Stay in this session. Do not ask the user to switch chats. Do not pretend.",
+        ids.join(", ")
+    );
     format!("{text}\n\n[crew system]\n{note}")
-}
-
-pub fn mentioned_channel_ids(text: &str, channels: &[Channel]) -> Vec<String> {
-    let mut found = Vec::new();
-    let mut seen = HashSet::new();
-    for token in sigil_tokens(text, '#') {
-        if let Some(id) = resolve_channel_mention(&token, channels) {
-            if seen.insert(id.clone()) {
-                found.push(id);
-            }
-        }
-    }
-    found
-}
-
-pub(crate) fn resolve_channel_mention(token: &str, channels: &[Channel]) -> Option<String> {
-    let raw = token.strip_prefix('#').unwrap_or(token);
-    let lower = raw.to_lowercase();
-    channels
-        .iter()
-        .find(|c| {
-            c.id == raw
-                || c.name == raw
-                || c.id.to_lowercase() == lower
-                || c.name.to_lowercase() == lower
-        })
-        .map(|c| c.id.clone())
 }
 
 pub(crate) fn mention_tokens(text: &str) -> Vec<String> {
@@ -1109,13 +972,10 @@ fn append_flag_value(args: &mut Vec<String>, flag: &str, extra: &str) {
     args.push(extra.to_string());
 }
 
-pub fn format_roster(agents: &[AgentConfig], channels: &[Channel]) -> String {
+pub fn format_roster(agents: &[AgentConfig]) -> String {
     let mut out = String::from("# Crew roster\n\n");
     out.push_str("Message a teammate with `crew tell <id> <text>`.\n");
     out.push_str("crew is on PATH; CREW_AGENT_ID is set in each agent session.\n");
-    out.push_str(
-        "Channel post: `crew tell --channel <id> <text>` or `crew channel send <id> <text>`.\n",
-    );
     out.push_str("Rename yourself with `crew agent set --name \"New Name\"`.\n");
     out.push_str(
         "Schedule work with `crew routine add --name \"...\" --schedule \"평일 8시에 브리핑\" --prompt \"...\"`.\n",
@@ -1142,33 +1002,12 @@ pub fn format_roster(agents: &[AgentConfig], channels: &[Channel]) -> String {
             }
         }
     }
-    out.push_str("\n## Channels\n\n");
-    if channels.is_empty() {
-        out.push_str("(none)\n");
-    } else {
-        let mut list: Vec<&Channel> = channels.iter().collect();
-        list.sort_by(|a, b| a.id.cmp(&b.id));
-        for c in list {
-            let members = if c.members.is_empty() {
-                "(none)".to_string()
-            } else {
-                c.members.join(", ")
-            };
-            out.push_str(&format!(
-                "- `{}` — {}\n  members: {}\n",
-                c.id, c.name, members
-            ));
-            if let Some(brief) = c.brief.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
-                out.push_str(&format!("  brief: {brief}\n"));
-            }
-        }
-    }
     out
 }
 
-pub fn write_roster(agents: &[AgentConfig], channels: &[Channel]) -> anyhow::Result<()> {
+pub fn write_roster(agents: &[AgentConfig]) -> anyhow::Result<()> {
     paths::ensure_home()?;
-    fs::write(paths::roster_path(), format_roster(agents, channels))?;
+    fs::write(paths::roster_path(), format_roster(agents))?;
     Ok(())
 }
 
@@ -1290,19 +1129,6 @@ mod tests {
             let err = Config::load().expect_err("a corrupt config is an error");
             assert!(err.to_string().contains("agents.json"), "{err:#}");
         });
-    }
-
-    #[test]
-    fn channel_reads_a_config_written_before_routines_existed() {
-        let raw = r#"{"id":"room","name":"방","members":["a1","a2"]}"#;
-        let ch: Channel = serde_json::from_str(raw).expect("old channel");
-        assert!(ch.routines.is_empty());
-        let mut ch = ch;
-        ch.routines
-            .push(Routine::new("스탠드업".into(), "0 9 * * *".into(), "brief".into()).unwrap());
-        let back: Channel = serde_json::from_str(&serde_json::to_string(&ch).unwrap()).unwrap();
-        assert_eq!(back.routines.len(), 1);
-        assert_eq!(back.routines[0].name, "스탠드업");
     }
 
     #[test]
@@ -1542,60 +1368,27 @@ mod tests {
     }
 
     #[test]
-    fn roster_markdown_lists_agents_and_channels() {
+    fn roster_markdown_lists_agents() {
         let mut a = AgentConfig::new("alpha".into(), "Alpha".into(), vec!["cat".into()], None);
         a.role = Some("PM".into());
-        let ch = Channel::new(
-            "room".into(),
-            "Room".into(),
-            vec!["alpha".into(), "beta".into()],
-        )
-        .unwrap();
-        let md = format_roster(&[a.clone()], &[ch.clone()]);
+        let md = format_roster(&[a]);
         assert!(md.contains("`alpha` — Alpha — PM"));
-        assert!(md.contains("`room` — Room"));
-        assert!(md.contains("members: alpha, beta"));
-        assert!(!md.contains("brief:"));
-        let mut with_brief = ch.clone();
-        with_brief.brief = Some("launch notes".into());
-        let md = format_roster(&[a], &[with_brief]);
-        assert!(md.contains("brief: launch notes"));
         assert!(md.contains("crew tell"));
         assert!(md.contains("crew agent set --name"));
         assert!(md.contains("crew routine add"));
         assert!(md.contains("crew ask --question"));
         assert!(md.contains("--input"));
+        assert!(!md.contains("channel"));
     }
 
     #[test]
-    fn channels_roundtrip_in_config() {
+    fn old_channel_field_is_ignored() {
         let raw = r#"{"agents":[{"id":"a","name":"A","cmd":["cat"]}],"channels":[{"id":"room","name":"Room","members":["a"]}]}"#;
         let cfg: Config = serde_json::from_str(raw).unwrap();
-        assert_eq!(cfg.channels.len(), 1);
-        assert_eq!(cfg.channels[0].members, vec!["a"]);
-        assert!(cfg.channels[0].brief.is_none());
-        let with_brief = r#"{"agents":[{"id":"a","name":"A","cmd":["cat"]}],"channels":[{"id":"room","name":"Room","members":["a"],"brief":"notes"}]}"#;
-        let cfg: Config = serde_json::from_str(with_brief).unwrap();
-        assert_eq!(cfg.channels[0].brief.as_deref(), Some("notes"));
-        let old = r#"{"agents":[{"id":"a","name":"A","cmd":["cat"]}]}"#;
-        let cfg: Config = serde_json::from_str(old).unwrap();
-        assert!(cfg.channels.is_empty());
-    }
-
-    #[test]
-    fn channel_set_name_brief_members() {
-        let mut ch = Channel::new("room".into(), "Room".into(), vec!["a".into()]).unwrap();
-        ch.set_name("  Launch  ".into());
-        assert_eq!(ch.name, "Launch");
-        ch.set_brief(Some("  keep this  ".into()));
-        assert_eq!(ch.brief.as_deref(), Some("keep this"));
-        ch.set_brief(Some("   ".into()));
-        assert!(ch.brief.is_none());
-        ch.set_members(vec!["a".into(), "b".into(), "a".into()], ["a", "b", "c"])
-            .unwrap();
-        assert_eq!(ch.members, vec!["a", "b"]);
-        let err = ch.set_members(vec!["nope".into()], ["a", "b"]).unwrap_err();
-        assert!(err.to_string().contains("unknown agent nope"), "{err}");
+        assert_eq!(cfg.agents.len(), 1);
+        assert_eq!(cfg.agents[0].id, "a");
+        let saved = serde_json::to_string(&cfg).unwrap();
+        assert!(!saved.contains("channels"));
     }
 
     #[test]
@@ -1702,7 +1495,7 @@ mod tests {
         // every per-id file.
         assert!(!valid_agent_id("춘식이"));
         assert!(!valid_agent_id("죠르디"));
-        // And this one decodes as a channel in `persist_path`.
+        // A colon is not in the id alphabet.
         assert!(!valid_agent_id("ch:general"));
     }
 
@@ -1809,21 +1602,14 @@ mod tests {
     #[test]
     fn a_minted_id_always_passes_the_id_rule() {
         let long = "Browser QA for the checkout flow regression suite and payment edge cases";
-        let id = unique_channel_id(long, Vec::<&str>::new());
+        let id = unique_agent_id(long, Vec::<&str>::new());
         assert!(valid_agent_id(&id), "{id}");
         let taken: Vec<String> = (2..40)
             .map(|n| format!("{id}-{n}"))
             .chain([id.clone()])
             .collect();
-        let suffixed = unique_channel_id(long, taken);
+        let suffixed = unique_agent_id(long, taken);
         assert!(valid_agent_id(&suffixed), "{suffixed}");
-        assert!(Channel::new(suffixed.clone(), "x".into(), Vec::new()).is_ok());
-    }
-
-    #[test]
-    fn unique_channel_id_suffixes() {
-        assert_eq!(unique_channel_id("Room", ["room"]), "room-2");
-        assert_eq!(unique_channel_id("프로젝트", Vec::<&str>::new()), "channel");
     }
 
     #[test]
@@ -1865,42 +1651,16 @@ mod tests {
             Vec::<String>::new()
         );
 
-        let hinted = with_mention_hint("ping @Beta please", "alpha", &roster, &[]);
+        let hinted = with_mention_hint("ping @Beta please", "alpha", &roster);
         assert!(hinted.starts_with("ping @Beta please"));
         assert!(hinted.contains("[crew system]"));
         assert!(hinted.contains("beta"));
         assert!(hinted.contains("already messaged teammates"));
-        assert_eq!(
-            with_mention_hint("no mentions", "alpha", &roster, &[]),
-            "no mentions"
-        );
+        assert_eq!(with_mention_hint("no mentions", "alpha", &roster), "no mentions");
         let quoted = "[crew reply:1-2 from:beta]\nask @beta later\n\njust thinking";
-        assert_eq!(with_mention_hint(quoted, "alpha", &roster, &[]), quoted);
+        assert_eq!(with_mention_hint(quoted, "alpha", &roster), quoted);
         let body_mention = "[crew reply:1-2 from:alice]\nhello\n\nask @beta";
-        assert!(with_mention_hint(body_mention, "alpha", &roster, &[]).contains("[crew system]"));
-    }
-
-    #[test]
-    fn hash_tokens_resolve_channels() {
-        let room = Channel::new("ship".into(), "출시".into(), vec!["alpha".into()]).unwrap();
-        assert_eq!(
-            mentioned_channel_ids("post in #출시 please", &[room.clone()]),
-            vec!["ship".to_string()]
-        );
-        assert_eq!(
-            mentioned_channel_ids("see #ship.", &[room.clone()]),
-            vec!["ship".to_string()]
-        );
-        assert!(mentioned_channel_ids("color #ff6a00", &[room]).is_empty());
-        let alpha = AgentConfig::new("alpha".into(), "Alpha".into(), vec!["cat".into()], None);
-        let hinted = with_mention_hint(
-            "drop this in #출시",
-            "alpha",
-            &[alpha],
-            &[Channel::new("ship".into(), "출시".into(), vec!["alpha".into()]).unwrap()],
-        );
-        assert!(hinted.contains("ship"));
-        assert!(hinted.contains("channel send"));
+        assert!(with_mention_hint(body_mention, "alpha", &roster).contains("[crew system]"));
     }
 
     #[test]
@@ -1915,13 +1675,7 @@ mod tests {
         assert!(rules.contains("[crew handoff from:"));
         assert!(rules.contains("[crew reply:"));
         assert!(rules.contains("crew agent set --name"));
-        assert!(rules.contains("crew channel add --name"));
-        assert!(rules.contains("crew channel list"));
-        assert!(rules.contains("crew channel set <id> --brief"));
-        assert!(rules.contains("Members:"));
-        assert!(rules.contains("one member at a time"));
-        assert!(rules.contains("waits until they finish"));
-        assert!(rules.contains("Another room keeps its own order"));
+        assert!(!rules.contains("crew channel"));
         assert!(rules.contains("in the order they were written"));
         assert!(rules.contains("crew routine add"));
         assert!(rules.contains("crew ask --question"));
@@ -1994,6 +1748,5 @@ mod tests {
         let ids: Vec<&str> = cfg.agents.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(ids, vec!["grok", "shell"]);
         assert_eq!(cfg.agents[0].cmd, vec!["grok", "--always-approve"]);
-        assert!(cfg.channels.is_empty());
     }
 }

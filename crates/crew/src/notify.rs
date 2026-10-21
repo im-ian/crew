@@ -50,16 +50,13 @@ pub fn routine_fail_body(routine: &str, lang: &str) -> String {
     }
 }
 
-/// Where clicking the notification should land: the bot's chat, or the room.
+/// Where clicking the notification should land: the bot's chat.
 pub fn focus_scope(target: &str) -> (&'static str, &str) {
-    match target.strip_prefix('#') {
-        Some(channel) => ("channel", channel),
-        None => ("agent", target),
-    }
+    ("agent", target)
 }
 
 /// A scheduled routine could not start. Same focus + notification path as a status
-/// change. `target` is a bot id, or `#room` for a channel routine.
+/// change. `target` is a bot id.
 pub fn routine_failed(target: &str, routine: &str) {
     let body = routine_fail_body(routine, &paths::locale());
     let (kind, id) = focus_scope(target);
@@ -73,7 +70,6 @@ pub fn routine_failed(target: &str, routine: &str) {
 pub fn maybe_status_notify(
     agent_id: &str,
     name: &str,
-    channel: Option<&str>,
     prev: AgentStatus,
     next: AgentStatus,
     interrupted: bool,
@@ -82,10 +78,7 @@ pub fn maybe_status_notify(
         return;
     }
     let body = notify_body(name, next, &paths::locale());
-    let (kind, id) = match channel.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(ch) => ("channel", ch),
-        None => ("agent", agent_id),
-    };
+    let (kind, id) = ("agent", agent_id);
     let event = if next == AgentStatus::Blocked {
         "blocked"
     } else {
@@ -228,10 +221,10 @@ mod tests {
     }
 
     #[test]
-    fn a_channel_routine_points_at_the_room() {
-        assert_eq!(focus_scope("#room"), ("channel", "room"));
+    fn focus_scope_is_the_bot() {
         assert_eq!(focus_scope("alpha"), ("agent", "alpha"));
-        assert_eq!(focus_scope("#"), ("channel", ""));
+        assert_eq!(focus_scope("#room"), ("agent", "#room"));
+        assert_eq!(focus_scope("#"), ("agent", "#"));
     }
 
     #[test]
@@ -249,18 +242,18 @@ mod tests {
         write_focus_at(
             &path,
             &FocusTarget {
-                kind: "channel".into(),
-                id: "room".into(),
+                kind: "agent".into(),
+                id: "alpha".into(),
                 body: "춘식이 작업을 마쳤습니다".into(),
                 event: "done".into(),
                 name: "춘식이".into(),
             },
         );
         let peek = peek_focus_at(&path).expect("peek");
-        assert_eq!(peek.kind, "channel");
-        assert_eq!(peek.id, "room");
+        assert_eq!(peek.kind, "agent");
+        assert_eq!(peek.id, "alpha");
         let taken = take_focus_at(&path).expect("take");
-        assert_eq!(taken.id, "room");
+        assert_eq!(taken.id, "alpha");
         assert!(take_focus_at(&path).is_none());
         let _ = fs::remove_dir_all(&dir);
     }

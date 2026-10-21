@@ -30,18 +30,6 @@ export function ConfirmDialog({ open, kind, onCancel, onConfirm }: Props) {
     ok = t("common.delete");
     okClass = "danger";
     showToggle = false;
-  } else if (kind === "leave-channel") {
-    title = t("confirm.leaveChannel.title");
-    body = t("confirm.leaveChannel.body");
-    ok = t("confirm.leaveChannel.ok");
-    okClass = "danger";
-    showToggle = false;
-  } else if (kind === "remove-channel") {
-    title = t("confirm.removeChannel.title");
-    body = t("confirm.removeChannel.body");
-    ok = t("common.delete");
-    okClass = "danger";
-    showToggle = false;
   } else if (kind === "remove-group") {
     title = t("confirm.removeGroup.title");
     body = t("confirm.removeGroup.body");

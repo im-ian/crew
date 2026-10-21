@@ -1,4 +1,4 @@
-import type { AgentInfo, ChannelInfo, Group, Kind } from "./types";
+import type { AgentInfo, Group, Kind } from "./types";
 
 export const UNGROUPED_ID = "__ungrouped";
 
@@ -16,7 +16,7 @@ export function parseItemKey(key: string): { kind: Kind; id: string } | null {
   if (i <= 0) return null;
   const kind = key.slice(0, i);
   const id = key.slice(i + 1);
-  if ((kind !== "agent" && kind !== "channel") || !id) return null;
+  if (kind !== "agent" || !id) return null;
   return { kind, id };
 }
 
@@ -85,12 +85,8 @@ export function groupIdOf(groups: Group[], kind: Kind, id: string): string | nul
   return found ? found.id : null;
 }
 
-export function pruneLayout(
-  layout: RailLayout,
-  agents: AgentInfo[],
-  channels: ChannelInfo[],
-): RailLayout {
-  const valid = validKeys(agents, channels);
+export function pruneLayout(layout: RailLayout, agents: AgentInfo[]): RailLayout {
+  const valid = validKeys(agents);
   return {
     groups: layout.groups
       .filter((g) => g.id !== UNGROUPED_ID)
@@ -110,17 +106,12 @@ export function visibleUngroupedKeys(
   groups: Group[],
   ungrouped: string[],
   agents: AgentInfo[],
-  channels: ChannelInfo[],
 ): string[] {
   const grouped = new Set(groups.flatMap((g) => g.items));
   const present: { key: string; name: string }[] = [];
   for (const a of agents) {
     const key = itemKey("agent", a.id);
     if (!grouped.has(key)) present.push({ key, name: a.name || a.id });
-  }
-  for (const c of channels) {
-    const key = itemKey("channel", c.id);
-    if (!grouped.has(key)) present.push({ key, name: c.name || c.id });
   }
   const byKey = new Map(present.map((p) => [p.key, p]));
   const out: string[] = [];
@@ -141,9 +132,8 @@ export function railOrder(
   groups: Group[],
   ungrouped: string[],
   agents: AgentInfo[],
-  channels: ChannelInfo[],
 ): { kind: Kind; id: string }[] {
-  const valid = validKeys(agents, channels);
+  const valid = validKeys(agents);
   const out: { kind: Kind; id: string }[] = [];
   const used = new Set<string>();
   for (const g of groups) {
@@ -156,7 +146,7 @@ export function railOrder(
       if (parsed) out.push(parsed);
     }
   }
-  for (const key of visibleUngroupedKeys(groups, ungrouped, agents, channels)) {
+  for (const key of visibleUngroupedKeys(groups, ungrouped, agents)) {
     if (used.has(key)) continue;
     used.add(key);
     const parsed = parseItemKey(key);
@@ -208,13 +198,9 @@ export function moveItem(
   };
 }
 
-export function validKeys(
-  agents: AgentInfo[],
-  channels: ChannelInfo[],
-): Set<string> {
+export function validKeys(agents: AgentInfo[]): Set<string> {
   const keys = new Set<string>();
   for (const a of agents) keys.add(itemKey("agent", a.id));
-  for (const c of channels) keys.add(itemKey("channel", c.id));
   return keys;
 }
 

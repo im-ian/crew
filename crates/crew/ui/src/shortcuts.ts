@@ -16,7 +16,6 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "next-chat", combo: "Meta+Alt+ArrowDown", group: "nav" },
   { id: "bottom", combo: "Meta+Shift+ArrowDown", group: "nav" },
   { id: "new-bot", combo: "Meta+N", group: "create" },
-  { id: "new-channel", combo: "Meta+Shift+N", group: "create" },
   { id: "info", combo: "Meta+I", group: "chat" },
   { id: "routines", combo: "Meta+Shift+R", group: "chat" },
   { id: "stop", combo: "Meta+.", group: "chat" },
@@ -130,7 +129,7 @@ function selfCheck() {
   const cases: Array<[KeyEventLike, boolean, string | null]> = [
     [{ key: "k", metaKey: true }, false, "search"],
     [{ key: "n", metaKey: true }, true, "new-bot"],
-    [{ key: "N", metaKey: true, shiftKey: true }, false, "new-channel"],
+    [{ key: "N", metaKey: true, shiftKey: true }, false, null],
     [{ key: "/", metaKey: true }, false, "help"],
     [{ key: ",", metaKey: true }, false, "settings"],
     [{ key: ".", metaKey: true }, true, "stop"],

@@ -33,14 +33,26 @@ pub fn load_from(path: &Path) -> anyhow::Result<Vec<SidebarGroup>> {
     if trimmed.is_empty() {
         return Ok(Vec::new());
     }
-    Ok(serde_json::from_str(trimmed)?)
+    let mut groups: Vec<SidebarGroup> = serde_json::from_str(trimmed)?;
+    drop_channel_items(&mut groups);
+    Ok(groups)
+}
+
+/// Old sidebar folders could point at a group chat. Those chats are gone,
+/// so a `channel:` key would render as an empty row.
+fn drop_channel_items(groups: &mut [SidebarGroup]) {
+    for group in groups {
+        group.items.retain(|item| !item.starts_with("channel:"));
+    }
 }
 
 pub fn save_to(path: &Path, groups: &[SidebarGroup]) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let raw = serde_json::to_string_pretty(groups)?;
+    let mut groups = groups.to_vec();
+    drop_channel_items(&mut groups);
+    let raw = serde_json::to_string_pretty(&groups)?;
     fs::write(path, raw + "\n")?;
     Ok(())
 }
@@ -69,7 +81,9 @@ mod tests {
             items: vec!["agent:grok".into(), "channel:room".into()],
         }];
         save_to(&path, &groups).unwrap();
-        assert_eq!(load_from(&path).unwrap(), groups);
+        let loaded = load_from(&path).unwrap();
+        assert_eq!(loaded[0].id, "g1");
+        assert_eq!(loaded[0].items, vec!["agent:grok".to_string()]);
         let _ = fs::remove_file(&path);
         let _ = fs::remove_dir(&dir);
     }
@@ -80,5 +94,16 @@ mod tests {
             serde_json::from_str(r#"[{"id":"g1","name":"개인"}]"#).unwrap();
         assert!(!groups[0].collapsed);
         assert!(groups[0].items.is_empty());
+    }
+
+    #[test]
+    fn load_drops_channel_items() {
+        let groups: Vec<SidebarGroup> = serde_json::from_str(
+            r#"[{"id":"g1","name":"작업","items":["agent:grok","channel:room"]}]"#,
+        )
+        .unwrap();
+        let mut groups = groups;
+        drop_channel_items(&mut groups);
+        assert_eq!(groups[0].items, vec!["agent:grok".to_string()]);
     }
 }
