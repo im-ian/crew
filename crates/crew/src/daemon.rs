@@ -562,7 +562,6 @@ fn start_delivery(id: &str, text: &str, newline: bool, origin: TurnOrigin) -> an
     } else {
         crate::protocol::attach_after_marker(text, &render_handoffs(&pending))
     };
-    crate::transcript::expect_echo(id, &text);
     set_origin(id, origin);
     match deliver(id, &text, newline) {
         Ok(()) => Ok(()),
@@ -1988,7 +1987,13 @@ fn deliver(id: &str, text: &str, newline: bool) -> anyhow::Result<()> {
             .with_context(|| format!("unknown agent {id}"))?
     };
     match live {
-        LiveAgent::Pty(_) => write_pty(id, text, newline),
+        LiveAgent::Pty(_) => {
+            // Only a terminal types the prompt back. A headless CLI streams its
+            // reply alone, and an echo armed there ate any reply that opened
+            // like the prompt: "반가워" got back "워요.".
+            crate::transcript::expect_echo(id, text);
+            write_pty(id, text, newline)
+        }
         LiveAgent::Headless(session) => {
             let cfg = clone_agent_cfg(id)?;
             let roster = roster_vec();
