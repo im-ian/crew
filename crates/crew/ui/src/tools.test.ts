@@ -223,3 +223,79 @@ describe("momentStamp", () => {
     expect(momentStamp(routine[0])).toBe(0);
   });
 });
+
+describe("threadRows replies another bot asked for", () => {
+  const reply = (
+    id: string,
+    extra: Partial<ChatMessage> = {},
+  ): ChatMessage => ({
+    id,
+    role: "assistant",
+    from: "chunsik",
+    text: "바위.",
+    ts: 1,
+    peer: "jordy",
+    ...extra,
+  });
+
+  // jordy told chunsik, chunsik answered and told jordy back. The answer is
+  // already in jordy's chat; here it reads beside the thread, not in it.
+  it("folds the reply into the run with the bot that asked", () => {
+    const rows = threadRows(
+      [
+        note("r", "jordy", "received"),
+        reply("a"),
+        note("s", "to:jordy", "sent"),
+      ],
+      roster,
+    );
+    expect(rows.map((r) => r.kind)).toEqual(["notes"]);
+    expect(rows[0].kind === "notes" && rows[0].msgs.map((m) => m.id)).toEqual(
+      ["r", "a", "s"],
+    );
+  });
+
+  // Folded into the run, a lone tool card made a run of no messages: "0".
+  it("keeps the turn's tool cards with the tool cards", () => {
+    const rows = threadRows(
+      [
+        note("r", "jordy", "received"),
+        { ...msg("t", "tool"), peer: "jordy" },
+        reply("a"),
+      ],
+      roster,
+    );
+    expect(rows.map((r) => r.kind)).toEqual(["notes", "tools", "notes"]);
+  });
+
+  it("folds the reply even with no note beside it", () => {
+    const rows = threadRows(
+      [{ id: "u", role: "user", from: "user", text: "hi", ts: 1 }, reply("a")],
+      roster,
+    );
+    expect(rows.map((r) => (r.kind === "notes" ? r.peerId : r.kind))).toEqual([
+      "msg",
+      "jordy",
+    ]);
+  });
+
+  it("keeps a card waiting on the user in the thread", () => {
+    const rows = threadRows(
+      [
+        note("r", "jordy", "received"),
+        reply("a", { approval: "pending" }),
+        note("s", "to:jordy", "sent"),
+      ],
+      roster,
+    );
+    expect(rows.map((r) => r.kind)).toEqual(["notes", "msg", "notes"]);
+  });
+
+  it("leaves the bot's reply to the user in the thread", () => {
+    const rows = threadRows(
+      [note("r", "jordy", "received"), reply("a", { peer: null })],
+      roster,
+    );
+    expect(rows.map((r) => r.kind)).toEqual(["notes", "msg"]);
+  });
+});

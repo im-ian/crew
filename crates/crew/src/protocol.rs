@@ -370,6 +370,11 @@ pub struct ChatMessage {
     pub ts: u64,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub queued: bool,
+    /// On a row from a turn another bot asked for: that bot's id. The reply is
+    /// copied into its chat, so here the row belongs to the exchange with it.
+    /// It is shown beside this chat's thread, not in it, and is not unread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<MessageKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -456,7 +461,8 @@ pub fn system_envelope(text: &str) -> String {
     format!("[crew system]\n{text}")
 }
 
-/// Teammate reply copied into the caller's next prompt (does not start a turn).
+/// Teammate reply for the caller. A turn of its own when the caller asked with
+/// `crew tell`, otherwise it rides the caller's next prompt.
 pub fn handoff_envelope(from: &str, text: &str) -> String {
     let from = from.trim();
     let from = if from.is_empty() { "user" } else { from };
@@ -481,7 +487,8 @@ pub fn attach_after_marker(prompt: &str, extra: &str) -> String {
     if extra.is_empty() {
         return prompt.to_string();
     }
-    if prompt.starts_with("[crew ") {
+    // A prompt that is itself a handoff has no sender line to keep on top.
+    if prompt.starts_with("[crew ") && !prompt.starts_with("[crew handoff") {
         if let Some((first, rest)) = prompt.split_once('\n') {
             return format!("{first}\n{extra}{rest}");
         }
@@ -521,6 +528,13 @@ mod tests {
         assert_eq!(
             attach_after_marker("hello", "[crew handoff from:beta]\nok\n"),
             "[crew handoff from:beta]\nok\nhello"
+        );
+        assert_eq!(
+            attach_after_marker(
+                "[crew handoff from:alpha]\n보",
+                "[crew handoff from:beta]\nok\n"
+            ),
+            "[crew handoff from:beta]\nok\n[crew handoff from:alpha]\n보"
         );
     }
 
@@ -663,6 +677,7 @@ mod tests {
             text: "hello".into(),
             ts: 1,
             queued: false,
+            peer: None,
             kind: None,
             approval: None,
             choice: None,

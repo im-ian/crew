@@ -129,7 +129,10 @@ export function PeekRoom({
           const agent =
             agents.find((a) => a.id === m.from) ??
             (m.from === self.id ? self : null);
-          const who = agent?.name || agent?.id || m.from;
+          const who =
+            agent?.name ||
+            agent?.id ||
+            (m.from === "user" ? t("thread.you") : m.from);
           return (
             <PeekBubble
               key={m.id}

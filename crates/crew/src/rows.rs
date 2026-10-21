@@ -173,6 +173,7 @@ mod tests {
             text: text.into(),
             ts: 1,
             queued: false,
+            peer: None,
             kind: None,
             approval: None,
             choice: None,

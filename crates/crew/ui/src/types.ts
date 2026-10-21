@@ -109,6 +109,8 @@ export type ChatMessage = {
   text: string;
   ts: number;
   queued?: boolean;
+  /** The bot that asked for the turn this row came from: it belongs beside the thread, with that bot. */
+  peer?: string | null;
   kind?: MessageKind | null;
   approval?: ApprovalState | null;
   choice?: ChoiceCard | null;

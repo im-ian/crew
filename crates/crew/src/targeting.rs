@@ -18,6 +18,9 @@ pub struct TurnOrigin {
     pub routine: Option<String>,
     /// Relays between this turn and the user message that started the chain.
     pub hops: u32,
+    /// The turn's one wake of the bot waiting on it is used up, by the wake or
+    /// by a stop. Output the turn leaves behind cannot wake that bot again.
+    pub wake_spent: bool,
 }
 
 impl TurnOrigin {
@@ -117,6 +120,15 @@ pub fn postback_targets(origin: &TurnOrigin, speaker: &str) -> Postback {
     Postback { agent }
 }
 
+/// The bot to wake with the speaker's reply: one that ran `crew tell` itself
+/// and is waiting on the answer. A user's @mention, or a reply passed on to the
+/// chat a chain started in, waits for that chat's next prompt instead.
+pub fn waiting_asker(origin: &TurnOrigin, speaker: &str) -> Option<String> {
+    postback_targets(origin, speaker)
+        .agent
+        .filter(|asker| *asker == origin.from)
+}
+
 /// A turn the user did not ask for, that has already been relayed too far.
 pub fn relay_exhausted(origin: &TurnOrigin) -> bool {
     origin.hops > MAX_RELAY_HOPS
@@ -155,6 +167,22 @@ mod tests {
             assert!(!relay_exhausted(&cur), "hop {n} should still run");
         }
         assert!(relay_exhausted(&bot_hop(&cur)));
+    }
+
+    #[test]
+    fn only_the_bot_that_told_waits_for_the_reply() {
+        let told = bot_hop(&TurnOrigin::user());
+        assert_eq!(waiting_asker(&told, "gamma").as_deref(), Some("beta"));
+        assert_eq!(
+            waiting_asker(&TurnOrigin::mention_tell("alpha"), "beta"),
+            None
+        );
+        // The user @mentioned beta in alpha's chat and beta passed it on. The
+        // reply goes to alpha's chat, but alpha did not run the tell, so it is
+        // not woken; beta is not woken either, since the reply is not sent to it.
+        let passed = bot_hop(&TurnOrigin::mention_tell("alpha"));
+        assert_eq!(passed.reply_agent.as_deref(), Some("alpha"));
+        assert_eq!(waiting_asker(&passed, "gamma"), None);
     }
 
     #[test]

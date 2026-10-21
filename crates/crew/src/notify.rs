@@ -22,12 +22,13 @@ pub struct FocusTarget {
 }
 
 /// Fire a desktop notification when a bot finishes or becomes blocked.
-/// Explicit stop/interrupt is `interrupted = true` and must not look like a finish.
-pub fn should_notify(prev: AgentStatus, next: AgentStatus, interrupted: bool) -> bool {
+/// `no_finish` is a stop, or a turn another bot asked for. Neither is a finish
+/// the user should hear about; blocked still is.
+pub fn should_notify(prev: AgentStatus, next: AgentStatus, no_finish: bool) -> bool {
     if next == AgentStatus::Blocked && prev != AgentStatus::Blocked {
         return true;
     }
-    if interrupted {
+    if no_finish {
         return false;
     }
     prev == AgentStatus::Working && next == AgentStatus::Idle
@@ -72,9 +73,9 @@ pub fn maybe_status_notify(
     name: &str,
     prev: AgentStatus,
     next: AgentStatus,
-    interrupted: bool,
+    no_finish: bool,
 ) {
-    if !should_notify(prev, next, interrupted) {
+    if !should_notify(prev, next, no_finish) {
         return;
     }
     let body = notify_body(name, next, &paths::locale());

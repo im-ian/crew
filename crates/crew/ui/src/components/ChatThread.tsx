@@ -15,6 +15,7 @@ import { splitBubbles } from "../bubbles";
 import { noteRef, sentTarget } from "../peek";
 import {
   momentStamp,
+  runPeer,
   threadRows,
   toolArgs,
   toolNames,
@@ -129,7 +130,12 @@ export function ChatThread({
   function workingPlaceholders(): AgentInfo[] {
     const live = streaming && currentAgent ? [currentAgent] : [];
     return live.filter((a) => {
-      if (lastVisible?.role === "assistant" && lastVisible.from === a.id) {
+      // A reply folded beside the thread has no bubble here to carry the dots.
+      if (
+        lastVisible?.role === "assistant" &&
+        lastVisible.from === a.id &&
+        !runPeer(lastVisible, agents)
+      ) {
         return false;
       }
       return true;
@@ -731,7 +737,8 @@ function NoteGroup({
   const show = (!side && open) || hit;
   // One note is not a run. The row is still a run so that a reply arriving
   // does not change the element type and remount the note under the reader.
-  const folds = items.length > 1;
+  // A reply that belongs to the exchange is not a note, so it folds even alone.
+  const folds = items.length > 1 || !noteRef(items[0], agents);
   const who = peerId.startsWith("#")
     ? peerId
     : displayWho({ from: peerId } as ChatMessage, agent);
@@ -761,20 +768,35 @@ function NoteGroup({
       ) : null}
       {folds && !show && queued ? <QueueWait /> : null}
       {!folds || show
-        ? items.map((m) => (
-            <SystemOrIncoming
-              key={m.id}
-              message={m}
-              agents={agents}
-              selectedKind={selectedKind}
-              onSelectAgent={onSelectAgent}
-              onReply={onReply}
-              onJump={onJump}
-              peekFocus={peekFocus}
-              onPeek={onPeek}
-              flash={highlightId === m.id}
-            />
-          ))
+        ? items.map((m) =>
+            m.role === "assistant" ? (
+              <Bubble
+                key={m.id}
+                message={m}
+                agents={agents}
+                selected={null}
+                selectedKind={selectedKind}
+                currentAgent={null}
+                onSelectAgent={onSelectAgent}
+                onReply={onReply}
+                onJump={onJump}
+                flash={highlightId === m.id}
+              />
+            ) : (
+              <SystemOrIncoming
+                key={m.id}
+                message={m}
+                agents={agents}
+                selectedKind={selectedKind}
+                onSelectAgent={onSelectAgent}
+                onReply={onReply}
+                onJump={onJump}
+                peekFocus={peekFocus}
+                onPeek={onPeek}
+                flash={highlightId === m.id}
+              />
+            ),
+          )
         : null}
     </div>
   );
