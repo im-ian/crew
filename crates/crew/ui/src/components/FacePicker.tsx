@@ -14,6 +14,7 @@ import {
 } from "../avatar";
 import { Pencil } from "../icons";
 import { useT } from "../LocaleContext";
+import { usePopover } from "../usePopover";
 import { BotFace } from "./BotFace";
 import { Field } from "./Field";
 
@@ -265,32 +266,7 @@ export function FacePop({
   ...picker
 }: FacePopProps) {
   const t = useT();
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!active) setOpen(false);
-  }, [active]);
-
-  useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    function onPointer(e: PointerEvent) {
-      const el = rootRef.current;
-      if (el && !el.contains(e.target as Node)) setOpen(false);
-    }
-    const id = window.setTimeout(() => {
-      document.addEventListener("keydown", onKey);
-      document.addEventListener("pointerdown", onPointer);
-    }, 0);
-    return () => {
-      window.clearTimeout(id);
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("pointerdown", onPointer);
-    };
-  }, [open]);
+  const { open, setOpen, rootRef } = usePopover(active);
 
   return (
     <div className={"face-pop" + (open ? " open" : "")} ref={rootRef}>
