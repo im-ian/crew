@@ -567,6 +567,7 @@ fn start_delivery(id: &str, text: &str, newline: bool, origin: TurnOrigin) -> an
     } else {
         crate::protocol::attach_after_marker(text, &render_handoffs(&pending))
     };
+    crate::transcript::set_peer(id, asked_by(&origin, id));
     set_origin(id, origin);
     match deliver(id, &text, newline) {
         Ok(()) => Ok(()),
@@ -994,8 +995,18 @@ fn notify_from_frame(ev: &Event) {
         .ok()
         .and_then(|m| m.get(agent).map(|c| c.display_name().to_string()))
         .unwrap_or_else(|| agent.clone());
+    // The bot that asked for this turn finishes it, in its own chat.
+    let asked = get_origin(agent)
+        .and_then(|o| asked_by(&o, agent))
+        .is_some();
     let interrupted = agent_interrupted(agent);
-    crate::notify::maybe_status_notify(agent, &name, prev, *status, interrupted);
+    crate::notify::maybe_status_notify(agent, &name, prev, *status, interrupted || asked);
+}
+
+/// The bot that asked for this turn, when the reply is copied into its chat.
+/// The turn is that chat's news, not this one's.
+fn asked_by(origin: &TurnOrigin, agent: &str) -> Option<String> {
+    targeting::postback_targets(origin, agent).agent
 }
 
 fn agent_interrupted(id: &str) -> bool {
@@ -1982,6 +1993,9 @@ fn tell_agent_origin(
     let parsed = targeting::origin_from_envelope(&envelope);
     let parent = origin.or_else(|| get_origin(&from));
     let origin = targeting::inherit_origin(parent.as_ref(), parsed);
+    if let Some(peer) = asked_by(&origin, to) {
+        crate::transcript::mark_peer(to, &msg.id, &peer);
+    }
     submit_delivery(to, &envelope, true, Some(msg.id), origin)?;
     if from != "user" && from != to {
         let known = agents()
@@ -2804,6 +2818,7 @@ mod daemon_tests {
             text: "reviewed".into(),
             ts: 1,
             queued: false,
+            peer: None,
             kind: None,
             approval: None,
             choice: None,
@@ -2915,6 +2930,37 @@ mod daemon_tests {
             take_origin(&speaker);
             session.inner.lock().unwrap().status = AgentStatus::Idle;
             remove_agent(&asker).unwrap();
+        });
+    }
+
+    /// A bot's tell lands in the teammate's chat without lighting it up. The
+    /// user's own tell does.
+    #[test]
+    fn a_tell_from_a_bot_does_not_make_the_chat_unread() {
+        paths::testing::with_home("quiet-tell", || {
+            let peer = test_id("peer");
+            insert_spawned_agent(AgentConfig::new(
+                peer.clone(),
+                peer.clone(),
+                AgentCli::Claude.default_cmd(),
+                None,
+            ))
+            .unwrap();
+            let Some(LiveAgent::Headless(session)) = agents().lock().unwrap().get(&peer).cloned()
+            else {
+                panic!("claude runs headless");
+            };
+            // Busy, so each tell waits in the inbox instead of starting a CLI.
+            session.inner.lock().unwrap().status = AgentStatus::Working;
+
+            tell_agent_origin("rival", &peer, "가위바위보 한 판", None, false).unwrap();
+            assert_eq!(crate::transcript::last_ts(&peer), 0);
+
+            tell_agent_origin("user", &peer, "누가 이겼어?", None, false).unwrap();
+            assert!(crate::transcript::last_ts(&peer) > 0);
+
+            session.inner.lock().unwrap().status = AgentStatus::Idle;
+            remove_agent(&peer).unwrap();
         });
     }
 

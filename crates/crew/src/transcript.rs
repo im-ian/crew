@@ -40,6 +40,9 @@ struct AgentChat {
     turn_gen: u64,
     /// CLI tool-call id -> message id, so repeat events update one card.
     tool_ids: HashMap<String, String>,
+    /// The bot that asked for the turn in progress, if one did. The rows the
+    /// turn adds carry it as their `peer`.
+    peer: Option<String>,
 }
 
 impl AgentChat {
@@ -56,6 +59,7 @@ impl AgentChat {
             echo_skip: String::new(),
             turn_gen: 0,
             tool_ids: HashMap::new(),
+            peer: None,
         }
     }
 }
@@ -108,6 +112,7 @@ fn load_key(key: &str, path: &Path) {
                 echo_skip: String::new(),
                 turn_gen: 0,
                 tool_ids: HashMap::new(),
+                peer: None,
             },
         );
     }
@@ -149,8 +154,36 @@ pub fn messages(agent: &str) -> Vec<ChatMessage> {
         .unwrap_or_default()
 }
 
+/// When this chat last got something for the user. An exchange another bot
+/// asked for is not, unless it left a card the user has to answer.
 pub fn last_ts(key: &str) -> u64 {
-    messages(key).last().map(|m| m.ts).unwrap_or(0)
+    messages(key)
+        .iter()
+        .rev()
+        .find(|m| m.peer.is_none() || m.choice.is_some() || m.approval.is_some())
+        .map(|m| m.ts)
+        .unwrap_or(0)
+}
+
+/// The bot that asked for the turn starting here, or None for the user's own.
+pub fn set_peer(agent: &str, peer: Option<String>) {
+    if let Ok(mut map) = chats().lock() {
+        map.entry(agent.to_string())
+            .or_insert_with(AgentChat::empty)
+            .peer = peer;
+    }
+}
+
+/// Another bot's tell lands before the turn it starts, so it is tagged here.
+pub fn mark_peer(agent: &str, id: &str, peer: &str) {
+    if let Ok(mut map) = chats().lock() {
+        if let Some(chat) = map.get_mut(agent) {
+            if let Some(m) = chat.messages.iter_mut().find(|m| m.id == id) {
+                m.peer = Some(peer.to_string());
+                persist(agent, chat);
+            }
+        }
+    }
 }
 
 pub fn preview(agent: &str) -> Option<String> {
@@ -281,6 +314,7 @@ pub fn push_tool(agent: &str, call_id: Option<&str>, name: &str, detail: &str) -
                 text: String::new(),
                 ts: now_ms(),
                 queued: false,
+                peer: None,
                 kind: Some(MessageKind::Tool),
                 approval: None,
                 choice: None,
@@ -299,6 +333,7 @@ pub fn push_tool(agent: &str, call_id: Option<&str>, name: &str, detail: &str) -
         text: detail.to_string(),
         ts: now_ms(),
         queued: false,
+        peer: None,
         kind: Some(MessageKind::Tool),
         approval: None,
         choice: None,
@@ -322,6 +357,7 @@ pub fn push_tool(agent: &str, call_id: Option<&str>, name: &str, detail: &str) -
             msg = row.clone();
             persist(agent, chat);
         } else {
+            msg.peer = chat.peer.clone();
             if let Some(id) = call_id {
                 chat.tool_ids.insert(id.to_string(), msg.id.clone());
             }
@@ -382,6 +418,7 @@ fn pin_ask_tool(agent: &str, call_id: Option<&str>) {
         text: String::new(),
         ts: now_ms(),
         queued: false,
+        peer: chat.peer.clone(),
         kind: None,
         approval: None,
         choice: None,
@@ -409,6 +446,7 @@ pub fn attach_choice(agent: &str, call_id: Option<&str>, mut card: ChoiceCard) -
                     text: String::new(),
                     ts: now_ms(),
                     queued: false,
+                    peer: None,
                     kind: None,
                     approval: None,
                     choice: Some(card),
@@ -466,6 +504,7 @@ pub fn attach_choice(agent: &str, call_id: Option<&str>, mut card: ChoiceCard) -
                 text: String::new(),
                 ts: now_ms(),
                 queued: false,
+                peer: chat.peer.clone(),
                 kind: None,
                 approval: None,
                 choice: Some(card),
@@ -633,13 +672,14 @@ fn push_role(
     kind: Option<MessageKind>,
 ) -> ChatMessage {
     seal_now(agent);
-    let msg = ChatMessage {
+    let mut msg = ChatMessage {
         id: new_id(),
         role,
         from: from.to_string(),
         text: text.to_string(),
         ts: now_ms(),
         queued: false,
+        peer: None,
         kind,
         approval: None,
         choice: None,
@@ -648,6 +688,11 @@ fn push_role(
         let chat = map
             .entry(agent.to_string())
             .or_insert_with(AgentChat::empty);
+        // A tell the bot sends belongs to the exchange its turn is part of.
+        // The rest written here is for the user, or tagged by the caller.
+        if msg.kind == Some(MessageKind::Sent) {
+            msg.peer = chat.peer.clone();
+        }
         chat.messages.push(msg.clone());
         chat.expecting = expect;
         chat.pending_idx = None;
@@ -807,6 +852,7 @@ pub fn set_pending_assistant(agent: &str, text: &str) {
                 text: cleaned,
                 ts: now_ms(),
                 queued: false,
+                peer: chat.peer.clone(),
                 kind: None,
                 approval: None,
                 choice: None,
@@ -874,6 +920,7 @@ pub fn on_pty_bytes(agent: &str, bytes: &[u8]) {
                 text: cleaned,
                 ts: now_ms(),
                 queued: false,
+                peer: chat.peer.clone(),
                 kind: None,
                 approval: None,
                 choice: None,
@@ -1277,6 +1324,7 @@ mod tests {
             text: text.into(),
             ts: 0,
             queued: false,
+            peer: None,
             kind,
             approval: None,
             choice: None,
@@ -1323,6 +1371,47 @@ mod tests {
         let msg = push_user(&agent, "user", "hi");
         assert_eq!(last_ts(&agent), msg.ts);
         assert!(msg.ts > 0);
+        drop_agent(&agent);
+    }
+
+    /// 빵셔틀 only answered 가위바위보. That answer is 가위바위보's news, so
+    /// 빵셔틀's own chat stays read and every row of it is tagged with the asker.
+    #[test]
+    fn another_bots_turn_leaves_the_chat_read() {
+        let agent = format!(
+            "peer-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        let seen = push_user(&agent, "user", "안녕");
+        let tell = push_system(&agent, "rival", "가위바위보 한 판");
+        mark_peer(&agent, &tell.id, "rival");
+        set_peer(&agent, Some("rival".into()));
+        on_assistant_delta(&agent, "보");
+        seal_now(&agent);
+        push_notice(&agent, "to:rival", "보");
+        assert_eq!(last_ts(&agent), seen.ts);
+        let rows = messages(&agent);
+        assert!(rows[1..].iter().all(|m| m.peer.as_deref() == Some("rival")));
+
+        let reply = rows.iter().find(|m| m.role == Role::Assistant).unwrap();
+        set_approval(&agent, &reply.id, ApprovalState::Pending);
+        assert_eq!(
+            last_ts(&agent),
+            reply.ts,
+            "a card waiting on the user is news"
+        );
+
+        let typed = push_user(&agent, "user", "누가 이겼어?");
+        assert_eq!(typed.peer, None, "what the user typed is news");
+        set_peer(&agent, None);
+        on_assistant_delta(&agent, "내가 이겼어");
+        seal_now(&agent);
+        assert!(last_ts(&agent) >= typed.ts);
+        assert!(messages(&agent).last().is_some_and(|m| m.peer.is_none()));
         drop_agent(&agent);
     }
 
@@ -1452,6 +1541,7 @@ mod tests {
             text: "hi".into(),
             ts: 9,
             queued: false,
+            peer: None,
             kind: None,
             approval: None,
             choice: None,

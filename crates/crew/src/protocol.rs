@@ -370,6 +370,11 @@ pub struct ChatMessage {
     pub ts: u64,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub queued: bool,
+    /// On a row from a turn another bot asked for: that bot's id. The reply is
+    /// copied into its chat, so here the row belongs to the exchange with it.
+    /// It is shown beside this chat's thread, not in it, and is not unread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<MessageKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -672,6 +677,7 @@ mod tests {
             text: "hello".into(),
             ts: 1,
             queued: false,
+            peer: None,
             kind: None,
             approval: None,
             choice: None,
