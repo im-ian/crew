@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocale, useT } from "../LocaleContext";
 import type { TFn } from "../i18n";
 import type { ReplyTarget } from "../reply";
@@ -13,7 +13,14 @@ import type {
 import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { noteRef, sentTarget } from "../peek";
-import { threadRows, toolArgs, toolNames, toolSummary } from "../tools";
+import {
+  momentStamp,
+  threadRows,
+  toolArgs,
+  toolNames,
+  toolSummary,
+  type ThreadRow,
+} from "../tools";
 import { clockLabels } from "../clock";
 import { ChevronDown, Reply, X } from "../icons";
 import { Avatar } from "./Avatar";
@@ -22,6 +29,11 @@ import { MdBody } from "./MdBody";
 import { WhoButton, whoColor } from "./WhoButton";
 
 const STICK_PX = 24;
+
+function rowKey(row: ThreadRow): string {
+  if (row.kind === "msg") return row.msg.id;
+  return row.msgs[0].id;
+}
 // Streaming text is its own sign of life, so the wait dots only cover a bot
 // that has gone quiet this long. It must outlast a CLI's tail after the last
 // word (grok sends `end` ~0.5s later), or the dots flash as a reply ends.
@@ -92,26 +104,14 @@ export function ChatThread({
   const [away, setAway] = useState(false);
   const visible = visibleMessages(messages, showTools);
   const rows = threadRows(visible, agents);
-  // Keyed by message id, not by row index: a filter or an inserted row would
-  // slide a parallel array one place and stamp every message with its
-  // neighbour's time, silently.
+  // Keyed by row id, not by index: a filter or an inserted row would slide a
+  // parallel array and stamp the wrong stretch.
   const clocks = useMemo(() => {
-    // Only balloons carry a clock; a tool run or a folded note passes 0 so it
-    // cannot swallow the stamp of the minute it sits in. The daemon writes a
-    // human's `crew tell` as a system row from `user`, and that still draws as
-    // a balloon.
-    const stamped = rows.map((r) =>
-      r.kind === "msg" && (r.msg.role !== "system" || r.msg.from === "user")
-        ? r.msg
-        : null,
-    );
-    const labels = clockLabels(
-      stamped.map((m) => m?.ts ?? 0),
-      locale,
-    );
-    const map = new Map<string, string>();
-    stamped.forEach((m, i) => {
-      if (m && labels[i]) map.set(m.id, labels[i]);
+    const stamps = rows.map(momentStamp);
+    const labels = clockLabels(stamps, locale);
+    const map = new Map<string, { ts: number; label: string }>();
+    rows.forEach((row, i) => {
+      if (labels[i]) map.set(rowKey(row), { ts: stamps[i], label: labels[i] });
     });
     return map;
   }, [rows, locale]);
@@ -211,19 +211,20 @@ export function ChatThread({
           <EmptyChat agent={currentAgent} />
         ) : (
           rows.map((row) => {
+            const id = rowKey(row);
+            let node: ReactNode;
             if (row.kind === "tools") {
-              return (
+              node = (
                 <ToolGroup
-                  key={row.msgs[0].id}
+                  key={id}
                   items={row.msgs}
                   highlightId={highlightId}
                 />
               );
-            }
-            if (row.kind === "notes") {
-              return (
+            } else if (row.kind === "notes") {
+              node = (
                 <NoteGroup
-                  key={row.msgs[0].id}
+                  key={id}
                   peerId={row.peerId}
                   items={row.msgs}
                   agents={agents}
@@ -236,56 +237,61 @@ export function ChatThread({
                   highlightId={highlightId}
                 />
               );
+            } else {
+              const m = row.msg;
+              const caret =
+                streaming &&
+                quiet &&
+                m.role === "assistant" &&
+                m.id === lastVisible?.id;
+              const flash = highlightId === m.id;
+              node =
+                m.role === "system" && m.from !== "user" ? (
+                  <SystemOrIncoming
+                    key={id}
+                    message={m}
+                    agents={agents}
+                    selectedKind={selectedKind}
+                    onSelectAgent={openAgent}
+                    onReply={onReply}
+                    onJump={onJump}
+                    peekFocus={peekFocus}
+                    onPeek={onPeek}
+                    flash={flash}
+                  />
+                ) : (
+                  <Bubble
+                    key={id}
+                    message={m}
+                    agents={agents}
+                    selected={selected}
+                    selectedKind={selectedKind}
+                    currentAgent={currentAgent}
+                    caret={caret}
+                    onSelectAgent={openAgent}
+                    onApprove={
+                      onApprove
+                        ? (allow) => onApprove(allow, m.from)
+                        : undefined
+                    }
+                    onAnswerChoice={
+                      onAnswerChoice
+                        ? (answers, values, closed) =>
+                            onAnswerChoice(m.from, m.id, answers, values, closed)
+                        : undefined
+                    }
+                    onReply={onReply}
+                    onJump={onJump}
+                    flash={flash}
+                  />
+                );
             }
-            const m = row.msg;
-            const caret =
-              streaming &&
-              quiet &&
-              m.role === "assistant" &&
-              m.id === lastVisible?.id;
-            const flash = highlightId === m.id;
-            if (m.role === "system" && m.from !== "user") {
-              return (
-                <SystemOrIncoming
-                  key={m.id}
-                  message={m}
-                  agents={agents}
-                  selectedKind={selectedKind}
-                  onSelectAgent={openAgent}
-                  onReply={onReply}
-                  onJump={onJump}
-                  peekFocus={peekFocus}
-                  onPeek={onPeek}
-                  flash={flash}
-                />
-              );
-            }
+            const time = clocks.get(id);
             return (
-              <Bubble
-                key={m.id}
-                clock={clocks.get(m.id)}
-                message={m}
-                agents={agents}
-                selected={selected}
-                selectedKind={selectedKind}
-                currentAgent={currentAgent}
-                caret={caret}
-                onSelectAgent={openAgent}
-                onApprove={
-                  onApprove
-                    ? (allow) => onApprove(allow, m.from)
-                    : undefined
-                }
-                onAnswerChoice={
-                  onAnswerChoice
-                    ? (answers, values, closed) =>
-                        onAnswerChoice(m.from, m.id, answers, values, closed)
-                    : undefined
-                }
-                onReply={onReply}
-                onJump={onJump}
-                flash={flash}
-              />
+              <Fragment key={id}>
+                {time ? <ThreadTime ts={time.ts} label={time.label} /> : null}
+                {node}
+              </Fragment>
             );
           })
         )}
@@ -573,7 +579,6 @@ function Incoming({
   onReply,
   onJump,
   flash = false,
-  clock,
 }: {
   message: ChatMessage;
   agent: AgentInfo | null;
@@ -591,7 +596,6 @@ function Incoming({
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
   flash?: boolean;
-  clock?: string;
 }) {
   const color = agent
     ? whoColor(resolveFace(agent.id, agent.avatar_shape, agent.avatar_color).color)
@@ -689,11 +693,6 @@ function Incoming({
           }
         />
       </div>
-      {clock ? (
-        <time className="msg-clock" dateTime={new Date(m.ts).toISOString()}>
-          {clock}
-        </time>
-      ) : null}
     </div>
   );
 }
@@ -1175,7 +1174,6 @@ function Bubble({
   onReply,
   onJump,
   flash = false,
-  clock,
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
@@ -1193,7 +1191,6 @@ function Bubble({
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
   flash?: boolean;
-  clock?: string;
 }) {
   const t = useT();
   const text =
@@ -1216,7 +1213,6 @@ function Bubble({
         onReply={onReply}
         onJump={onJump}
         flash={flash}
-        clock={clock}
       />
     );
   }
@@ -1229,11 +1225,6 @@ function Bubble({
       className={"row me" + (queued ? " queued" : "") + (flash ? " flash" : "")}
       data-msg-id={m.id}
     >
-      {clock ? (
-        <time className="msg-clock" dateTime={new Date(m.ts).toISOString()}>
-          {clock}
-        </time>
-      ) : null}
       <div className="me-msg">
         {reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
         {body.trim() ? (
@@ -1314,6 +1305,14 @@ function ReplyQuote({
       <span className="reply-quote-who">{quoteWho(reply.from, agents, t)}</span>
       <span className="reply-quote-text">{reply.snippet}</span>
     </button>
+  );
+}
+
+function ThreadTime({ ts, label }: { ts: number; label: string }) {
+  return (
+    <time className="thread-time" dateTime={new Date(ts).toISOString()}>
+      {label}
+    </time>
   );
 }
 

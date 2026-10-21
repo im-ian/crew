@@ -62,6 +62,19 @@ export function threadRows(
 }
 
 /**
+ * Time a row contributes to the centered clock. A tool run, a folded note,
+ * and a notice that is not a balloon pass `0`: they sit in the same stretch
+ * as a message, and a real stamp there would swallow that message's divider
+ * or hide a gap that comes after the run.
+ */
+export function momentStamp(row: ThreadRow): number {
+  if (row.kind !== "msg") return 0;
+  const m = row.msg;
+  if (m.role === "system" && m.from !== "user") return 0;
+  return m.ts || 0;
+}
+
+/**
  * What a folded tool run did, by name: distinct, in first-use order, so the
  * chip says "Read · Grep · Edit" instead of only a count. An MCP tool keeps
  * its last segment — `mcp__server__browser_click` would fill the row alone.
