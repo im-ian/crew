@@ -436,13 +436,18 @@ fn approve_agent(id: &str, allow: bool) -> anyhow::Result<()> {
     set_live_status(id, AgentStatus::Idle);
     if allow {
         let origin = get_origin(id).unwrap_or_else(TurnOrigin::user);
-        if let Err(err) = submit_delivery(
+        // What waited on the blocked turn waits on the turn that goes on, even
+        // when that one has to queue behind the CLI's exit.
+        let mut then = take_followers(id);
+        if let Err(err) = submit_delivery_then(
             id,
             "User allowed this action. Continue.",
             true,
             None,
             origin,
+            &mut then,
         ) {
+            release(then);
             pump_inbox(id);
             return Err(err);
         }
@@ -585,6 +590,16 @@ fn start_delivery(
 ) -> anyhow::Result<()> {
     let id = start.0.clone();
     let id = id.as_str();
+    // A bot left waiting on allow / deny moves on without an answer: what
+    // waited on that turn goes out now, not after this one.
+    if matches!(live_status(id), Ok(AgentStatus::Blocked)) {
+        let held = serial_board()
+            .lock()
+            .ok()
+            .and_then(|mut board| board.queues.remove(id))
+            .unwrap_or_default();
+        release(held);
+    }
     // Teammates' replies in front of a command turn it into words. They wait
     // for the next prompt instead.
     let pending = if is_slash_command(text) {
@@ -1967,7 +1982,7 @@ fn send_agent_shown(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
     let msg = crate::transcript::push_user(id, "user", shown);
     // The teammates named here answer after this message's turn, so they ride
     // with it instead of waiting on whatever the bot is doing now.
-    let mut named: VecDeque<SerialJob> =
+    let mut then: VecDeque<SerialJob> =
         targeting::one_on_one_tell_targets(crate::rows::reply_body(text), id, &roster)
             .into_iter()
             .map(|to| SerialJob {
@@ -1981,18 +1996,25 @@ fn send_agent_shown(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
             })
             .collect();
     let delivered = crate::config::with_mention_hint(text, id, &roster);
-    drop_mention_followers(id);
+    if matches!(live_status(id), Ok(AgentStatus::Blocked)) {
+        // A message to a bot waiting on allow / deny answers it, as Allow
+        // does: the turn goes on in this one, and what waited on it waits on
+        // this.
+        then.extend(take_followers(id));
+    } else {
+        drop_mention_followers(id);
+    }
     let started = submit_delivery_then(
         id,
         &delivered,
         true,
         Some(msg.id),
         TurnOrigin::user(),
-        &mut named,
+        &mut then,
     );
     // Not delivered: the named teammates still answer, in order, instead of
     // the chain dying with this bot.
-    release(named);
+    release(then);
     started
 }
 
@@ -3509,6 +3531,151 @@ exec sleep 5"#,
                 clear_inbox(id);
             }
             for id in [&bot, &reviewer, &builder] {
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    fn headless_status(id: &str, to: AgentStatus) {
+        match agents().lock().unwrap().get(id) {
+            Some(LiveAgent::Headless(s)) => s.inner.lock().unwrap().status = to,
+            _ => panic!("runs headless"),
+        }
+    }
+
+    fn claude_bot(id: &str) {
+        insert_spawned_agent(AgentConfig::new(
+            id.into(),
+            id.into(),
+            AgentCli::Claude.default_cmd(),
+            None,
+        ))
+        .unwrap();
+    }
+
+    /// A bot blocked on "진행할까요?" moves on to something else without an
+    /// answer: what waited on that turn goes out then, instead of waiting on
+    /// the new turn and dying with it on a stop.
+    #[test]
+    fn a_blocked_turn_left_unanswered_lets_its_followers_go() {
+        paths::testing::with_home("blocked-moved-on", || {
+            let [bot, builder] = ["moved-bot", "moved-builder"].map(test_id);
+            fake_bot_running(&bot, "exec sleep 2");
+            claude_bot(&builder);
+            headless_status(&builder, AgentStatus::Working);
+            set_live_status(&bot, AgentStatus::Blocked);
+            defer_tell(&bot, &builder, &bot, "구현해줘", None);
+
+            tell_agent("someone", &bot, "다른 일 좀").unwrap();
+            assert!(agent_busy(&bot).unwrap(), "the new turn is under way");
+            assert!(!inbox_is_empty(&builder), "the tell waited on the new turn");
+
+            interrupt_turn(&bot).unwrap();
+            headless_status(&builder, AgentStatus::Idle);
+            clear_inbox(&builder);
+            wait_idle(&bot);
+            for id in [&bot, &builder] {
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// A reply in words to a blocked bot answers it, as Allow does: the turn
+    /// goes on, and the teammates its message named and the tells it ran wait
+    /// on the answer's turn instead of being dropped or sent before it.
+    #[test]
+    fn answering_a_blocked_bot_in_words_keeps_what_waited() {
+        paths::testing::with_home("blocked-words", || {
+            let [bot, reviewer, builder] =
+                ["words-bot", "words-reviewer", "words-builder"].map(test_id);
+            fake_bot_running(&bot, "exec sleep 2");
+            for id in [&reviewer, &builder] {
+                claude_bot(id);
+                headless_status(id, AgentStatus::Working);
+            }
+            set_live_status(&bot, AgentStatus::Blocked);
+            queue_serial_after(
+                &bot,
+                VecDeque::from([SerialJob {
+                    to: reviewer.clone(),
+                    kind: SerialKind::Tell {
+                        from: "user".into(),
+                        text: "리뷰해줘".into(),
+                        origin: Some(TurnOrigin::mention_tell(&bot)),
+                    },
+                    own: false,
+                }]),
+            );
+            defer_tell(&bot, &builder, &bot, "구현해줘", None);
+
+            send_agent(&bot, "응, 진행해").unwrap();
+            assert!(agent_busy(&bot).unwrap(), "the answer's turn is under way");
+            assert!(
+                tells_after(&bot, &reviewer),
+                "the named teammate was dropped"
+            );
+            assert!(tells_after(&bot, &builder));
+            assert!(inbox_is_empty(&reviewer) && inbox_is_empty(&builder));
+
+            interrupt_turn(&bot).unwrap();
+            for id in [&reviewer, &builder] {
+                headless_status(id, AgentStatus::Idle);
+                clear_inbox(id);
+            }
+            wait_idle(&bot);
+            for id in [&bot, &reviewer, &builder] {
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// Allow clicked while the CLI is still on its way out queues the
+    /// "Continue." turn. What waited on the blocked turn waits on that one,
+    /// not on the CLI's exit.
+    #[test]
+    fn allow_during_the_cli_tail_keeps_followers_for_the_turn_it_continues() {
+        paths::testing::with_home("allow-tail", || {
+            let [bot, builder] = ["allow-bot", "allow-builder"].map(test_id);
+            let prompt = paths::home_dir().join("prompt");
+            fake_bot_running(
+                &bot,
+                r#"case "$last" in *Continue*) exec sleep 1 ;; esac
+cat <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"text","text":"지울까요?"}]}}
+{"type":"result","subtype":"success"}
+EOF
+exec sleep 1"#,
+            );
+            claude_bot(&builder);
+            headless_status(&builder, AgentStatus::Working);
+            send_agent(&bot, "정리해줘").unwrap();
+            eventually(Duration::from_secs(5), "the reply never came", || {
+                told(&bot, "지울까요?")
+            });
+            // The reply is in and the CLI is on its way out: blocked on a card.
+            let ask = crate::transcript::messages(&bot).pop().unwrap();
+            crate::transcript::set_approval(&bot, &ask.id, crate::protocol::ApprovalState::Pending);
+            set_live_status(&bot, AgentStatus::Blocked);
+            defer_tell(&bot, &builder, &bot, "구현해줘", None);
+
+            approve_agent(&bot, true).unwrap();
+            eventually(Duration::from_secs(5), "Continue never started", || {
+                fs::read_to_string(&prompt)
+                    .unwrap_or_default()
+                    .contains("Continue")
+            });
+            assert!(
+                inbox_is_empty(&builder),
+                "the tell went before the approved turn"
+            );
+            eventually(Duration::from_secs(5), "the tell never went", || {
+                !inbox_is_empty(&builder)
+            });
+
+            headless_status(&builder, AgentStatus::Idle);
+            clear_inbox(&builder);
+            wait_idle(&bot);
+            for id in [&bot, &builder] {
                 remove_agent(id).unwrap();
             }
         });
