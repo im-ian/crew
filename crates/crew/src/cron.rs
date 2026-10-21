@@ -34,16 +34,27 @@ pub fn unix_now() -> anyhow::Result<libc::time_t> {
     Ok(t)
 }
 
-/// The first minute after `after` (unix seconds) that `expr` fires, looking a
-/// year ahead. `None` for a schedule that never comes round, like `0 0 31 2 *`.
-// ponytail: walks minute by minute, half a million steps for a schedule that
-// never fires; skip whole hours and days if a listing ever feels slow.
+/// The first minute after `after` (unix seconds) that `expr` fires, looking
+/// four years ahead so a leap day is found. `None` for a schedule that never
+/// comes round, like `0 0 31 2 *`.
 pub fn next_after(expr: &str, after: libc::time_t) -> anyhow::Result<Option<LocalTime>> {
     validate(expr)?;
+    let parts: Vec<&str> = expr.split_whitespace().collect();
     let mut t = after - after.rem_euclid(60) + 60;
-    for _ in 0..366 * 24 * 60 {
+    let end = t + 4 * 366 * 24 * 60 * 60;
+    while t < end {
         let local = local_at(t)?;
-        if matches(expr, &local)? {
+        // An hour whose day or hour misses is skipped whole: a minute walk
+        // took half a million steps to give up on a schedule that never fires.
+        // To the hour, not the day, so a DST day of 23 or 25 hours lands right.
+        let hour_fits = field_matches(parts[3], local.month, 1, 12)?
+            && day_matches(parts[2], parts[4], &local)?
+            && field_matches(parts[1], local.hour, 0, 23)?;
+        if !hour_fits {
+            t += (60 - local.minute as libc::time_t) * 60;
+            continue;
+        }
+        if field_matches(parts[0], local.minute, 0, 59)? {
             return Ok(Some(local));
         }
         t += 60;
@@ -280,6 +291,11 @@ mod tests {
         }
         assert_eq!(next_after("0 0 31 2 *", start).unwrap(), None);
         assert!(next_after("nope", start).is_err());
+        // Start is September 2026, so the next leap day is over a year off.
+        let leap = next_after("0 9 29 2 *", start).unwrap().unwrap();
+        assert_eq!((leap.year, leap.month, leap.day, leap.hour), (2028, 2, 29, 9));
+        let half = next_after("30 * * * *", start).unwrap().unwrap();
+        assert_eq!(half.minute, 30);
     }
 
     #[test]
