@@ -46,7 +46,9 @@ type Props = {
   jumpSeq?: number;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
-  onPeek?: (peerId: string) => void;
+  /** First id of the run open in the side panel, if any. */
+  peekFocus?: string | null;
+  onPeek?: (peerId: string, focus?: string[]) => void;
 };
 
 export function ChatThread({
@@ -66,6 +68,7 @@ export function ChatThread({
   jumpSeq = 0,
   onReply,
   onJump,
+  peekFocus = null,
   onPeek,
 }: Props) {
   const { locale, t } = useLocale();
@@ -199,6 +202,7 @@ export function ChatThread({
                   onSelectAgent={openAgent}
                   onReply={onReply}
                   onJump={onJump}
+                  peekFocus={peekFocus}
                   onPeek={onPeek}
                   highlightId={highlightId}
                 />
@@ -220,6 +224,7 @@ export function ChatThread({
                   onSelectAgent={openAgent}
                   onReply={onReply}
                   onJump={onJump}
+                  peekFocus={peekFocus}
                   onPeek={onPeek}
                   flash={flash}
                 />
@@ -326,6 +331,7 @@ function SystemOrIncoming({
   onSelectAgent,
   onReply,
   onJump,
+  peekFocus = null,
   onPeek,
   flash = false,
 }: {
@@ -335,7 +341,8 @@ function SystemOrIncoming({
   onSelectAgent?: (id: string) => void;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
-  onPeek?: (peerId: string) => void;
+  peekFocus?: string | null;
+  onPeek?: (peerId: string, focus?: string[]) => void;
   flash?: boolean;
 }) {
   const t = useT();
@@ -374,6 +381,7 @@ function SystemOrIncoming({
         onSelectAgent={onSelectAgent}
         onReply={onReply}
         onJump={onJump}
+        peeking={peekFocus === m.id}
         onPeek={onPeek}
         flash={flash}
       />
@@ -399,6 +407,7 @@ function TransferNote({
   onSelectAgent,
   onReply,
   onJump,
+  peeking = false,
   onPeek,
   flash = false,
 }: {
@@ -409,7 +418,8 @@ function TransferNote({
   onSelectAgent?: (id: string) => void;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
-  onPeek?: (peerId: string) => void;
+  peeking?: boolean;
+  onPeek?: (peerId: string, focus?: string[]) => void;
   flash?: boolean;
 }) {
   const agent = agents.find((a) => a.id === otherId) ?? null;
@@ -427,8 +437,10 @@ function TransferNote({
         ? t("thread.handoff")
         : t("thread.received");
   const { reply, body } = splitReply(m.text || "");
+  // A bot on the roster opens beside the thread; anything else still unfolds here.
+  const side = onPeek && agent ? () => onPeek(agent.id, [m.id]) : null;
   // A search hit has to be readable without a click.
-  const show = openBody || flash;
+  const show = (!side && openBody) || flash;
   return (
     <div
       className={"xfer" + (m.queued ? " queued" : "") + (flash ? " flash" : "")}
@@ -438,9 +450,9 @@ function TransferNote({
         {m.text ? (
           <button
             type="button"
-            className="xfer-label is-toggle"
-            aria-expanded={show}
-            onClick={() => setOpenBody(!openBody)}
+            className={"xfer-label is-toggle" + (peeking ? " is-peeking" : "")}
+            aria-expanded={side ? peeking : show}
+            onClick={side ?? (() => setOpenBody(!openBody))}
           >
             <ChevronDown className="note-caret" size={12} />
             {label}
@@ -482,7 +494,7 @@ function TransferNote({
             <button
               type="button"
               className="xfer-peek"
-              onClick={() => onPeek(agent.id)}
+              onClick={() => onPeek(agent.id, [m.id])}
             >
               {t("thread.viewFull")}
             </button>
@@ -677,6 +689,7 @@ function NoteGroup({
   onSelectAgent,
   onReply,
   onJump,
+  peekFocus = null,
   onPeek,
   highlightId = null,
 }: {
@@ -687,18 +700,22 @@ function NoteGroup({
   onSelectAgent?: (id: string) => void;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
-  onPeek?: (peerId: string) => void;
+  peekFocus?: string | null;
+  onPeek?: (peerId: string, focus?: string[]) => void;
   highlightId?: string | null;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const hit = items.some((m) => m.id === highlightId);
+  const agent = agents.find((a) => a.id === peerId) ?? null;
+  const side =
+    onPeek && agent ? () => onPeek(peerId, items.map((m) => m.id)) : null;
+  const peeking = peekFocus === items[0].id;
   // A search hit inside a folded run has to be on screen to be highlighted.
-  const show = open || hit;
+  const show = (!side && open) || hit;
   // One note is not a run. The row is still a run so that a reply arriving
   // does not change the element type and remount the note under the reader.
   const folds = items.length > 1;
-  const agent = agents.find((a) => a.id === peerId) ?? null;
   const who = peerId.startsWith("#")
     ? peerId
     : displayWho({ from: peerId } as ChatMessage, agent);
@@ -709,9 +726,9 @@ function NoteGroup({
         <div className="note-run-chip">
           <button
             type="button"
-            className="note-run-head"
-            aria-expanded={show}
-            onClick={() => setOpen(!open)}
+            className={"note-run-head" + (peeking ? " is-peeking" : "")}
+            aria-expanded={side ? peeking : show}
+            onClick={side ?? (() => setOpen(!open))}
           >
             <ChevronDown className="note-caret" size={12} />
             {t("thread.noteRun", { n: items.length })}
@@ -737,6 +754,7 @@ function NoteGroup({
               onSelectAgent={onSelectAgent}
               onReply={onReply}
               onJump={onJump}
+              peekFocus={peekFocus}
               onPeek={onPeek}
               flash={highlightId === m.id}
             />

@@ -38,13 +38,16 @@ export function App() {
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [theme, setTheme] = useState<ThemePref>(loadThemePref);
   const [jumpSeq, setJumpSeq] = useState(0);
-  const [peekPeer, setPeekPeer] = useState<string | null>(null);
+  // `focus` is the run that was clicked, so the panel opens on it rather than
+  // at the bottom of everything the two bots ever said.
+  const [peek, setPeek] = useState<{ peer: string; focus: string[] } | null>(
+    null,
+  );
   const updater = useUpdater();
   const renamingId = crew.pendingRenameId || renameId;
   const searchRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<ComposerHandle>(null);
-  const mainRef = useRef<HTMLElement>(null);
-  const peekOpen = !!(peekPeer && crew.currentAgent);
+  const peekOpen = !!(peek && crew.currentAgent);
 
   function finishRename() {
     crew.clearPendingRename();
@@ -62,18 +65,16 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    setPeekPeer(null);
+    setPeek(null);
   }, [crew.selected, crew.selectedKind]);
 
-  useEffect(() => {
-    const main = mainRef.current;
-    if (!main) return;
-    for (const el of Array.from(main.children)) {
-      if (el.classList.contains("peek-room")) continue;
-      if (peekOpen) el.setAttribute("inert", "");
-      else el.removeAttribute("inert");
-    }
-  }, [peekOpen]);
+  function togglePeek(peer: string, focus: string[] = []) {
+    setPeek((cur) =>
+      cur && cur.peer === peer && cur.focus[0] === focus[0]
+        ? null
+        : { peer, focus },
+    );
+  }
 
   useEffect(() => {
     applyTheme(theme);
@@ -101,28 +102,16 @@ export function App() {
       const c = crewRef.current;
       if (c.confirmOpen) return;
       const typing = isTypingTarget(e.target);
-      if (peekPeer && e.key === "Escape") {
+      if (peek && e.key === "Escape") {
         if (typing) return;
         e.preventDefault();
-        setPeekPeer(null);
+        setPeek(null);
         return;
       }
       const id = shortcutId(e, typing);
       if (!id) return;
       if (helpOpen && id !== "help") return;
       e.preventDefault();
-      if (
-        peekPeer &&
-        (id === "composer" ||
-          id === "attach" ||
-          id === "info" ||
-          id === "routines" ||
-          id === "approve" ||
-          id === "deny" ||
-          id === "bottom")
-      ) {
-        return;
-      }
       if (id === "help") {
         setHelpOpen((open) => !open);
         return;
@@ -187,7 +176,7 @@ export function App() {
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [helpOpen, settingsOpen, peekPeer]);
+  }, [helpOpen, settingsOpen, peek]);
 
   return (
     <div className="app">
@@ -214,7 +203,7 @@ export function App() {
         searchRef={searchRef}
         onOpenSettings={() => setSettingsOpen(true)}
       />
-      <main ref={mainRef}>
+      <main className={peekOpen ? "has-peek" : undefined}>
         <div className="titlebar-align" data-tauri-drag-region />
         {/* `connected` starts null — not checked yet, which is not a failure. */}
         <ConnectionBanner
@@ -263,7 +252,8 @@ export function App() {
           jumpSeq={jumpSeq}
           onReply={(target) => composerRef.current?.replyTo(target)}
           onJump={crew.highlightMessage}
-          onPeek={setPeekPeer}
+          peekFocus={peekOpen ? peek?.focus[0] ?? null : null}
+          onPeek={togglePeek}
         />
         <Composer
           ref={composerRef}
@@ -303,13 +293,14 @@ export function App() {
           onLoadMemory={crew.loadMemory}
           onSaveMemory={crew.saveMemory}
         />
-        {peekPeer && crew.currentAgent ? (
+        {peek && crew.currentAgent ? (
           <PeekRoom
-            peerId={peekPeer}
+            peerId={peek.peer}
+            focus={peek.focus}
             self={crew.currentAgent}
             messages={crew.messages}
             agents={crew.agents}
-            onClose={() => setPeekPeer(null)}
+            onClose={() => setPeek(null)}
           />
         ) : null}
       </main>

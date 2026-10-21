@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { useT } from "../LocaleContext";
-import { Lock } from "../icons";
+import { Lock, X } from "../icons";
 import { peekMessages } from "../peek";
 import type { AgentInfo, ChatMessage } from "../types";
 import { Avatar } from "./Avatar";
@@ -11,6 +11,8 @@ import { WhoButton, whoColor } from "./WhoButton";
 
 type Props = {
   peerId: string;
+  /** The run that was clicked: scrolled to and flashed. */
+  focus?: string[];
   self: AgentInfo;
   messages: ChatMessage[];
   agents: AgentInfo[];
@@ -19,6 +21,7 @@ type Props = {
 
 export function PeekRoom({
   peerId,
+  focus = [],
   self,
   messages,
   agents,
@@ -45,21 +48,44 @@ export function PeekRoom({
     ":" +
     (rows[rows.length - 1]?.text || "");
 
+  // Beside the thread the reader may be partway up an old run when a new
+  // note lands; only follow the tail if they were already at it.
+  const atBottom = useRef(true);
+  const focusKey = focus.join(",");
+
   useEffect(() => {
     roomRef.current?.focus();
   }, [peerId]);
 
   useEffect(() => {
     const el = threadRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && atBottom.current) el.scrollTop = el.scrollHeight;
   }, [tail]);
+
+  useEffect(() => {
+    const el = threadRef.current;
+    const first = focus[0];
+    if (!el || !first) return;
+    el.querySelector(`[data-msg-id="${CSS.escape(first)}"]`)?.scrollIntoView({
+      block: "start",
+    });
+  }, [peerId, focusKey]);
+
+  // The flash ring is a static style under its animation, so it has to come
+  // off on the same clock the thread uses or the run stays outlined.
+  const [flashing, setFlashing] = useState(true);
+  useEffect(() => {
+    setFlashing(true);
+    const id = window.setTimeout(() => setFlashing(false), 1600);
+    return () => window.clearTimeout(id);
+  }, [peerId, focusKey]);
+  const flash = new Set(flashing ? focus : []);
 
   return (
     <div
       ref={roomRef}
       className="peek-room"
-      role="dialog"
-      aria-modal="true"
+      role="complementary"
       aria-labelledby="peek-title"
       tabIndex={-1}
     >
@@ -80,8 +106,25 @@ export function PeekRoom({
             fallbackId={peerId}
           />
         </div>
+        <button
+          type="button"
+          className="head-action"
+          title={t("thread.peekClose")}
+          aria-label={t("thread.peekClose")}
+          onClick={onClose}
+        >
+          <X />
+        </button>
       </header>
-      <div className="thread peek-thread" ref={threadRef}>
+      <div
+        className="thread peek-thread"
+        ref={threadRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          atBottom.current =
+            el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+        }}
+      >
         {rows.map((m) => {
           const agent =
             agents.find((a) => a.id === m.from) ??
@@ -94,6 +137,7 @@ export function PeekRoom({
               agent={agent}
               who={who}
               agents={agents}
+              flash={flash.has(m.id)}
             />
           );
         })}
@@ -103,9 +147,6 @@ export function PeekRoom({
           <Lock size={14} />
           <span>{t("thread.peekReadOnly")}</span>
         </p>
-        <button type="button" className="peek-close" onClick={onClose}>
-          {t("thread.peekClose")}
-        </button>
       </div>
     </div>
   );
@@ -116,11 +157,13 @@ function PeekBubble({
   agent,
   who,
   agents,
+  flash = false,
 }: {
   message: ChatMessage;
   agent: AgentInfo | null;
   who: string;
   agents: AgentInfo[];
+  flash?: boolean;
 }) {
   const color = agent
     ? whoColor(
@@ -129,7 +172,10 @@ function PeekBubble({
     : undefined;
   const parts = splitBubbles(m.text || "");
   return (
-    <div className="row them incoming" data-msg-id={m.id}>
+    <div
+      className={"row them incoming" + (flash ? " flash" : "")}
+      data-msg-id={m.id}
+    >
       {agent ? (
         <Avatar
           className="msg-avatar"

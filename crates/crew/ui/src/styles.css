@@ -921,6 +921,7 @@ button.avatar {
   text-align: center;
 }
 main {
+  --peek-w: clamp(320px, 42%, 480px);
   display: grid;
   grid-template-rows: var(--titlebar) auto auto auto minmax(0, 1fr) auto;
   min-width: 0;
@@ -928,6 +929,11 @@ main {
   overflow: hidden;
   background: var(--bg);
   position: relative;
+}
+/* The padding narrows the room's own grid; the side panel sits in it. Both
+   percentages resolve against main's width, so the two always agree. */
+main.has-peek {
+  padding-right: var(--peek-w);
 }
 .update-banner-slot,
 .conn-banner-slot {
@@ -1792,14 +1798,27 @@ button.choice-option:disabled {
   align-items: center;
   gap: var(--space-6);
   border: 0;
+  border-radius: var(--radius-pill);
   background: none;
-  padding: 0;
+  padding: var(--space-2) var(--space-8);
+  margin: 0 calc(-1 * var(--space-8));
   color: var(--muted);
   font: inherit;
   font-size: var(--text-md);
   cursor: pointer;
 }
-.note-run-head:hover { color: var(--ink); }
+.note-run-head:hover {
+  color: var(--ink);
+  background: var(--chip);
+}
+/* One step past hover: in light, --chip on the thread is barely a tint. */
+.note-run-head.is-peeking,
+.xfer-label.is-peeking {
+  color: var(--ink);
+  background: var(--chip-hover);
+}
+/* The bot's own work, so it hangs in the bot's column under its balloons —
+   past the 32px avatar and its gap — not centred like notes from others. */
 .tool-run {
   align-self: center;
   max-width: 92%;
@@ -2232,9 +2251,16 @@ button.who-btn:focus-visible {
   transform: scale(0.97);
 }
 .peek-room {
+  --content-pad: var(--space-16);
   position: absolute;
-  inset: 0;
-  z-index: 40;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--peek-w);
+  /* Under .overlay, so the bot sheet still slides over the whole room. */
+  z-index: 1;
+  border-left: 1px solid var(--line);
+  animation: slide-in 0.22s var(--ease-out);
   background: var(--bg);
   display: grid;
   grid-template-rows: var(--titlebar) auto minmax(0, 1fr) auto;
@@ -2267,6 +2293,10 @@ button.who-btn:focus-visible {
 .peek-thread {
   min-height: 0;
 }
+/* Clear of the thread's top fade when a run is scrolled to the top. */
+.peek-thread .row {
+  scroll-margin-top: var(--space-12);
+}
 .peek-foot {
   display: flex;
   align-items: center;
@@ -2286,23 +2316,6 @@ button.who-btn:focus-visible {
 }
 .peek-note svg {
   flex-shrink: 0;
-}
-.peek-close {
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: var(--chip);
-  color: var(--ink);
-  padding: var(--space-8) var(--space-16);
-  font: inherit;
-  font-size: var(--text-md);
-  line-height: 1.2;
-  cursor: pointer;
-}
-.peek-close:hover {
-  background: var(--chip-hover);
-}
-.peek-close:active {
-  transform: scale(0.97);
 }
 .composer {
   display: flex;
@@ -2759,7 +2772,8 @@ button.mention-chip:active {
   to { transform: translateX(0); opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .sheet { animation: none; }
+  .sheet,
+  .peek-room { animation: none; }
 }
 .info-hero {
   margin: 0;
@@ -3421,8 +3435,7 @@ button.toast {
   .ghost:active,
   .danger:active,
   .primary:not(:disabled):active,
-  .xfer-peek:active,
-  .peek-close:active {
+  .xfer-peek:active {
     transform: none;
   }
   .jump-bottom:active {
