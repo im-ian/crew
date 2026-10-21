@@ -107,6 +107,8 @@ export const api = {
   openPath: (path: string) => invoke<void>("open_path", { path }),
   setDockBadge: (count: number) => invoke<void>("set_dock_badge", { count }),
   setLocale: (locale: string) => invoke<void>("set_locale", { locale }),
+  setNotifications: (enabled: boolean) =>
+    invoke<void>("set_notifications", { enabled }),
   listModels: (cli: string) => {
     let pending = modelLists.get(cli);
     if (!pending) {

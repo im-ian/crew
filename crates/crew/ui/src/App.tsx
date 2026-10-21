@@ -348,11 +348,7 @@ export function App() {
       />
       <SkillsPane open={skillsOpen} onClose={() => setSkillsOpen(false)} />
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
-      <Toast
-        text={crew.toast.text}
-        show={crew.toast.show}
-        onClick={crew.toast.target ? crew.clickToast : undefined}
-      />
+      <Toast text={crew.toast.text} show={crew.toast.show} />
     </div>
   );
 }

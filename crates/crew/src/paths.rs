@@ -47,6 +47,23 @@ pub fn write_locale(locale: &str) {
     let _ = fs::write(locale_path(), value);
 }
 
+pub fn notifications_path() -> PathBuf {
+    home_dir().join("notifications")
+}
+
+/// Desktop notifications. On when unset, so an older install keeps alerting.
+pub fn notifications_enabled() -> bool {
+    match fs::read_to_string(notifications_path()) {
+        Ok(s) if s.trim() == "off" => false,
+        _ => true,
+    }
+}
+
+pub fn write_notifications_enabled(on: bool) {
+    let _ = fs::create_dir_all(home_dir());
+    let _ = fs::write(notifications_path(), if on { "on" } else { "off" });
+}
+
 pub fn pid_path() -> PathBuf {
     home_dir().join("crew.pid")
 }
@@ -428,6 +445,21 @@ mod tests {
             );
             fs::write(locale_path(), "en").unwrap();
             assert_eq!(locale(), "en");
+        });
+    }
+
+    #[test]
+    fn notifications_default_on_and_only_off_disables_them() {
+        testing::with_home("notify", || {
+            assert!(notifications_enabled());
+            write_notifications_enabled(false);
+            assert!(!notifications_enabled());
+            write_notifications_enabled(true);
+            assert!(notifications_enabled());
+            fs::write(notifications_path(), "off\n").unwrap();
+            assert!(!notifications_enabled());
+            fs::write(notifications_path(), "nope").unwrap();
+            assert!(notifications_enabled());
         });
     }
 

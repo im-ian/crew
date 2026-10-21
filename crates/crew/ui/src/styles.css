@@ -2968,6 +2968,13 @@ button.mention-chip:active {
   gap: var(--space-6);
   min-width: 0;
 }
+.settings-notify {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+  min-width: 0;
+}
 label.field {
   display: block;
   font-size: var(--text-sm);
@@ -3430,12 +3437,6 @@ textarea.textin.skill-body {
   border-radius: var(--radius-lg);
 }
 .toast.show { display: block; }
-button.toast {
-  border: 0;
-  font: inherit;
-  cursor: pointer;
-}
-.toast.is-action:hover { filter: brightness(1.08); }
 .avatar-file { display: none; }
 @media (prefers-reduced-motion: reduce) {
   button,

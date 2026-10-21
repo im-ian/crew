@@ -44,6 +44,7 @@ fn main() {
             "open_path",
             "set_dock_badge",
             "set_locale",
+            "set_notifications",
         ])),
     )
     .expect("failed to run tauri build");

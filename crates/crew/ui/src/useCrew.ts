@@ -8,6 +8,7 @@ import {
 } from "react";
 import { api, errMsg } from "./api";
 import { useT } from "./LocaleContext";
+import { loadNotify } from "./notifyPref";
 import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
 import {
   groupIdOf,
@@ -62,11 +63,7 @@ export function useCrew() {
   const [confirmKind, setConfirmKind] = useState<ConfirmKind>("reset");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [newBotOpen, setNewBotOpen] = useState(false);
-  const [toast, setToast] = useState<{
-    text: string;
-    show: boolean;
-    target: FocusTarget | null;
-  }>({ text: "", show: false, target: null });
+  const [toast, setToast] = useState({ text: "", show: false });
   const [ctx, setCtx] = useState<Ctx>({
     open: false,
     x: 0,
@@ -143,12 +140,12 @@ export function useCrew() {
     return hit.body;
   }
 
-  function showToast(text: string, target: FocusTarget | null = null) {
-    setToast({ text, show: true, target });
+  function showToast(text: string) {
+    setToast({ text, show: true });
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => {
-      setToast((t) => ({ ...t, show: false }));
-    }, target ? 8000 : 2500);
+      setToast((prev) => ({ ...prev, show: false }));
+    }, 2500);
   }
 
   function showError(err: unknown) {
@@ -807,20 +804,7 @@ export function useCrew() {
     };
   }, []);
 
-  function openFocus(hit: FocusTarget) {
-    void api.takePendingFocus().catch(() => null);
-    selectAgent(hit.id);
-  }
-
-  function clickToast() {
-    const target = toast.target;
-    if (!target) return;
-    setToast((t) => ({ ...t, show: false, target: null }));
-    openFocus(target);
-  }
-
   useEffect(() => {
-    let last = "";
     let noticeKey = "";
     function go(hit: FocusTarget) {
       void api.takePendingFocus().catch(() => null);
@@ -850,20 +834,16 @@ export function useCrew() {
     async function tick() {
       const hit = await api.peekPendingFocus().catch(() => null);
       if (!hit) {
-        last = "";
+        noticeKey = "";
         return;
       }
+      // A visible window already has the unread dot. Notifying here would
+      // repeat the banner the daemon sent while the window was closed.
+      if (!loadNotify() || !document.hidden) return;
       const key = `${hit.kind}:${hit.id}:${hit.body}`;
-      if (document.hidden) {
-        if (noticeKey !== key) {
-          noticeKey = key;
-          fireNotice(hit);
-        }
-        return;
-      }
-      if (last === key) return;
-      last = key;
-      showToast(focusBody(hit), hit);
+      if (noticeKey === key) return;
+      noticeKey = key;
+      fireNotice(hit);
     }
     function onWinFocus() {
       void api
@@ -914,7 +894,6 @@ export function useCrew() {
     confirmKind,
     newBotOpen,
     toast,
-    clickToast,
     ctx,
     groups,
     ungrouped,

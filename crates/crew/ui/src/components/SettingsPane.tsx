@@ -1,5 +1,8 @@
+import { useEffect, useState } from "react";
+import { api } from "../api";
 import { useLocale, useT } from "../LocaleContext";
 import type { Locale } from "../i18n";
+import { loadNotify, saveNotify } from "../notifyPref";
 import type { ThemePref } from "../theme";
 import type { UpdaterApi } from "../updater";
 import { Field } from "./Field";
@@ -36,6 +39,14 @@ export function SettingsPane({
 }: Props) {
   const t = useT();
   const { locale, setLocale } = useLocale();
+  const [notify, setNotify] = useState(loadNotify);
+
+  useEffect(() => {
+    saveNotify(notify);
+    // The daemon sends the same alerts while the window is closed.
+    void api.setNotifications(notify).catch(() => {});
+  }, [notify]);
+
   const themes: { value: ThemePref; label: string }[] = [
     { value: "dark", label: t("settings.theme.dark") },
     { value: "light", label: t("settings.theme.light") },
@@ -70,6 +81,25 @@ export function SettingsPane({
           />
         </Field>
         <p className="apply-note">{t("settings.tools.note")}</p>
+        <div className="settings-notify">
+          <label className="field" htmlFor="settings-notify">
+            {t("settings.notifications")}
+          </label>
+          <input
+            id="settings-notify"
+            type="checkbox"
+            role="switch"
+            className="switch"
+            checked={notify}
+            title={notify ? t("common.on") : t("common.off")}
+            onChange={(e) => setNotify(e.target.checked)}
+          />
+        </div>
+        <p className="apply-note">
+          {notify
+            ? t("settings.notifications.note.on")
+            : t("settings.notifications.note.off")}
+        </p>
         <Field label={t("settings.update")}>
           <div className="update-actions">
             <button

@@ -137,6 +137,9 @@ pub fn take_focus_at(path: &Path) -> Option<FocusTarget> {
 }
 
 pub fn notify(title: &str, body: &str) {
+    if !paths::notifications_enabled() {
+        return;
+    }
     let script = format!(
         "display notification {} with title {}",
         applescript_str(body),
