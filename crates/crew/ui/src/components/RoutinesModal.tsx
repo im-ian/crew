@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+} from "react";
 import { useT } from "../LocaleContext";
 import type { MessageKey } from "../locales";
 import {
@@ -9,7 +15,8 @@ import {
   toCron,
   type Repeat,
 } from "../schedule";
-import type { Routine, RoutineRun } from "../types";
+import type { Routine } from "../types";
+import { ContextMenu } from "./ContextMenu";
 import { Field } from "./Field";
 import { Seg } from "./Seg";
 
@@ -23,11 +30,6 @@ type Props = {
   onToggle: (r: Routine) => Promise<void>;
   onDelete: (r: Routine) => Promise<void>;
   onRun: (r: Routine) => Promise<void>;
-  onEdit: (
-    r: Routine,
-    fields: { name?: string; schedule?: string; prompt?: string },
-  ) => Promise<void>;
-  onLoadRuns: (r: Routine) => Promise<RoutineRun[]>;
 };
 
 export function RoutinesModal({
@@ -37,8 +39,6 @@ export function RoutinesModal({
   onToggle,
   onDelete,
   onRun,
-  onEdit,
-  onLoadRuns,
 }: Props) {
   const t = useT();
   const [name, setName] = useState("");
@@ -48,12 +48,10 @@ export function RoutinesModal({
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [nl, setNl] = useState("");
-  const [editId, setEditId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editPrompt, setEditPrompt] = useState("");
-  const [editSchedule, setEditSchedule] = useState("");
-  const [runsFor, setRunsFor] = useState<string | null>(null);
-  const [runs, setRuns] = useState<RoutineRun[]>([]);
+  const [menu, setMenu] = useState<{ x: number; y: number; r: Routine } | null>(
+    null,
+  );
+  const menuRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const routines = (agent && agent.routines) || [];
@@ -67,10 +65,49 @@ export function RoutinesModal({
     setPrompt("");
     setBusy(false);
     setNl("");
-    setEditId(null);
-    setRunsFor(null);
-    setRuns([]);
+    setMenu(null);
   }, [open, agent?.id]);
+
+  // Local rather than the app's menu: this one opens inside the right-hand
+  // sheet, where it has to be kept on screen, and its Escape must not also
+  // close the sheet under it.
+  useEffect(() => {
+    if (!menu) return;
+    menuRef.current?.querySelector("button")?.focus();
+    const close = () => setMenu(null);
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      close();
+    }
+    document.addEventListener("click", close);
+    document.addEventListener("contextmenu", close);
+    document.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("blur", close);
+    return () => {
+      document.removeEventListener("click", close);
+      document.removeEventListener("contextmenu", close);
+      document.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("blur", close);
+    };
+  }, [menu]);
+
+  function openMenu(e: MouseEvent | KeyboardEvent, r: Routine) {
+    e.preventDefault();
+    // Or the document listener above closes the menu this just opened.
+    e.stopPropagation();
+    const box = e.currentTarget.getBoundingClientRect();
+    const fromKey = !("clientX" in e);
+    const x = fromKey ? box.left + 12 : e.clientX;
+    const y = fromKey ? box.bottom - 8 : e.clientY;
+    setMenu({
+      x: Math.min(x, window.innerWidth - 184),
+      y: Math.min(y, window.innerHeight - 96),
+      r,
+    });
+  }
 
   function toggleDay(day: number) {
     setDays((cur) => {
@@ -124,33 +161,37 @@ export function RoutinesModal({
     }
   }
 
-  async function saveEdit(r: Routine) {
-    setBusy(true);
-    try {
-      await onEdit(r, {
-        name: editName.trim(),
-        schedule: editSchedule.trim(),
-        prompt: editPrompt.trim(),
-      });
-      setEditId(null);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function toggleRuns(r: Routine) {
-    const key = r.id || r.name;
-    if (runsFor === key) {
-      setRunsFor(null);
-      setRuns([]);
-      return;
-    }
-    setRunsFor(key);
-    setRuns(await onLoadRuns(r));
-  }
-
   return (
     <div className="form-stack">
+      {menu ? (
+        <div className="routine-menu" ref={menuRef}>
+          <ContextMenu
+            open
+            x={menu.x}
+            y={menu.y}
+            items={[
+              {
+                type: "action",
+                label: t("common.runNow"),
+                onClick: () => {
+                  setMenu(null);
+                  void onRun(menu.r);
+                },
+              },
+              { type: "sep" },
+              {
+                type: "action",
+                label: t("common.delete"),
+                danger: true,
+                onClick: () => {
+                  setMenu(null);
+                  void onDelete(menu.r);
+                },
+              },
+            ]}
+          />
+        </div>
+      ) : null}
           <div className="pane-block">
             <div className="pane-label">{t("routine.list")}</div>
             <div className="routine-list">
@@ -158,97 +199,38 @@ export function RoutinesModal({
                 <div className="empty-routines">{t("routine.empty")}</div>
               ) : (
                 routines.map((r) => (
-                  <div className="routine" key={r.id || r.name}>
-                    <div>
+                  <div
+                    className={"routine" + (r.enabled === false ? " is-off" : "")}
+                    key={r.id || r.name}
+                    tabIndex={0}
+                    title={t("routine.menuHint")}
+                    onContextMenu={(e) => openMenu(e, r)}
+                    onKeyDown={(e) => {
+                      if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+                        openMenu(e, r);
+                      }
+                    }}
+                  >
+                    <div className="routine-text">
                       <div className="routine-name">{r.name || r.id}</div>
                       <div className="routine-meta">
-                        {formatSchedule(r.schedule || "", t)} ·{" "}
-                        {r.enabled === false ? t("common.off") : t("common.on")}
+                        {formatSchedule(r.schedule || "", t)}
                       </div>
+                      {r.prompt ? (
+                        <div className="routine-prompt">{r.prompt}</div>
+                      ) : null}
                     </div>
-                    <div className="routine-actions">
-                      <button type="button" onClick={() => void onRun(r)}>
-                        {t("common.runNow")}
-                      </button>
-                      <button type="button" onClick={() => void onToggle(r)}>
-                        {r.enabled === false ? t("common.turnOn") : t("common.turnOff")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditId(r.id || r.name);
-                          setEditName(r.name || "");
-                          setEditPrompt(r.prompt || "");
-                          setEditSchedule(r.schedule || "");
-                        }}
-                      >
-                        {t("common.edit")}
-                      </button>
-                      <button type="button" onClick={() => void toggleRuns(r)}>
-                        {t("routine.history")}
-                      </button>
-                      <button type="button" onClick={() => void onDelete(r)}>
-                        {t("common.delete")}
-                      </button>
-                    </div>
-                    {editId === (r.id || r.name) ? (
-                      <div className="routine-edit">
-                        <input
-                          className="textin"
-                          value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
-                          placeholder={t("field.name")}
-                        />
-                        <input
-                          className="textin"
-                          value={editSchedule}
-                          onChange={(e) => setEditSchedule(e.target.value)}
-                          placeholder={t("routine.schedulePh")}
-                        />
-                        <textarea
-                          className="textin"
-                          value={editPrompt}
-                          onChange={(e) => setEditPrompt(e.target.value)}
-                          placeholder={t("routine.prompt")}
-                        />
-                        <div className="actions">
-                          <button
-                            type="button"
-                            className="primary"
-                            disabled={busy}
-                            onClick={() => void saveEdit(r)}
-                          >
-                            {t("common.save")}
-                          </button>
-                          <button type="button" onClick={() => setEditId(null)}>
-                            {t("common.cancel")}
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
-                    {runsFor === (r.id || r.name) ? (
-                      <div className="routine-runs">
-                        {!runs.length ? (
-                          <div className="empty-routines">{t("routine.runsEmpty")}</div>
-                        ) : (
-                          runs
-                            .slice()
-                            .reverse()
-                            .map((run) => (
-                              <div
-                                key={run.ts}
-                                className={"routine-run" + (run.ok ? "" : " is-fail")}
-                              >
-                                {run.ok ? t("common.ok") : t("common.fail")} ·{" "}
-                                {new Date(run.ts).toLocaleString()}
-                                {run.detail && run.detail !== "ok"
-                                  ? ` · ${run.detail}`
-                                  : ""}
-                              </div>
-                            ))
-                        )}
-                      </div>
-                    ) : null}
+                    {/* The state was a word in the meta line and a button that
+                        said the opposite; a switch is both. */}
+                    <input
+                      type="checkbox"
+                      role="switch"
+                      className="switch"
+                      checked={r.enabled !== false}
+                      aria-label={r.name || r.id}
+                      title={r.enabled === false ? t("common.off") : t("common.on")}
+                      onChange={() => void onToggle(r)}
+                    />
                   </div>
                 ))
               )}

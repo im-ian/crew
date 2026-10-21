@@ -584,31 +584,6 @@ export function useCrew() {
     }
   }
 
-  async function editRoutine(
-    r: Routine,
-    fields: { name?: string; schedule?: string; prompt?: string },
-  ) {
-    const id = routineTarget();
-    if (!id || !r) return;
-    try {
-      await api.editRoutine(id, r.id || r.name, fields);
-      await refreshList();
-    } catch (err) {
-      showError(err);
-    }
-  }
-
-  async function loadRoutineRuns(r: Routine) {
-    const id = routineTarget();
-    if (!id || !r) return [];
-    try {
-      return await api.listRoutineRuns(id, r.id || r.name);
-    } catch (err) {
-      showError(err);
-      return [];
-    }
-  }
-
   async function deleteRoutine(r: Routine) {
     const id = routineTarget();
     if (!id || !r) return;
@@ -977,8 +952,6 @@ export function useCrew() {
     toggleRoutine,
     deleteRoutine,
     runRoutine,
-    editRoutine,
-    loadRoutineRuns,
     loadMemory,
     saveMemory,
     showError,

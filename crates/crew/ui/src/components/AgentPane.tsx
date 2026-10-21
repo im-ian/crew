@@ -32,11 +32,6 @@ type Props = {
   onToggleRoutine: (r: Routine) => Promise<void>;
   onDeleteRoutine: (r: Routine) => Promise<void>;
   onRunRoutine: (r: Routine) => Promise<void>;
-  onEditRoutine: (
-    r: Routine,
-    fields: { name?: string; schedule?: string; prompt?: string },
-  ) => Promise<void>;
-  onLoadRoutineRuns: (r: Routine) => Promise<import("../types").RoutineRun[]>;
   onLoadMemory: (id: string) => Promise<string>;
   onSaveMemory: (text: string) => Promise<void>;
 };
@@ -54,8 +49,6 @@ export function AgentPane({
   onToggleRoutine,
   onDeleteRoutine,
   onRunRoutine,
-  onEditRoutine,
-  onLoadRoutineRuns,
   onLoadMemory,
   onSaveMemory,
 }: Props) {
@@ -112,8 +105,6 @@ export function AgentPane({
               onToggle={onToggleRoutine}
               onDelete={onDeleteRoutine}
               onRun={onRunRoutine}
-              onEdit={onEditRoutine}
-              onLoadRuns={onLoadRoutineRuns}
             />
           </div>
           <div hidden={tab !== "memory"}>
