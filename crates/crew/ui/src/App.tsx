@@ -367,6 +367,7 @@ function menuItems(
       {
         type: "action",
         label: t("menu.newBot"),
+        hint: "⌘N",
         onClick: () => {
           crew.hideCtx();
           crew.openNewBot();

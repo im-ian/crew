@@ -2758,6 +2758,7 @@ button.mention-chip:active {
   width: max-content;
 }
 .face-pop-hit {
+  position: relative;
   border: 0;
   padding: 0;
   background: transparent;
@@ -2767,6 +2768,24 @@ button.mention-chip:active {
   line-height: 0;
   width: max-content;
 }
+/* Nothing else says the face is a button. */
+.face-pop-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -2px;
+  z-index: 4;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--chip);
+  color: var(--ink);
+  box-shadow: 0 0 0 3px var(--elevated);
+  pointer-events: none;
+}
+.face-pop-hit:hover .face-pop-badge,
+.face-pop.open .face-pop-badge { background: var(--chip-hover); }
 .face-pop-hit .avatar-face {
   pointer-events: none;
 }
@@ -2917,10 +2936,8 @@ button.mention-chip:active {
 }
 label.field {
   display: block;
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--muted);
   margin: 0;
 }
@@ -3106,26 +3123,30 @@ textarea.textin.skill-body {
 .seg {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--bg);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  overflow: hidden;
 }
 .seg[data-cols="2"] { grid-template-columns: repeat(2, 1fr); }
 .seg[data-cols="3"] { grid-template-columns: repeat(3, 1fr); }
 .seg button {
   background: transparent;
   border: 0;
-  border-right: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   color: var(--muted);
-  padding: 9px 0;
+  padding: 7px 0;
   font-size: var(--text-md);
   cursor: pointer;
   min-width: 0;
 }
-.seg button:last-child { border-right: 0; }
+.seg button:hover { color: var(--ink); background: var(--hover); }
 .seg button.on {
   background: var(--btn);
   color: var(--on-ink);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
 }
 .actions {
   display: flex;
@@ -3154,11 +3175,12 @@ textarea.textin.skill-body {
 .danger:hover { background: rgba(255, 69, 58, 0.1); }
 .danger:active { transform: scale(0.98); }
 .primary {
-  background: var(--btn);
-  color: var(--on-ink);
-  border-color: var(--btn);
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+  font-weight: 600;
 }
-.primary:hover { background: var(--btn-hover); border-color: var(--btn-hover); }
+.primary:hover:not(:disabled) { opacity: 0.88; }
 .primary:not(:disabled):active { transform: scale(0.98); }
 .primary:disabled {
   background: var(--btn-disabled);
@@ -3192,7 +3214,19 @@ textarea.textin.skill-body {
   justify-content: center;
   z-index: 25;
 }
-.modal.open { display: flex; }
+.modal.open {
+  display: flex;
+  animation: modal-fade var(--dur) var(--ease);
+}
+.modal.open > .dialog {
+  animation: dialog-in 0.22s var(--ease-out);
+}
+@keyframes modal-fade {
+  from { opacity: 0; }
+}
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+}
 .dialog {
   background: var(--elevated);
   border: 1px solid var(--line);
@@ -3292,6 +3326,16 @@ textarea.textin.skill-body {
   justify-content: space-between;
   gap: var(--space-12);
 }
+.ctx button:has(.ctx-hint) {
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+}
+.ctx-hint {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--text-sm);
+}
 .ctx-caret {
   color: var(--faint);
   font-size: var(--text-2xl);
@@ -3342,7 +3386,9 @@ button.toast {
   }
   .mention-menu,
   .plus-menu,
-  .composer-input .mention-chip {
+  .composer-input .mention-chip,
+  .modal.open,
+  .modal.open > .dialog {
     animation: none;
   }
   .icon-btn:active,

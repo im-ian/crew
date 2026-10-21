@@ -189,7 +189,7 @@ export const KO = {
   "effort.medium": "보통",
   "effort.high": "꼼꼼하게",
   "newBot.title": "새 봇",
-  "newBot.personaPh": "선택 사항",
+  "newBot.personaPh": "선택 사항 · 예: 근거를 들어 코드 리뷰를 하는 동료",
 
   "face.random": "랜덤",
   "face.randomAria": "랜덤 조합",
@@ -460,7 +460,7 @@ export const EN: { [K in MessageKey]: string } = {
   "effort.medium": "Normal",
   "effort.high": "Careful",
   "newBot.title": "New bot",
-  "newBot.personaPh": "Optional",
+  "newBot.personaPh": "Optional · e.g. a reviewer who explains every change",
 
   "face.random": "Random",
   "face.randomAria": "Random mix",

@@ -47,7 +47,9 @@ export function NewBotModal({
     setModel("");
     setCli("grok");
     setEffort("");
-    const face = randomFace();
+    // #3a3a3c is a swatch to pick, not a face to start from: on the dark
+    // dialog it reads as an empty slot.
+    const face = randomFace({ color: "#3a3a3c" });
     setShape(face.shape);
     setColor(face.color);
     setBusy(false);
