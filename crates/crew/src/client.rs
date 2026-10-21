@@ -9,7 +9,7 @@ use anyhow::{bail, Context};
 
 use crate::config::AgentConfig;
 use crate::paths;
-use crate::protocol::{AgentInfo, Event, Request};
+use crate::protocol::{Event, Request};
 
 /// A request the daemon answers out of its own state. Everything it does for
 /// one is bounded, so silence past this means wedged rather than busy.
@@ -364,14 +364,6 @@ pub fn print_event(ev: Event) -> anyhow::Result<()> {
         other => println!("{}", other.to_line()?),
     }
     Ok(())
-}
-
-pub fn print_routines(agents: &[AgentInfo], filter: Option<&str>) -> anyhow::Result<()> {
-    let hosts: Vec<(String, Vec<crate::config::Routine>)> = agents
-        .iter()
-        .map(|a| (a.id.clone(), a.routines.clone()))
-        .collect();
-    print_routine_rows(&hosts, filter)
 }
 
 /// One row per routine: host, id, name, schedule, on/off, next run, last run.

@@ -809,17 +809,12 @@ fn run_routine(cmd: RoutineCmd) -> anyhow::Result<()> {
     print_routine_list(Some(&agent))
 }
 
+// From agents.json, not the daemon's List: the daemon writes the file before
+// it answers a change, and List leaves out a bot whose session never started,
+// so a saved change on that bot read back as "unknown bot".
 fn print_routine_list(agent: Option<&str>) -> anyhow::Result<()> {
-    if paths::is_socket_live() {
-        match client::rpc(Request::List)? {
-            Event::Agents { agents } => client::print_routines(&agents, agent),
-            Event::Error { message } => anyhow::bail!("{message}"),
-            ev => client::print_event(ev),
-        }
-    } else {
-        let cfg = Config::load()?;
-        client::print_routines_from_config(&cfg.agents, agent)
-    }
+    let cfg = Config::load()?;
+    client::print_routines_from_config(&cfg.agents, agent)
 }
 
 fn routine_rpc(req: Request) -> anyhow::Result<()> {
