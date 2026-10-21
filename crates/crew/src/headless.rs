@@ -497,9 +497,12 @@ fn spawn_and_stream(
 
     let status = {
         let mut inner = session.inner.lock().expect("headless inner");
-        match inner.child.as_mut() {
-            Some(child) => child.wait().ok(),
-            None => None,
+        // A stop took this turn's child. One there now is the next turn's, and
+        // waiting on it here would hold the bot until that turn is over.
+        if inner.generation != generation {
+            None
+        } else {
+            inner.child.as_mut().and_then(|child| child.wait().ok())
         }
     };
     let stderr_text = stderr_handle

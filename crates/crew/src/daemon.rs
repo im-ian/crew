@@ -3307,6 +3307,46 @@ exec sleep 5"#,
         });
     }
 
+    /// npm's codex is a node launcher whose native child keeps the output pipe
+    /// after a stop. When the pipe closed, the stopped turn's reader waited,
+    /// holding the bot's lock, on whatever child was there: the next turn's.
+    /// Everything that looked at the bot hung with it.
+    #[test]
+    fn a_stopped_turn_does_not_wait_on_the_next_one() {
+        paths::testing::with_home("stale-wait", || {
+            let bot = test_id("launcher");
+            let armed = paths::home_dir().join("armed");
+            // The writer leaves the process group, so no stop reaches it.
+            fake_bot_running(
+                &bot,
+                &format!(
+                    r#"case "$last" in *next*) exec sleep 3 ;; esac
+perl -e 'setpgrp(0, 0); select(undef, undef, undef, 0.5)' &
+touch '{}'
+exec sleep 5"#,
+                    armed.display()
+                ),
+            );
+            send_agent(&bot, "first").unwrap();
+            eventually(Duration::from_secs(5), "the writer never started", || {
+                armed.exists()
+            });
+            send_agent(&bot, "next please").unwrap();
+            interrupt_turn(&bot).unwrap();
+            // The writer lets go at 0.5s, and the next turn runs until 3s.
+            std::thread::sleep(Duration::from_secs(1));
+            let asked = Instant::now();
+            let _ = live_status(&bot);
+            assert!(
+                asked.elapsed() < Duration::from_millis(500),
+                "the stopped turn held the bot"
+            );
+            interrupt_turn(&bot).unwrap();
+            wait_idle(&bot);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
     #[test]
     fn a_stop_takes_the_approval_card_down() {
         paths::testing::with_home("blocked-stop", || {
