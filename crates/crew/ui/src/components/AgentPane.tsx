@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useT } from "../LocaleContext";
-import type { AgentInfo, PaneTab, Routine } from "../types";
+import type { AgentInfo, CliKind, PaneTab, Routine } from "../types";
 import { Field } from "./Field";
 import { InfoPane } from "./InfoPane";
 import { RoutinesModal } from "./RoutinesModal";
@@ -28,6 +28,7 @@ type Props = {
     effort: string;
     cwd: string;
   }) => Promise<void>;
+  onSetCli: (cli: CliKind) => Promise<boolean>;
   onToggleRoutine: (r: Routine) => Promise<void>;
   onDeleteRoutine: (r: Routine) => Promise<void>;
   onRunRoutine: (r: Routine) => Promise<void>;
@@ -44,6 +45,7 @@ export function AgentPane({
   onReset,
   onSetFace,
   onSave,
+  onSetCli,
   onToggleRoutine,
   onDeleteRoutine,
   onRunRoutine,
@@ -93,6 +95,7 @@ export function AgentPane({
               onReset={onReset}
               onSetFace={onSetFace}
               onSave={onSave}
+              onSetCli={onSetCli}
             />
           </div>
           <div hidden={tab !== "routines"}>

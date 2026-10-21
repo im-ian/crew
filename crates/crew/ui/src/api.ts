@@ -67,6 +67,7 @@ export const api = {
     // optional marker is what let a caller drop it.
     unsetCwd: boolean;
   }) => invoke<void>("set_agent", args),
+  setAgentCli: (id: string, cli: string) => invoke<void>("set_agent_cli", { id, cli }),
   addAgent: (args: {
     name: string;
     cli: string;

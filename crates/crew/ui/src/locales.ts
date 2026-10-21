@@ -168,7 +168,6 @@ export const KO = {
   "field.name": "이름",
   "field.role": "역할",
   "field.description": "설명",
-  "field.model": "모델",
   "field.cwd": "작업 폴더",
   "field.effort": "생각",
   "field.persona": "역할 / 설명",
@@ -180,7 +179,7 @@ export const KO = {
   "info.descPh": "이 봇을 어떻게 쓸지",
   "info.cwdPh": "예: ~/Projects/app",
   "info.applyNote":
-    "모델·생각·역할·작업 폴더는 다음 대화부터 적용됩니다. 대화를 지우면 바로 새 설정으로 시작됩니다.",
+    "AI·모델·생각·역할·작업 폴더는 다음 대화부터 적용됩니다. AI를 바꾸면 새 AI가 지금까지의 대화를 한 번 읽고 이어갑니다. 대화를 지우면 바로 새 설정으로 시작됩니다.",
   "info.clearChat": "대화 지우기",
   "model.default": "기본값",
   "model.defaultNamed": "기본값 ({name})",
@@ -419,7 +418,6 @@ export const EN: { [K in MessageKey]: string } = {
   "field.name": "Name",
   "field.role": "Role",
   "field.description": "About",
-  "field.model": "Model",
   "field.cwd": "Working folder",
   "field.effort": "Think",
   "field.persona": "Role / about",
@@ -431,7 +429,7 @@ export const EN: { [K in MessageKey]: string } = {
   "info.descPh": "How you’ll use this bot",
   "info.cwdPh": "e.g. ~/Projects/app",
   "info.applyNote":
-    "Model, think, role, and working folder apply from the next turn. Clear the chat to start on the new settings now.",
+    "AI, model, think, role, and working folder apply from the next turn. A new AI reads the chat so far once before it answers. Clear the chat to start on the new settings now.",
   "info.clearChat": "Clear chat",
   "model.default": "Default",
   "model.defaultNamed": "Default ({name})",

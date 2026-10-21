@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { AvatarShape } from "../avatar";
 import { useT } from "../LocaleContext";
-import { cliFromCmd, effortOptions } from "../options";
-import type { AgentInfo } from "../types";
+import { cliFromCmd } from "../options";
+import type { AgentInfo, CliKind } from "../types";
 import { Avatar } from "./Avatar";
 import { FacePop } from "./FacePicker";
 import { Field } from "./Field";
-import { ModelSelect } from "./ModelSelect";
-import { Seg } from "./Seg";
+import { ModelPicker } from "./ModelPicker";
 
 type Props = {
   open: boolean;
@@ -22,6 +21,7 @@ type Props = {
     effort: string;
     cwd: string;
   }) => Promise<void>;
+  onSetCli: (cli: CliKind) => Promise<boolean>;
 };
 
 export function InfoPane({
@@ -30,8 +30,10 @@ export function InfoPane({
   onReset,
   onSetFace,
   onSave,
+  onSetCli,
 }: Props) {
   const t = useT();
+  const cli = cliFromCmd(agent?.cmd);
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [description, setDescription] = useState("");
@@ -140,18 +142,30 @@ export function InfoPane({
           onBlur={() => void flushSave()}
         />
       </Field>
-      <Field label={t("field.model")} htmlFor="model">
-        <ModelSelect
-          id="model"
-          cli={cliFromCmd(agent?.cmd)}
-          value={model}
-          onChange={(next) => {
-            setModel(next);
-            void flushSave({ model: next });
-          }}
-          active={open}
-        />
-      </Field>
+      {/* A bot on its own command has no CLI to pick for. */}
+      {cli ? (
+        <Field label={t("field.ai")}>
+          <ModelPicker
+            cli={cli}
+            model={model}
+            effort={effort}
+            active={open}
+            onCli={async (next) => {
+              // Land pending edits under the old CLI; the switch drops its model.
+              await flushSave();
+              if (await onSetCli(next)) setModel("");
+            }}
+            onModel={(next) => {
+              setModel(next);
+              void flushSave({ model: next });
+            }}
+            onEffort={(next) => {
+              setEffort(next);
+              void flushSave({ effort: next });
+            }}
+          />
+        </Field>
+      ) : null}
       <Field label={t("field.cwd")} htmlFor="info-cwd">
         <input
           id="info-cwd"
@@ -163,16 +177,6 @@ export function InfoPane({
             scheduleSave({ cwd: e.target.value });
           }}
           onBlur={() => void flushSave()}
-        />
-      </Field>
-      <Field label={t("field.effort")}>
-        <Seg
-          value={effort}
-          options={effortOptions(t)}
-          onChange={(next) => {
-            setEffort(next);
-            void flushSave({ effort: next });
-          }}
         />
       </Field>
       <p className="apply-note">{t("info.applyNote")}</p>

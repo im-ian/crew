@@ -475,6 +475,20 @@ export function useCrew() {
     }
   }
 
+  /** False when the daemon refused, e.g. mid-turn; the error is shown. */
+  async function saveAgentCli(cli: CliKind): Promise<boolean> {
+    const id = selectedRef.current.id;
+    if (!id || selectedRef.current.kind !== "agent") return false;
+    try {
+      await api.setAgentCli(id, cli);
+      await refreshList();
+      return true;
+    } catch (err) {
+      showError(err);
+      return false;
+    }
+  }
+
   async function saveAgentFace(shape?: string | null, color?: string | null) {
     const id = selectedRef.current.id;
     if (!id || selectedRef.current.kind !== "agent") return;
@@ -904,6 +918,7 @@ export function useCrew() {
     approveAgent,
     answerChoice,
     saveAgentInfo,
+    saveAgentCli,
     saveAgentFace,
     toggleRoutine,
     deleteRoutine,
