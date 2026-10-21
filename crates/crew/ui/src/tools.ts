@@ -79,7 +79,8 @@ export function momentStamp(row: ThreadRow): number {
  * The bot whose exchange a row folds into: the other end of a note, or the
  * bot that asked for the turn the row came from. That turn's reply is already
  * in the asker's chat, so here it reads beside the thread. A card waiting on
- * the user stays in the thread, where it can be answered.
+ * the user stays in the thread, where it can be answered, and a tool card
+ * stays with the tool cards, where the tools switch shows or hides it.
  */
 export function runPeer(
   msg: ChatMessage,
@@ -87,7 +88,7 @@ export function runPeer(
 ): string | null {
   const note = noteRef(msg, agents);
   if (note) return note.otherId;
-  if (msg.choice || msg.approval) return null;
+  if (msg.kind === "tool" || msg.choice || msg.approval) return null;
   return msg.peer || null;
 }
 

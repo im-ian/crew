@@ -754,9 +754,7 @@ function NoteGroup({
             onClick={side ?? (() => setOpen(!open))}
           >
             <ChevronDown className="note-caret" size={12} />
-            {t("thread.noteRun", {
-              n: items.filter((m) => m.kind !== "tool").length,
-            })}
+            {t("thread.noteRun", { n: items.length })}
           </button>
           <WhoButton
             agent={agent}
@@ -771,9 +769,7 @@ function NoteGroup({
       {folds && !show && queued ? <QueueWait /> : null}
       {!folds || show
         ? items.map((m) =>
-            m.kind === "tool" ? (
-              <ToolRow key={m.id} message={m} flash={highlightId === m.id} />
-            ) : m.role === "assistant" ? (
+            m.role === "assistant" ? (
               <Bubble
                 key={m.id}
                 message={m}

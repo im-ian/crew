@@ -56,15 +56,16 @@ export function noteRef(
   return null;
 }
 
+const MARKER = /^\[crew (from:[^\]]+|routine:[^\]]+|channel:[^\]]+|system)\]$/;
+
+function isMarker(line: string): boolean {
+  return MARKER.test(line.trim());
+}
+
 function stripCrewMarkers(text: string): string {
   return text
     .split("\n")
-    .filter((line) => {
-      const t = line.trim();
-      return !/^\[crew (from:[^\]]+|routine:[^\]]+|channel:[^\]]+|system)\]$/.test(
-        t,
-      );
-    })
+    .filter((line) => !isMarker(line))
     .join("\n")
     .trim();
 }
@@ -99,8 +100,13 @@ export function peekMessages(
     // user in its own turns stays in the thread, even right after a note.
     if (m.peer !== peerId || m.kind === "tool") continue;
     const row = asSpeech(m, m.role === "assistant" ? selfId : m.from);
-    // A terminal types the tell back before the reply.
-    if (row && row.text !== out[out.length - 1]?.text) out.push(row);
+    if (!row) continue;
+    // A terminal can type the tell back, envelope and all, before the reply.
+    // The same words without the envelope are an answer: "보" to "보" is a tie.
+    const echo =
+      (m.text || "").split("\n").some(isMarker) &&
+      row.text === out[out.length - 1]?.text;
+    if (!echo) out.push(row);
   }
   return out;
 }

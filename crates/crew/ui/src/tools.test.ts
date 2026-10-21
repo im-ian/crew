@@ -244,7 +244,6 @@ describe("threadRows replies another bot asked for", () => {
     const rows = threadRows(
       [
         note("r", "jordy", "received"),
-        { ...msg("t", "tool"), peer: "jordy" },
         reply("a"),
         note("s", "to:jordy", "sent"),
       ],
@@ -252,8 +251,21 @@ describe("threadRows replies another bot asked for", () => {
     );
     expect(rows.map((r) => r.kind)).toEqual(["notes"]);
     expect(rows[0].kind === "notes" && rows[0].msgs.map((m) => m.id)).toEqual(
-      ["r", "t", "a", "s"],
+      ["r", "a", "s"],
     );
+  });
+
+  // Folded into the run, a lone tool card made a run of no messages: "0".
+  it("keeps the turn's tool cards with the tool cards", () => {
+    const rows = threadRows(
+      [
+        note("r", "jordy", "received"),
+        { ...msg("t", "tool"), peer: "jordy" },
+        reply("a"),
+      ],
+      roster,
+    );
+    expect(rows.map((r) => r.kind)).toEqual(["notes", "tools", "notes"]);
   });
 
   it("folds the reply even with no note beside it", () => {

@@ -113,6 +113,22 @@ describe("peekMessages", () => {
     expect(rows.map((m) => [m.from, m.text])).toEqual([["alpha", "rock"]]);
   });
 
+  it("keeps an answer that repeats the tell", () => {
+    const rows = peekMessages(
+      [
+        msg("system", "alpha", "보", { kind: "received", peer: "alpha" }),
+        msg("assistant", "beta", "보", { peer: "alpha" }),
+      ],
+      "alpha",
+      "beta",
+      AGENTS,
+    );
+    expect(rows.map((m) => [m.from, m.text])).toEqual([
+      ["alpha", "보"],
+      ["beta", "보"],
+    ]);
+  });
+
   it("keeps a reply to another peer out", () => {
     const rows = peekMessages(
       [msg("assistant", "beta", "for gamma", { peer: "gamma" })],
