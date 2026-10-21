@@ -290,6 +290,41 @@ impl Routine {
         })
     }
 
+    /// Replace the fields that are given and non-blank. A schedule may be cron
+    /// or a short Korean/English sentence.
+    pub fn edit(
+        &mut self,
+        name: Option<String>,
+        schedule: Option<String>,
+        prompt: Option<String>,
+    ) -> anyhow::Result<()> {
+        if let Some(name) = name {
+            let name = name.trim();
+            if !name.is_empty() {
+                self.name = name.to_string();
+            }
+        }
+        if let Some(schedule) = schedule {
+            let schedule = schedule.trim();
+            if !schedule.is_empty() {
+                let resolved = if cron::validate(schedule).is_ok() {
+                    schedule.to_string()
+                } else {
+                    crate::nl_routine::parse_nl_routine(schedule)?.schedule
+                };
+                cron::validate(&resolved)?;
+                self.schedule = resolved;
+            }
+        }
+        if let Some(prompt) = prompt {
+            let prompt = prompt.trim();
+            if !prompt.is_empty() {
+                self.prompt = prompt.to_string();
+            }
+        }
+        Ok(())
+    }
+
     pub fn is_due(&self, now: &cron::LocalTime) -> bool {
         if !self.enabled {
             return false;
@@ -514,7 +549,15 @@ impl Config {
         paths::ensure_home()?;
         let path = paths::agents_path();
         let raw = serde_json::to_string_pretty(self)?;
-        fs::write(path, raw + "\n")?;
+        // Whole or not at all: the CLI reads this file while the daemon may be
+        // writing it. One temp name per write, since daemon threads save too.
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = path.with_extension(format!("json.{}-{n}.tmp", std::process::id()));
+        fs::write(&tmp, raw + "\n")?;
+        fs::rename(&tmp, &path).inspect_err(|_| {
+            let _ = fs::remove_file(&tmp);
+        })?;
         Ok(())
     }
 
@@ -766,7 +809,7 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         "To change your display name, actually run `crew agent set --name \"New Name\"` (id defaults to CREW_AGENT_ID). Do not only claim you renamed yourself.\n",
     );
     s.push_str(
-        "To schedule recurring work, actually run `crew routine add --name \"...\" --schedule \"평일 8시에 브리핑\" --prompt \"...\"`. Schedule may be cron or a short Korean/English sentence. That creates a Crew routine, not a chat reminder.\n",
+        "To schedule recurring work, actually run `crew routine add --name \"...\" --schedule \"0 8 * * 1-5\" --prompt \"...\"`. Turn the user's words into 5-field cron yourself: numbers only, minute hour day month weekday (0 = Sunday), local time. If the day or time is unclear, ask with `crew ask` first. `crew routine list` shows yours; change one with `crew routine edit|remove|pause|resume <name>` (`crew routine --help`). Each prints your routines with their next run; tell the user the schedule and next run it shows. That creates a Crew routine, not a chat reminder.\n",
     );
     s.push_str(
         "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew system]` / `[crew handoff from:…]` / `[crew reply:…]` are real messages. A `[crew reply:…]` line is the user answering an earlier message; the next line is the quote, then their new text. A handoff is a teammate's finished reply; do not crew tell them that same text back.\n",
@@ -1060,7 +1103,7 @@ pub fn format_roster(agents: &[AgentConfig]) -> String {
     out.push_str("crew is on PATH; CREW_AGENT_ID is set in each agent session.\n");
     out.push_str("Rename yourself with `crew agent set --name \"New Name\"`.\n");
     out.push_str(
-        "Schedule work with `crew routine add --name \"...\" --schedule \"평일 8시에 브리핑\" --prompt \"...\"`.\n",
+        "Schedule work with `crew routine add --name \"...\" --schedule \"0 8 * * 1-5\" --prompt \"...\"` (numeric 5-field cron); see yours with `crew routine list`, change one with `crew routine edit|remove|pause|resume <name>`.\n",
     );
     out.push_str(
         "Ask the human user to pick with `crew ask --question \"...\" --option A --option B`, or to type with `--input 아이디`. Do not use this to ask a teammate.\n\n",
@@ -1759,6 +1802,11 @@ mod tests {
         assert!(!rules.contains("crew channel"));
         assert!(rules.contains("in the order they were written"));
         assert!(rules.contains("crew routine add"));
+        assert!(rules.contains("into 5-field cron"));
+        assert!(rules.contains("numbers only"));
+        assert!(rules.contains("`crew routine list` shows yours"));
+        assert!(rules.contains("crew routine edit|remove|pause|resume <name>"));
+        assert!(rules.contains("tell the user the schedule and next run"));
         assert!(rules.contains("crew ask --question"));
         assert!(rules.contains("human user"));
         assert!(rules.contains("Never send this to a teammate"));

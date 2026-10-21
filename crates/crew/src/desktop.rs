@@ -458,6 +458,7 @@ fn set_routine_enabled(agent: String, key: String, enabled: bool) -> Result<(), 
         agent,
         key,
         enabled,
+        notify: true,
     }) {
         Ok(Event::Ok) | Ok(Event::Agents { .. }) => Ok(()),
         Ok(Event::Error { message }) => Err(message),

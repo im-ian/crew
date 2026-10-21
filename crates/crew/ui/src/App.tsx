@@ -291,7 +291,6 @@ export function App() {
           }}
           onSetFace={crew.saveAgentFace}
           onSave={crew.saveAgentInfo}
-          onAddRoutine={crew.addRoutine}
           onToggleRoutine={crew.toggleRoutine}
           onDeleteRoutine={crew.deleteRoutine}
           onRunRoutine={crew.runRoutine}

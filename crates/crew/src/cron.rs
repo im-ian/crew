@@ -23,11 +23,47 @@ impl LocalTime {
 }
 
 pub fn now_local() -> anyhow::Result<LocalTime> {
-    unsafe {
-        let mut t: libc::time_t = 0;
-        if libc::time(&mut t) == -1 {
-            bail!("time() failed");
+    local_at(unix_now()?)
+}
+
+pub fn unix_now() -> anyhow::Result<libc::time_t> {
+    let mut t: libc::time_t = 0;
+    if unsafe { libc::time(&mut t) } == -1 {
+        bail!("time() failed");
+    }
+    Ok(t)
+}
+
+/// The first minute after `after` (unix seconds) that `expr` fires, looking
+/// four years ahead so a leap day is found. `None` for a schedule that never
+/// comes round, like `0 0 31 2 *`.
+pub fn next_after(expr: &str, after: libc::time_t) -> anyhow::Result<Option<LocalTime>> {
+    validate(expr)?;
+    let parts: Vec<&str> = expr.split_whitespace().collect();
+    let mut t = after - after.rem_euclid(60) + 60;
+    let end = t + 4 * 366 * 24 * 60 * 60;
+    while t < end {
+        let local = local_at(t)?;
+        // An hour whose day or hour misses is skipped whole: a minute walk
+        // took half a million steps to give up on a schedule that never fires.
+        // To the hour, not the day, so a DST day of 23 or 25 hours lands right.
+        let hour_fits = field_matches(parts[3], local.month, 1, 12)?
+            && day_matches(parts[2], parts[4], &local)?
+            && field_matches(parts[1], local.hour, 0, 23)?;
+        if !hour_fits {
+            t += (60 - local.minute as libc::time_t) * 60;
+            continue;
         }
+        if field_matches(parts[0], local.minute, 0, 59)? {
+            return Ok(Some(local));
+        }
+        t += 60;
+    }
+    Ok(None)
+}
+
+fn local_at(t: libc::time_t) -> anyhow::Result<LocalTime> {
+    unsafe {
         let mut tm: libc::tm = std::mem::zeroed();
         if libc::localtime_r(&t, &mut tm).is_null() {
             bail!("localtime_r failed");
@@ -43,20 +79,46 @@ pub fn now_local() -> anyhow::Result<LocalTime> {
     }
 }
 
+/// Parses every field. Running `matches` at one instant stopped at the first
+/// field that missed, so `0 9 * * MON-FRI` passed and then never fired.
 pub fn validate(expr: &str) -> anyhow::Result<()> {
-    matches(
-        expr,
-        &LocalTime {
-            year: 1970,
-            month: 1,
-            day: 1,
-            hour: 0,
-            minute: 0,
-            wday: 4,
-        },
-    )
-    .map(|_| ())
-    .with_context(|| format!("invalid cron schedule `{expr}`"))
+    let check = || -> anyhow::Result<()> {
+        let parts: Vec<&str> = expr.split_whitespace().collect();
+        if parts.len() != 5 {
+            bail!("schedule must be 5-field cron (got {} fields)", parts.len());
+        }
+        let ranges = [(0, 59), (0, 23), (1, 31), (1, 12), (0, 7)];
+        for (field, (min, max)) in parts.into_iter().zip(ranges) {
+            for part in field.split(',') {
+                part_matches(part, min, min, max)?;
+            }
+        }
+        Ok(())
+    };
+    check().with_context(|| format!("invalid cron schedule `{expr}`"))
+}
+
+/// Written as cron rather than as a sentence: `@daily`, or five or more fields
+/// that open with a minute and an hour. A sentence never does.
+pub fn looks_like(expr: &str) -> bool {
+    let expr = expr.trim();
+    if expr.starts_with('@') {
+        return true;
+    }
+    let parts: Vec<&str> = expr.split_whitespace().collect();
+    parts.len() >= 5
+        && parts[..2]
+            .iter()
+            .all(|p| p.chars().all(|c| c.is_ascii_digit() || "*/,-".contains(c)))
+}
+
+/// A cron this engine cannot read is a mistake to report. Read as a sentence
+/// instead, `@daily` found no clock and saved 08:00.
+pub fn reject_unreadable(expr: &str) -> anyhow::Result<()> {
+    if looks_like(expr) {
+        validate(expr).context("write 5 numeric fields: minute hour day month weekday (0 = Sunday)")?;
+    }
+    Ok(())
 }
 
 /// True if `expr` matches `t`. 5 whitespace-separated fields.
@@ -67,9 +129,20 @@ pub fn matches(expr: &str, t: &LocalTime) -> anyhow::Result<bool> {
     }
     Ok(field_matches(parts[0], t.minute, 0, 59)?
         && field_matches(parts[1], t.hour, 0, 23)?
-        && field_matches(parts[2], t.day, 1, 31)?
-        && field_matches(parts[3], t.month, 1, 12)?
-        && dow_matches(parts[4], t.wday)?)
+        && day_matches(parts[2], parts[4], t)?
+        && field_matches(parts[3], t.month, 1, 12)?)
+}
+
+/// As standard cron reads it: with both day of month and weekday restricted,
+/// either one is enough, so `0 9 1 * 1` is the 1st and every Monday.
+fn day_matches(dom: &str, dow: &str, t: &LocalTime) -> anyhow::Result<bool> {
+    let by_date = field_matches(dom, t.day, 1, 31)?;
+    let by_weekday = dow_matches(dow, t.wday)?;
+    Ok(if dom.starts_with('*') || dow.starts_with('*') {
+        by_date && by_weekday
+    } else {
+        by_date || by_weekday
+    })
 }
 
 fn field_matches(expr: &str, value: u8, min: u8, max: u8) -> anyhow::Result<bool> {
@@ -182,12 +255,60 @@ mod tests {
     }
 
     #[test]
+    fn date_or_weekday_when_both_are_set() {
+        let expr = "0 9 1 * 1";
+        assert!(matches(expr, &t(0, 9, 1, 10, 4)).unwrap(), "the 1st, a Thursday");
+        assert!(matches(expr, &t(0, 9, 5, 10, 1)).unwrap(), "a Monday, the 5th");
+        assert!(!matches(expr, &t(0, 9, 6, 10, 2)).unwrap(), "neither");
+        // One side left open still narrows by the other.
+        assert!(!matches("0 9 1-7 * *", &t(0, 9, 8, 10, 1)).unwrap());
+        assert!(!matches("0 9 * * 1", &t(0, 9, 1, 10, 4)).unwrap());
+        assert!(matches("0 9 */2 * *", &t(0, 9, 3, 10, 6)).unwrap());
+    }
+
+    #[test]
     fn rejects_bad_expr() {
         assert!(validate("").is_err());
         assert!(validate("* * * *").is_err());
         assert!(validate("* * * * * *").is_err());
         assert!(validate("60 * * * *").is_err());
         assert!(validate("*/0 * * * *").is_err());
+        // Fields past the first miss at 1970-01-01 00:00 are checked too.
+        assert!(validate("0 9 * * MON-FRI").is_err());
+        assert!(validate("0 9 * 13 *").is_err());
+        assert!(validate("0 9 * * 1,X").is_err());
+        assert!(validate("30 9 1-15 */2 0,6").is_ok());
+    }
+
+    #[test]
+    fn next_after_lands_on_a_matching_minute_after_the_start() {
+        let start: libc::time_t = 1_790_000_000;
+        let every = next_after("* * * * *", start).unwrap().unwrap();
+        assert_eq!(every, local_at(start - start % 60 + 60).unwrap());
+        for expr in ["0 9 * * 1-5", "30 18 * * 0", "0 0 1 * *"] {
+            let next = next_after(expr, start).unwrap().unwrap();
+            assert!(matches(expr, &next).unwrap(), "{expr}");
+        }
+        assert_eq!(next_after("0 0 31 2 *", start).unwrap(), None);
+        assert!(next_after("nope", start).is_err());
+        // Start is September 2026, so the next leap day is over a year off.
+        let leap = next_after("0 9 29 2 *", start).unwrap().unwrap();
+        assert_eq!((leap.year, leap.month, leap.day, leap.hour), (2028, 2, 29, 9));
+        let half = next_after("30 * * * *", start).unwrap().unwrap();
+        assert_eq!(half.minute, 30);
+    }
+
+    #[test]
+    fn tells_cron_from_a_sentence() {
+        for expr in ["0 9 * * MON-FRI", "@daily", "0 0 9 * * *", "*/5 * * * *"] {
+            assert!(looks_like(expr), "{expr}");
+        }
+        for text in ["평일 8시에 브리핑", "every weekday at 8 am briefing", "9 30"] {
+            assert!(!looks_like(text), "{text}");
+        }
+        assert!(reject_unreadable("0 9 * * MON-FRI").is_err());
+        assert!(reject_unreadable("0 9 * * 1-5").is_ok());
+        assert!(reject_unreadable("평일 9시").is_ok());
     }
 
     #[test]

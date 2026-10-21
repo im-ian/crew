@@ -1,42 +1,6 @@
 import type { TFn } from "./i18n";
 import type { MessageKey } from "./locales";
 
-export type Repeat = "daily" | "weekdays" | "weekly" | "hourly";
-
-export const REPEAT_VALUES: Repeat[] = ["daily", "weekdays", "weekly", "hourly"];
-
-export function repeatOptions(t: TFn): { value: Repeat; label: string }[] {
-  return REPEAT_VALUES.map((value) => ({
-    value,
-    label: t(`repeat.${value}` as MessageKey),
-  }));
-}
-
-export const WEEKDAYS: { value: number }[] = [
-  { value: 1 },
-  { value: 2 },
-  { value: 3 },
-  { value: 4 },
-  { value: 5 },
-  { value: 6 },
-  { value: 0 },
-];
-
-export function toCron(
-  repeat: Repeat,
-  days: number[],
-  hour: number,
-  minute: number,
-): string {
-  const m = String(minute);
-  const h = String(hour);
-  if (repeat === "hourly") return `${m} * * * *`;
-  if (repeat === "daily") return `${m} ${h} * * *`;
-  if (repeat === "weekdays") return `${m} ${h} * * 1-5`;
-  const picked = (days.length ? days : [1]).slice().sort((a, b) => a - b);
-  return `${m} ${h} * * ${picked.join(",")}`;
-}
-
 export function formatClock(hour: number, minute: number, t: TFn): string {
   const ampm = hour < 12 ? t("clock.am") : t("clock.pm");
   let h12 = hour % 12;
@@ -46,9 +10,9 @@ export function formatClock(hour: number, minute: number, t: TFn): string {
 
 export function formatSchedule(expr: string, t: TFn): string {
   const parts = expr.trim().split(/\s+/);
-  if (parts.length !== 5) return t("schedule.custom");
+  if (parts.length !== 5) return t("schedule.custom", { expr: expr.trim() });
   const [min, hour, dom, month, dow] = parts;
-  if (dom !== "*" || month !== "*") return t("schedule.custom");
+  if (dom !== "*" || month !== "*") return t("schedule.custom", { expr: expr.trim() });
 
   const minStep = min.match(/^\*\/(\d+)$/);
   if (minStep && hour === "*" && (dow === "*" || !dow)) {
@@ -65,7 +29,7 @@ export function formatSchedule(expr: string, t: TFn): string {
   }
 
   const time = clockFromFields(hour, min, t);
-  if (!time) return t("schedule.custom");
+  if (!time) return t("schedule.custom", { expr: expr.trim() });
   if (dow === "*") return t("schedule.dailyAt", { time });
   if (dow === "1-5") return t("schedule.weekdaysAt", { time });
   if (dow === "0,6" || dow === "6,0") return t("schedule.weekendAt", { time });
@@ -75,11 +39,13 @@ export function formatSchedule(expr: string, t: TFn): string {
       if (!Number.isInteger(i)) return "";
       return t(`dow.${i}` as MessageKey);
     });
-    if (names.some((n) => !n)) return time;
+    if (names.some((n) => !n)) return t("schedule.custom", { expr: expr.trim() });
     if (names.length === 1) return t("schedule.weeklyAt", { day: names[0], time });
     return t("schedule.daysAt", { days: names.join(" · "), time });
   }
-  return time;
+  // A day range or step ("1-3", "*/2") would otherwise read as a bare time,
+  // which looks daily.
+  return t("schedule.custom", { expr: expr.trim() });
 }
 
 function clockFromFields(hour: string, min: string, t: TFn): string | null {
@@ -88,13 +54,4 @@ function clockFromFields(hour: string, min: string, t: TFn): string | null {
   const m = Number(min);
   if (h > 23 || m > 59) return null;
   return formatClock(h, m, t);
-}
-
-export function parseTimeValue(value: string): { hour: number; minute: number } | null {
-  const m = value.trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) return null;
-  const hour = Number(m[1]);
-  const minute = Number(m[2]);
-  if (hour > 23 || minute > 59) return null;
-  return { hour, minute };
 }

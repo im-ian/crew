@@ -3165,33 +3165,6 @@ textarea.textin.skill-body {
   border: 1px dashed var(--line);
   border-radius: var(--radius-md);
 }
-.dow-row {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: var(--space-6);
-}
-.dow-pick {
-  height: 36px;
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--muted);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-size: var(--text-md);
-  font-weight: 600;
-  padding: 0;
-}
-.dow-pick:hover { background: var(--hover); color: var(--ink); }
-.dow-pick:active { transform: scale(0.96); }
-.dow-pick.on {
-  background: var(--btn);
-  color: var(--on-ink);
-  border-color: var(--btn);
-}
-.timein {
-  min-height: 42px;
-  font-variant-numeric: tabular-nums;
-}
 .seg {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -3468,7 +3441,6 @@ textarea.textin.skill-body {
   button.mention-chip:active,
   .face-pop-hit:active,
   .shape-pick:active,
-  .dow-pick:active,
   .ghost:active,
   .danger:active,
   .primary:not(:disabled):active,

@@ -178,15 +178,21 @@
             </div>
           </header>
           <div class="thread-wrap">
-            <div class="thread">
+            <!-- Only the strip left of the sheet shows; keep the talk inside it. -->
+            <div class="thread" style="max-width: 440px; margin: 0">
               <div class="row me">
                 <div class="me-msg">
-                  <div class="bubble">README 설치 섹션, clone 빌드랑 cargo install --git 둘 다 넣을까?</div>
+                  <div class="bubble">평일 8시마다 할 일 브리핑해줘</div>
                 </div>
               </div>
               <div class="row them">
                 <span class="avatar msg-avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
-                <div class="bubble incoming">둘 다 적어. clone은 고치기 쉽고, <code>cargo install --git</code>은 PATH에 바로 올라가.</div>
+                <div class="bubble incoming">평일 8:00로 등록했어요. 첫 실행은 내일이에요.</div>
+              </div>
+              <div class="sys-note">‘주간 리뷰’ 루틴을 껐습니다.</div>
+              <div class="row them">
+                <span class="avatar msg-avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
+                <div class="bubble incoming">알겠어요, 다시 켤 때까지 쉴게요.</div>
               </div>
             </div>
           </div>
@@ -224,67 +230,29 @@
                     <div class="pane-label">등록된 루틴</div>
                     <div class="routine-list">
                       <div class="routine">
-                        <div>
+                        <div class="routine-text">
                           <div class="routine-name">아침 브리핑</div>
-                          <div class="routine-meta">평일 오전 8:00 · 켜짐</div>
+                          <div class="routine-meta">평일 오전 8:00</div>
+                          <div class="routine-prompt">오늘 할 일을 정리해서 알려줘</div>
                         </div>
-                        <div class="routine-actions">
-                          <button type="button">지금 실행</button>
-                          <button type="button">끄기</button>
-                          <button type="button">수정</button>
-                          <button type="button">기록</button>
-                          <button type="button">삭제</button>
+                        <input type="checkbox" role="switch" class="switch" aria-label="아침 브리핑" checked />
+                      </div>
+                      <div class="routine">
+                        <div class="routine-text">
+                          <div class="routine-name">월초 정산</div>
+                          <div class="routine-meta">cron 0 9 1 * *</div>
+                          <div class="routine-prompt">지난달 지출 내역을 표로 정리해줘</div>
                         </div>
+                        <input type="checkbox" role="switch" class="switch" aria-label="월초 정산" checked />
                       </div>
-                    </div>
-                  </div>
-                  <div class="pane-block">
-                    <div class="pane-label">말로 추가</div>
-                    <div class="field-block">
-                      <label class="field" for="routine-nl">예: 평일 8시에 브리핑</label>
-                      <textarea id="routine-nl" class="textin" readonly>매주 금요일 오후에 주간 리뷰</textarea>
-                    </div>
-                    <div class="actions">
-                      <button type="button" class="primary">만들기</button>
-                    </div>
-                  </div>
-                  <div class="pane-block">
-                    <div class="pane-label">새로 추가</div>
-                    <div class="field-block">
-                      <label class="field" for="routine-name">이름</label>
-                      <input id="routine-name" class="textin" value="주간 리뷰" readonly />
-                    </div>
-                    <div class="field-block">
-                      <label class="field">언제</label>
-                      <div class="seg" data-cols="4">
-                        <button type="button">매일</button>
-                        <button type="button">평일</button>
-                        <button type="button" class="on">매주</button>
-                        <button type="button">매시</button>
+                      <div class="routine is-off">
+                        <div class="routine-text">
+                          <div class="routine-name">주간 리뷰</div>
+                          <div class="routine-meta">매주 금요일 오후 5:00</div>
+                          <div class="routine-prompt">이번 주 한 일을 짧게 정리해줘</div>
+                        </div>
+                        <input type="checkbox" role="switch" class="switch" aria-label="주간 리뷰" />
                       </div>
-                    </div>
-                    <div class="field-block">
-                      <label class="field">요일</label>
-                      <div class="dow-row">
-                        <button type="button" class="dow-pick">월</button>
-                        <button type="button" class="dow-pick">화</button>
-                        <button type="button" class="dow-pick">수</button>
-                        <button type="button" class="dow-pick">목</button>
-                        <button type="button" class="dow-pick on" aria-pressed="true">금</button>
-                        <button type="button" class="dow-pick">토</button>
-                        <button type="button" class="dow-pick">일</button>
-                      </div>
-                    </div>
-                    <div class="field-block">
-                      <label class="field" for="routine-time">시각</label>
-                      <input id="routine-time" class="textin timein" type="time" value="17:00" readonly />
-                    </div>
-                    <div class="field-block">
-                      <label class="field" for="routine-prompt">시킬 일</label>
-                      <textarea id="routine-prompt" class="textin" readonly>이번 주 한 일을 짧게 정리해줘</textarea>
-                    </div>
-                    <div class="actions">
-                      <button type="button" class="primary">추가</button>
                     </div>
                   </div>
                 </div>

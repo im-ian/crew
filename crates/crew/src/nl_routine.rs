@@ -17,6 +17,7 @@ pub fn resolve_routine_fields(
     schedule: String,
     prompt: String,
 ) -> anyhow::Result<(String, String, String)> {
+    cron::reject_unreadable(&schedule)?;
     if cron::validate(&schedule).is_ok() && !name.trim().is_empty() && !prompt.trim().is_empty() {
         return Ok((name, schedule, prompt));
     }
@@ -47,6 +48,7 @@ pub fn parse_nl_routine(text: &str) -> anyhow::Result<ParsedRoutine> {
     if cron::validate(raw).is_ok() {
         bail!("expected natural language, got cron");
     }
+    cron::reject_unreadable(raw)?;
     let lower = raw.to_lowercase();
     let hourly = is_hourly(&lower);
     let (hour, minute) = if hourly {
@@ -364,6 +366,15 @@ mod tests {
         assert_eq!(name, "아침");
         assert_eq!(schedule, "0 8 * * 1-5");
         assert_eq!(prompt, "오늘 할 일");
+    }
+
+    #[test]
+    fn resolve_refuses_cron_it_cannot_read_instead_of_guessing() {
+        for schedule in ["0 9 * * MON-FRI", "@daily", "0 0 9 * * *"] {
+            let err = resolve_routine_fields("아침 브리핑".into(), schedule.into(), "오늘 할 일 브리핑".into())
+                .expect_err(schedule);
+            assert!(format!("{err:#}").contains("minute hour day month weekday"), "{err:#}");
+        }
     }
 
     #[test]

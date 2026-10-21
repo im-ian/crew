@@ -518,28 +518,6 @@ export function useCrew() {
     return id;
   }
 
-  async function addRoutine(name: string, schedule: string, prompt: string) {
-    const id = routineTarget();
-    if (!id) return;
-    const n = name.trim();
-    const s = schedule.trim();
-    const p = prompt.trim();
-    if (!s) {
-      showError(t("error.routineFields"));
-      return;
-    }
-    if ((!n || !p) && s.trim().split(/\s+/).length === 5 && /^\S+ \S+ \S+ \S+ \S+$/.test(s.trim())) {
-      showError(t("error.routineFields"));
-      return;
-    }
-    try {
-      await api.addRoutine(id, n, s, p);
-      await refreshList();
-    } catch (err) {
-      showError(err);
-    }
-  }
-
   async function toggleRoutine(r: Routine) {
     const id = routineTarget();
     if (!id || !r) return;
@@ -927,7 +905,6 @@ export function useCrew() {
     answerChoice,
     saveAgentInfo,
     saveAgentFace,
-    addRoutine,
     toggleRoutine,
     deleteRoutine,
     runRoutine,

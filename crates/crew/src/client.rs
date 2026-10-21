@@ -9,7 +9,7 @@ use anyhow::{bail, Context};
 
 use crate::config::AgentConfig;
 use crate::paths;
-use crate::protocol::{AgentInfo, Event, Request};
+use crate::protocol::{Event, Request};
 
 /// A request the daemon answers out of its own state. Everything it does for
 /// one is bounded, so silence past this means wedged rather than busy.
@@ -366,18 +366,11 @@ pub fn print_event(ev: Event) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn print_routines(agents: &[AgentInfo], filter: Option<&str>) -> anyhow::Result<()> {
-    let hosts: Vec<(String, Vec<crate::config::Routine>)> = agents
-        .iter()
-        .map(|a| (a.id.clone(), a.routines.clone()))
-        .collect();
-    print_routine_rows(&hosts, filter)
-}
-
-/// One row per routine: host, id, name, schedule, on/off, last run.
+/// One row per routine: host, id, name, schedule, on/off, next run, last run.
 fn routine_rows(
     hosts: &[(String, Vec<crate::config::Routine>)],
     filter: Option<&str>,
+    now: libc::time_t,
 ) -> anyhow::Result<Vec<String>> {
     if let Some(id) = filter {
         if !hosts.iter().any(|(host, _)| host == id) {
@@ -392,13 +385,22 @@ fn routine_rows(
             }
         }
         for r in routines {
+            let next = if r.enabled {
+                crate::cron::next_after(&r.schedule, now)
+                    .ok()
+                    .flatten()
+                    .map(|t| t.minute_key())
+            } else {
+                None
+            };
             rows.push(format!(
-                "{}\t{}\t{}\t{}\t{}\t{}",
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 host,
                 r.id,
                 r.name,
                 r.schedule,
                 if r.enabled { "on" } else { "off" },
+                next.as_deref().unwrap_or("-"),
                 r.last_run.as_deref().unwrap_or("-")
             ));
         }
@@ -410,9 +412,11 @@ fn print_routine_rows(
     hosts: &[(String, Vec<crate::config::Routine>)],
     filter: Option<&str>,
 ) -> anyhow::Result<()> {
-    let rows = routine_rows(hosts, filter)?;
+    let rows = routine_rows(hosts, filter, crate::cron::unix_now()?)?;
     if rows.is_empty() {
         println!("(no routines)");
+    } else {
+        println!("bot\tid\tname\tschedule\tstate\tnext\tlast");
     }
     for row in rows {
         println!("{row}");
@@ -514,19 +518,22 @@ mod tests {
 
     #[test]
     fn rows_cover_each_bots_routines() {
-        let rows = routine_rows(&hosts(), None).unwrap();
+        let rows = routine_rows(&hosts(), None, 1_790_000_000).unwrap();
         assert_eq!(rows.len(), 2);
-        assert!(rows[0].starts_with("alpha\tid-daily\tdaily\t0 9 * * *\ton\t-"));
+        let cols: Vec<&str> = rows[0].split('\t').collect();
+        assert_eq!(cols[..5], ["alpha", "id-daily", "daily", "0 9 * * *", "on"]);
+        assert!(cols[5].ends_with("T09:00"), "next run: {}", cols[5]);
+        assert_eq!(cols[6], "-");
         assert!(rows[1].starts_with("beta\tid-standup\tstandup"));
     }
 
     #[test]
     fn a_filter_picks_one_host_and_rejects_unknown_ones() {
-        let rows = routine_rows(&hosts(), Some("beta")).unwrap();
+        let rows = routine_rows(&hosts(), Some("beta"), 0).unwrap();
         assert_eq!(rows.len(), 1);
         assert!(rows[0].starts_with("beta\t"));
         // A host with no routines still resolves; it just prints nothing.
-        assert!(routine_rows(&hosts(), Some("gamma")).unwrap().is_empty());
-        assert!(routine_rows(&hosts(), Some("nope")).is_err());
+        assert!(routine_rows(&hosts(), Some("gamma"), 0).unwrap().is_empty());
+        assert!(routine_rows(&hosts(), Some("nope"), 0).is_err());
     }
 }
