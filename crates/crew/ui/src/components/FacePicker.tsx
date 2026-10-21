@@ -36,8 +36,93 @@ export function FacePicker({
   const t = useT();
   const resolved = resolveFace(id, shape, color);
   const [hex, setHex] = useState(resolved.color);
+  const preview = normalizeHex(hex) ?? resolved.color;
+  // Hold the edited color so a slower save cannot paint the previous one back.
+  const pendingColor = useRef<string | null>(null);
+  const sentColor = useRef<string | null>(null);
+  const queuedColor = useRef<string | null>(null);
+  const colorTimer = useRef<number | null>(null);
+  const onColorRef = useRef(onColor);
+  const resolvedColorRef = useRef(resolved.color);
+  const seenId = useRef(id);
+  onColorRef.current = onColor;
+  resolvedColorRef.current = resolved.color;
+
+  function publishColor(next: string) {
+    const norm = next.toLowerCase();
+    if (sentColor.current?.toLowerCase() === norm) {
+      pendingColor.current = next;
+      return;
+    }
+    const unchanged =
+      sentColor.current == null && resolvedColorRef.current.toLowerCase() === norm;
+    if (unchanged) {
+      pendingColor.current = null;
+      return;
+    }
+    pendingColor.current = next;
+    sentColor.current = next;
+    onColorRef.current(next);
+  }
+
+  const publishColorRef = useRef(publishColor);
+  publishColorRef.current = publishColor;
+
+  function clearColorTimer() {
+    if (colorTimer.current == null) return;
+    window.clearTimeout(colorTimer.current);
+    colorTimer.current = null;
+  }
+
+  function scheduleColor(next: string) {
+    pendingColor.current = next;
+    queuedColor.current = next;
+    clearColorTimer();
+    colorTimer.current = window.setTimeout(() => {
+      colorTimer.current = null;
+      const queued = queuedColor.current;
+      queuedColor.current = null;
+      if (queued) publishColorRef.current(queued);
+    }, 200);
+  }
+
+  function flushColor(next: string) {
+    queuedColor.current = null;
+    clearColorTimer();
+    publishColor(next);
+  }
 
   useEffect(() => {
+    return () => {
+      if (colorTimer.current != null) {
+        window.clearTimeout(colorTimer.current);
+        colorTimer.current = null;
+      }
+      const queued = queuedColor.current;
+      queuedColor.current = null;
+      if (queued) publishColorRef.current(queued);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (seenId.current !== id) {
+      seenId.current = id;
+      pendingColor.current = null;
+      sentColor.current = null;
+      queuedColor.current = null;
+      if (colorTimer.current != null) {
+        window.clearTimeout(colorTimer.current);
+        colorTimer.current = null;
+      }
+      setHex(resolved.color);
+      return;
+    }
+    const pending = pendingColor.current;
+    if (pending && resolved.color.toLowerCase() === pending.toLowerCase()) {
+      pendingColor.current = null;
+      sentColor.current = null;
+    }
+    if (pendingColor.current) return;
     setHex(resolved.color);
   }, [resolved.color, id]);
 
@@ -45,20 +130,24 @@ export function FacePicker({
     const next = normalizeHex(raw);
     if (!next) return;
     setHex(next);
-    onColor(next);
+    flushColor(next);
   }
 
   const selectedSwatch = AVATAR_SWATCHES.find(
-    (c) => c.toLowerCase() === resolved.color.toLowerCase(),
+    (c) => c.toLowerCase() === preview.toLowerCase(),
   );
 
   function shuffle() {
     const next = randomFace(resolved);
     setHex(next.color);
+    queuedColor.current = null;
+    clearColorTimer();
+    pendingColor.current = next.color;
+    sentColor.current = next.color;
     if (onFace) onFace(next.shape, next.color);
     else {
       onShape(next.shape);
-      onColor(next.color);
+      onColorRef.current(next.color);
     }
   }
 
@@ -87,7 +176,7 @@ export function FacePicker({
               title={s}
               onClick={() => onShape(s)}
             >
-              <BotFace shape={s} color={resolved.color} />
+              <BotFace shape={s} color={preview} />
             </button>
           ))}
         </div>
@@ -105,11 +194,29 @@ export function FacePicker({
                 aria-label={c}
                 onClick={() => {
                   setHex(c);
-                  onColor(c);
+                  flushColor(c);
                 }}
               />
             ))}
           </div>
+          <input
+            className="color-native"
+            type="color"
+            value={preview}
+            aria-label={t("face.colorPick")}
+            onChange={(e) => {
+              const next = normalizeHex(e.target.value);
+              if (!next) return;
+              setHex(next);
+              scheduleColor(next);
+            }}
+            onBlur={(e) => {
+              const next = normalizeHex(e.currentTarget.value);
+              if (!next) return;
+              setHex(next);
+              flushColor(next);
+            }}
+          />
           <input
             className="textin color-hex"
             value={hex}
@@ -121,11 +228,17 @@ export function FacePicker({
               const raw = e.target.value;
               setHex(raw);
               const next = normalizeHex(raw);
-              if (next) onColor(next);
+              if (next) publishColor(next);
             }}
             onBlur={() => {
               const next = normalizeHex(hex);
-              setHex(next || resolved.color);
+              if (!next) {
+                pendingColor.current = null;
+                setHex(resolved.color);
+                return;
+              }
+              setHex(next);
+              flushColor(next);
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter") {

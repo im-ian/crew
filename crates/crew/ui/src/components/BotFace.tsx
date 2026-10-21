@@ -6,6 +6,7 @@ import {
   type PointerEvent,
 } from "react";
 import { avatarPhase, type AvatarShape } from "../avatar";
+import { EXTRA_BOXES, EXTRA_INKS, extraFace } from "../faceGeometry";
 import type { AgentStatus } from "../types";
 
 type Props = {
@@ -18,6 +19,8 @@ type Props = {
 };
 
 function eyesAt(shape: AvatarShape): { x: number; y: number } {
+  const extra = extraFace(shape);
+  if (extra) return extra.eyes;
   switch (shape) {
     case "teardrop":
       return { x: 32, y: 28 };
@@ -39,6 +42,8 @@ function eyesAt(shape: AvatarShape): { x: number; y: number } {
 }
 
 function Shape({ shape, color }: { shape: AvatarShape; color: string }) {
+  const extra = extraFace(shape);
+  if (extra) return <path fill={color} d={extra.d} />;
   switch (shape) {
     case "circle":
       return <circle cx="32" cy="32" r="30" fill={color} />;
@@ -105,6 +110,8 @@ function Shape({ shape, color }: { shape: AvatarShape; color: string }) {
           d="M32 16C32 8.5 26.2 3.2 19.2 3.2C10.4 3.2 3.2 10.4 3.2 19.4C3.2 29.2 9.6 39.6 20.2 50.2C25.6 55.6 29.6 58.8 32 58.8C34.4 58.8 38.4 55.6 43.8 50.2C54.4 39.6 60.8 29.2 60.8 19.4C60.8 10.4 53.6 3.2 44.8 3.2C37.8 3.2 32 8.5 32 16Z"
         />
       );
+    default:
+      return null;
   }
 }
 
@@ -182,6 +189,7 @@ type ShapeBox = {
   w: number;
   h: number;
   optical?: number;
+  opticalX?: number;
   opticalY?: number;
 };
 
@@ -197,6 +205,7 @@ const SHAPE_BOX: Record<AvatarShape, ShapeBox> = {
   pentagon: { x: 3, y: 3.96, w: 58, h: 56.08, opticalY: 2 },
   star: { x: 3, y: 4.39, w: 58, h: 55.23, optical: 1.14, opticalY: 2.8 },
   heart: { x: 3.2, y: 3.2, w: 57.6, h: 55.6, optical: 1.12, opticalY: 1.4 },
+  ...EXTRA_BOXES,
 };
 
 // Measured ink coverage of each shape's rendered alpha mask, not a hand fudge.
@@ -214,6 +223,7 @@ const SHAPE_INK: Record<AvatarShape, number> = {
   pentagon: 0.983,
   star: 0.904,
   heart: 0.895,
+  ...EXTRA_INKS,
 };
 
 // ponytail: scaling about the face centre is just a bigger `s`, since shapeFit
@@ -221,7 +231,7 @@ const SHAPE_INK: Record<AvatarShape, number> = {
 function shapeFit(shape: AvatarShape, ink = 1): string {
   const b = SHAPE_BOX[shape];
   const s = (FACE_SPAN / Math.max(b.w, b.h)) * (b.optical ?? 1) * ink;
-  const cx = b.x + b.w / 2;
+  const cx = b.x + b.w / 2 + (b.opticalX ?? 0);
   const cy = b.y + b.h / 2 + (b.opticalY ?? 0);
   return `translate(32 32) scale(${s}) translate(${-cx} ${-cy})`;
 }
