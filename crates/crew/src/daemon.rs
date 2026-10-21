@@ -3080,15 +3080,15 @@ mod daemon_tests {
     }
 
     /// A stand-in `claude` in the test home, so a turn runs without the real
-    /// CLI. It prints `lines` and keeps the prompt it got in `prompt` beside it.
+    /// CLI. It keeps the prompt it got in `prompt` beside it, then runs `body`.
     /// Notifications go off first: a turn's finish would post a real one.
-    fn fake_claude(lines: &str) -> String {
+    fn fake_claude(body: &str) -> String {
         use std::os::unix::fs::PermissionsExt;
         paths::write_notifications_enabled(false);
         let dir = paths::home_dir();
         let bin = dir.join("claude");
         let script = format!(
-            "#!/bin/sh\nfor arg; do last=$arg; done\nprintf '%s' \"$last\" > '{}'\ncat <<'EOF'\n{lines}\nEOF\n",
+            "#!/bin/sh\nfor arg; do last=$arg; done\nprintf '%s' \"$last\" > '{}'\n{body}\n",
             dir.join("prompt").display()
         );
         fs::write(&bin, script).unwrap();
@@ -3096,12 +3096,17 @@ mod daemon_tests {
         bin.display().to_string()
     }
 
+    /// A bot on `fake_claude` that prints `lines` as its turn.
     fn fake_bot(id: &str, lines: &str) {
+        fake_bot_running(id, &format!("cat <<'EOF'\n{lines}\nEOF"));
+    }
+
+    fn fake_bot_running(id: &str, body: &str) {
         let cwd = paths::home_dir().display().to_string();
         insert_spawned_agent(AgentConfig::new(
             id.into(),
             id.into(),
-            vec![fake_claude(lines)],
+            vec![fake_claude(body)],
             Some(cwd),
         ))
         .unwrap();
@@ -3173,6 +3178,50 @@ mod daemon_tests {
             assert!(
                 next.contains("their answer"),
                 "it rides the next prompt: {next}"
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// "멈춰" kills the CLI, but what it printed on its way out is still read
+    /// from the pipe. It came back as a reply under "멈춰", or at the front of
+    /// the answer to a message that was waiting.
+    #[test]
+    fn a_stopped_cli_gets_no_last_word() {
+        paths::testing::with_home("stop-tail", || {
+            let bot = test_id("tail");
+            // The writer in the background outlives the kill: it stands in for
+            // output that was still in the pipe when the CLI died.
+            fake_bot_running(
+                &bot,
+                r#"( sleep 1; cat <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"text","text":"late"}]}}
+EOF
+) &
+cat <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"text","text":"early"}]}}
+EOF
+exec sleep 5"#,
+            );
+            send_agent(&bot, "go").unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !crate::transcript::messages(&bot)
+                .iter()
+                .any(|m| m.text == "early")
+            {
+                assert!(Instant::now() < deadline, "the turn never spoke");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            send_agent(&bot, "멈춰").unwrap();
+            std::thread::sleep(Duration::from_millis(1500));
+            let rows = crate::transcript::messages(&bot);
+            let stop = rows.iter().position(|m| m.text == "멈춰").unwrap();
+            assert!(
+                rows[stop..].iter().all(|m| m.role != Role::Assistant),
+                "{:?}",
+                rows.iter()
+                    .map(|m| (m.role, m.text.as_str()))
+                    .collect::<Vec<_>>()
             );
             remove_agent(&bot).unwrap();
         });

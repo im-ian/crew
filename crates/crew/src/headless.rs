@@ -277,13 +277,7 @@ fn run_turn(
     }
     let result = spawn_and_stream(&session, &argv, generation, turn, &cwd);
 
-    let stale = session
-        .inner
-        .lock()
-        .ok()
-        .map(|i| i.generation != generation)
-        .unwrap_or(true);
-    if stale {
+    if is_stale(&session, generation) {
         crate::transcript::end_turn_gen(&session.id, Some(turn));
         return;
     }
@@ -358,6 +352,15 @@ fn run_turn(
     // Before the inbox: the next turn replaces this origin.
     crate::daemon::turn_ended(&session.id);
     crate::daemon::pump_inbox(&session.id);
+}
+
+/// The turn was stopped (or its bot reset or removed) since it began.
+fn is_stale(session: &HeadlessSession, generation: u64) -> bool {
+    session
+        .inner
+        .lock()
+        .map(|i| i.generation != generation)
+        .unwrap_or(true)
 }
 
 /// A turn that died without a reply left no CLI conversation behind, so its id
@@ -449,7 +452,9 @@ fn spawn_and_stream(
             Err(err) => return Err(err.into()),
         };
         // Keep draining so the CLI never blocks on a full pipe while it exits.
-        if sealed {
+        // A stopped CLI's last lines are still in the pipe: read now, they land
+        // under the user's stop or in the next turn's reply.
+        if sealed || is_stale(session, generation) {
             continue;
         }
         let mut turn_end = false;
