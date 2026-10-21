@@ -155,13 +155,15 @@ pub fn messages(agent: &str) -> Vec<ChatMessage> {
 }
 
 /// When this chat last got something for the user. An exchange another bot
-/// asked for is not, unless it left a card the user has to answer.
+/// asked for is not, unless it left a card the user has to answer. Newest by
+/// time, not by place: a reply being written stays above rows that land
+/// meanwhile, and can finish after them.
 pub fn last_ts(key: &str) -> u64 {
     messages(key)
         .iter()
-        .rev()
-        .find(|m| m.peer.is_none() || m.choice.is_some() || m.approval.is_some())
+        .filter(|m| m.peer.is_none() || m.choice.is_some() || m.approval.is_some())
         .map(|m| m.ts)
+        .max()
         .unwrap_or(0)
 }
 
@@ -178,7 +180,8 @@ pub fn set_peer(agent: &str, peer: Option<String>) -> Option<String> {
 
 pub fn preview(agent: &str) -> Option<String> {
     let msgs = messages(agent);
-    let last = msgs.last()?;
+    // The newest, as in `last_ts`.
+    let last = msgs.iter().max_by_key(|m| m.ts)?;
     let mut t: String = crate::rows::display_text(last)
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -1576,6 +1579,31 @@ mod tests {
                     (Role::User, "follow-up".to_string()),
                 ]
             );
+            drop_agent(&agent);
+        });
+    }
+
+    /// A reply still being written stays above the rows that land meanwhile,
+    /// so the last row is not the newest news once the reply finishes.
+    #[test]
+    fn a_reply_finishing_above_newer_rows_is_the_latest() {
+        crate::paths::testing::with_home("latest", || {
+            let agent = format!(
+                "latest-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            );
+            push_user(&agent, "user", "hi");
+            let turn = begin_turn(&agent);
+            on_assistant_delta(&agent, "working on it");
+            let note = push_handoff(&agent, "peer", "their answer");
+            std::thread::sleep(Duration::from_millis(5));
+            on_assistant_delta(&agent, ", done");
+            end_turn_gen(&agent, Some(turn));
+            assert!(last_ts(&agent) > note.ts, "the unread dot missed it");
+            assert_eq!(preview(&agent).as_deref(), Some("working on it, done"));
             drop_agent(&agent);
         });
     }
