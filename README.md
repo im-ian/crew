@@ -60,7 +60,7 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 세션마다 `CREW_AGENT_ID`와 확장된 `PATH`가 들어가요. 시스템 프롬프트는 대략 이렇게 알려 줘요.
 
 > 사용자가 `@id`를 쓰면 그건 **너에게** 다른 봇을 가리키는 것이다. 이 세션에 남아라. 필요하면 직접 `crew tell <id> <text>`를 실행해라.
-> 이름을 바꿔 달라면 `crew agent set --name "새 이름"`을 실행해라. 반복 일을 맡기면 `crew routine add`로 루틴을 만들어라.
+> 이름을 바꿔 달라면 `crew agent set --name "새 이름"`을 실행해라. 반복 일을 맡기면 그 말을 cron으로 바꿔 `crew routine add`로 루틴을 만들고, 고치거나 지우라면 `crew routine edit` / `remove`를 실행해라.
 > 사람에게 고르라고 물으려면 `crew ask --question "..." --option A --option B`를 실행해라. 값을 적으라고 하려면 `--input 아이디`를 보태라. 다른 봇에게 묻지 마라.
 
 그래서 1:1 대화에서 `@리뷰어 이 패치 봐줘`라고 쓰면, 지금 대화 중인 봇이 먼저 일을 하고 필요할 때 리뷰어 봇에게 넘겨요. 이름을 여러 개 적으면 지금 봇이 답을 끝낸 뒤에, 적힌 순서대로 한 명씩 답해요. 봇 사이의 릴레이는 사용자 메시지 하나당 최대 4홉이에요. 이름 변경과 루틴 등록은 채팅에서 시키면 봇이 같은 식으로 `crew`를 실행해요. 사람에게 A / B / C를 고르라고 묻거나 값을 적으라고 할 때도 `crew ask`로 그 봇의 채팅에 카드가 떠요.
@@ -292,7 +292,7 @@ Grok이 PATH에 있다면 예시 `grok` 봇에게 바로 말을 걸 수 있어�
 
 CLI도 데스크톱과 같은 데몬, 같은 `agents.json`을 써요. 데몬이 꺼져 있어도 `agent` / `memory` / `routine`의 설정 변경은 파일에 바로 반영돼요. `tell`, `send`, `reset`, `routine run`처럼 살아 있는 세션이 필요한 명령은 데몬을 띄운 뒤에 실행해요.
 
-봇 세션 안에서 `crew tell`을 실행하면 `CREW_AGENT_ID`가 보낸 사람이 돼요. 에이전트 프로세스가 데몬을 새로 띄우지는 않아요.
+봇 세션 안에서 `crew tell`을 실행하면 `CREW_AGENT_ID`가 보낸 사람이 돼요. `routine`은 봇 id를 생략하면 그 봇의 루틴을 가리켜요 (`crew routine edit 아침 …`). 루틴을 바꾸면 그 봇의 루틴이 다음 실행 시각과 함께 출력돼요. 에이전트 프로세스가 데몬을 새로 띄우지는 않아요.
 
 ```bash
 crew                    # 데스크톱
@@ -314,8 +314,12 @@ crew tell review --from grok 방금 패치 리뷰해줘
 crew ask --question "어느 쪽을 고를래?" --option A --option B --option C
 crew ask --question "로그인" --input 아이디 --input 비밀번호
 
-crew routine add grok --name "아침" --schedule "평일 8시에 브리핑" --prompt "오늘 할 일 브리핑"
 crew routine add grok --name "아침" --schedule "0 8 * * 1-5" --prompt "오늘 할 일 브리핑"
+crew routine add grok --name "아침" --schedule "평일 8시에 브리핑" --prompt "오늘 할 일 브리핑"
+crew routine list grok
+crew routine edit grok 아침 --schedule "0 9 * * 1-5"
+crew routine pause grok 아침
+crew routine remove grok 아침
 crew routine run grok 아침
 
 crew memory show grok
