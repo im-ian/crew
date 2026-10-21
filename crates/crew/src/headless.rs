@@ -345,6 +345,9 @@ fn spawn_and_stream(
     cmd.env("PATH", paths::enriched_path());
     cmd.env("CREW_AGENT_ID", &session.id);
     cmd.env("CREW_HOME", paths::home_dir());
+    // grok reads ~/.claude/CLAUDE.md, the user's own Claude Code setup, and goes
+    // looking for its `@file` imports in the bot's folder before every answer.
+    cmd.env("GROK_CLAUDE_AGENTS_ENABLED", "false");
     cmd.env("TERM", "dumb");
     cmd.env("NO_COLOR", "1");
     cmd.stdin(Stdio::null());
