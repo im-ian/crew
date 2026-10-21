@@ -49,6 +49,7 @@ type Props = {
   /** First id of the run open in the side panel, if any. */
   peekFocus?: string | null;
   onPeek?: (peerId: string, focus?: string[]) => void;
+  showTools?: boolean;
 };
 
 export function ChatThread({
@@ -70,11 +71,12 @@ export function ChatThread({
   onJump,
   peekFocus = null,
   onPeek,
+  showTools = false,
 }: Props) {
   const { locale, t } = useLocale();
   const ref = useRef<HTMLDivElement>(null);
   const [away, setAway] = useState(false);
-  const visible = visibleMessages(messages);
+  const visible = visibleMessages(messages, showTools);
   const rows = threadRows(visible, agents);
   // Keyed by message id, not by row index: a filter or an inserted row would
   // slide a parallel array one place and stamp every message with its
@@ -144,7 +146,15 @@ export function ChatThread({
     const el = ref.current;
     if (el && stick && !highlightId) el.scrollTop = el.scrollHeight;
     syncStick();
-  }, [messages, stick, selected, selectedKind, streaming, highlightId]);
+  }, [
+    messages,
+    stick,
+    selected,
+    selectedKind,
+    streaming,
+    highlightId,
+    showTools,
+  ]);
 
   useEffect(() => {
     if (!jumpSeq) return;
@@ -1382,8 +1392,12 @@ function displayText(m: ChatMessage): string {
   return stripCrewMarkers(m.text || "");
 }
 
-function visibleMessages(messages: ChatMessage[]): ChatMessage[] {
+function visibleMessages(
+  messages: ChatMessage[],
+  showTools: boolean,
+): ChatMessage[] {
   return messages.filter((m, i) => {
+    if (m.kind === "tool") return showTools;
     if (m.role !== "assistant") return true;
     const raw = m.text || "";
     if (isEnvelopeEcho(raw, messages[i - 1])) return false;

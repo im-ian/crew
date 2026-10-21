@@ -10,6 +10,8 @@ type Props = {
   open: boolean;
   theme: ThemePref;
   onTheme: (theme: ThemePref) => void;
+  showTools: boolean;
+  onShowTools: (show: boolean) => void;
   onClose: () => void;
   onOpenShortcuts: () => void;
   onOpenSkills: () => void;
@@ -25,6 +27,8 @@ export function SettingsPane({
   open,
   theme,
   onTheme,
+  showTools,
+  onShowTools,
   onClose,
   onOpenShortcuts,
   onOpenSkills,
@@ -55,6 +59,17 @@ export function SettingsPane({
           <Seg value={locale} options={LANGS} onChange={setLocale} />
         </Field>
         <p className="apply-note">{t("settings.language.note")}</p>
+        <Field label={t("settings.tools")}>
+          <Seg
+            value={showTools ? "on" : "off"}
+            options={[
+              { value: "on", label: t("common.on") },
+              { value: "off", label: t("common.off") },
+            ]}
+            onChange={(v) => onShowTools(v === "on")}
+          />
+        </Field>
+        <p className="apply-note">{t("settings.tools.note")}</p>
         <Field label={t("settings.update")}>
           <div className="update-actions">
             <button
