@@ -55,6 +55,8 @@ pub fn spawn(
     builder.env("PATH", paths::enriched_path());
     builder.env("CREW_AGENT_ID", &cfg.id);
     builder.env("CREW_HOME", paths::home_dir());
+    // See headless::spawn_and_stream: keep grok off the user's ~/.claude/CLAUDE.md.
+    builder.env("GROK_CLAUDE_AGENTS_ENABLED", "false");
 
     let pty_system = NativePtySystem::default();
     let pair = pty_system
