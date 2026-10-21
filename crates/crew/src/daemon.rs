@@ -2616,6 +2616,11 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
 /// `id`'s turn is over: wake the bot waiting on its answer, and stop tagging
 /// the rows that come after with the bot that asked for the turn.
 pub(crate) fn turn_ended(id: &str) {
+    // A reply waiting on the user's approval is not the answer yet. The turn
+    // goes on once they answer, and ends after that.
+    if matches!(live_status(id), Ok(AgentStatus::Blocked)) {
+        return;
+    }
     wake_asker(id);
     crate::transcript::set_peer(id, None);
 }
@@ -2995,6 +3000,63 @@ mod daemon_tests {
 
             session.inner.lock().unwrap().status = AgentStatus::Idle;
             remove_agent(&peer).unwrap();
+        });
+    }
+
+    /// 빵셔틀 asked the user to approve before answering 춘식이. That question
+    /// is not the answer, so 춘식이 is woken only once the turn is done.
+    #[test]
+    fn a_turn_waiting_on_approval_does_not_wake_its_asker() {
+        paths::testing::with_home("wake-blocked", || {
+            let asker = test_id("asker");
+            let speaker = format!("rival-{asker}");
+            for id in [&asker, &speaker] {
+                insert_spawned_agent(AgentConfig::new(
+                    id.clone(),
+                    id.clone(),
+                    AgentCli::Claude.default_cmd(),
+                    None,
+                ))
+                .unwrap();
+            }
+            let set_status = |id: &str, to: AgentStatus| match agents().lock().unwrap().get(id) {
+                Some(LiveAgent::Headless(s)) => s.inner.lock().unwrap().status = to,
+                _ => panic!("claude runs headless"),
+            };
+            // Busy, so the wake waits in the inbox instead of starting a CLI.
+            set_status(&asker, AgentStatus::Working);
+            set_status(&speaker, AgentStatus::Blocked);
+            let asked = TurnOrigin {
+                from: asker.clone(),
+                ..TurnOrigin::default()
+            };
+            set_origin(
+                &speaker,
+                targeting::inherit_origin(Some(&TurnOrigin::user()), asked),
+            );
+            enqueue_handoff(&asker, &speaker, "가위로 낼까요?");
+            turn_ended(&speaker);
+            assert!(
+                inbox_is_empty(&asker),
+                "a question for the user is not the answer"
+            );
+
+            set_status(&speaker, AgentStatus::Idle);
+            enqueue_handoff(&asker, &speaker, "보");
+            turn_ended(&speaker);
+            let item = inbox()
+                .lock()
+                .unwrap()
+                .get_mut(&asker)
+                .and_then(|q| q.pop_front())
+                .expect("woken once the turn is done");
+            assert_eq!(item.text, format!("[crew handoff from:{speaker}]\n보"));
+
+            take_origin(&speaker);
+            for id in [&asker, &speaker] {
+                set_status(id, AgentStatus::Idle);
+                remove_agent(id).unwrap();
+            }
         });
     }
 
