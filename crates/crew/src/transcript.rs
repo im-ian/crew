@@ -788,10 +788,9 @@ pub fn set_queued(agent: &str, id: &str, queued: bool) {
         if m.queued == queued {
             return;
         }
+        // Memory only: the file never keeps it, and this runs under the inbox lock.
         m.queued = queued;
-        let out = m.clone();
-        persist(agent, chat);
-        out
+        m.clone()
     };
     emit(agent, msg);
 }
