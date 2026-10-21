@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { threadRows, toolNames, toolSummary } from "./tools";
+import { momentStamp, threadRows, toolNames, toolSummary } from "./tools";
 import type { AgentInfo, ChatMessage } from "./types";
 
 function msg(id: string, kind?: ChatMessage["kind"]): ChatMessage {
@@ -163,5 +163,63 @@ describe("threadRows note runs", () => {
   it("leaves a routine row alone", () => {
     const rows = threadRows([note("a", "jordy", "routine")], roster);
     expect(rows.map((r) => r.kind)).toEqual(["msg"]);
+  });
+});
+
+describe("momentStamp", () => {
+  const hour = 60 * 60 * 1000;
+
+  it("uses a balloon's own time", () => {
+    const rows = threadRows(
+      [
+        { id: "u", role: "user", from: "user", text: "hi", ts: 10 },
+        { id: "a", role: "assistant", from: "jordy", text: "ok", ts: 11 },
+      ],
+      roster,
+    );
+    expect(rows.map(momentStamp)).toEqual([10, 11]);
+  });
+
+  it("ignores a tool run even when the run outlasts the hour", () => {
+    const rows = threadRows(
+      [
+        { id: "t1", role: "system", from: "Bash", text: "", ts: 10, kind: "tool" },
+        {
+          id: "t2",
+          role: "system",
+          from: "Bash",
+          text: "",
+          ts: 10 + hour,
+          kind: "tool",
+        },
+      ],
+      [],
+    );
+    expect(rows[0].kind).toBe("tools");
+    expect(momentStamp(rows[0])).toBe(0);
+  });
+
+  it("ignores a note run", () => {
+    const rows = threadRows(
+      [note("a", "jordy", "received"), { ...note("b", "jordy", "handoff"), ts: 10 + hour }],
+      roster,
+    );
+    expect(rows[0].kind).toBe("notes");
+    expect(momentStamp(rows[0])).toBe(0);
+  });
+
+  it("stamps a tell from the human and skips a notice", () => {
+    const tell = threadRows(
+      [{ id: "t", role: "system", from: "user", text: "hi", ts: 7 }],
+      roster,
+    );
+    const notice = threadRows(
+      [{ id: "n", role: "system", from: "crew", text: "hi", ts: 7 }],
+      roster,
+    );
+    const routine = threadRows([note("r", "jordy", "routine")], roster);
+    expect(momentStamp(tell[0])).toBe(7);
+    expect(momentStamp(notice[0])).toBe(0);
+    expect(momentStamp(routine[0])).toBe(0);
   });
 });

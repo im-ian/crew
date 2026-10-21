@@ -1,48 +1,65 @@
 // `Intl.DateTimeFormat` is expensive to build and the thread rebuilds its rows
 // on every streaming chunk, so keep one per locale.
-const formatters = new Map<string, Intl.DateTimeFormat | null>();
+const times = new Map<string, Intl.DateTimeFormat | null>();
+const days = new Map<string, Intl.DateTimeFormat | null>();
 
-function formatter(locale: string): Intl.DateTimeFormat | null {
-  const hit = formatters.get(locale);
+function cached(
+  store: Map<string, Intl.DateTimeFormat | null>,
+  locale: string,
+  options: Intl.DateTimeFormatOptions,
+): Intl.DateTimeFormat | null {
+  const hit = store.get(locale);
   if (hit !== undefined) return hit;
   let made: Intl.DateTimeFormat | null = null;
   try {
-    made = new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" });
+    made = new Intl.DateTimeFormat(locale, options);
   } catch {
     made = null;
   }
-  formatters.set(locale, made);
+  store.set(locale, made);
   return made;
 }
 
-/** Wall clock beside a message, in the reader's locale. */
+/** A pause this long starts a new moment. Anything shorter stays in the last one. */
+export const CLOCK_GAP_MS = 60 * 60 * 1000;
+
+/** Wall clock for a message, in the reader's locale. */
 export function clockLabel(ts: number, locale: string): string {
   if (!ts) return "";
-  return formatter(locale)?.format(new Date(ts)) ?? "";
+  return cached(times, locale, { hour: "numeric", minute: "2-digit" })?.format(new Date(ts)) ?? "";
+}
+
+function dayLabel(ts: number, locale: string): string {
+  return cached(days, locale, { month: "long", day: "numeric" })?.format(new Date(ts)) ?? "";
 }
 
 /**
- * One label per row, blank where it would repeat the last one drawn. A run of
- * messages inside a minute reads as one moment, so only its first row is
- * stamped.
+ * One centered stamp per quiet stretch. The first moment is stamped, and so
+ * is the next row once an hour has passed since the previous one. A run of
+ * messages inside that hour reads as one moment.
  *
- * Sameness is the day *and* the minute, not the rendered text: a transcript
- * outlives the day it was written, and 3:24 PM on Wednesday is not the 3:24 PM
- * above it from Tuesday.
+ * The gap is measured from the previous non-zero stamp. A `0` is not a
+ * moment and does not move the hour.
  *
- * A row that shows no clock passes `0` and does not count as the last one
- * drawn — otherwise a note between two messages would swallow the stamp of
- * the minute it sits in.
+ * A stamp from another day carries the date. The clock alone would make
+ * Tuesday's 3:24 PM look like the 3:24 PM already on screen from today.
  */
-export function clockLabels(stamps: readonly number[], locale: string): string[] {
-  let prev = "";
+export function clockLabels(
+  stamps: readonly number[],
+  locale: string,
+  now = Date.now(),
+): string[] {
+  let prev = 0;
+  const today = new Date(now).toDateString();
   return stamps.map((ts) => {
-    const label = clockLabel(ts, locale);
-    if (!label) return "";
-    const at = new Date(ts);
-    const key = `${at.toDateString()} ${label}`;
-    if (key === prev) return "";
-    prev = key;
-    return label;
+    if (!ts) return "";
+    const gap = prev ? ts - prev : CLOCK_GAP_MS;
+    if (ts >= prev) prev = ts;
+    if (gap < CLOCK_GAP_MS) return "";
+    const time = clockLabel(ts, locale);
+    if (!time) return "";
+    if (new Date(ts).toDateString() === today) return time;
+    const day = dayLabel(ts, locale);
+    return day ? `${day} ${time}` : time;
   });
 }
