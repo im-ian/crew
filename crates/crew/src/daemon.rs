@@ -615,9 +615,10 @@ fn start_delivery(
     let prev_peer = crate::transcript::set_peer(id, asked_by(&origin, id));
     let prev_origin = get_origin(id);
     set_origin(id, origin);
+    let epoch = serial_epoch(id);
     let started = deliver(id, &text, newline);
     match &started {
-        Ok(()) => queue_serial_after(id, std::mem::take(then)),
+        Ok(()) => follow_turn(id, epoch, std::mem::take(then)),
         Err(_) => {
             restore_handoffs(id, pending);
             crate::transcript::cancel_expect(id);
@@ -856,16 +857,24 @@ fn serial_epoch(agent: &str) -> u64 {
         .unwrap_or(0)
 }
 
-fn queue_serial_after(agent: &str, mut jobs: VecDeque<SerialJob>) {
-    if agent.is_empty() || jobs.is_empty() {
+fn queue_serial_after(agent: &str, jobs: VecDeque<SerialJob>) {
+    follow_turn(agent, serial_epoch(agent), jobs);
+}
+
+/// `jobs` wait on `agent`'s turn, unless a stop came in since `epoch`: what
+/// the stop ended does not come back after it.
+fn follow_turn(agent: &str, epoch: u64, mut jobs: VecDeque<SerialJob>) {
+    let Ok(mut board) = serial_board().lock() else {
+        return;
+    };
+    if agent.is_empty() || jobs.is_empty() || board.epoch.get(agent).copied().unwrap_or(0) != epoch
+    {
         return;
     }
-    if let Ok(mut board) = serial_board().lock() {
-        // This message stays contiguous, ahead of work already waiting here.
-        let q = board.queues.entry(agent.to_string()).or_default();
-        jobs.append(q);
-        *q = jobs;
-    }
+    // This message stays contiguous, ahead of work already waiting here.
+    let q = board.queues.entry(agent.to_string()).or_default();
+    jobs.append(q);
+    *q = jobs;
 }
 
 /// A stop: nothing waiting on this turn answers it.
@@ -3724,12 +3733,22 @@ exec sleep 1"#,
             }
             for i in 0..MAX_INBOX {
                 let mut none = VecDeque::new();
-                enqueue_delivery(&bot, &i.to_string(), true, None, TurnOrigin::user(), &mut none)
-                    .unwrap();
+                enqueue_delivery(
+                    &bot,
+                    &i.to_string(),
+                    true,
+                    None,
+                    TurnOrigin::user(),
+                    &mut none,
+                )
+                .unwrap();
             }
             let text = format!("@{reviewer} 봐줘");
             assert!(send_agent(&bot, &text).is_err(), "the inbox is full");
-            assert!(!told(&reviewer, &text), "the teammate answered a refused message");
+            assert!(
+                !told(&reviewer, &text),
+                "the teammate answered a refused message"
+            );
 
             for id in [&bot, &reviewer] {
                 headless_status(id, AgentStatus::Idle);
@@ -4121,6 +4140,20 @@ exec sleep 1"#,
         assert!(take_followers(&anchor).is_empty());
         drop(start);
         assert_eq!(take_followers(&anchor).len(), 1);
+    }
+
+    /// A stop that lands while a turn is being started ends what waits on that
+    /// turn: the followers the start brought are not put on after it.
+    #[test]
+    fn a_stop_during_a_start_drops_the_followers_it_brought() {
+        let bot = test_id("stop-start");
+        let seen = serial_epoch(&bot);
+        clear_serial_after(&bot);
+        follow_turn(&bot, seen, VecDeque::from([tell_job("reviewer", "x")]));
+        assert!(take_followers(&bot).is_empty());
+        let seen = serial_epoch(&bot);
+        follow_turn(&bot, seen, VecDeque::from([tell_job("reviewer", "x")]));
+        assert_eq!(take_followers(&bot).len(), 1);
     }
 
     #[test]
