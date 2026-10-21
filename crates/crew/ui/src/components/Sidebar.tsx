@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 import { useLocale, useT } from "../LocaleContext";
 import { itemKey, parseItemKey } from "../groups";
 import type { AgentInfo, Group, Kind, SearchHit } from "../types";
+import { listStamp } from "../clock";
 import { mentionRuns, mentionText } from "../mentions";
 import { numberDuplicateNames } from "../rail";
 import { Avatar } from "./Avatar";
@@ -856,6 +857,9 @@ function ItemRow({
   onPointerDown?: (e: ReactPointerEvent<HTMLButtonElement>) => void;
 }) {
   const a = item.agent;
+  const { locale } = useLocale();
+  const ts = a?.last_ts || 0;
+  const stamp = listStamp(ts, locale);
   // ItemRow re-renders on every pointermove while a drag is armed, so the scan
   // does not want to run per frame per visible row.
   const previewRuns = useMemo(
@@ -878,9 +882,16 @@ function ItemRow({
       {face}
       <div className="rail-row-text">
         <div className="agent-name">
-          <span className="agent-name-text">{item.name}</span>
-          {item.ordinal ? (
-            <span className="name-ordinal">#{item.ordinal}</span>
+          <span className="agent-name-label">
+            <span className="agent-name-text">{item.name}</span>
+            {item.ordinal ? (
+              <span className="name-ordinal">#{item.ordinal}</span>
+            ) : null}
+          </span>
+          {stamp ? (
+            <time className="rail-stamp" dateTime={new Date(ts).toISOString()}>
+              {stamp}
+            </time>
           ) : null}
         </div>
         {item.preview ? (
