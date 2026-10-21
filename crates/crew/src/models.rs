@@ -12,22 +12,29 @@ pub struct ModelList {
     pub models: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<String>,
+    pub installed: bool,
 }
 
 const CLAUDE_MODELS: &[&str] = &["sonnet", "opus", "haiku", "fable"];
 
 pub fn list_models(cli: AgentCli) -> anyhow::Result<ModelList> {
-    match cli {
-        AgentCli::Grok => list_grok_models(),
-        AgentCli::Claude => Ok(claude_models()),
-        AgentCli::Codex => Ok(list_codex_models()),
+    // A missing CLI is an answer the picker shows, not an error.
+    if !paths::resolve_program(&cli.default_cmd()[0]).is_file() {
+        return Ok(ModelList::default());
     }
+    let mut list = match cli {
+        AgentCli::Grok => list_grok_models()?,
+        AgentCli::Claude => claude_models(),
+        AgentCli::Codex => list_codex_models(),
+    };
+    list.installed = true;
+    Ok(list)
 }
 
 fn claude_models() -> ModelList {
     ModelList {
         models: CLAUDE_MODELS.iter().map(|s| (*s).to_string()).collect(),
-        default: None,
+        ..ModelList::default()
     }
 }
 
@@ -113,23 +120,27 @@ pub fn parse_grok_models(text: &str) -> ModelList {
             models.insert(0, id.to_string());
         }
     }
-    ModelList { models, default }
+    ModelList {
+        models,
+        default,
+        ..ModelList::default()
+    }
 }
 
 pub fn parse_codex_models(json: &str, config_toml: Option<&str>) -> ModelList {
     let default = config_toml.and_then(parse_codex_default_model);
     if json.trim().is_empty() {
         return ModelList {
-            models: Vec::new(),
             default,
+            ..ModelList::default()
         };
     }
     let cache: CodexCache = match serde_json::from_str(json) {
         Ok(cache) => cache,
         Err(_) => {
             return ModelList {
-                models: Vec::new(),
                 default,
+                ..ModelList::default()
             };
         }
     };
@@ -148,7 +159,11 @@ pub fn parse_codex_models(json: &str, config_toml: Option<&str>) -> ModelList {
             models.insert(0, id.to_string());
         }
     }
-    ModelList { models, default }
+    ModelList {
+        models,
+        default,
+        ..ModelList::default()
+    }
 }
 
 fn parse_codex_default_model(toml: &str) -> Option<String> {
