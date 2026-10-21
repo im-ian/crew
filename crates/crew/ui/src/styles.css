@@ -2548,7 +2548,11 @@ button.who-btn:focus-visible {
   background: var(--chip);
   color: var(--ink);
   font: inherit;
+  /* middle centres on the x-height; Hangul and the name sit on the cap
+     height, so lift the pill the difference or it hangs low. */
   vertical-align: middle;
+  position: relative;
+  top: calc(0.5ex - 0.5cap);
   line-height: 1;
   white-space: nowrap;
   user-select: none;
