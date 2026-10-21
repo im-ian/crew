@@ -122,7 +122,9 @@ export function ChatThread({
       if (selectedKind === "agent" && selected === id) return;
       onSelectAgent(id);
     });
-  const lastVisible = visible[visible.length - 1];
+  // A queued message has not reached the bot yet: the reply still coming sits
+  // above it, and the wait dots belong under that reply.
+  const lastVisible = [...visible].reverse().find((m) => !m.queued);
   const quiet = useQuiet(
     lastVisible ? lastVisible.id + "\n" + lastVisible.text : "",
     QUIET_MS,
