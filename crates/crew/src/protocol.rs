@@ -456,7 +456,8 @@ pub fn system_envelope(text: &str) -> String {
     format!("[crew system]\n{text}")
 }
 
-/// Teammate reply copied into the caller's next prompt (does not start a turn).
+/// Teammate reply for the caller. A turn of its own when the caller asked with
+/// `crew tell`, otherwise it rides the caller's next prompt.
 pub fn handoff_envelope(from: &str, text: &str) -> String {
     let from = from.trim();
     let from = if from.is_empty() { "user" } else { from };
@@ -481,7 +482,8 @@ pub fn attach_after_marker(prompt: &str, extra: &str) -> String {
     if extra.is_empty() {
         return prompt.to_string();
     }
-    if prompt.starts_with("[crew ") {
+    // A prompt that is itself a handoff has no sender line to keep on top.
+    if prompt.starts_with("[crew ") && !prompt.starts_with("[crew handoff") {
         if let Some((first, rest)) = prompt.split_once('\n') {
             return format!("{first}\n{extra}{rest}");
         }
@@ -521,6 +523,13 @@ mod tests {
         assert_eq!(
             attach_after_marker("hello", "[crew handoff from:beta]\nok\n"),
             "[crew handoff from:beta]\nok\nhello"
+        );
+        assert_eq!(
+            attach_after_marker(
+                "[crew handoff from:alpha]\n보",
+                "[crew handoff from:beta]\nok\n"
+            ),
+            "[crew handoff from:beta]\nok\n[crew handoff from:alpha]\n보"
         );
     }
 

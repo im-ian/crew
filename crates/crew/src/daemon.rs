@@ -209,14 +209,19 @@ fn enqueue_handoff(peer: &str, from: &str, text: &str) {
 }
 
 fn drop_pending_from(peer: &str, from: &str) {
-    if let Ok(mut map) = pending_handoffs().lock() {
-        if let Some(q) = map.get_mut(peer) {
-            q.retain(|h| h.from != from);
-            if q.is_empty() {
-                map.remove(peer);
-            }
-        }
+    take_handoff_from(peer, from);
+}
+
+/// `enqueue_handoff` keeps one entry per sender, so this is all of them.
+fn take_handoff_from(peer: &str, from: &str) -> Option<PendingHandoff> {
+    let mut map = pending_handoffs().lock().ok()?;
+    let q = map.get_mut(peer)?;
+    let at = q.iter().position(|h| h.from == from)?;
+    let item = q.remove(at);
+    if q.is_empty() {
+        map.remove(peer);
     }
+    Some(item)
 }
 
 fn take_handoffs(agent: &str) -> Vec<PendingHandoff> {
@@ -807,6 +812,19 @@ fn defer_tell_if_epoch(
     true
 }
 
+fn tells_after(anchor: &str, to: &str) -> bool {
+    serial_board()
+        .lock()
+        .ok()
+        .and_then(|board| {
+            board
+                .queues
+                .get(anchor)
+                .map(|q| q.iter().any(|j| j.to == to))
+        })
+        .unwrap_or(false)
+}
+
 fn defer_tell(anchor: &str, to: &str, from: &str, text: &str, origin: Option<TurnOrigin>) {
     let epoch = serial_epoch(anchor);
     let _ = defer_tell_if_epoch(anchor, epoch, to, from, text, origin);
@@ -1268,6 +1286,8 @@ fn spawn_status_ticker() {
                     let id = session.id.clone();
                     emit_frame(&session);
                     if idle {
+                        // Before the chain moves on: the next turn replaces this origin.
+                        wake_asker(&id);
                         advance_serial(&id);
                     }
                 }
@@ -2549,6 +2569,39 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
     }
 }
 
+/// `id`'s turn just ended. A bot that asked it with `crew tell` is waiting on
+/// the answer, so the reply becomes that bot's next turn instead of sitting
+/// until the user talks to it again. A user's @mention leaves the reply for
+/// the next prompt. Each wake is a hop, so two bots cannot go on forever.
+pub(crate) fn wake_asker(id: &str) {
+    let Some(origin) = get_origin(id) else {
+        return;
+    };
+    let Some(asker) = origin.reply_agent.clone() else {
+        return;
+    };
+    if asker != origin.from || !known_agent(&asker) {
+        return;
+    }
+    // It also ran `crew tell` back. That tell drops this reply on arrival, so
+    // it is the one turn the asker gets.
+    if tells_after(id, &asker) {
+        return;
+    }
+    let Some(reply) = take_handoff_from(&asker, id) else {
+        return;
+    };
+    let wake = TurnOrigin {
+        from: id.to_string(),
+        hops: origin.hops + 1,
+        ..TurnOrigin::default()
+    };
+    let text = crate::protocol::handoff_envelope(id, &reply.text);
+    if submit_delivery(&asker, &text, true, None, wake).is_err() {
+        restore_handoffs(&asker, vec![reply]);
+    }
+}
+
 #[cfg(test)]
 mod daemon_tests {
     use super::*;
@@ -2798,6 +2851,71 @@ mod daemon_tests {
         );
         let err = insert_spawned_agent(ch).unwrap_err().to_string();
         assert!(err.contains("must be 1-64 of a-z"), "{err}");
+    }
+
+    /// 춘식이 ran `crew tell 빵셔틀`, 빵셔틀 answered "보", and 춘식이 sat
+    /// there until the user spoke again.
+    #[test]
+    fn a_bot_that_asked_gets_the_answer_as_a_turn() {
+        paths::testing::with_home("wake-asker", || {
+            let asker = test_id("asker");
+            let speaker = format!("rival-{asker}");
+            insert_spawned_agent(AgentConfig::new(
+                asker.clone(),
+                asker.clone(),
+                AgentCli::Claude.default_cmd(),
+                None,
+            ))
+            .unwrap();
+            let Some(LiveAgent::Headless(session)) = agents().lock().unwrap().get(&asker).cloned()
+            else {
+                panic!("claude runs headless");
+            };
+            // Busy, so the wake waits in the inbox instead of starting a CLI.
+            session.inner.lock().unwrap().status = AgentStatus::Working;
+            enqueue_handoff(&asker, &speaker, "보");
+
+            set_origin(&speaker, TurnOrigin::mention_tell(&asker));
+            wake_asker(&speaker);
+            assert!(
+                inbox_is_empty(&asker),
+                "the user's @mention does not wake the bot"
+            );
+
+            let asked = TurnOrigin {
+                from: asker.clone(),
+                ..TurnOrigin::default()
+            };
+            set_origin(
+                &speaker,
+                targeting::inherit_origin(Some(&TurnOrigin::user()), asked),
+            );
+            // 빵셔틀 answered and also ran `crew tell` back with "보".
+            defer_tell(&speaker, &asker, &speaker, "보", None);
+            wake_asker(&speaker);
+            assert!(inbox_is_empty(&asker), "its own tell is the one turn");
+            clear_serial_after(&speaker);
+
+            wake_asker(&speaker);
+            let item = inbox()
+                .lock()
+                .unwrap()
+                .get_mut(&asker)
+                .and_then(|q| q.pop_front())
+                .expect("the asker is woken");
+            assert_eq!(item.text, format!("[crew handoff from:{speaker}]\n보"));
+            assert_eq!(item.origin.from, speaker);
+            assert_eq!(item.origin.reply_agent, None);
+            assert_eq!(item.origin.hops, 2);
+            assert!(
+                take_handoffs(&asker).is_empty(),
+                "not again on the next prompt"
+            );
+
+            take_origin(&speaker);
+            session.inner.lock().unwrap().status = AgentStatus::Idle;
+            remove_agent(&asker).unwrap();
+        });
     }
 
     #[test]
