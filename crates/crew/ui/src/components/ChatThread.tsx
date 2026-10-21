@@ -14,6 +14,7 @@ import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { noteRef, sentTarget } from "../peek";
 import {
+  dotsAfter,
   momentStamp,
   runPeer,
   threadRows,
@@ -122,7 +123,7 @@ export function ChatThread({
       if (selectedKind === "agent" && selected === id) return;
       onSelectAgent(id);
     });
-  const lastVisible = visible[visible.length - 1];
+  const lastVisible = dotsAfter(visible);
   const quiet = useQuiet(
     lastVisible ? lastVisible.id + "\n" + lastVisible.text : "",
     QUIET_MS,

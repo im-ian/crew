@@ -63,6 +63,22 @@ export function threadRows(
 }
 
 /**
+ * The row the wait dots follow. A reply still being written stays above what
+ * lands in its chat meanwhile (a queued message, a teammate's reply, a "sent
+ * to" notice), so those are passed over.
+ */
+export function dotsAfter(
+  list: readonly ChatMessage[],
+): ChatMessage | undefined {
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i];
+    if (m.queued || m.kind === "handoff" || m.kind === "sent") continue;
+    return m;
+  }
+  return undefined;
+}
+
+/**
  * Time a row contributes to the centered clock. A tool run, a folded note,
  * and a notice that is not a balloon pass `0`: they sit in the same stretch
  * as a message, and a real stamp there would swallow that message's divider

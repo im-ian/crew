@@ -155,13 +155,15 @@ pub fn messages(agent: &str) -> Vec<ChatMessage> {
 }
 
 /// When this chat last got something for the user. An exchange another bot
-/// asked for is not, unless it left a card the user has to answer.
+/// asked for is not, unless it left a card the user has to answer. Newest by
+/// time, not by place: a reply being written stays above rows that land
+/// meanwhile, and can finish after them.
 pub fn last_ts(key: &str) -> u64 {
     messages(key)
         .iter()
-        .rev()
-        .find(|m| m.peer.is_none() || m.choice.is_some() || m.approval.is_some())
+        .filter(|m| m.peer.is_none() || m.choice.is_some() || m.approval.is_some())
         .map(|m| m.ts)
+        .max()
         .unwrap_or(0)
 }
 
@@ -178,7 +180,8 @@ pub fn set_peer(agent: &str, peer: Option<String>) -> Option<String> {
 
 pub fn preview(agent: &str) -> Option<String> {
     let msgs = messages(agent);
-    let last = msgs.last()?;
+    // The newest, as in `last_ts`.
+    let last = msgs.iter().max_by_key(|m| m.ts)?;
     let mut t: String = crate::rows::display_text(last)
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -668,7 +671,6 @@ fn push_role(
     kind: Option<MessageKind>,
     peer: Option<String>,
 ) -> ChatMessage {
-    seal_now(agent);
     let msg = ChatMessage {
         id: new_id(),
         role,
@@ -681,16 +683,32 @@ fn push_role(
         approval: None,
         choice: None,
     };
-    if let Ok(mut map) = chats().lock() {
-        let chat = map
-            .entry(agent.to_string())
-            .or_insert_with(AgentChat::empty);
-        chat.messages.push(msg.clone());
-        chat.expecting = expect;
-        chat.pending_idx = None;
-        chat.dirty = false;
-        chat.last_byte = Instant::now();
-        persist(agent, chat);
+    let sealed = match chats().lock() {
+        Ok(mut map) => {
+            let chat = map
+                .entry(agent.to_string())
+                .or_insert_with(AgentChat::empty);
+            // A headless turn still answering keeps its reply and its stream.
+            // Sealing here split the reply around this row, and a row that
+            // expects no turn left the rest of the reply nowhere to go.
+            let sealed = if chat.hold {
+                None
+            } else {
+                finish_pending(agent, chat)
+            };
+            chat.messages.push(msg.clone());
+            if !chat.hold {
+                chat.expecting = expect;
+                chat.dirty = false;
+                chat.last_byte = Instant::now();
+            }
+            persist(agent, chat);
+            sealed
+        }
+        Err(_) => None,
+    };
+    if let Some(sealed) = sealed {
+        emit_sealed(agent, sealed);
     }
     emit(agent, msg.clone());
     msg
@@ -726,6 +744,35 @@ pub fn pending_approval(agent: &str) -> Option<ChatMessage> {
         .find(|m| m.approval == Some(ApprovalState::Pending))
 }
 
+/// The bot moved on without an allow or a deny: a new turn started, or it was
+/// stopped. The card holds nothing back any more, and a click on it later
+/// would answer a question nobody is waiting on.
+pub fn drop_pending_approval(agent: &str) {
+    let rows: Vec<ChatMessage> = {
+        let mut map = match chats().lock() {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        let Some(chat) = map.get_mut(agent) else {
+            return;
+        };
+        let mut rows = Vec::new();
+        for m in chat.messages.iter_mut() {
+            if m.approval == Some(ApprovalState::Pending) {
+                m.approval = None;
+                rows.push(m.clone());
+            }
+        }
+        if !rows.is_empty() {
+            persist(agent, chat);
+        }
+        rows
+    };
+    for row in rows {
+        emit(agent, row);
+    }
+}
+
 pub fn set_queued(agent: &str, id: &str, queued: bool) {
     let msg = {
         let mut map = match chats().lock() {
@@ -741,10 +788,9 @@ pub fn set_queued(agent: &str, id: &str, queued: bool) {
         if m.queued == queued {
             return;
         }
+        // Memory only: the file never keeps it, and this runs under the inbox lock.
         m.queued = queued;
-        let out = m.clone();
-        persist(agent, chat);
-        out
+        m.clone()
     };
     emit(agent, msg);
 }
@@ -752,6 +798,10 @@ pub fn set_queued(agent: &str, id: &str, queued: bool) {
 pub fn cancel_expect(agent: &str) {
     if let Ok(mut map) = chats().lock() {
         if let Some(chat) = map.get_mut(agent) {
+            // A delivery that failed on a bot mid-turn: the stream is that turn's.
+            if chat.hold {
+                return;
+            }
             chat.expecting = false;
             chat.echo_skip.clear();
         }
@@ -1494,6 +1544,92 @@ mod tests {
         end_turn(&agent);
         let sealed = messages(&agent);
         assert_eq!(sealed.last().unwrap().text, "hello");
+        drop_agent(&agent);
+    }
+
+    /// A teammate's reply or the user's follow-up can land while this bot is
+    /// still answering. Sealing there split the reply around the row, handed
+    /// the first half on as the whole answer, and a row that expects no turn
+    /// (the teammate's reply) left the rest of the answer nowhere to go.
+    #[test]
+    fn a_row_landing_mid_turn_leaves_the_reply_whole() {
+        crate::paths::testing::with_home("mid-turn", || {
+            let agent = format!(
+                "midturn-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            );
+            push_user(&agent, "user", "first");
+            let turn = begin_turn(&agent);
+            on_assistant_delta(&agent, "one");
+            push_handoff(&agent, "peer", "their answer");
+            on_assistant_delta(&agent, " two");
+            push_user(&agent, "user", "follow-up");
+            on_assistant_delta(&agent, " three");
+            end_turn_gen(&agent, Some(turn));
+            let rows: Vec<(Role, String)> = messages(&agent)
+                .into_iter()
+                .map(|m| (m.role, m.text))
+                .collect();
+            assert_eq!(
+                rows,
+                [
+                    (Role::User, "first".to_string()),
+                    (Role::Assistant, "one two three".to_string()),
+                    (Role::System, "their answer".to_string()),
+                    (Role::User, "follow-up".to_string()),
+                ]
+            );
+            drop_agent(&agent);
+        });
+    }
+
+    /// A reply still being written stays above the rows that land meanwhile,
+    /// so the last row is not the newest news once the reply finishes.
+    #[test]
+    fn a_reply_finishing_above_newer_rows_is_the_latest() {
+        crate::paths::testing::with_home("latest", || {
+            let agent = format!(
+                "latest-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            );
+            push_user(&agent, "user", "hi");
+            let turn = begin_turn(&agent);
+            on_assistant_delta(&agent, "working on it");
+            let note = push_handoff(&agent, "peer", "their answer");
+            std::thread::sleep(Duration::from_millis(5));
+            on_assistant_delta(&agent, ", done");
+            end_turn_gen(&agent, Some(turn));
+            assert!(last_ts(&agent) > note.ts, "the unread dot missed it");
+            assert_eq!(preview(&agent).as_deref(), Some("working on it, done"));
+            drop_agent(&agent);
+        });
+    }
+
+    /// A delivery that fails while a turn is under way is not that turn's. It
+    /// switched the turn's stream off, and the whole reply was lost.
+    #[test]
+    fn a_failed_delivery_leaves_the_turn_in_flight_alone() {
+        let agent = format!(
+            "inflight-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let turn = begin_turn(&agent);
+        cancel_expect(&agent);
+        on_assistant_delta(&agent, "still here");
+        end_turn_gen(&agent, Some(turn));
+        assert_eq!(
+            messages(&agent).last().map(|m| m.text.as_str()),
+            Some("still here")
+        );
         drop_agent(&agent);
     }
 

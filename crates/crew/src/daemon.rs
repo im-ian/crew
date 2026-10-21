@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -167,7 +167,7 @@ static CONFIGS: OnceLock<Mutex<HashMap<String, AgentConfig>>> = OnceLock::new();
 static INBOX: OnceLock<Mutex<HashMap<String, VecDeque<PendingDelivery>>>> = OnceLock::new();
 static ORIGINS: OnceLock<Mutex<HashMap<String, TurnOrigin>>> = OnceLock::new();
 static PENDING_HANDOFFS: OnceLock<Mutex<HashMap<String, Vec<PendingHandoff>>>> = OnceLock::new();
-/// Jobs that wait until `agent` is idle, then run one at a time in order.
+/// Jobs that wait on a bot's turn in progress, then run one at a time in order.
 static SERIAL: OnceLock<Mutex<SerialBoard>> = OnceLock::new();
 
 struct PendingDelivery {
@@ -175,6 +175,10 @@ struct PendingDelivery {
     newline: bool,
     msg_id: Option<String>,
     origin: TurnOrigin,
+    /// The rest of a chain, waiting on this delivery's turn. It goes on the
+    /// bot when the delivery starts: until then a stop or a newer message for
+    /// that bot is about the work ahead of it, not this.
+    then: VecDeque<SerialJob>,
 }
 
 struct PendingHandoff {
@@ -326,22 +330,25 @@ fn enqueue_delivery(
     newline: bool,
     msg_id: Option<String>,
     origin: TurnOrigin,
+    then: &mut VecDeque<SerialJob>,
 ) -> anyhow::Result<()> {
     let mut map = inbox().lock().expect("inbox mutex");
     let q = map.entry(id.to_string()).or_default();
     if q.len() >= MAX_INBOX {
         anyhow::bail!("agent {id} is busy (inbox full)");
     }
+    // Marked before anyone can pop it. A turn that ends right after the push
+    // starts it and clears the mark, and a mark set after that stayed up.
+    if let Some(mid) = msg_id.as_deref() {
+        crate::transcript::set_queued(id, mid, true);
+    }
     q.push_back(PendingDelivery {
         text: text.to_string(),
         newline,
-        msg_id: msg_id.clone(),
+        msg_id,
         origin,
+        then: std::mem::take(then),
     });
-    drop(map);
-    if let Some(mid) = msg_id {
-        crate::transcript::set_queued(id, &mid, true);
-    }
     Ok(())
 }
 
@@ -410,6 +417,7 @@ fn interrupt_turn(id: &str) -> anyhow::Result<()> {
     crate::transcript::end_turn(id);
     let closed = crate::transcript::close_pending_choices(id);
     fail_asks(&closed, "interrupted");
+    crate::transcript::drop_pending_approval(id);
     emit_agent_frame(id);
     pump_inbox(id);
     Ok(())
@@ -428,18 +436,23 @@ fn approve_agent(id: &str, allow: bool) -> anyhow::Result<()> {
     set_live_status(id, AgentStatus::Idle);
     if allow {
         let origin = get_origin(id).unwrap_or_else(TurnOrigin::user);
-        if let Err(err) = submit_delivery(
+        // What waited on the blocked turn waits on the turn that goes on, even
+        // when that one has to queue behind the CLI's exit.
+        let mut then = take_followers(id);
+        if let Err(err) = submit_delivery_then(
             id,
             "User allowed this action. Continue.",
             true,
             None,
             origin,
+            &mut then,
         ) {
-            advance_serial(id);
+            release(then);
+            pump_inbox(id);
             return Err(err);
         }
     } else {
-        advance_serial(id);
+        pump_inbox(id);
     }
     Ok(())
 }
@@ -558,8 +571,42 @@ fn answer_choice(
     send_agent_shown(agent, &crate::choice::format_answer_masked(&updated), &text)
 }
 
-fn start_delivery(id: &str, text: &str, newline: bool, origin: TurnOrigin) -> anyhow::Result<()> {
-    let pending = take_handoffs(id);
+/// `/compact`, `/context`: a CLI command, which reads as one only when the
+/// prompt starts with it. A path is not one.
+fn is_slash_command(text: &str) -> bool {
+    text.strip_prefix('/')
+        .and_then(|rest| rest.split(char::is_whitespace).next())
+        .is_some_and(|name| !name.is_empty() && !name.contains('/'))
+}
+
+/// `then` goes on the bot with the turn, and stays with the caller when the
+/// turn does not start.
+fn start_delivery(
+    start: Starting,
+    text: &str,
+    newline: bool,
+    origin: TurnOrigin,
+    then: &mut VecDeque<SerialJob>,
+) -> anyhow::Result<()> {
+    let id = start.0.clone();
+    let id = id.as_str();
+    // A bot left waiting on allow / deny moves on without an answer: what
+    // waited on that turn goes out now, not after this one.
+    if matches!(live_status(id), Ok(AgentStatus::Blocked)) {
+        let held = serial_board()
+            .lock()
+            .ok()
+            .and_then(|mut board| board.queues.remove(id))
+            .unwrap_or_default();
+        release(held);
+    }
+    // Teammates' replies in front of a command turn it into words. They wait
+    // for the next prompt instead.
+    let pending = if is_slash_command(text) {
+        Vec::new()
+    } else {
+        take_handoffs(id)
+    };
     let text = if pending.is_empty() {
         text.to_string()
     } else {
@@ -568,9 +615,11 @@ fn start_delivery(id: &str, text: &str, newline: bool, origin: TurnOrigin) -> an
     let prev_peer = crate::transcript::set_peer(id, asked_by(&origin, id));
     let prev_origin = get_origin(id);
     set_origin(id, origin);
-    match deliver(id, &text, newline) {
-        Ok(()) => Ok(()),
-        Err(err) => {
+    let epoch = serial_epoch(id);
+    let started = deliver(id, &text, newline);
+    match &started {
+        Ok(()) => follow_turn(id, epoch, std::mem::take(then)),
+        Err(_) => {
             restore_handoffs(id, pending);
             crate::transcript::cancel_expect(id);
             // A busy agent is still in the turn these belong to.
@@ -581,9 +630,18 @@ fn start_delivery(id: &str, text: &str, newline: bool, origin: TurnOrigin) -> an
                     take_origin(id);
                 }
             }
-            Err(err)
         }
     }
+    drop(start);
+    if started.is_ok() {
+        crate::transcript::drop_pending_approval(id);
+    }
+    // Over already, or never begun: what waits here goes on, and a message
+    // that queued while this start held the bot begins.
+    if !agent_busy(id).unwrap_or(true) {
+        pump_inbox(id);
+    }
+    started
 }
 
 fn submit_delivery(
@@ -593,6 +651,19 @@ fn submit_delivery(
     msg_id: Option<String>,
     origin: TurnOrigin,
 ) -> anyhow::Result<()> {
+    submit_delivery_then(id, text, newline, msg_id, origin, &mut VecDeque::new())
+}
+
+/// `then` is the rest of a chain waiting on this delivery's turn. It is taken
+/// when the delivery starts or queues, and left with the caller when it fails.
+fn submit_delivery_then(
+    id: &str,
+    text: &str,
+    newline: bool,
+    msg_id: Option<String>,
+    origin: TurnOrigin,
+    then: &mut VecDeque<SerialJob>,
+) -> anyhow::Result<()> {
     if targeting::relay_exhausted(&origin) {
         note_relay_stop(id, &origin);
         anyhow::bail!(
@@ -600,14 +671,19 @@ fn submit_delivery(
             targeting::MAX_RELAY_HOPS
         );
     }
-    if agent_busy(id)? {
-        return enqueue_delivery(id, text, newline, msg_id, origin);
+    if !agent_busy(id)? {
+        if let Some(start) = claim_start(id) {
+            match start_delivery(start, text, newline, origin.clone(), then) {
+                Err(err) if is_busy_err(&err) => {}
+                started => return started,
+            }
+        }
     }
-    match start_delivery(id, text, newline, origin.clone()) {
-        Ok(()) => Ok(()),
-        Err(err) if is_busy_err(&err) => enqueue_delivery(id, text, newline, msg_id, origin),
-        Err(err) => Err(err),
-    }
+    enqueue_delivery(id, text, newline, msg_id, origin, then)?;
+    // The turn that was in the way, or a start under way, can finish before
+    // the push and find nothing to start. Nothing else would start this one.
+    pump_inbox_inner(id);
+    Ok(())
 }
 
 /// Say once, where the user is looking, that a bot-to-bot chain was cut short.
@@ -620,15 +696,42 @@ fn note_relay_stop(id: &str, origin: &TurnOrigin) {
     crate::transcript::push_system(id, "crew", line, None);
 }
 
+/// `id`'s turn is over: what waited on that turn goes on, and the next message
+/// for `id` starts. Neither waits on the other.
 pub(crate) fn pump_inbox(id: &str) {
-    pump_inbox_inner(id, true);
+    advance_serial(id);
+    pump_inbox_inner(id);
 }
 
-fn pump_inbox_inner(id: &str, then_serial: bool) {
+fn pump_inbox_inner(id: &str) {
     match agent_busy(id) {
         Ok(false) => {}
-        _ => return,
+        Ok(true) => return,
+        // Exited or gone: nothing queued here will start. A chain riding on it
+        // goes on without this bot, as past a delivery that failed.
+        Err(_) => {
+            let chains: Vec<VecDeque<SerialJob>> = inbox()
+                .lock()
+                .ok()
+                .and_then(|mut map| {
+                    map.get_mut(id).map(|q| {
+                        q.iter_mut()
+                            .map(|item| std::mem::take(&mut item.then))
+                            .collect()
+                    })
+                })
+                .unwrap_or_default();
+            for chain in chains {
+                release(chain);
+            }
+            return;
+        }
     }
+    // Claimed before the pop, so two pumps cannot start this bot's queue out
+    // of order.
+    let Some(start) = claim_start(id) else {
+        return;
+    };
     let next = {
         let mut map = match inbox().lock() {
             Ok(m) => m,
@@ -636,13 +739,16 @@ fn pump_inbox_inner(id: &str, then_serial: bool) {
         };
         map.get_mut(id).and_then(|q| q.pop_front())
     };
-    let Some(item) = next else {
-        if then_serial {
-            advance_serial(id);
-        }
+    let Some(mut item) = next else {
         return;
     };
-    match start_delivery(id, &item.text, item.newline, item.origin.clone()) {
+    match start_delivery(
+        start,
+        &item.text,
+        item.newline,
+        item.origin.clone(),
+        &mut item.then,
+    ) {
         Ok(()) => {
             if let Some(ref mid) = item.msg_id {
                 crate::transcript::set_queued(id, mid, false);
@@ -658,11 +764,14 @@ fn pump_inbox_inner(id: &str, then_serial: bool) {
                 crate::transcript::set_queued(id, mid, false);
             }
             eprintln!("[crew] inbox {id}: {err:#}");
-            pump_inbox_inner(id, then_serial);
+            // The rest of its chain goes on without this bot.
+            release(item.then);
+            pump_inbox_inner(id);
         }
     }
 }
 
+#[cfg(test)]
 fn inbox_is_empty(id: &str) -> bool {
     inbox()
         .lock()
@@ -675,6 +784,9 @@ fn inbox_is_empty(id: &str) -> bool {
 struct SerialJob {
     to: String,
     kind: SerialKind,
+    /// A tell the bot ran itself. Those go out in a line of their own, not
+    /// behind the teammates its message named.
+    own: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -686,13 +798,24 @@ enum SerialKind {
     },
 }
 
+impl SerialJob {
+    /// A teammate the user @named in `chat`'s own 1:1.
+    fn named_in(&self, chat: &str) -> bool {
+        let SerialKind::Tell { from, origin, .. } = &self.kind;
+        from == "user" && origin.as_ref().and_then(|o| o.reply_agent.as_deref()) == Some(chat)
+    }
+}
+
 struct SerialBoard {
+    /// What waits on each bot's turn in progress: the teammates its message
+    /// named, the tells it ran, and the rest of a chain it is part of.
     queues: HashMap<String, VecDeque<SerialJob>>,
-    /// Callers currently attaching followers. A count, so one caller finishing
-    /// does not expose the tail while another is still attaching it.
-    arming: HashMap<String, u32>,
+    /// Bots whose next turn is being started. One start at a time per bot: only
+    /// the one under way sets the turn's origin and peer, and what waits on the
+    /// bot stays put until that turn is up.
+    starting: HashSet<String>,
     /// Bumped when an agent's chain is cleared. A tell that observed an older
-    /// value belongs to a turn the user already replaced or stopped.
+    /// value belongs to a turn that was stopped.
     epoch: HashMap<String, u64>,
 }
 
@@ -700,43 +823,30 @@ fn serial_board() -> &'static Mutex<SerialBoard> {
     SERIAL.get_or_init(|| {
         Mutex::new(SerialBoard {
             queues: HashMap::new(),
-            arming: HashMap::new(),
+            starting: HashSet::new(),
             epoch: HashMap::new(),
         })
     })
 }
 
-fn mark_serial_arming(agent: &str) {
-    if agent.is_empty() {
-        return;
-    }
-    if let Ok(mut board) = serial_board().lock() {
-        *board.arming.entry(agent.to_string()).or_insert(0) += 1;
-    }
-}
+/// A turn being started on the bot it names. Dropping it lets the next start in.
+struct Starting(String);
 
-fn unmark_serial_arming(agent: &str) {
-    if let Ok(mut board) = serial_board().lock() {
-        let done = match board.arming.get_mut(agent) {
-            Some(n) if *n > 1 => {
-                *n -= 1;
-                false
-            }
-            Some(_) => true,
-            None => false,
-        };
-        if done {
-            board.arming.remove(agent);
+impl Drop for Starting {
+    fn drop(&mut self) {
+        if let Ok(mut board) = serial_board().lock() {
+            board.starting.remove(&self.0);
         }
     }
 }
 
-fn is_serial_arming(agent: &str) -> bool {
-    serial_board()
-        .lock()
-        .ok()
-        .map(|board| board.arming.contains_key(agent))
-        .unwrap_or(false)
+/// None while another start is under way on `agent`.
+fn claim_start(agent: &str) -> Option<Starting> {
+    let mut board = serial_board().lock().ok()?;
+    board
+        .starting
+        .insert(agent.to_string())
+        .then(|| Starting(agent.to_string()))
 }
 
 fn serial_epoch(agent: &str) -> u64 {
@@ -747,24 +857,49 @@ fn serial_epoch(agent: &str) -> u64 {
         .unwrap_or(0)
 }
 
-fn queue_serial_after(agent: &str, jobs: Vec<SerialJob>) {
-    if agent.is_empty() || jobs.is_empty() {
-        return;
-    }
-    if let Ok(mut board) = serial_board().lock() {
-        // This message stays contiguous, ahead of work already waiting here.
-        let q = board.queues.entry(agent.to_string()).or_default();
-        let mut combined = VecDeque::from(jobs);
-        combined.append(q);
-        *q = combined;
-    }
+fn queue_serial_after(agent: &str, jobs: VecDeque<SerialJob>) {
+    follow_turn(agent, serial_epoch(agent), jobs);
 }
 
+/// `jobs` wait on `agent`'s turn, unless a stop came in since `epoch`: what
+/// the stop ended does not come back after it.
+fn follow_turn(agent: &str, epoch: u64, mut jobs: VecDeque<SerialJob>) {
+    let Ok(mut board) = serial_board().lock() else {
+        return;
+    };
+    if agent.is_empty() || jobs.is_empty() || board.epoch.get(agent).copied().unwrap_or(0) != epoch
+    {
+        return;
+    }
+    // This message stays contiguous, ahead of work already waiting here.
+    let q = board.queues.entry(agent.to_string()).or_default();
+    jobs.append(q);
+    *q = jobs;
+}
+
+/// A stop: nothing waiting on this turn answers it.
 fn clear_serial_after(agent: &str) {
     if let Ok(mut board) = serial_board().lock() {
         board.queues.remove(agent);
         let epoch = board.epoch.entry(agent.to_string()).or_insert(0);
         *epoch = epoch.wrapping_add(1);
+    }
+}
+
+/// A newer message from the user drops the teammates their earlier ones named
+/// that have not started, whether that message is answered or still waiting.
+/// The tells the bot ran itself, and another chat's chain running on through
+/// this bot, are not that message's to drop.
+fn drop_mention_followers(agent: &str) {
+    if let Ok(mut board) = serial_board().lock() {
+        if let Some(q) = board.queues.get_mut(agent) {
+            q.retain(|job| !job.named_in(agent));
+        }
+    }
+    if let Ok(mut map) = inbox().lock() {
+        for item in map.get_mut(agent).into_iter().flatten() {
+            item.then.retain(|job| !job.named_in(agent));
+        }
     }
 }
 
@@ -815,6 +950,7 @@ fn defer_tell_if_epoch(
                 text: text.to_string(),
                 origin,
             },
+            own: true,
         });
     true
 }
@@ -837,87 +973,46 @@ fn defer_tell(anchor: &str, to: &str, from: &str, text: &str, origin: Option<Tur
     let _ = defer_tell_if_epoch(anchor, epoch, to, from, text, origin);
 }
 
-fn park_tail(
-    queues: &mut HashMap<String, VecDeque<SerialJob>>,
-    next_to: &str,
-    mut rest: VecDeque<SerialJob>,
-) {
-    if rest.is_empty() {
+/// What waits on `agent`'s turn, unless a turn is still being started there.
+fn take_followers(agent: &str) -> VecDeque<SerialJob> {
+    let Ok(mut board) = serial_board().lock() else {
+        return VecDeque::new();
+    };
+    if board.starting.contains(agent) {
+        return VecDeque::new();
+    }
+    board.queues.remove(agent).unwrap_or_default()
+}
+
+/// `start`'s turn is over: what waited on it goes on.
+fn advance_serial(start: &str) {
+    if matches!(
+        live_status(start),
+        Ok(AgentStatus::Working | AgentStatus::Blocked)
+    ) {
         return;
     }
-    let dest = queues.entry(next_to.to_string()).or_default();
-    let mut combined = VecDeque::new();
-    combined.append(&mut rest);
-    combined.append(dest);
-    *dest = combined;
+    release(take_followers(start));
 }
 
-/// Pop the next job waiting on `finished` and leave the rest waiting on that
-/// job's agent, so the chain stays A, then B, then C.
-fn take_next_serial(finished: &str) -> Option<SerialJob> {
-    let mut board = serial_board().lock().ok()?;
-    let mut q = board.queues.remove(finished)?;
-    let next = q.pop_front()?;
-    park_tail(&mut board.queues, &next.to, q);
-    Some(next)
+/// What waited on a turn that is over: the tells the bot ran, and the
+/// teammates its message named with the rest of any chain. Each line goes
+/// one at a time, and neither waits on the other.
+fn release(jobs: VecDeque<SerialJob>) {
+    let (own, named): (VecDeque<_>, VecDeque<_>) = jobs.into_iter().partition(|job| job.own);
+    run_chain(own);
+    run_chain(named);
 }
 
-/// Same handoff as `take_next_serial`, and the next agent is arming before the
-/// lock is released. A turn that ends in that window cannot start the follower
-/// until `unmark_serial_arming`.
-fn claim_next_serial(finished: &str) -> Option<SerialJob> {
-    let mut board = serial_board().lock().ok()?;
-    if board.arming.contains_key(finished) {
-        return None;
-    }
-    let mut q = board.queues.remove(finished)?;
-    let next = q.pop_front()?;
-    park_tail(&mut board.queues, &next.to, q);
-    *board.arming.entry(next.to.clone()).or_insert(0) += 1;
-    Some(next)
-}
-
-fn run_serial_job(job: &SerialJob) -> anyhow::Result<bool> {
-    let SerialKind::Tell { from, text, origin } = &job.kind;
-    tell_agent_origin(from, &job.to, text, origin.clone(), false)?;
-    Ok(true)
-}
-
-fn advance_serial(start: &str) {
-    let mut current = start.to_string();
-    loop {
-        if is_serial_arming(&current) {
-            return;
-        }
-        match live_status(&current) {
-            Ok(AgentStatus::Working | AgentStatus::Blocked) => return,
-            Ok(AgentStatus::Idle | AgentStatus::Exited) => {
-                if !inbox_is_empty(&current) {
-                    pump_inbox_inner(&current, false);
-                    if agent_busy(&current).unwrap_or(false) || !inbox_is_empty(&current) {
-                        return;
-                    }
-                }
-            }
-            Err(_) => {}
-        }
-        let Some(job) = claim_next_serial(&current) else {
-            return;
-        };
-        let started = run_serial_job(&job);
-        unmark_serial_arming(&job.to);
-        match started {
-            Ok(true) => {
-                if !agent_busy(&job.to).unwrap_or(true) {
-                    pump_inbox(&job.to);
-                }
-                return;
-            }
-            Ok(false) => current = job.to.clone(),
-            Err(err) => {
-                eprintln!("[crew] serial {current} -> {}: {err:#}", job.to);
-                current = job.to.clone();
-            }
+/// Deliver the head. The rest rides with that delivery and goes on when its
+/// turn ends, so the chain stays A, then B, then C. A head that cannot be
+/// delivered is skipped.
+fn run_chain(mut chain: VecDeque<SerialJob>) {
+    while let Some(job) = chain.pop_front() {
+        let SerialKind::Tell { from, text, origin } = &job.kind;
+        match tell_agent_origin(from, &job.to, text, origin.clone(), false, &mut chain) {
+            Ok(()) => return,
+            Err(err) => eprintln!("[crew] serial -> {}: {err:#}", job.to),
         }
     }
 }
@@ -1330,7 +1425,7 @@ fn spawn_status_ticker() {
                     if idle {
                         // Before the chain moves on: the next turn replaces this origin.
                         turn_ended(&id);
-                        advance_serial(&id);
+                        pump_inbox(&id);
                     }
                 }
             }
@@ -1913,15 +2008,10 @@ fn send_agent_shown(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
     ensure_accepts_turn(id)?;
     let roster = roster_vec();
     let msg = crate::transcript::push_user(id, "user", shown);
-    let mentions = targeting::one_on_one_tell_targets(crate::rows::reply_body(text), id, &roster);
-    let delivered = crate::config::with_mention_hint(text, id, &roster);
-    // Install the followers before the turn starts. A fast turn can finish
-    // inside `submit_delivery`, and the arming flag keeps that finish from
-    // running the chain before it is in place.
-    mark_serial_arming(id);
-    clear_serial_after(id);
-    if !mentions.is_empty() {
-        let jobs = mentions
+    // The teammates named here answer after this message's turn, so they ride
+    // with it instead of waiting on whatever the bot is doing now.
+    let mut then: VecDeque<SerialJob> =
+        targeting::one_on_one_tell_targets(crate::rows::reply_body(text), id, &roster)
             .into_iter()
             .map(|to| SerialJob {
                 to,
@@ -1930,16 +2020,39 @@ fn send_agent_shown(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
                     text: text.to_string(),
                     origin: Some(TurnOrigin::mention_tell(id)),
                 },
+                own: false,
             })
             .collect();
-        queue_serial_after(id, jobs);
+    let delivered = crate::config::with_mention_hint(text, id, &roster);
+    let named_here = then.len();
+    if matches!(live_status(id), Ok(AgentStatus::Blocked)) {
+        // A message to a bot waiting on allow / deny answers it, as Allow
+        // does: the turn goes on in this one, and what waited on it waits on
+        // this.
+        then.extend(take_followers(id));
+    } else {
+        drop_mention_followers(id);
     }
-    let started = submit_delivery(id, &delivered, true, Some(msg.id), TurnOrigin::user());
-    unmark_serial_arming(id);
-    // Idle here means this bot's turn did not stay up. The named teammates
-    // still answer, in order, instead of the chain dying with this bot.
-    if !agent_busy(id).unwrap_or(true) {
-        pump_inbox(id);
+    let started = submit_delivery_then(
+        id,
+        &delivered,
+        true,
+        Some(msg.id),
+        TurnOrigin::user(),
+        &mut then,
+    );
+    if started.is_err() {
+        let held = then.split_off(named_here.min(then.len()));
+        if agent_busy(id).unwrap_or(true) {
+            // Refused (its inbox is full): the teammates it named go with it,
+            // and what waited on the blocked turn keeps waiting.
+            queue_serial_after(id, held);
+        } else {
+            // It could not start: they still answer, in order, instead of the
+            // chain dying with this bot.
+            then.extend(held);
+            release(then);
+        }
     }
     started
 }
@@ -1969,15 +2082,17 @@ fn from_id(from: &str) -> String {
 }
 
 fn tell_agent(from: &str, to: &str, text: &str) -> anyhow::Result<()> {
-    tell_agent_origin(from, to, text, None, true)
+    tell_agent_origin(from, to, text, None, true, &mut VecDeque::new())
 }
 
+/// `then` is the rest of a chain that waits on this tell's turn.
 fn tell_agent_origin(
     from: &str,
     to: &str,
     text: &str,
     origin: Option<TurnOrigin>,
     allow_defer: bool,
+    then: &mut VecDeque<SerialJob>,
 ) -> anyhow::Result<()> {
     let to = to.trim();
     if to.is_empty() {
@@ -1998,7 +2113,10 @@ fn tell_agent_origin(
     if allow_defer && from != "user" && from != to {
         let epoch = serial_epoch(&from);
         if agent_busy(&from).unwrap_or(false) {
-            if defer_tell_if_epoch(&from, epoch, to, &from, text, origin.clone())
+            // It runs once this turn is over, when the bot may be on another:
+            // the reply goes where this turn's would.
+            let sent_from = origin.clone().or_else(|| get_origin(&from));
+            if defer_tell_if_epoch(&from, epoch, to, &from, text, sent_from)
                 && !matches!(
                     live_status(&from),
                     Ok(AgentStatus::Working | AgentStatus::Blocked)
@@ -2024,7 +2142,7 @@ fn tell_agent_origin(
     let parent = origin.or_else(|| get_origin(&from));
     let origin = targeting::inherit_origin(parent.as_ref(), parsed);
     let msg = crate::transcript::push_system(to, &from, text, asked_by(&origin, to));
-    submit_delivery(to, &envelope, true, Some(msg.id), origin)?;
+    submit_delivery_then(to, &envelope, true, Some(msg.id), origin, then)?;
     if from != "user" && from != to {
         let known = agents()
             .lock()
@@ -2607,7 +2725,8 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
             enqueue_handoff(&peer, agent, &text);
         }
     }
-    if crate::interrupt::looks_like_judgment_question(&text) {
+    // A reply the user cut off with a stop is not a question waiting on them.
+    if crate::interrupt::looks_like_judgment_question(&text) && !agent_interrupted(agent) {
         crate::transcript::set_approval(agent, &msg.id, crate::protocol::ApprovalState::Pending);
         set_live_status(agent, AgentStatus::Blocked);
     }
@@ -2814,8 +2933,24 @@ mod daemon_tests {
     fn inbox_is_fifo() {
         let id = "test-inbox-fifo";
         clear_inbox(id);
-        enqueue_delivery(id, "a", true, None, TurnOrigin::user()).unwrap();
-        enqueue_delivery(id, "b", true, None, TurnOrigin::user()).unwrap();
+        enqueue_delivery(
+            id,
+            "a",
+            true,
+            None,
+            TurnOrigin::user(),
+            &mut VecDeque::new(),
+        )
+        .unwrap();
+        enqueue_delivery(
+            id,
+            "b",
+            true,
+            None,
+            TurnOrigin::user(),
+            &mut VecDeque::new(),
+        )
+        .unwrap();
         let mut map = inbox().lock().unwrap();
         let q = map.get_mut(id).unwrap();
         assert_eq!(q.pop_front().unwrap().text, "a");
@@ -2829,9 +2964,25 @@ mod daemon_tests {
         let id = "test-inbox-full";
         clear_inbox(id);
         for i in 0..MAX_INBOX {
-            enqueue_delivery(id, &i.to_string(), true, None, TurnOrigin::user()).unwrap();
+            enqueue_delivery(
+                id,
+                &i.to_string(),
+                true,
+                None,
+                TurnOrigin::user(),
+                &mut VecDeque::new(),
+            )
+            .unwrap();
         }
-        let err = enqueue_delivery(id, "overflow", true, None, TurnOrigin::user()).unwrap_err();
+        let err = enqueue_delivery(
+            id,
+            "overflow",
+            true,
+            None,
+            TurnOrigin::user(),
+            &mut VecDeque::new(),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("inbox full"), "{err}");
         clear_inbox(id);
     }
@@ -2992,10 +3143,26 @@ mod daemon_tests {
             // Busy, so each tell waits in the inbox instead of starting a CLI.
             session.inner.lock().unwrap().status = AgentStatus::Working;
 
-            tell_agent_origin("rival", &peer, "가위바위보 한 판", None, false).unwrap();
+            tell_agent_origin(
+                "rival",
+                &peer,
+                "가위바위보 한 판",
+                None,
+                false,
+                &mut VecDeque::new(),
+            )
+            .unwrap();
             assert_eq!(crate::transcript::last_ts(&peer), 0);
 
-            tell_agent_origin("user", &peer, "누가 이겼어?", None, false).unwrap();
+            tell_agent_origin(
+                "user",
+                &peer,
+                "누가 이겼어?",
+                None,
+                false,
+                &mut VecDeque::new(),
+            )
+            .unwrap();
             assert!(crate::transcript::last_ts(&peer) > 0);
 
             session.inner.lock().unwrap().status = AgentStatus::Idle;
@@ -3060,6 +3227,637 @@ mod daemon_tests {
         });
     }
 
+    /// A stand-in `claude` in the test home, so a turn runs without the real
+    /// CLI. It keeps the prompt it got in `prompt` beside it, then runs `body`.
+    /// Notifications go off first: a turn's finish would post a real one.
+    fn fake_claude(body: &str) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        paths::write_notifications_enabled(false);
+        let dir = paths::home_dir();
+        let bin = dir.join("claude");
+        let script = format!(
+            "#!/bin/sh\nfor arg; do last=$arg; done\nprintf '%s' \"$last\" > '{}'\n{body}\n",
+            dir.join("prompt").display()
+        );
+        fs::write(&bin, script).unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        bin.display().to_string()
+    }
+
+    /// A bot on `fake_claude` that prints `lines` as its turn.
+    fn fake_bot(id: &str, lines: &str) {
+        fake_bot_running(id, &format!("cat <<'EOF'\n{lines}\nEOF"));
+    }
+
+    fn fake_bot_running(id: &str, body: &str) {
+        let cwd = paths::home_dir().display().to_string();
+        insert_spawned_agent(AgentConfig::new(
+            id.into(),
+            id.into(),
+            vec![fake_claude(body)],
+            Some(cwd),
+        ))
+        .unwrap();
+    }
+
+    fn wait_idle(id: &str) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while agent_busy(id).unwrap_or(false) {
+            assert!(Instant::now() < deadline, "{id} never finished its turn");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn eventually(within: Duration, what: &str, done: impl Fn() -> bool) {
+        let deadline = Instant::now() + within;
+        while !done() {
+            assert!(Instant::now() < deadline, "{what}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn told(id: &str, text: &str) -> bool {
+        crate::transcript::messages(id)
+            .iter()
+            .any(|m| m.text == text)
+    }
+
+    /// A reply that asks "진행할까요?" waits on allow / deny. A user who
+    /// answers in words instead starts a new turn, and the card has nothing
+    /// left to hold back: a click on it later flipped the bot to idle in the
+    /// middle of that turn and sent "Continue." after it.
+    #[test]
+    fn talking_to_a_blocked_bot_takes_its_card_down() {
+        paths::testing::with_home("blocked-talk", || {
+            let bot = test_id("blocked");
+            fake_bot(&bot, "");
+            crate::transcript::begin_turn(&bot);
+            crate::transcript::on_assistant_delta(&bot, "이대로 진행할까요?");
+            crate::transcript::end_turn(&bot);
+            let ask = crate::transcript::messages(&bot).pop().unwrap();
+            crate::transcript::set_approval(&bot, &ask.id, crate::protocol::ApprovalState::Pending);
+            set_live_status(&bot, AgentStatus::Blocked);
+
+            send_agent(&bot, "응, 진행해").unwrap();
+            assert!(crate::transcript::pending_approval(&bot).is_none());
+            wait_idle(&bot);
+            assert!(
+                approve_agent(&bot, true).is_err(),
+                "nothing left to approve"
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// `/compact` reads as a command only when the prompt starts with it. A
+    /// teammate's reply waiting for the next prompt went in front of it, and
+    /// the CLI took the command for words.
+    #[test]
+    fn a_slash_command_goes_out_alone() {
+        assert!(is_slash_command("/compact keep the API notes"));
+        assert!(!is_slash_command("/Users/me/shot.png 이거 봐줘"));
+        assert!(!is_slash_command("/ 안녕"));
+        assert!(!is_slash_command("이거 /compact"));
+        paths::testing::with_home("slash", || {
+            let bot = test_id("slash");
+            fake_bot(
+                &bot,
+                r#"{"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted </local-command-stdout>"}}
+{"type":"result","subtype":"success","is_error":false,"result":""}"#,
+            );
+            enqueue_handoff(&bot, "peer", "their answer");
+
+            send_agent(&bot, "/compact").unwrap();
+            wait_idle(&bot);
+            let prompt = fs::read_to_string(paths::home_dir().join("prompt")).unwrap();
+            assert_eq!(prompt, "/compact");
+            let last = crate::transcript::messages(&bot).pop().unwrap();
+            assert_eq!(
+                (last.role, last.text.as_str()),
+                (Role::Assistant, "Compacted")
+            );
+            let next = flush_handoffs(&bot, "hi");
+            assert!(
+                next.contains("their answer"),
+                "it rides the next prompt: {next}"
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// "멈춰" kills the CLI, but what it printed on its way out is still read
+    /// from the pipe. It came back as a reply under "멈춰", or at the front of
+    /// the answer to a message that was waiting.
+    #[test]
+    fn a_stopped_cli_gets_no_last_word() {
+        paths::testing::with_home("stop-tail", || {
+            let bot = test_id("tail");
+            // The writer leaves the process group, so it outlives the stop: it
+            // stands in for output that was still in the pipe when the CLI died.
+            fake_bot_running(
+                &bot,
+                r#"perl -e 'setpgrp(0, 0); select(undef, undef, undef, 1); print qq({"type":"assistant","message":{"content":[{"type":"text","text":"late"}]}}\n)' &
+cat <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"text","text":"early"}]}}
+EOF
+exec sleep 5"#,
+            );
+            send_agent(&bot, "go").unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !crate::transcript::messages(&bot)
+                .iter()
+                .any(|m| m.text == "early")
+            {
+                assert!(Instant::now() < deadline, "the turn never spoke");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            send_agent(&bot, "멈춰").unwrap();
+            std::thread::sleep(Duration::from_millis(1500));
+            let rows = crate::transcript::messages(&bot);
+            let stop = rows.iter().position(|m| m.text == "멈춰").unwrap();
+            assert!(
+                rows[stop..].iter().all(|m| m.role != Role::Assistant),
+                "{:?}",
+                rows.iter()
+                    .map(|m| (m.role, m.text.as_str()))
+                    .collect::<Vec<_>>()
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// npm's codex is a node launcher, and a stop killed only the launcher: the
+    /// CLI under it kept working, on the session the next turn resumes.
+    #[test]
+    fn a_stop_ends_the_whole_cli() {
+        paths::testing::with_home("stop-group", || {
+            let bot = test_id("group");
+            let home = paths::home_dir();
+            let (armed, outlived) = (home.join("armed"), home.join("outlived"));
+            fake_bot_running(
+                &bot,
+                &format!(
+                    "( sleep 1; touch '{}' ) &\ntouch '{}'\nexec sleep 5",
+                    outlived.display(),
+                    armed.display()
+                ),
+            );
+            send_agent(&bot, "go").unwrap();
+            eventually(Duration::from_secs(5), "the CLI never started", || {
+                armed.exists()
+            });
+            interrupt_turn(&bot).unwrap();
+            std::thread::sleep(Duration::from_millis(1500));
+            assert!(!outlived.exists(), "part of the CLI outlived the stop");
+            wait_idle(&bot);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// npm's codex is a node launcher whose native child keeps the output pipe
+    /// after a stop. When the pipe closed, the stopped turn's reader waited,
+    /// holding the bot's lock, on whatever child was there: the next turn's.
+    /// Everything that looked at the bot hung with it.
+    #[test]
+    fn a_stopped_turn_does_not_wait_on_the_next_one() {
+        paths::testing::with_home("stale-wait", || {
+            let bot = test_id("launcher");
+            let armed = paths::home_dir().join("armed");
+            // The writer leaves the process group, so no stop reaches it.
+            fake_bot_running(
+                &bot,
+                &format!(
+                    r#"case "$last" in *next*) exec sleep 3 ;; esac
+perl -e 'setpgrp(0, 0); select(undef, undef, undef, 0.5)' &
+touch '{}'
+exec sleep 5"#,
+                    armed.display()
+                ),
+            );
+            send_agent(&bot, "first").unwrap();
+            eventually(Duration::from_secs(5), "the writer never started", || {
+                armed.exists()
+            });
+            send_agent(&bot, "next please").unwrap();
+            interrupt_turn(&bot).unwrap();
+            // The writer lets go at 0.5s, and the next turn runs until 3s.
+            std::thread::sleep(Duration::from_secs(1));
+            let asked = Instant::now();
+            let _ = live_status(&bot);
+            assert!(
+                asked.elapsed() < Duration::from_millis(500),
+                "the stopped turn held the bot"
+            );
+            interrupt_turn(&bot).unwrap();
+            wait_idle(&bot);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// Two callers can find a bot idle at once, and only one turn starts. The
+    /// other undid the winner's origin and peer on its way out.
+    #[test]
+    fn a_start_under_way_makes_another_wait() {
+        paths::testing::with_home("one-start", || {
+            paths::write_notifications_enabled(false);
+            let bot = test_id("contended");
+            insert_spawned_agent(AgentConfig::new(
+                bot.clone(),
+                bot.clone(),
+                AgentCli::Claude.default_cmd(),
+                None,
+            ))
+            .unwrap();
+            let running = TurnOrigin::mention_tell("asker");
+            set_origin(&bot, running.clone());
+            let start = claim_start(&bot).expect("nothing is starting");
+            assert!(claim_start(&bot).is_none(), "one start at a time");
+            submit_delivery(&bot, "second", true, None, TurnOrigin::user()).unwrap();
+            assert_eq!(get_origin(&bot), Some(running));
+            assert!(!inbox_is_empty(&bot), "it waits for the start under way");
+            drop(start);
+            clear_inbox(&bot);
+            take_origin(&bot);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// "@B @C 리뷰해줘" waits while the bot is busy, then "리뷰는 취소": the
+    /// newer message drops the teammates the waiting one named (#27).
+    #[test]
+    fn a_newer_message_drops_whom_a_waiting_one_named() {
+        paths::testing::with_home("named-queued", || {
+            paths::write_notifications_enabled(false);
+            let [bot, b, c] = ["named-bot", "named-b", "named-c"].map(test_id);
+            for id in [&bot, &b, &c] {
+                insert_spawned_agent(AgentConfig::new(
+                    id.clone(),
+                    id.clone(),
+                    AgentCli::Claude.default_cmd(),
+                    None,
+                ))
+                .unwrap();
+            }
+            let Some(LiveAgent::Headless(session)) = agents().lock().unwrap().get(&bot).cloned()
+            else {
+                panic!("claude runs headless");
+            };
+            // Busy, so both messages wait in the inbox instead of starting a CLI.
+            session.inner.lock().unwrap().status = AgentStatus::Working;
+            send_agent(&bot, &format!("@{b} @{c} 리뷰해줘")).unwrap();
+            send_agent(&bot, "리뷰는 취소").unwrap();
+            let named: Vec<String> = inbox().lock().unwrap()[&bot]
+                .iter()
+                .flat_map(|item| item.then.iter().map(|job| job.to.clone()))
+                .collect();
+            assert!(named.is_empty(), "{named:?}");
+
+            session.inner.lock().unwrap().status = AgentStatus::Idle;
+            clear_inbox(&bot);
+            for id in [&bot, &b, &c] {
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// The tells a bot ran go out when its turn ends, in a line of their own:
+    /// not behind the teammates its message named, where a stop of one of
+    /// those teammates dropped them.
+    #[test]
+    fn a_bots_own_tells_do_not_wait_behind_whom_it_named() {
+        paths::testing::with_home("own-line", || {
+            paths::write_notifications_enabled(false);
+            let [bot, reviewer, builder] = ["own-bot", "own-reviewer", "own-builder"].map(test_id);
+            for id in [&bot, &reviewer, &builder] {
+                insert_spawned_agent(AgentConfig::new(
+                    id.clone(),
+                    id.clone(),
+                    AgentCli::Claude.default_cmd(),
+                    None,
+                ))
+                .unwrap();
+            }
+            let set_status = |id: &str, to: AgentStatus| match agents().lock().unwrap().get(id) {
+                Some(LiveAgent::Headless(s)) => s.inner.lock().unwrap().status = to,
+                _ => panic!("claude runs headless"),
+            };
+            // Busy, so what reaches them waits in their inboxes.
+            set_status(&reviewer, AgentStatus::Working);
+            set_status(&builder, AgentStatus::Working);
+            queue_serial_after(
+                &bot,
+                VecDeque::from([SerialJob {
+                    to: reviewer.clone(),
+                    kind: SerialKind::Tell {
+                        from: "user".into(),
+                        text: "리뷰해줘".into(),
+                        origin: Some(TurnOrigin::mention_tell(&bot)),
+                    },
+                    own: false,
+                }]),
+            );
+            defer_tell(&bot, &builder, &bot, "구현해줘", None);
+
+            advance_serial(&bot);
+            assert!(!inbox_is_empty(&reviewer));
+            assert!(
+                !inbox_is_empty(&builder),
+                "the tell waited behind the reviewer"
+            );
+
+            for id in [&reviewer, &builder] {
+                set_status(id, AgentStatus::Idle);
+                clear_inbox(id);
+            }
+            for id in [&bot, &reviewer, &builder] {
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    fn headless_status(id: &str, to: AgentStatus) {
+        match agents().lock().unwrap().get(id) {
+            Some(LiveAgent::Headless(s)) => s.inner.lock().unwrap().status = to,
+            _ => panic!("runs headless"),
+        }
+    }
+
+    fn claude_bot(id: &str) {
+        insert_spawned_agent(AgentConfig::new(
+            id.into(),
+            id.into(),
+            AgentCli::Claude.default_cmd(),
+            None,
+        ))
+        .unwrap();
+    }
+
+    /// A bot blocked on "진행할까요?" moves on to something else without an
+    /// answer: what waited on that turn goes out then, instead of waiting on
+    /// the new turn and dying with it on a stop.
+    #[test]
+    fn a_blocked_turn_left_unanswered_lets_its_followers_go() {
+        paths::testing::with_home("blocked-moved-on", || {
+            let [bot, builder] = ["moved-bot", "moved-builder"].map(test_id);
+            fake_bot_running(&bot, "exec sleep 2");
+            claude_bot(&builder);
+            headless_status(&builder, AgentStatus::Working);
+            set_live_status(&bot, AgentStatus::Blocked);
+            defer_tell(&bot, &builder, &bot, "구현해줘", None);
+
+            tell_agent("someone", &bot, "다른 일 좀").unwrap();
+            assert!(agent_busy(&bot).unwrap(), "the new turn is under way");
+            assert!(!inbox_is_empty(&builder), "the tell waited on the new turn");
+
+            interrupt_turn(&bot).unwrap();
+            headless_status(&builder, AgentStatus::Idle);
+            clear_inbox(&builder);
+            wait_idle(&bot);
+            for id in [&bot, &builder] {
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// A reply in words to a blocked bot answers it, as Allow does: the turn
+    /// goes on, and the teammates its message named and the tells it ran wait
+    /// on the answer's turn instead of being dropped or sent before it.
+    #[test]
+    fn answering_a_blocked_bot_in_words_keeps_what_waited() {
+        paths::testing::with_home("blocked-words", || {
+            let [bot, reviewer, builder] =
+                ["words-bot", "words-reviewer", "words-builder"].map(test_id);
+            fake_bot_running(&bot, "exec sleep 2");
+            for id in [&reviewer, &builder] {
+                claude_bot(id);
+                headless_status(id, AgentStatus::Working);
+            }
+            set_live_status(&bot, AgentStatus::Blocked);
+            queue_serial_after(
+                &bot,
+                VecDeque::from([SerialJob {
+                    to: reviewer.clone(),
+                    kind: SerialKind::Tell {
+                        from: "user".into(),
+                        text: "리뷰해줘".into(),
+                        origin: Some(TurnOrigin::mention_tell(&bot)),
+                    },
+                    own: false,
+                }]),
+            );
+            defer_tell(&bot, &builder, &bot, "구현해줘", None);
+
+            send_agent(&bot, "응, 진행해").unwrap();
+            assert!(agent_busy(&bot).unwrap(), "the answer's turn is under way");
+            assert!(
+                tells_after(&bot, &reviewer),
+                "the named teammate was dropped"
+            );
+            assert!(tells_after(&bot, &builder));
+            assert!(inbox_is_empty(&reviewer) && inbox_is_empty(&builder));
+
+            interrupt_turn(&bot).unwrap();
+            for id in [&reviewer, &builder] {
+                headless_status(id, AgentStatus::Idle);
+                clear_inbox(id);
+            }
+            wait_idle(&bot);
+            for id in [&bot, &reviewer, &builder] {
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// Allow clicked while the CLI is still on its way out queues the
+    /// "Continue." turn. What waited on the blocked turn waits on that one,
+    /// not on the CLI's exit.
+    #[test]
+    fn allow_during_the_cli_tail_keeps_followers_for_the_turn_it_continues() {
+        paths::testing::with_home("allow-tail", || {
+            let [bot, builder] = ["allow-bot", "allow-builder"].map(test_id);
+            let prompt = paths::home_dir().join("prompt");
+            fake_bot_running(
+                &bot,
+                r#"case "$last" in *Continue*) exec sleep 1 ;; esac
+cat <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"text","text":"지울까요?"}]}}
+{"type":"result","subtype":"success"}
+EOF
+exec sleep 1"#,
+            );
+            claude_bot(&builder);
+            headless_status(&builder, AgentStatus::Working);
+            send_agent(&bot, "정리해줘").unwrap();
+            eventually(Duration::from_secs(5), "the reply never came", || {
+                told(&bot, "지울까요?")
+            });
+            // The reply is in and the CLI is on its way out: blocked on a card.
+            let ask = crate::transcript::messages(&bot).pop().unwrap();
+            crate::transcript::set_approval(&bot, &ask.id, crate::protocol::ApprovalState::Pending);
+            set_live_status(&bot, AgentStatus::Blocked);
+            defer_tell(&bot, &builder, &bot, "구현해줘", None);
+
+            approve_agent(&bot, true).unwrap();
+            eventually(Duration::from_secs(5), "Continue never started", || {
+                fs::read_to_string(&prompt)
+                    .unwrap_or_default()
+                    .contains("Continue")
+            });
+            assert!(
+                inbox_is_empty(&builder),
+                "the tell went before the approved turn"
+            );
+            eventually(Duration::from_secs(5), "the tell never went", || {
+                !inbox_is_empty(&builder)
+            });
+
+            headless_status(&builder, AgentStatus::Idle);
+            clear_inbox(&builder);
+            wait_idle(&bot);
+            for id in [&bot, &builder] {
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// A message refused because the bot's inbox is full did not reach it, so
+    /// the teammates it named do not answer it either.
+    #[test]
+    fn a_refused_message_sends_nobody_it_named() {
+        paths::testing::with_home("refused", || {
+            paths::write_notifications_enabled(false);
+            let [bot, reviewer] = ["full-bot", "full-reviewer"].map(test_id);
+            for id in [&bot, &reviewer] {
+                claude_bot(id);
+                headless_status(id, AgentStatus::Working);
+            }
+            for i in 0..MAX_INBOX {
+                let mut none = VecDeque::new();
+                enqueue_delivery(
+                    &bot,
+                    &i.to_string(),
+                    true,
+                    None,
+                    TurnOrigin::user(),
+                    &mut none,
+                )
+                .unwrap();
+            }
+            let text = format!("@{reviewer} 봐줘");
+            assert!(send_agent(&bot, &text).is_err(), "the inbox is full");
+            assert!(
+                !told(&reviewer, &text),
+                "the teammate answered a refused message"
+            );
+
+            for id in [&bot, &reviewer] {
+                headless_status(id, AgentStatus::Idle);
+                clear_inbox(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// "@B @C" while terminal bot B is busy: B's turn queues, carrying C. When
+    /// B's terminal exits, nothing queued there starts, and C still answers.
+    #[test]
+    fn the_rest_of_a_chain_goes_on_past_a_bot_that_exited() {
+        paths::testing::with_home("exited", || {
+            paths::write_notifications_enabled(false);
+            let [term, c] = ["exit-term", "exit-c"].map(test_id);
+            insert_spawned_agent(AgentConfig::new(
+                term.clone(),
+                term.clone(),
+                vec!["cat".into()],
+                Some(paths::home_dir().display().to_string()),
+            ))
+            .unwrap();
+            claude_bot(&c);
+            headless_status(&c, AgentStatus::Working);
+            let mut then = VecDeque::from([SerialJob {
+                to: c.clone(),
+                kind: SerialKind::Tell {
+                    from: "user".into(),
+                    text: "같이 봐줘".into(),
+                    origin: Some(TurnOrigin::mention_tell("chat-a")),
+                },
+                own: false,
+            }]);
+            let origin = TurnOrigin::mention_tell("chat-a");
+            enqueue_delivery(&term, "같이 봐줘", true, None, origin, &mut then).unwrap();
+            match agents().lock().unwrap().get(&term) {
+                Some(LiveAgent::Pty(s)) => s.inner.lock().unwrap().status = AgentStatus::Exited,
+                _ => panic!("cat runs on a terminal"),
+            }
+
+            pump_inbox(&term);
+            assert!(told(&c, "같이 봐줘"), "C waited on a bot that is gone");
+
+            headless_status(&c, AgentStatus::Idle);
+            clear_inbox(&c);
+            for id in [&term, &c] {
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    #[test]
+    fn a_stop_takes_the_approval_card_down() {
+        paths::testing::with_home("blocked-stop", || {
+            paths::write_notifications_enabled(false);
+            let bot = test_id("blocked");
+            insert_spawned_agent(AgentConfig::new(
+                bot.clone(),
+                bot.clone(),
+                AgentCli::Claude.default_cmd(),
+                None,
+            ))
+            .unwrap();
+            let ask = crate::transcript::push_system(&bot, "crew", "삭제할까요?", None);
+            crate::transcript::set_approval(&bot, &ask.id, crate::protocol::ApprovalState::Pending);
+            set_live_status(&bot, AgentStatus::Blocked);
+
+            interrupt_turn(&bot).unwrap();
+            assert!(crate::transcript::pending_approval(&bot).is_none());
+            assert_eq!(live_status(&bot).unwrap(), AgentStatus::Idle);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// The stop seals what the reply got to. Read as a question, the cut-off
+    /// words left the bot blocked on a card right after the user stopped it.
+    #[test]
+    fn a_reply_cut_off_by_a_stop_is_not_a_question() {
+        paths::testing::with_home("stopped-ask", || {
+            paths::write_notifications_enabled(false);
+            let bot = test_id("stopped");
+            insert_spawned_agent(AgentConfig::new(
+                bot.clone(),
+                bot.clone(),
+                AgentCli::Claude.default_cmd(),
+                None,
+            ))
+            .unwrap();
+            let Some(LiveAgent::Headless(session)) = agents().lock().unwrap().get(&bot).cloned()
+            else {
+                panic!("claude runs headless");
+            };
+            set_origin(&bot, TurnOrigin::user());
+            headless::interrupt(&session);
+            let cut = crate::transcript::push_system(&bot, "crew", "x", None);
+            let reply = ChatMessage {
+                role: Role::Assistant,
+                text: "파일을 지우기 전에 확인해도 될까".into(),
+                ..cut
+            };
+            on_assistant_sealed(&bot, &reply);
+            assert!(crate::transcript::pending_approval(&bot).is_none());
+            assert_eq!(live_status(&bot).unwrap(), AgentStatus::Idle);
+            take_origin(&bot);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
     /// A delivery that does not go out leaves the turn already running as it
     /// was: where its reply goes, and which bot its rows belong to.
     #[test]
@@ -3068,7 +3866,14 @@ mod daemon_tests {
         let running = TurnOrigin::mention_tell("asker");
         set_origin(&id, running.clone());
         crate::transcript::set_peer(&id, Some("asker".into()));
-        assert!(start_delivery(&id, "hi", true, TurnOrigin::user()).is_err());
+        assert!(start_delivery(
+            claim_start(&id).unwrap(),
+            "hi",
+            true,
+            TurnOrigin::user(),
+            &mut VecDeque::new()
+        )
+        .is_err());
         assert_eq!(get_origin(&id), Some(running));
         assert_eq!(
             crate::transcript::set_peer(&id, None).as_deref(),
@@ -3168,85 +3973,187 @@ mod daemon_tests {
                 text: text.to_string(),
                 origin: None,
             },
+            own: false,
         }
     }
 
+    /// "@B @C" in A's chat: A answers, then B, then C, one at a time.
     #[test]
     fn a_chain_answers_a_then_b_then_c() {
-        let anchor = test_id("serial-anchor");
-        let a = test_id("serial-a");
-        let b = test_id("serial-b");
-        let c = test_id("serial-c");
-        queue_serial_after(
-            &anchor,
-            vec![
-                tell_job(&a, "first"),
-                tell_job(&b, "second"),
-                tell_job(&c, "third"),
-            ],
-        );
-        let first = take_next_serial(&anchor).expect("A");
-        assert_eq!(first.to, a);
-        let second = take_next_serial(&a).expect("B");
-        assert_eq!(second.to, b);
-        let third = take_next_serial(&b).expect("C");
-        assert_eq!(third.to, c);
-        assert!(take_next_serial(&c).is_none());
-        assert!(take_next_serial(&anchor).is_none());
-        clear_serial_after(&anchor);
-        clear_serial_after(&a);
-        clear_serial_after(&b);
-        clear_serial_after(&c);
+        paths::testing::with_home("chain", || {
+            let order = paths::home_dir().join("order");
+            let body = format!("echo \"$CREW_AGENT_ID\" >> '{}'", order.display());
+            let [a, b, c] = ["chain-a", "chain-b", "chain-c"].map(test_id);
+            for id in [&a, &b, &c] {
+                fake_bot_running(id, &body);
+            }
+            send_agent(&a, &format!("@{b} @{c} 봐줘")).unwrap();
+            let ran = || fs::read_to_string(&order).unwrap_or_default();
+            eventually(Duration::from_secs(10), "the chain stopped short", || {
+                ran().lines().count() == 3
+            });
+            let ran = ran();
+            assert_eq!(
+                ran.lines().collect::<Vec<_>>(),
+                [a.as_str(), b.as_str(), c.as_str()]
+            );
+            for id in [&a, &b, &c] {
+                wait_idle(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// "@B @C" from A's chat while B is busy with other work: B's turn queues,
+    /// and C waits on that turn. Talking to B, or stopping what B was doing,
+    /// is about the other work: C still answers once B has.
+    #[test]
+    fn the_rest_of_a_chain_waits_with_its_queued_turn() {
+        paths::testing::with_home("chain-tail", || {
+            let [a, b, c] = ["tail-a", "tail-b", "tail-c"].map(test_id);
+            for id in [&b, &c] {
+                fake_bot(id, "");
+            }
+            match agents().lock().unwrap().get(&b) {
+                Some(LiveAgent::Headless(s)) => {
+                    s.inner.lock().unwrap().status = AgentStatus::Working
+                }
+                _ => panic!("fake claude runs headless"),
+            }
+            let ask = |to: &str| SerialJob {
+                to: to.into(),
+                kind: SerialKind::Tell {
+                    from: "user".into(),
+                    text: "같이 봐줘".into(),
+                    origin: Some(TurnOrigin::mention_tell(&a)),
+                },
+                own: false,
+            };
+            queue_serial_after(&a, VecDeque::from([ask(&b), ask(&c)]));
+            advance_serial(&a);
+            assert!(!inbox_is_empty(&b), "B is busy, so its turn queues");
+
+            send_agent(&b, "다른 얘기").unwrap();
+            interrupt_turn(&b).unwrap();
+            eventually(
+                Duration::from_secs(10),
+                "C was dropped with B's other work",
+                || told(&c, "같이 봐줘"),
+            );
+            for id in [&b, &c] {
+                wait_idle(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// A tell the bot ran goes out when that turn ends. The user asking how it
+    /// is going does not take it back, and the message waiting behind the turn
+    /// can take as long as it likes.
+    #[test]
+    fn a_tell_goes_out_when_its_turn_ends() {
+        paths::testing::with_home("tell-first", || {
+            let [bot, builder] = ["teller", "builder"].map(test_id);
+            let body = "case \"$last\" in *slow*) exec sleep 5 ;; *first*) sleep 0.5 ;; esac";
+            fake_bot_running(&bot, body);
+            fake_bot_running(&builder, body);
+            send_agent(&bot, "first").unwrap();
+            tell_agent(&bot, &builder, "구현해줘").unwrap();
+            send_agent(&bot, "slow one, and how is it going?").unwrap();
+            // The slow one takes five seconds; the tell does not wait for it,
+            // and it still runs.
+            let within = Duration::from_secs(3);
+            eventually(within, "the tell waited on the next message", || {
+                told(&builder, "구현해줘")
+            });
+            eventually(within, "the next message did not start", || {
+                agent_busy(&bot).unwrap_or(false)
+            });
+            interrupt_turn(&bot).unwrap();
+            for id in [&bot, &builder] {
+                wait_idle(id);
+                remove_agent(id).unwrap();
+            }
+        });
     }
 
     #[test]
     fn a_busy_tell_keeps_its_place_in_the_chain() {
         let anchor = test_id("serial-upgrade");
-        let a = test_id("up-a");
-        let b = test_id("up-b");
-        let c = test_id("up-c");
+        let [a, b, c] = ["up-a", "up-b", "up-c"].map(test_id);
         queue_serial_after(
             &anchor,
-            vec![
+            VecDeque::from([
                 tell_job(&a, "user text"),
                 tell_job(&b, "b"),
                 tell_job(&c, "c"),
-            ],
+            ]),
         );
         defer_tell(&anchor, &b, &anchor, "from the bot", None);
-        let first = take_next_serial(&anchor).unwrap();
-        let second = take_next_serial(&a).unwrap();
-        let third = take_next_serial(&b).unwrap();
-        assert_eq!(first.to, a);
-        assert_eq!(second.to, b);
-        let SerialKind::Tell { text, .. } = second.kind;
-        assert_eq!(text, "from the bot");
-        assert_eq!(third.to, c);
-        clear_serial_after(&anchor);
-        clear_serial_after(&a);
-        clear_serial_after(&b);
-        clear_serial_after(&c);
+        let chain: Vec<(String, String)> = take_followers(&anchor)
+            .into_iter()
+            .map(|job| {
+                let SerialKind::Tell { text, .. } = job.kind;
+                (job.to, text)
+            })
+            .collect();
+        assert_eq!(
+            chain,
+            [
+                (a, "user text".to_string()),
+                (b, "from the bot".to_string()),
+                (c, "c".to_string()),
+            ]
+        );
     }
 
+    /// Only the teammates named in this bot's own chat are a newer message
+    /// there's to drop.
     #[test]
-    fn claiming_the_next_bot_holds_the_rest_until_it_starts() {
-        let anchor = test_id("serial-claim");
-        let a = test_id("claim-a");
-        let b = test_id("claim-b");
-        queue_serial_after(&anchor, vec![tell_job(&a, "first"), tell_job(&b, "second")]);
-        let first = claim_next_serial(&anchor).expect("A");
-        assert_eq!(first.to, a);
-        assert!(
-            claim_next_serial(&a).is_none(),
-            "the follower stays queued while A is still being started"
+    fn a_newer_message_drops_only_whom_its_chat_named() {
+        let bot = test_id("named");
+        let named = |chat: &str, to: &str| SerialJob {
+            to: to.into(),
+            kind: SerialKind::Tell {
+                from: "user".into(),
+                text: "봐줘".into(),
+                origin: Some(TurnOrigin::mention_tell(chat)),
+            },
+            own: false,
+        };
+        queue_serial_after(
+            &bot,
+            VecDeque::from([named(&bot, "reviewer"), named("other-chat", "tester")]),
         );
-        unmark_serial_arming(&a);
-        let second = claim_next_serial(&a).expect("B");
-        assert_eq!(second.to, b);
-        unmark_serial_arming(&b);
-        clear_serial_after(&anchor);
-        clear_serial_after(&a);
-        clear_serial_after(&b);
+        defer_tell(&bot, "builder", &bot, "구현해줘", None);
+        drop_mention_followers(&bot);
+        let left: Vec<String> = take_followers(&bot).into_iter().map(|j| j.to).collect();
+        assert_eq!(left, ["tester", "builder"]);
+    }
+
+    /// A turn still being started there keeps what waits on it in place.
+    #[test]
+    fn followers_stay_while_their_turn_is_being_started() {
+        let anchor = test_id("serial-arming");
+        queue_serial_after(&anchor, VecDeque::from([tell_job("someone", "x")]));
+        let start = claim_start(&anchor);
+        assert!(take_followers(&anchor).is_empty());
+        drop(start);
+        assert_eq!(take_followers(&anchor).len(), 1);
+    }
+
+    /// A stop that lands while a turn is being started ends what waits on that
+    /// turn: the followers the start brought are not put on after it.
+    #[test]
+    fn a_stop_during_a_start_drops_the_followers_it_brought() {
+        let bot = test_id("stop-start");
+        let seen = serial_epoch(&bot);
+        clear_serial_after(&bot);
+        follow_turn(&bot, seen, VecDeque::from([tell_job("reviewer", "x")]));
+        assert!(take_followers(&bot).is_empty());
+        let seen = serial_epoch(&bot);
+        follow_turn(&bot, seen, VecDeque::from([tell_job("reviewer", "x")]));
+        assert_eq!(take_followers(&bot).len(), 1);
     }
 
     #[test]
@@ -3254,15 +4161,10 @@ mod daemon_tests {
         let anchor = test_id("serial-prepend");
         let old = test_id("prepend-old");
         let new_to = test_id("prepend-new");
-        queue_serial_after(&anchor, vec![tell_job(&old, "old")]);
-        queue_serial_after(&anchor, vec![tell_job(&new_to, "new")]);
-        let first = take_next_serial(&anchor).expect("new message first");
-        assert_eq!(first.to, new_to);
-        let second = take_next_serial(&new_to).expect("older job follows");
-        assert_eq!(second.to, old);
-        clear_serial_after(&anchor);
-        clear_serial_after(&old);
-        clear_serial_after(&new_to);
+        queue_serial_after(&anchor, VecDeque::from([tell_job(&old, "old")]));
+        queue_serial_after(&anchor, VecDeque::from([tell_job(&new_to, "new")]));
+        let chain: Vec<String> = take_followers(&anchor).into_iter().map(|j| j.to).collect();
+        assert_eq!(chain, [new_to, old]);
     }
 
     #[test]
@@ -3274,16 +4176,14 @@ mod daemon_tests {
         assert!(!defer_tell_if_epoch(
             &anchor, seen, &b, &anchor, "late", None
         ));
-        assert!(take_next_serial(&anchor).is_none());
+        assert!(take_followers(&anchor).is_empty());
         let seen = serial_epoch(&anchor);
         assert!(defer_tell_if_epoch(
             &anchor, seen, &b, &anchor, "kept", None
         ));
-        let job = take_next_serial(&anchor).expect("kept");
+        let job = take_followers(&anchor).pop_front().expect("kept");
         assert_eq!(job.to, b);
         let SerialKind::Tell { text, .. } = job.kind;
         assert_eq!(text, "kept");
-        clear_serial_after(&anchor);
-        clear_serial_after(&b);
     }
 }

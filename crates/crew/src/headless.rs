@@ -1,7 +1,8 @@
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read};
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -152,8 +153,7 @@ pub fn interrupt(session: &HeadlessSession) {
         inner.child.take()
     };
     if let Some(mut child) = child {
-        let _ = child.kill();
-        let _ = child.wait();
+        kill_all(&mut child);
     }
     if let Ok(mut inner) = session.inner.lock() {
         if inner.status != AgentStatus::Exited {
@@ -162,6 +162,17 @@ pub fn interrupt(session: &HeadlessSession) {
         inner.seq += 1;
         inner.child = None;
     }
+}
+
+/// The CLI and what it started. npm's codex is a node launcher, and killing
+/// the launcher alone left the CLI under it running on the bot's session.
+fn kill_all(child: &mut Child) {
+    // Not reaped yet, so its pid still names the group it leads.
+    unsafe {
+        libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 pub fn is_interrupted(session: &HeadlessSession) -> bool {
@@ -277,13 +288,7 @@ fn run_turn(
     }
     let result = spawn_and_stream(&session, &argv, generation, turn, &cwd);
 
-    let stale = session
-        .inner
-        .lock()
-        .ok()
-        .map(|i| i.generation != generation)
-        .unwrap_or(true);
-    if stale {
+    if is_stale(&session, generation) {
         crate::transcript::end_turn_gen(&session.id, Some(turn));
         return;
     }
@@ -360,6 +365,15 @@ fn run_turn(
     crate::daemon::pump_inbox(&session.id);
 }
 
+/// The turn was stopped (or its bot reset or removed) since it began.
+fn is_stale(session: &HeadlessSession, generation: u64) -> bool {
+    session
+        .inner
+        .lock()
+        .map(|i| i.generation != generation)
+        .unwrap_or(true)
+}
+
 /// A turn that died without a reply left no CLI conversation behind, so its id
 /// must not be reused: resuming would point at a session the CLI never wrote.
 /// Every CLI words a missing session differently ("No conversation found with
@@ -412,6 +426,8 @@ fn spawn_and_stream(
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
+    // Its own group, so a stop reaches all of it (see `kill_all`).
+    cmd.process_group(0);
 
     let mut child = cmd
         .spawn()
@@ -421,8 +437,7 @@ fn spawn_and_stream(
     {
         let mut inner = session.inner.lock().expect("headless inner");
         if inner.generation != generation {
-            let _ = child.kill();
-            let _ = child.wait();
+            kill_all(&mut child);
             anyhow::bail!("turn cancelled");
         }
         inner.child = Some(child);
@@ -449,7 +464,9 @@ fn spawn_and_stream(
             Err(err) => return Err(err.into()),
         };
         // Keep draining so the CLI never blocks on a full pipe while it exits.
-        if sealed {
+        // A stopped CLI's last lines are still in the pipe: read now, they land
+        // under the user's stop or in the next turn's reply.
+        if sealed || is_stale(session, generation) {
             continue;
         }
         let mut turn_end = false;
@@ -492,9 +509,12 @@ fn spawn_and_stream(
 
     let status = {
         let mut inner = session.inner.lock().expect("headless inner");
-        match inner.child.as_mut() {
-            Some(child) => child.wait().ok(),
-            None => None,
+        // A stop took this turn's child. One there now is the next turn's, and
+        // waiting on it here would hold the bot until that turn is over.
+        if inner.generation != generation {
+            None
+        } else {
+            inner.child.as_mut().and_then(|child| child.wait().ok())
         }
     };
     let stderr_text = stderr_handle
@@ -666,6 +686,10 @@ fn claude_text(v: &Value, state: &mut ParseState) -> Option<String> {
         state.got_text = true;
         return Some(delta);
     }
+    if let Some(out) = local_command_output(v) {
+        state.got_text = true;
+        return Some(out);
+    }
     if state.used_deltas {
         return None;
     }
@@ -677,6 +701,23 @@ fn claude_text(v: &Value, state: &mut ParseState) -> Option<String> {
         }
     }
     None
+}
+
+/// What a slash command such as `/compact` printed. The CLI answers it itself,
+/// as a user row in this tag, and the model says nothing: without it the turn
+/// ended blank, and the bot read as having ignored or hung on the request.
+fn local_command_output(v: &Value) -> Option<String> {
+    if v.get("type").and_then(Value::as_str) != Some("user") {
+        return None;
+    }
+    let out = v
+        .pointer("/message/content")?
+        .as_str()?
+        .trim()
+        .strip_prefix("<local-command-stdout>")?
+        .strip_suffix("</local-command-stdout>")?
+        .trim();
+    (!out.is_empty()).then(|| out.to_string())
 }
 
 fn claude_text_delta(v: &Value) -> Option<String> {
@@ -1020,6 +1061,26 @@ mod tests {
         );
         let d = ingest_line(CliKind::Claude, &delta("It says 42."), &mut st);
         assert_eq!(d.as_deref(), Some("\n\nIt says 42."));
+    }
+
+    /// What `claude -p --resume <id> /compact` prints: a summary row, the
+    /// command's own output, and a result with no text.
+    #[test]
+    fn a_slash_command_answers_with_what_the_cli_printed() {
+        let mut st = ParseState::default();
+        let summary = r#"{"type":"user","message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context."}}"#;
+        assert!(ingest_line(CliKind::Claude, summary, &mut st).is_none());
+        let tool = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"<local-command-stdout>ls</local-command-stdout>"}]}}"#;
+        assert!(ingest_line(CliKind::Claude, tool, &mut st).is_none());
+        assert!(!st.got_text);
+        let out = r#"{"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted </local-command-stdout>"}}"#;
+        assert_eq!(
+            ingest_line(CliKind::Claude, out, &mut st).as_deref(),
+            Some("Compacted")
+        );
+        assert!(st.got_text, "the turn has its answer");
+        let end = r#"{"type":"result","subtype":"success","is_error":false,"result":""}"#;
+        assert!(ingest_line(CliKind::Claude, end, &mut st).is_none());
     }
 
     #[test]
