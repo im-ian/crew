@@ -1,5 +1,11 @@
 export type MenuEntry =
-  | { type: "action"; label: string; danger?: boolean; onClick: () => void }
+  | {
+      type: "action";
+      label: string;
+      hint?: string;
+      danger?: boolean;
+      onClick: () => void;
+    }
   | { type: "sep" }
   | { type: "sub"; label: string; items: MenuEntry[] };
 
@@ -50,6 +56,7 @@ function MenuList({ items }: { items: MenuEntry[] }) {
             onClick={item.onClick}
           >
             {item.label}
+            {item.hint ? <span className="ctx-hint">{item.hint}</span> : null}
           </button>
         );
       })}

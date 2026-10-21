@@ -42,6 +42,23 @@ export function threadRows(
   return rows;
 }
 
+/**
+ * What a folded tool run did, by name: distinct, in first-use order, so the
+ * chip says "Read · Grep · Edit" instead of only a count. An MCP tool keeps
+ * its last segment — `mcp__server__browser_click` would fill the row alone.
+ */
+export function toolNames(
+  msgs: readonly ChatMessage[],
+  max = 3,
+): { names: string[]; more: number } {
+  const seen: string[] = [];
+  for (const m of msgs) {
+    const name = (m.from || "tool").split("__").pop() || "tool";
+    if (!seen.includes(name)) seen.push(name);
+  }
+  return { names: seen.slice(0, max), more: Math.max(0, seen.length - max) };
+}
+
 const HEAD_KEYS = [
   "command",
   "file_path",

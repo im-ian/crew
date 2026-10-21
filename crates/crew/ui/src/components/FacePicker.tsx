@@ -12,6 +12,7 @@ import {
   resolveFace,
   type AvatarShape,
 } from "../avatar";
+import { Pencil } from "../icons";
 import { useT } from "../LocaleContext";
 import { BotFace } from "./BotFace";
 import { Field } from "./Field";
@@ -306,6 +307,9 @@ export function FacePop({
         }}
       >
         {children}
+        <span className="face-pop-badge" aria-hidden="true">
+          <Pencil size={12} />
+        </span>
       </button>
       {open ? (
         <div className="face-pop-card" role="dialog" aria-label={t("face.avatar")}>
