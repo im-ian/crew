@@ -76,7 +76,6 @@ export function ModelPicker({
         className="textin model-pick-hit"
         aria-expanded={open}
         aria-haspopup="dialog"
-        onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation();
           setOpen((v) => !v);

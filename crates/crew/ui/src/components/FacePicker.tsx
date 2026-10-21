@@ -276,7 +276,6 @@ export function FacePop({
         aria-label={t("face.avatar")}
         aria-expanded={open}
         aria-haspopup="dialog"
-        onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation();
           setOpen((v) => !v);
