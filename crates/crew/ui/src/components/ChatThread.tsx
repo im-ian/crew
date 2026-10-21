@@ -13,7 +13,7 @@ import type {
 import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { noteRef, sentTarget } from "../peek";
-import { threadRows, toolArgs, toolSummary } from "../tools";
+import { threadRows, toolArgs, toolNames, toolSummary } from "../tools";
 import { clockLabels } from "../clock";
 import { ChevronDown, Reply, X } from "../icons";
 import { Avatar } from "./Avatar";
@@ -776,6 +776,7 @@ function ToolGroup({
   const hit = items.some((m) => m.id === highlightId);
   // A search hit inside a folded run has to be on screen to be highlighted.
   const show = open || hit;
+  const { names, more } = toolNames(items);
   return (
     <div className="tool-run">
       <button
@@ -786,6 +787,11 @@ function ToolGroup({
       >
         <ChevronDown className="note-caret" size={12} />
         {t("thread.toolUsed", { n: items.length })}
+        <span aria-hidden="true">·</span>
+        <span className="tool-run-names">
+          {names.join(" · ")}
+          {more ? ` +${more}` : ""}
+        </span>
       </button>
       {show ? (
         <div className="tool-run-list">

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { threadRows, toolSummary } from "./tools";
+import { threadRows, toolNames, toolSummary } from "./tools";
 import type { AgentInfo, ChatMessage } from "./types";
 
 function msg(id: string, kind?: ChatMessage["kind"]): ChatMessage {
@@ -32,6 +32,32 @@ describe("threadRows", () => {
   it("keeps runs split by a message between them", () => {
     const rows = threadRows([msg("t1", "tool"), msg("a"), msg("t2", "tool")], []);
     expect(rows.map((r) => r.kind)).toEqual(["tools", "msg", "tools"]);
+  });
+});
+
+describe("toolNames", () => {
+  const tool = (from: string): ChatMessage => ({
+    id: from,
+    role: "system",
+    from,
+    text: "",
+    ts: 1,
+    kind: "tool",
+  });
+
+  it("lists each tool once, in the order it was first used", () => {
+    expect(toolNames(["Read", "Grep", "Read", "Edit"].map(tool))).toEqual({
+      names: ["Read", "Grep", "Edit"],
+      more: 0,
+    });
+  });
+
+  it("counts what does not fit and shortens MCP names", () => {
+    const run = ["Read", "mcp__plugin_pw__browser_click", "Edit", "Bash", "Grep"];
+    expect(toolNames(run.map(tool))).toEqual({
+      names: ["Read", "browser_click", "Edit"],
+      more: 2,
+    });
   });
 });
 

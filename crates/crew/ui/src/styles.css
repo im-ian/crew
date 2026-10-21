@@ -1775,8 +1775,6 @@ button.choice-option:disabled {
 .choice-dismiss:hover {
   background: var(--chip-hover);
 }
-/* The same air and inset as .tool-run, so a note run and a tool run standing
-   next to each other line up. */
 .note-run {
   display: flex;
   flex-direction: column;
@@ -1820,15 +1818,13 @@ button.choice-option:disabled {
 /* The bot's own work, so it hangs in the bot's column under its balloons —
    past the 32px avatar and its gap — not centred like notes from others. */
 .tool-run {
-  align-self: center;
-  max-width: 92%;
+  align-self: stretch;
   min-width: 0;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  /* Same air above and below as the transfer notes it sits among. */
-  padding: var(--space-8) 0;
+  align-items: flex-start;
+  padding-left: calc(32px + var(--space-10));
   gap: var(--space-8);
 }
 .tool-run-head {
@@ -1843,8 +1839,19 @@ button.choice-option:disabled {
   font-size: var(--text-md);
   line-height: 1.2;
   padding: var(--space-4) var(--space-10);
+  /* Pulls the pill out so the caret, not the pill, lines up with the balloons. */
+  margin-left: calc(-1 * var(--space-10));
+  max-width: 100%;
+  min-width: 0;
   white-space: nowrap;
   cursor: pointer;
+}
+.tool-run-names {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
 }
 .tool-run-head:hover {
   color: var(--ink);
