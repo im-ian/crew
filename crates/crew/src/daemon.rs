@@ -3270,14 +3270,11 @@ mod daemon_tests {
     fn a_stopped_cli_gets_no_last_word() {
         paths::testing::with_home("stop-tail", || {
             let bot = test_id("tail");
-            // The writer in the background outlives the kill: it stands in for
-            // output that was still in the pipe when the CLI died.
+            // The writer leaves the process group, so it outlives the stop: it
+            // stands in for output that was still in the pipe when the CLI died.
             fake_bot_running(
                 &bot,
-                r#"( sleep 1; cat <<'EOF'
-{"type":"assistant","message":{"content":[{"type":"text","text":"late"}]}}
-EOF
-) &
+                r#"perl -e 'setpgrp(0, 0); select(undef, undef, undef, 1); print qq({"type":"assistant","message":{"content":[{"type":"text","text":"late"}]}}\n)' &
 cat <<'EOF'
 {"type":"assistant","message":{"content":[{"type":"text","text":"early"}]}}
 EOF
@@ -3303,6 +3300,34 @@ exec sleep 5"#,
                     .map(|m| (m.role, m.text.as_str()))
                     .collect::<Vec<_>>()
             );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// npm's codex is a node launcher, and a stop killed only the launcher: the
+    /// CLI under it kept working, on the session the next turn resumes.
+    #[test]
+    fn a_stop_ends_the_whole_cli() {
+        paths::testing::with_home("stop-group", || {
+            let bot = test_id("group");
+            let home = paths::home_dir();
+            let (armed, outlived) = (home.join("armed"), home.join("outlived"));
+            fake_bot_running(
+                &bot,
+                &format!(
+                    "( sleep 1; touch '{}' ) &\ntouch '{}'\nexec sleep 5",
+                    outlived.display(),
+                    armed.display()
+                ),
+            );
+            send_agent(&bot, "go").unwrap();
+            eventually(Duration::from_secs(5), "the CLI never started", || {
+                armed.exists()
+            });
+            interrupt_turn(&bot).unwrap();
+            std::thread::sleep(Duration::from_millis(1500));
+            assert!(!outlived.exists(), "part of the CLI outlived the stop");
+            wait_idle(&bot);
             remove_agent(&bot).unwrap();
         });
     }

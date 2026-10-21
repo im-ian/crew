@@ -1,7 +1,8 @@
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read};
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -152,8 +153,7 @@ pub fn interrupt(session: &HeadlessSession) {
         inner.child.take()
     };
     if let Some(mut child) = child {
-        let _ = child.kill();
-        let _ = child.wait();
+        kill_all(&mut child);
     }
     if let Ok(mut inner) = session.inner.lock() {
         if inner.status != AgentStatus::Exited {
@@ -162,6 +162,17 @@ pub fn interrupt(session: &HeadlessSession) {
         inner.seq += 1;
         inner.child = None;
     }
+}
+
+/// The CLI and what it started. npm's codex is a node launcher, and killing
+/// the launcher alone left the CLI under it running on the bot's session.
+fn kill_all(child: &mut Child) {
+    // Not reaped yet, so its pid still names the group it leads.
+    unsafe {
+        libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 pub fn is_interrupted(session: &HeadlessSession) -> bool {
@@ -415,6 +426,8 @@ fn spawn_and_stream(
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
+    // Its own group, so a stop reaches all of it (see `kill_all`).
+    cmd.process_group(0);
 
     let mut child = cmd
         .spawn()
@@ -424,8 +437,7 @@ fn spawn_and_stream(
     {
         let mut inner = session.inner.lock().expect("headless inner");
         if inner.generation != generation {
-            let _ = child.kill();
-            let _ = child.wait();
+            kill_all(&mut child);
             anyhow::bail!("turn cancelled");
         }
         inner.child = Some(child);
