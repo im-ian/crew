@@ -83,6 +83,7 @@ export function useCrew() {
 
   const selectedRef = useRef({ id: selected, kind: selectedKind });
   selectedRef.current = { id: selected, kind: selectedKind };
+  const faceSave = useRef(Promise.resolve());
   const paneOpenRef = useRef(paneOpen);
   paneOpenRef.current = paneOpen;
   const agentsRef = useRef(agents);
@@ -480,28 +481,38 @@ export function useCrew() {
   async function saveAgentFace(shape?: string | null, color?: string | null) {
     const id = selectedRef.current.id;
     if (!id || selectedRef.current.kind !== "agent") return;
-    try {
-      await api.setAgent({
-        id,
-        model: null,
-        effort: null,
-        unsetModel: false,
-        unsetEffort: false,
-        title: null,
-        role: null,
-        description: null,
-        unsetTitle: false,
-        unsetRole: false,
-        unsetDescription: false,
-        shape: shape || null,
-        color: color || null,
-        cwd: null,
-        unsetCwd: false,
-      });
-      await refreshList();
-    } catch (err) {
-      showError(err);
-    }
+    // set_agent writes the whole record, so a later color must not land before an earlier one.
+    const run = faceSave.current
+      .catch(() => undefined)
+      .then(async () => {
+      try {
+        await api.setAgent({
+          id,
+          model: null,
+          effort: null,
+          unsetModel: false,
+          unsetEffort: false,
+          title: null,
+          role: null,
+          description: null,
+          unsetTitle: false,
+          unsetRole: false,
+          unsetDescription: false,
+          shape: shape || null,
+          color: color || null,
+          cwd: null,
+          unsetCwd: false,
+        });
+        await refreshList();
+      } catch (err) {
+        showError(err);
+      }
+    });
+    faceSave.current = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
   function routineTarget(): string | null {

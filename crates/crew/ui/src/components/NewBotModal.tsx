@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { hashedFace, type AvatarShape } from "../avatar";
+import { randomFace, type AvatarShape } from "../avatar";
 import { useT } from "../LocaleContext";
 import { CLIS, effortOptions } from "../options";
 import type { CliKind } from "../types";
@@ -47,7 +47,7 @@ export function NewBotModal({
     setModel("");
     setCli("grok");
     setEffort("");
-    const face = hashedFace(crypto.randomUUID());
+    const face = randomFace();
     setShape(face.shape);
     setColor(face.color);
     setBusy(false);

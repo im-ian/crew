@@ -66,7 +66,61 @@ pub enum AvatarShape {
     Pentagon,
     Star,
     Heart,
+    Square,
+    Slanted,
+    Arch,
+    Fan,
+    Arrow,
+    SemiCircle,
+    Oval,
+    ClamShell,
+    Gem,
+    Sunny,
+    Cookie,
+    Ghostish,
+    Clover,
+    Burst,
+    Flower,
+    Puffy,
+    PuffyDiamond,
+    PixelCircle,
+    PixelTriangle,
+    Bun,
 }
+
+const AVATAR_SHAPES: &[AvatarShape] = &[
+    AvatarShape::Circle,
+    AvatarShape::Teardrop,
+    AvatarShape::RoundedSquare,
+    AvatarShape::Hexagon,
+    AvatarShape::Triangle,
+    AvatarShape::Cloud,
+    AvatarShape::Pill,
+    AvatarShape::Diamond,
+    AvatarShape::Pentagon,
+    AvatarShape::Star,
+    AvatarShape::Heart,
+    AvatarShape::Square,
+    AvatarShape::Slanted,
+    AvatarShape::Arch,
+    AvatarShape::Fan,
+    AvatarShape::Arrow,
+    AvatarShape::SemiCircle,
+    AvatarShape::Oval,
+    AvatarShape::ClamShell,
+    AvatarShape::Gem,
+    AvatarShape::Sunny,
+    AvatarShape::Cookie,
+    AvatarShape::Ghostish,
+    AvatarShape::Clover,
+    AvatarShape::Burst,
+    AvatarShape::Flower,
+    AvatarShape::Puffy,
+    AvatarShape::PuffyDiamond,
+    AvatarShape::PixelCircle,
+    AvatarShape::PixelTriangle,
+    AvatarShape::Bun,
+];
 
 impl AvatarShape {
     pub fn as_str(self) -> &'static str {
@@ -82,26 +136,54 @@ impl AvatarShape {
             AvatarShape::Pentagon => "pentagon",
             AvatarShape::Star => "star",
             AvatarShape::Heart => "heart",
+            AvatarShape::Square => "square",
+            AvatarShape::Slanted => "slanted",
+            AvatarShape::Arch => "arch",
+            AvatarShape::Fan => "fan",
+            AvatarShape::Arrow => "arrow",
+            AvatarShape::SemiCircle => "semi-circle",
+            AvatarShape::Oval => "oval",
+            AvatarShape::ClamShell => "clam-shell",
+            AvatarShape::Gem => "gem",
+            AvatarShape::Sunny => "sunny",
+            AvatarShape::Cookie => "cookie",
+            AvatarShape::Ghostish => "ghostish",
+            AvatarShape::Clover => "clover",
+            AvatarShape::Burst => "burst",
+            AvatarShape::Flower => "flower",
+            AvatarShape::Puffy => "puffy",
+            AvatarShape::PuffyDiamond => "puffy-diamond",
+            AvatarShape::PixelCircle => "pixel-circle",
+            AvatarShape::PixelTriangle => "pixel-triangle",
+            AvatarShape::Bun => "bun",
         }
     }
 
     pub fn from_key(s: &str) -> anyhow::Result<Self> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "circle" => Ok(Self::Circle),
-            "teardrop" | "droplet" => Ok(Self::Teardrop),
-            "rounded-square" | "rounded_square" | "roundedsquare" => Ok(Self::RoundedSquare),
-            "hexagon" => Ok(Self::Hexagon),
-            "triangle" => Ok(Self::Triangle),
-            "cloud" => Ok(Self::Cloud),
-            "pill" => Ok(Self::Pill),
-            "diamond" | "rhombus" => Ok(Self::Diamond),
-            "pentagon" => Ok(Self::Pentagon),
-            "star" => Ok(Self::Star),
-            "heart" => Ok(Self::Heart),
-            other => anyhow::bail!(
-                "shape must be circle, teardrop, rounded-square, hexagon, triangle, cloud, pill, diamond, pentagon, star, or heart (got {other})"
-            ),
-        }
+        let raw = s.trim().to_ascii_lowercase();
+        let key = match raw.as_str() {
+            "droplet" => "teardrop",
+            "rounded_square" | "roundedsquare" => "rounded-square",
+            "rhombus" => "diamond",
+            "semi_circle" | "semicircle" => "semi-circle",
+            "clam_shell" | "clamshell" => "clam-shell",
+            "puffy_diamond" | "puffydiamond" => "puffy-diamond",
+            "pixel_circle" | "pixelcircle" => "pixel-circle",
+            "pixel_triangle" | "pixeltriangle" => "pixel-triangle",
+            other => other,
+        };
+        AVATAR_SHAPES
+            .iter()
+            .copied()
+            .find(|shape| shape.as_str() == key)
+            .ok_or_else(|| {
+                let names: Vec<_> = AVATAR_SHAPES.iter().map(|shape| shape.as_str()).collect();
+                let list = match names.split_last() {
+                    Some((last, rest)) => format!("{}, or {}", rest.join(", "), last),
+                    None => String::new(),
+                };
+                anyhow::anyhow!("shape must be {list} (got {raw})")
+            })
     }
 }
 
@@ -1581,21 +1663,20 @@ mod tests {
             AvatarShape::from_key("droplet").unwrap(),
             AvatarShape::Teardrop
         );
-        for shape in [
-            AvatarShape::Circle,
-            AvatarShape::Teardrop,
-            AvatarShape::RoundedSquare,
-            AvatarShape::Hexagon,
-            AvatarShape::Triangle,
-            AvatarShape::Cloud,
-            AvatarShape::Pill,
-            AvatarShape::Diamond,
-            AvatarShape::Pentagon,
-            AvatarShape::Star,
-            AvatarShape::Heart,
-        ] {
-            assert_eq!(AvatarShape::from_key(shape.as_str()).unwrap(), shape);
+        for shape in AVATAR_SHAPES {
+            assert_eq!(AvatarShape::from_key(shape.as_str()).unwrap(), *shape);
+            let raw = serde_json::to_string(shape).unwrap();
+            let back: AvatarShape = serde_json::from_str(&raw).unwrap();
+            assert_eq!(back, *shape);
         }
+        assert_eq!(
+            AvatarShape::from_key("semi_circle").unwrap(),
+            AvatarShape::SemiCircle
+        );
+        assert_eq!(
+            AvatarShape::from_key("ghostish").unwrap(),
+            AvatarShape::Ghostish
+        );
         assert!(AvatarShape::from_key("banana").is_err());
     }
 

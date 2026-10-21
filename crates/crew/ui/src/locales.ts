@@ -193,6 +193,7 @@ export const KO = {
   "face.random": "랜덤",
   "face.randomAria": "랜덤 조합",
   "face.colorCode": "색상 코드",
+  "face.colorPick": "색 고르기",
   "face.avatar": "아바타 설정",
 
   "routine.list": "등록된 루틴",
@@ -462,6 +463,7 @@ export const EN: { [K in MessageKey]: string } = {
   "face.random": "Random",
   "face.randomAria": "Random mix",
   "face.colorCode": "Color code",
+  "face.colorPick": "Pick a color",
   "face.avatar": "Avatar",
 
   "routine.list": "Scheduled routines",

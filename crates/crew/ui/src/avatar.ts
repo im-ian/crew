@@ -10,6 +10,26 @@ export const AVATAR_SHAPES = [
   "pentagon",
   "star",
   "heart",
+  "square",
+  "slanted",
+  "arch",
+  "fan",
+  "arrow",
+  "semi-circle",
+  "oval",
+  "clam-shell",
+  "gem",
+  "sunny",
+  "cookie",
+  "ghostish",
+  "clover",
+  "burst",
+  "flower",
+  "puffy",
+  "puffy-diamond",
+  "pixel-circle",
+  "pixel-triangle",
+  "bun",
 ] as const;
 
 export type AvatarShape = (typeof AVATAR_SHAPES)[number];
@@ -25,7 +45,18 @@ export const AVATAR_SWATCHES = [
   "#9b7dff",
   "#ffb347",
   "#3a3a3c",
+  "#ffcc37",
+  "#64d2ff",
+  "#5e5ce6",
+  "#ff375f",
+  "#bf5af2",
+  "#a2845e",
 ];
+
+// Agents with no saved face keep hashing into the original set. Adding a shape
+// or a swatch must not reshuffle bots that were never customized.
+const HASH_SHAPES = AVATAR_SHAPES.slice(0, 11);
+const HASH_SWATCHES = AVATAR_SWATCHES.slice(0, 10);
 
 const PALETTE = [
   "#5b7c99",
@@ -81,8 +112,8 @@ export function normalizeHex(input: string | null | undefined): string | null {
 export function hashedFace(id: string): { shape: AvatarShape; color: string } {
   const h = hashId(id);
   return {
-    shape: AVATAR_SHAPES[h % AVATAR_SHAPES.length],
-    color: AVATAR_SWATCHES[Math.floor(h / AVATAR_SHAPES.length) % AVATAR_SWATCHES.length],
+    shape: HASH_SHAPES[h % HASH_SHAPES.length],
+    color: HASH_SWATCHES[Math.floor(h / HASH_SHAPES.length) % HASH_SWATCHES.length],
   };
 }
 
