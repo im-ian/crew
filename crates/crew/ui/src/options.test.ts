@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { translate, type TFn } from "./i18n";
-import { modelRows } from "./options";
+import { modelLine, modelRows, pinnedDefault } from "./options";
 
 const t: TFn = (key, vars) => translate("ko", key, vars);
 
@@ -23,5 +23,43 @@ describe("modelRows", () => {
     expect(modelRows(list, "old-model", t).map((r) => r.value)).toEqual(["", "opus", "old-model"]);
     expect(modelRows(list, "opus", t).map((r) => r.value)).toEqual(["", "opus"]);
     expect(modelRows(undefined, "", t).map((r) => r.value)).toEqual([""]);
+  });
+});
+
+describe("modelLine", () => {
+  it("names the CLI, the chosen model, and how hard it thinks", () => {
+    expect(
+      modelLine({ cmd: ["claude"], model: "opus", effort: "high" }, null, t),
+    ).toBe("Claude · opus · 생각 꼼꼼하게");
+  });
+
+  it("uses the CLI's reported default when the bot left the model empty", () => {
+    expect(
+      modelLine({ cmd: ["/opt/grok"], model: null, effort: "low" }, "grok-4.6", t),
+    ).toBe("Grok · grok-4.6 · 생각 가볍게");
+  });
+
+  it("says default until a model id is known, and for an unset effort", () => {
+    expect(modelLine({ cmd: ["codex"], model: "  ", effort: "" }, "  ", t)).toBe(
+      "Codex · 기본값 · 생각 기본",
+    );
+  });
+
+  it("stays quiet for a bot that is not one of the three CLIs", () => {
+    expect(modelLine({ cmd: ["python"], model: "opus", effort: "high" }, null, t)).toBe(
+      null,
+    );
+  });
+});
+
+describe("pinnedDefault", () => {
+  it("pins an installed CLI's default id, or null when it has none", () => {
+    expect(pinnedDefault({ installed: true, default: " grok-4.6 " })).toBe("grok-4.6");
+    expect(pinnedDefault({ installed: true, default: "  " })).toBe(null);
+    expect(pinnedDefault({ installed: true })).toBe(null);
+  });
+
+  it("leaves a missing CLI unknown even when a default string came back", () => {
+    expect(pinnedDefault({ installed: false, default: "gpt-5.4" })).toBeUndefined();
   });
 });
