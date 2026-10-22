@@ -295,21 +295,16 @@ pub fn push_handoff(agent: &str, from: &str, text: &str) -> ChatMessage {
     )
 }
 
-/// Take back the handoff from `from` that a tell replaced before `agent` read
-/// it. The daemon keeps one handoff waiting per sender, the newest, so that is
-/// the newest such row.
-pub fn drop_handoff(agent: &str, from: &str) {
+/// Take back a row `agent` never heard: a handoff a tell went out in place of,
+/// or a tell that did not go out in place of its reply.
+pub fn remove_row(agent: &str, id: &str) {
     let Ok(mut map) = chats().lock() else {
         return;
     };
     let Some(chat) = map.get_mut(agent) else {
         return;
     };
-    let Some(idx) = chat
-        .messages
-        .iter()
-        .rposition(|m| m.kind == Some(MessageKind::Handoff) && m.from == from)
-    else {
+    let Some(idx) = chat.messages.iter().rposition(|m| m.id == id) else {
         return;
     };
     chat.messages.remove(idx);
