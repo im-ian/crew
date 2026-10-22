@@ -817,8 +817,13 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
     s.push_str(
         "To ask the human user in this chat to pick, actually run `crew ask --question \"어느 쪽을 고를래?\" --option A --option B --option C`. To ask them to type a value, run `crew ask --question \"로그인\" --input 아이디 --input 비밀번호`. Crew shows a card and prints their answer. Never send this to a teammate. Do not crew tell the options. Do not ask the user to type the letter. This is not a substitute for `crew tell`, `crew agent set`, or `crew routine add`.\n",
     );
+    s.push_str(&format!(
+        "Your memory survives chat resets and is reloaded every turn under `{MEMORY_HEADING}` at the end of these instructions (absent while empty). Keep it yourself: when you learn something later chats need (the user's name, preferences, recurring work, a decision) or the user asks you to remember it, actually run `crew memory append \"<one short line>\"`. To correct or forget something, run `crew memory set \"<whole new memory>\"`; it replaces everything, so keep the lines you still need. Do not save what is already there, one-off chatter, or passwords, tokens and other secrets. Do not only claim you remembered.\n",
+    ));
     s
 }
+
+const MEMORY_HEADING: &str = "# Your memory";
 
 /// Short `[crew system]` note for running PTYs when the roster changes.
 pub fn roster_update_text(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
@@ -1035,6 +1040,7 @@ fn inject_memory(program: &str, args: &mut Vec<String>, agent_id: &str) {
     if text.is_empty() {
         return;
     }
+    let text = &format!("{MEMORY_HEADING}\n{text}");
     match program {
         "grok" => append_flag_value(args, "--rules", text),
         "claude" => append_flag_value(args, "--append-system-prompt", text),
@@ -1814,7 +1820,10 @@ mod tests {
         assert!(rules.contains("--input"));
         assert!(rules.contains("not a substitute for `crew tell`"));
         assert!(!rules.contains("roster.md"));
-        assert!(!rules.contains("crew memory show"));
+        assert!(rules.contains("crew memory append"));
+        assert!(rules.contains("crew memory set"));
+        assert!(rules.contains("`# Your memory`"));
+        assert!(rules.contains("secrets"));
     }
 
     #[test]
@@ -1827,6 +1836,7 @@ mod tests {
             let team_at = rules.find("You are Crew agent `t`").expect("team_rules");
             let mem_at = rules.find("remember the harbor").expect("memory");
             assert!(team_at < mem_at, "{rules}");
+            assert!(rules.ends_with("# Your memory\nremember the harbor"), "{rules}");
         });
     }
 
