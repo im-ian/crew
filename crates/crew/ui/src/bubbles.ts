@@ -1,6 +1,7 @@
-// A ``` line with another backtick on it is inline code, not a fence.
-const FENCE_OPEN = /^ {0,3}(`{3,}(?!.*`)|~{3,})/;
-const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})\s*$/;
+// At any indent, for a fence inside a nested list item. A ``` line with
+// another backtick on it is inline code, not a fence.
+const FENCE_OPEN = /^[ \t]*(`{3,}(?!.*`)|~{3,})/;
+const FENCE_CLOSE = /^[ \t]*(`{3,}|~{3,})\s*$/;
 
 /** A balloon of nothing but link definitions draws nothing; its links resolve without it. */
 const LINK_DEF = /^ {0,3}\[(?!\^)[^\]]+\]:[ \t]*\S/;
@@ -41,5 +42,6 @@ export function splitBubbles(text: string): string[] {
     lines.push(line);
   }
   flush();
-  return parts;
+  // A message of nothing else still gets its balloon, to copy or reply to.
+  return parts.length || !text.trim() ? parts : [text.trim()];
 }
