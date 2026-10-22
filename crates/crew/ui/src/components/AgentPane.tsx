@@ -178,11 +178,11 @@ function MemoryTab({
           }}
         />
       </Field>
-      <div className="actions spread">
-        <span className="apply-note">{saved ? t("memory.saved") : t("memory.unsaved")}</span>
+      <div className="actions">
+        {saved ? <span className="apply-note">{t("memory.saved")}</span> : null}
         <button
           type="button"
-          className="primary"
+          className="primary wide"
           onClick={async () => {
             if (!(await onSave(memory, base.current))) return;
             base.current = memory;

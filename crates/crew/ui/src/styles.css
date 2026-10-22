@@ -3501,6 +3501,7 @@ textarea.textin.skill-body {
   gap: var(--space-10);
 }
 .actions.spread { justify-content: space-between; }
+.actions > .primary.wide { flex: 1; }
 .dialog .actions,
 .sheet > .actions {
   margin-top: var(--space-22);

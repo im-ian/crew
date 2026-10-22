@@ -164,7 +164,6 @@ export const KO = {
   "memory.label": "기억",
   "memory.placeholder": "이름, 취향, 자주 하는 일처럼 오래 남을 메모",
   "memory.saved": "저장됨",
-  "memory.unsaved": "저장해야 반영됩니다",
   "memory.changed": "그사이 메모리가 바뀌어 저장하지 않았습니다. 고친 내용을 복사해 두고 탭을 다시 여세요.",
 
   "field.name": "이름",
@@ -419,7 +418,6 @@ export const EN: { [K in MessageKey]: string } = {
   "memory.label": "Notes",
   "memory.placeholder": "Names, tastes, recurring work — things that should last",
   "memory.saved": "Saved",
-  "memory.unsaved": "Save to apply",
   "memory.changed": "The memory changed meanwhile, so this wasn’t saved. Copy your edit, then reopen the tab.",
 
   "field.name": "Name",
