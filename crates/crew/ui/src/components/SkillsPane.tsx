@@ -51,6 +51,8 @@ export function SkillsPane({ open, onClose }: Props) {
 
   function leave(to: string, go: () => void) {
     if (unsaved && leaving !== to) {
+      // One question at a time: the next press either leaves or saves.
+      setClash(null);
       setLeaving(to);
       return;
     }
