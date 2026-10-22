@@ -9,7 +9,7 @@
 설치 스크립트나 GitHub Releases의 `.dmg`로 설치할 수 있고, 설치된 앱은 새 버전이 나오면 직접 업데이트해요.
 
 <p align="center">
-  <img src="docs/readme/window.png" alt="Crew 채팅 창 — 봇, @멘션, 핸드오프" width="920">
+  <img src="docs/readme/window.png" alt="Crew 채팅 창 — 봇, @멘션, 핸드오프, 사이드 채팅" width="920">
 </p>
 
 <p align="center">
