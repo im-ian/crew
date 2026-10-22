@@ -295,6 +295,31 @@ pub fn push_handoff(agent: &str, from: &str, text: &str) -> ChatMessage {
     )
 }
 
+/// Take back the handoff from `from` that a tell replaced before `agent` read
+/// it. The daemon keeps one handoff waiting per sender, the newest, so that is
+/// the newest such row.
+pub fn drop_handoff(agent: &str, from: &str) {
+    let Ok(mut map) = chats().lock() else {
+        return;
+    };
+    let Some(chat) = map.get_mut(agent) else {
+        return;
+    };
+    let Some(idx) = chat
+        .messages
+        .iter()
+        .rposition(|m| m.kind == Some(MessageKind::Handoff) && m.from == from)
+    else {
+        return;
+    };
+    chat.messages.remove(idx);
+    // A reply `agent` is still writing sits after it.
+    if let Some(p) = chat.pending_idx.filter(|&p| p > idx) {
+        chat.pending_idx = Some(p - 1);
+    }
+    persist(agent, chat);
+}
+
 /// One row per tool call. `call_id` is the CLI's id for the call: later events
 /// for the same id fill the same card in instead of stacking another row.
 pub fn push_tool(agent: &str, call_id: Option<&str>, name: &str, detail: &str) -> ChatMessage {

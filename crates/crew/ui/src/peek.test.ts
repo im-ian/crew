@@ -129,6 +129,56 @@ describe("peekMessages", () => {
     ]);
   });
 
+  // The bot answered and ran `crew tell` back. The peer got the tell alone,
+  // and showing the reply too was the same throw twice.
+  it("lets a tell back stand for the turn's reply", () => {
+    const rows = peekMessages(
+      [
+        msg("system", "alpha", "가위", { kind: "received", peer: "alpha" }),
+        msg("system", "run_terminal_command", "crew tell alpha", {
+          kind: "tool",
+          peer: "alpha",
+        }),
+        msg("assistant", "beta", "**바위.** 내가 이겼다.", { peer: "alpha" }),
+        msg("system", "to:alpha", "바위. 내가 이겼다.", {
+          kind: "sent",
+          peer: "alpha",
+        }),
+        msg("system", "alpha", "또 해", { kind: "received", peer: "alpha" }),
+        msg("assistant", "beta", "보", { peer: "alpha" }),
+      ],
+      "alpha",
+      "beta",
+      AGENTS,
+    );
+    expect(rows.map((m) => [m.from, m.text])).toEqual([
+      ["alpha", "가위"],
+      ["beta", "바위. 내가 이겼다."],
+      ["alpha", "또 해"],
+      ["beta", "보"],
+    ]);
+  });
+
+  it("keeps the reply when the tell back says nothing", () => {
+    const rows = peekMessages(
+      [
+        msg("system", "alpha", "가위", { kind: "received", peer: "alpha" }),
+        msg("assistant", "beta", "바위", { peer: "alpha" }),
+        msg("system", "to:alpha", "[crew from:beta]", {
+          kind: "sent",
+          peer: "alpha",
+        }),
+      ],
+      "alpha",
+      "beta",
+      AGENTS,
+    );
+    expect(rows.map((m) => [m.from, m.text])).toEqual([
+      ["alpha", "가위"],
+      ["beta", "바위"],
+    ]);
+  });
+
   it("keeps a reply to another peer out", () => {
     const rows = peekMessages(
       [msg("assistant", "beta", "for gamma", { peer: "gamma" })],

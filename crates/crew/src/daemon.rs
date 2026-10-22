@@ -2105,8 +2105,10 @@ fn tell_agent_origin(
         }
     }
     let from = from_id(from);
-    if from != "user" && from != to {
-        take_handoff_from(to, &from);
+    if from != "user" && from != to && take_handoff_from(to, &from).is_some() {
+        // `to` hears this instead of the reply that was waiting for it. Left
+        // in its chat, that reply showed one answer twice.
+        crate::transcript::drop_handoff(to, &from);
     }
     ensure_accepts_turn(to)?;
     // Hold this tell until the sender is idle so it does not overlap that turn.
@@ -3024,6 +3026,54 @@ mod daemon_tests {
         crate::transcript::drop_agent(&peer);
         configs().lock().unwrap().remove(&peer);
         clear_agent_context(&peer);
+    }
+
+    /// 가위바위보의 신 answered 클로드 "**바위.**" and also ran `crew tell` back
+    /// with "바위.". 클로드 heard the tell alone, and its chat showed both.
+    #[test]
+    fn a_tell_back_takes_the_place_of_the_reply() {
+        paths::testing::with_home("tell-back", || {
+            let asker = test_id("asker");
+            let speaker = format!("rival-{asker}");
+            claude_bot(&asker);
+            // Busy, so the tell waits in the inbox instead of starting a CLI.
+            headless_status(&asker, AgentStatus::Working);
+            set_origin(&speaker, TurnOrigin::mention_tell(&asker));
+            let reply = ChatMessage {
+                id: "r1".into(),
+                role: Role::Assistant,
+                from: speaker.clone(),
+                text: "**바위.**".into(),
+                ts: 1,
+                queued: false,
+                peer: None,
+                kind: None,
+                approval: None,
+                choice: None,
+            };
+            on_assistant_sealed(&speaker, &reply);
+            let handoffs = || {
+                crate::transcript::messages(&asker)
+                    .iter()
+                    .filter(|m| m.kind == Some(crate::protocol::MessageKind::Handoff))
+                    .count()
+            };
+            // Until the tell lands the reply is the answer: a stop can still
+            // drop the tell.
+            assert_eq!(handoffs(), 1);
+
+            tell_agent_origin(&speaker, &asker, "바위.", None, false, &mut VecDeque::new())
+                .unwrap();
+            assert_eq!(handoffs(), 0);
+            let last = crate::transcript::messages(&asker).pop().expect("the tell");
+            assert_eq!(last.text, "바위.");
+            assert!(take_handoffs(&asker).is_empty());
+
+            take_origin(&speaker);
+            clear_inbox(&asker);
+            headless_status(&asker, AgentStatus::Idle);
+            remove_agent(&asker).unwrap();
+        });
     }
 
     #[test]
