@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useArriving } from "../arrive";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ARRIVE_MS, playArrive, useArriving } from "../arrive";
 import { useLocale, useT } from "../LocaleContext";
 import type { TFn } from "../i18n";
 import type { ReplyTarget } from "../reply";
@@ -37,6 +37,34 @@ const STICK_PX = 24;
 function rowKey(row: ThreadRow): string {
   if (row.kind === "msg") return row.msg.id;
   return row.msgs[0].id;
+}
+
+function MsgSlot({
+  id,
+  start,
+  typing = false,
+  children,
+}: {
+  id: string;
+  start: number | null;
+  typing?: boolean;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (start === null || !el) return;
+    return playArrive(el, start);
+  }, [id, start]);
+  return (
+    <div
+      className="msg-slot"
+      data-typing-slot={typing ? "" : undefined}
+      ref={ref}
+    >
+      <div className="msg-grow">{children}</div>
+    </div>
+  );
 }
 
 type Props = {
@@ -135,10 +163,18 @@ export function ChatThread({
   }
 
   const placeholders = workingPlaceholders();
-  const arrive = useArriving([
-    ...rows.map(rowKey),
-    ...placeholders.map((agent) => "working-" + agent.id),
-  ]);
+  const arrive = useArriving(
+    [
+      ...rows.map(rowKey),
+      ...placeholders.map((agent) => "working-" + agent.id),
+    ],
+    () => {
+      // Still on screen during this render, so this is the height the reader
+      // sees, including a typing row that has only partly opened.
+      const live = ref.current?.querySelector("[data-typing-slot]");
+      return live instanceof HTMLElement ? live.getBoundingClientRect().height : 0;
+    },
+  );
 
   function syncStick() {
     const el = ref.current;
@@ -170,6 +206,30 @@ export function ChatThread({
     highlightId,
     showTools,
   ]);
+
+  // The entrance grows the row after this commit. Follow it to the bottom
+  // unless the reader has already moved up.
+  useLayoutEffect(() => {
+    if (!stick || highlightId || arrive.size === 0) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const el = ref.current;
+    if (!el) return;
+    const until = performance.now() + ARRIVE_MS;
+    let locked = el.scrollTop;
+    let raf = 0;
+    const tick = (now: number) => {
+      const node = ref.current;
+      if (!node || now >= until) return;
+      if (node.scrollTop < locked - 1) return;
+      node.scrollTop = node.scrollHeight;
+      locked = node.scrollTop;
+      raf = requestAnimationFrame(tick);
+    };
+    el.scrollTop = el.scrollHeight;
+    locked = el.scrollTop;
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [arrive, stick, highlightId]);
 
   useEffect(() => {
     if (!jumpSeq) return;
@@ -284,23 +344,28 @@ export function ChatThread({
                 );
             }
             const time = clocks.get(id);
+            const start = arrive.get(id);
             return (
-              <div
+              <MsgSlot
                 key={id}
-                className={arrive.has(id) ? "msg-slot msg-arrive" : "msg-slot"}
+                id={id}
+                start={start === undefined ? null : start}
               >
                 {time ? <ThreadTime ts={time.ts} label={time.label} /> : null}
                 {node}
-              </div>
+              </MsgSlot>
             );
           })
         )}
         {placeholders.map((agent) => {
           const id = "working-" + agent.id;
+          const start = arrive.get(id);
           return (
-            <div
+            <MsgSlot
               key={id}
-              className={arrive.has(id) ? "msg-slot msg-arrive" : "msg-slot"}
+              id={id}
+              start={start === undefined ? null : start}
+              typing
             >
               <Incoming
                 message={{
@@ -317,7 +382,7 @@ export function ChatThread({
                 openName={false}
                 onSelectAgent={openAgent}
               />
-            </div>
+            </MsgSlot>
           );
         })}
         {blockedCards().map((agent) => (
@@ -573,6 +638,37 @@ function XferBody({
   );
 }
 
+/** Keep the dots bubble mounted long enough for its height to close. */
+function useDotsLeave(caret: boolean): {
+  show: boolean;
+  leaving: boolean;
+  finish: () => void;
+} {
+  const track = useRef({ caret: false, leave: false });
+  const [, bump] = useState(0);
+  if (caret) {
+    track.current = { caret: true, leave: false };
+  } else if (track.current.caret) {
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    track.current = { caret: false, leave: !reduce };
+  }
+  const finish = () => {
+    if (!track.current.leave) return;
+    track.current = { caret: false, leave: false };
+    bump((n) => n + 1);
+  };
+  useEffect(() => {
+    if (caret || !track.current.leave) return;
+    const t = window.setTimeout(finish, ARRIVE_MS + 40);
+    return () => window.clearTimeout(t);
+  }, [caret]);
+  return {
+    show: caret || track.current.leave,
+    leaving: track.current.leave && !caret,
+    finish,
+  };
+}
+
 function Incoming({
   message: m,
   agent,
@@ -616,7 +712,10 @@ function Incoming({
   const { reply, body } = splitReply(m.text || "");
   const defs = useMemo(() => messageDefinitions(body), [body]);
   // The wait dots get a bubble of their own under the text, not a tail on it.
-  const parts = caret ? [...splitBubbles(body), ""] : splitBubbles(body);
+  // Closing that bubble keeps it mounted for the shrink, so the thread does
+  // not jump when the turn ends.
+  const dots = useDotsLeave(caret);
+  const parts = dots.show ? [...splitBubbles(body), ""] : splitBubbles(body);
   return (
     <div
       className={
@@ -667,13 +766,14 @@ function Incoming({
                   ? " stack-last"
                   : " stack-mid"
               : "";
-          return (
-            <div key={m.id + "-" + i} className="bubble-row">
+          const closing = dots.leaving && last;
+          const bubble = (
+            <>
               <MdBody
                 className={
                   "bubble md incoming" +
                   stack +
-                  (caret && last ? " streaming" : "") +
+                  ((caret || closing) && last ? " streaming" : "") +
                   (queued ? " queued" : "")
                 }
                 text={part}
@@ -690,6 +790,27 @@ function Incoming({
                     : undefined
                 }
               />
+            </>
+          );
+          return (
+            <div
+              key={m.id + "-" + i}
+              className={"bubble-row" + (closing ? " dots-leave" : "")}
+              onAnimationEnd={
+                closing
+                  ? (e) => {
+                      if (
+                        e.animationName !== "dots-leave" ||
+                        e.target !== e.currentTarget
+                      ) {
+                        return;
+                      }
+                      dots.finish();
+                    }
+                  : undefined
+              }
+            >
+              {closing ? <div className="dots-clip">{bubble}</div> : bubble}
             </div>
           );
         })}
