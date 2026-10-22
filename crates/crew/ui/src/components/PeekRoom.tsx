@@ -41,7 +41,7 @@ export function PeekRoom({
   );
   const peer = agents.find((a) => a.id === peerId) ?? null;
   const selfName = self.name || self.id;
-  const peerName = peer?.name || peerId;
+  const peerName = peer ? peer.name || peer.id : t("thread.deletedBot");
   const tail =
     rows.length +
     ":" +
@@ -104,7 +104,7 @@ export function PeekRoom({
           <WhoButton
             agent={peer}
             who={peerName}
-            letter={peer ? undefined : peerName.slice(0, 1) || "?"}
+            letter={peer ? undefined : "?"}
             fallbackId={peerId}
           />
         </div>
@@ -134,7 +134,7 @@ export function PeekRoom({
           const who =
             agent?.name ||
             agent?.id ||
-            (m.from === "user" ? t("thread.you") : m.from);
+            (m.from === "user" ? t("thread.you") : t("thread.deletedBot"));
           return (
             <PeekBubble
               key={m.id}
