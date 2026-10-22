@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { ChatMessage, Role } from "./types";
-import { peekMessages, peekPeerId, sentTarget } from "./peek";
+import { translate, type TFn } from "./i18n";
+import type { AgentInfo, ChatMessage, Role } from "./types";
+import { displayWho, peekMessages, peekPeerId, sentTarget } from "./peek";
 
 const AGENTS = new Set(["alpha", "beta", "gamma"]);
 
@@ -24,6 +25,18 @@ describe("sentTarget", () => {
   it("reads the bot id off a to: from", () => {
     expect(sentTarget("to:beta")).toBe("beta");
     expect(sentTarget("beta")).toBe(null);
+  });
+});
+
+describe("displayWho", () => {
+  const t: TFn = (key, vars) => translate("en", key, vars);
+
+  it("names a bot on the roster, and only calls a missing one deleted", () => {
+    const beta = { id: "beta", name: "Beta" } as AgentInfo;
+    expect(displayWho("beta", beta, t)).toBe("Beta");
+    expect(displayWho("beta", { ...beta, name: "" }, t)).toBe("beta");
+    expect(displayWho("bot-mvj2zo29", null, t)).toBe("Deleted bot");
+    expect(displayWho("#room", null, t)).toBe("#room");
   });
 });
 

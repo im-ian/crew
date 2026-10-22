@@ -14,7 +14,7 @@ import type {
 import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { messageDefinitions } from "../markdown";
-import { noteRef, sentTarget } from "../peek";
+import { displayWho, noteRef, sentTarget } from "../peek";
 import {
   dotsAfter,
   momentStamp,
@@ -536,12 +536,10 @@ function TransferNote({
   flash?: boolean;
 }) {
   const agent = agents.find((a) => a.id === otherId) ?? null;
-  const who = otherId.startsWith("#")
-    ? otherId
-    : displayWho({ ...m, from: otherId }, agent);
+  const t = useT();
+  const who = displayWho(otherId, agent, t);
   const open =
     onSelectAgent && agent ? () => onSelectAgent(agent.id) : undefined;
-  const t = useT();
   const [openBody, setOpenBody] = useState(false);
   const label =
     kind === "sent"
@@ -869,9 +867,7 @@ function NoteGroup({
   // does not change the element type and remount the note under the reader.
   // A reply that belongs to the exchange is not a note, so it folds even alone.
   const folds = items.length > 1 || !noteRef(items[0], agents);
-  const who = peerId.startsWith("#")
-    ? peerId
-    : displayWho({ from: peerId } as ChatMessage, agent);
+  const who = displayWho(peerId, agent, t);
   const queued = items.some((m) => m.queued);
   return (
     <div className={"note-run" + (queued ? " queued" : "")}>
@@ -1355,7 +1351,7 @@ function Bubble({
       <Incoming
         message={{ ...m, text }}
         agent={agent}
-        who={displayWho(m, agent)}
+        who={displayWho(m.from, agent, t)}
         agents={agents}
         caret={caret}
         openName={!self}
@@ -1424,19 +1420,14 @@ function makeReply(m: ChatMessage, agents: AgentInfo[], t: TFn): ReplyTarget {
   const who =
     m.role === "user" || m.from === "user"
       ? t("thread.you")
-      : displayWho(m, agent);
+      : displayWho(m.from, agent, t);
   return { id: m.id, from: m.from || "user", who, text };
 }
 
 function quoteWho(from: string, agents: AgentInfo[], t: TFn): string {
   if (from === "user") return t("thread.you");
-  const sent = sentTarget(from);
-  if (sent) {
-    const agent = agents.find((a) => a.id === sent);
-    return agent ? agent.name || agent.id : sent;
-  }
-  const agent = agents.find((a) => a.id === from);
-  return agent ? agent.name || agent.id : from;
+  const id = sentTarget(from) ?? from;
+  return displayWho(id, agents.find((a) => a.id === id) ?? null, t);
 }
 
 function ReplyQuote({
@@ -1502,11 +1493,6 @@ function ReplyButton({ onClick }: { onClick: () => void }) {
       <Reply size={13} />
     </button>
   );
-}
-
-function displayWho(m: ChatMessage, agent: AgentInfo | null): string {
-  if (agent) return agent.name || agent.id;
-  return m.from || "";
 }
 
 function isCrewMarkerLine(line: string): boolean {
