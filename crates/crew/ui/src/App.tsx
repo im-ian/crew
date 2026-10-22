@@ -91,16 +91,12 @@ export function App() {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.isComposing) return;
+      // The skills window handles its own Escape, and no shortcut should act
+      // on the app hidden behind it.
+      if (skillsOpen) return;
       if (settingsOpen && e.key === "Escape") {
         e.preventDefault();
         setSettingsOpen(false);
-        return;
-      }
-      if (skillsOpen && e.key === "Escape") {
-        e.preventDefault();
-        // Leave a field first, so Escape mid-edit doesn't drop unsaved text.
-        if (isTypingTarget(e.target)) (e.target as HTMLElement).blur();
-        else setSkillsOpen(false);
         return;
       }
       if (helpOpen && e.key === "Escape") {

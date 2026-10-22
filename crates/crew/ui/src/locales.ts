@@ -241,6 +241,7 @@ export const KO = {
   "skills.bodyPh": "봇에게 그대로 전달할 문구",
   "skills.note": "입력창에 /이름 을 치면 이 내용이 들어갑니다.",
   "skills.deleteAgain": "한 번 더 누르면 삭제",
+  "skills.unsaved": "저장하지 않은 변경이 있습니다. 한 번 더 누르면 버립니다.",
 
   "conn.checking": "데몬 확인 중…",
   "conn.ok": "데몬 연결됨",
@@ -493,6 +494,7 @@ export const EN: { [K in MessageKey]: string } = {
   "skills.bodyPh": "Text handed to the bot as written",
   "skills.note": "Typing /name in the composer drops this text in.",
   "skills.deleteAgain": "Press again to delete",
+  "skills.unsaved": "You have unsaved changes. Press again to discard them.",
 
   "conn.checking": "Checking daemon…",
   "conn.ok": "Daemon connected",

@@ -20,38 +20,60 @@ export function SkillsPane({ open, onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [armed, setArmed] = useState(false);
   const [error, setError] = useState("");
+  // What the user tried to leave to while edits were unsaved; the same
+  // press again goes through and drops them.
+  const [leaving, setLeaving] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const saved = skills.find((s) => s.name === editing);
   const dirty = !saved || name.trim() !== saved.name || body !== saved.body;
+  const unsaved = saved ? dirty : Boolean(name.trim() || body.trim());
 
   useEffect(() => {
     if (!open) return;
-    setEditing(null);
-    setName("");
-    setBody("");
-    setArmed(false);
-    setError("");
+    load(null);
     void api
       .listSkills()
       .then(setSkills)
       .catch(() => setSkills([]));
   }, [open]);
 
-  function pick(skill: Skill) {
-    setEditing(skill.name);
-    setName(skill.name);
-    setBody(skill.body);
+  function load(skill: Skill | null) {
+    setEditing(skill?.name ?? null);
+    setName(skill?.name ?? "");
+    setBody(skill?.body ?? "");
     setArmed(false);
     setError("");
+    setLeaving(null);
   }
 
+  function leave(to: string, go: () => void) {
+    if (unsaved && leaving !== to) {
+      setLeaving(to);
+      return;
+    }
+    go();
+  }
+
+  const close = () => leave("close", onClose);
+
+  // The window holds the keyboard while open (App stays out), so Escape
+  // runs the same unsaved check as a click outside.
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape" || e.isComposing) return;
+      e.preventDefault();
+      close();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   function startNew() {
-    setEditing(null);
-    setName("");
-    setBody("");
-    setArmed(false);
-    setError("");
-    nameRef.current?.focus();
+    leave("new", () => {
+      load(null);
+      nameRef.current?.focus();
+    });
   }
 
   async function save() {
@@ -90,7 +112,7 @@ export function SkillsPane({ open, onClose }: Props) {
     try {
       await api.removeSkill(editing);
       setSkills(await api.listSkills());
-      startNew();
+      load(null);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -102,7 +124,7 @@ export function SkillsPane({ open, onClose }: Props) {
     <Modal
       open={open}
       title={t("skills.title")}
-      onClose={onClose}
+      onClose={close}
       className="skills-dialog"
     >
       <div className="skill-split">
@@ -123,7 +145,7 @@ export function SkillsPane({ open, onClose }: Props) {
                   key={s.name}
                   type="button"
                   className={"skill-row" + (editing === s.name ? " is-open" : "")}
-                  onClick={() => pick(s)}
+                  onClick={() => leave(s.name, () => load(s))}
                 >
                   <span className="skill-name">/{s.name}</span>
                   <span className="skill-peek">{firstLine(s.body)}</span>
@@ -144,7 +166,10 @@ export function SkillsPane({ open, onClose }: Props) {
                 spellCheck={false}
                 placeholder={t("skills.namePh")}
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setLeaving(null);
+                }}
               />
             </div>
           </Field>
@@ -154,10 +179,14 @@ export function SkillsPane({ open, onClose }: Props) {
               className="textin skill-body"
               placeholder={t("skills.bodyPh")}
               value={body}
-              onChange={(e) => setBody(e.target.value)}
+              onChange={(e) => {
+                setBody(e.target.value);
+                setLeaving(null);
+              }}
             />
           </Field>
           {error ? <p className="apply-note is-error">{error}</p> : null}
+          {leaving ? <p className="apply-note is-error">{t("skills.unsaved")}</p> : null}
           <p className="apply-note">{t("skills.note")}</p>
           <div className={"actions" + (editing ? " spread" : "")}>
             {editing ? (
