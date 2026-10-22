@@ -122,9 +122,6 @@ export function ChatThread({
   const [away, setAway] = useState(false);
   const visible = visibleMessages(messages, showTools);
   const rows = threadRows(visible, agents);
-  // Side-chat folds alone are not a conversation with this bot: it still
-  // gets the empty state, under the folds that lead to them.
-  const talk = rows.some((row) => row.kind === "msg");
   // Keyed by row id, not by index: a filter or an inserted row would slide a
   // parallel array and stamp the wrong stretch.
   const clocks = useMemo(() => {
@@ -166,6 +163,14 @@ export function ChatThread({
   }
 
   const placeholders = workingPlaceholders();
+  const blocked = blockedCards();
+  // Side-chat folds alone are not a conversation with this bot: it still
+  // gets the empty state, under the folds that lead to them. Dots or an
+  // approval card mean it is busy here, and "start a chat" would contradict.
+  const empty =
+    !rows.some((row) => row.kind === "msg") &&
+    !placeholders.length &&
+    !blocked.length;
   const arrive = useArriving(
     [
       ...rows.map(rowKey),
@@ -356,7 +361,7 @@ export function ChatThread({
             </MsgSlot>
           );
         })}
-        {talk ? null : <EmptyChat agent={currentAgent} />}
+        {empty ? <EmptyChat agent={currentAgent} /> : null}
         {placeholders.map((agent) => {
           const id = "working-" + agent.id;
           const start = arrive.get(id);
@@ -385,7 +390,7 @@ export function ChatThread({
             </MsgSlot>
           );
         })}
-        {blockedCards().map((agent) => (
+        {blocked.map((agent) => (
           <ApprovalCard
             key={"block-" + agent.id}
             state="pending"
