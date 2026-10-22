@@ -96,8 +96,6 @@ export function splitBubbles(text: string): string[] {
         (isNewStart(next) || (afterHangul && /[a-z*]/.test(next)))
       ) {
         flush(i + 1, i + 1);
-        i += 1;
-        continue;
       }
     }
     i += 1;
