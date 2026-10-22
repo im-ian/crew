@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { sideOnlyPeer } from "./components/ChatThread";
 import {
   dotsAfter,
   momentStamp,
@@ -325,5 +326,35 @@ describe("threadRows replies another bot asked for", () => {
       roster,
     );
     expect(rows.map((r) => r.kind)).toEqual(["notes", "msg"]);
+  });
+});
+
+describe("sideOnlyPeer", () => {
+  const agents = [{ id: "alpha" }] as AgentInfo[];
+  const note = (id: string, from: string): ChatMessage => ({
+    id,
+    role: "system",
+    from,
+    text: "rock",
+    ts: 1,
+    kind: "received",
+  });
+
+  it("opens the latest side chat, deleted bot or not, or the one a hit is in", () => {
+    const list = [note("1", "alpha"), note("2", "bot-gone")];
+    expect(sideOnlyPeer(list, agents)).toBe("bot-gone");
+    expect(sideOnlyPeer(list, agents, "1")).toBe("alpha");
+  });
+
+  it("opens nothing once the chat has a conversation of its own", () => {
+    const hello: ChatMessage = {
+      id: "2",
+      role: "user",
+      from: "user",
+      text: "hi",
+      ts: 2,
+    };
+    expect(sideOnlyPeer([note("1", "alpha"), hello], agents)).toBe(null);
+    expect(sideOnlyPeer([], agents)).toBe(null);
   });
 });

@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ChatHeader } from "./components/ChatHeader";
-import { ChatThread } from "./components/ChatThread";
+import { ChatThread, sideOnlyPeer } from "./components/ChatThread";
 import { PeekRoom } from "./components/PeekRoom";
 import { Composer, type ComposerHandle } from "./components/Composer";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -50,6 +50,8 @@ export function App() {
   const searchRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<ComposerHandle>(null);
   const peekOpen = !!(peek && crew.currentAgent);
+  const autoFor = useRef<string | null>(null);
+  const hitFor = useRef<string | null>(null);
 
   function finishRename() {
     crew.clearPendingRename();
@@ -66,9 +68,33 @@ export function App() {
     return () => window.clearInterval(interval);
   }, []);
 
-  useEffect(() => {
+  // Layout effects, in this order: a switch shuts the panel before the next
+  // one opens, with no frame painted between.
+  useLayoutEffect(() => {
     setPeek(null);
+    autoFor.current = null;
   }, [crew.selected, crew.selectedKind]);
+
+  // A bot with only side chats opens its latest beside the empty thread, and
+  // a search hit opens the one it is in. Once per pick, when that bot's own
+  // messages land: a note arriving later must not pop it open mid-sentence.
+  useLayoutEffect(() => {
+    const sel = crew.selected;
+    const hit = crew.highlightId;
+    if (!sel || crew.messagesFor !== sel) return;
+    if (!hit) hitFor.current = null;
+    if (autoFor.current === sel && (!hit || hitFor.current === hit)) return;
+    autoFor.current = sel;
+    hitFor.current = hit;
+    const peer = sideOnlyPeer(crew.messages, crew.agents, hit);
+    if (peer) setPeek({ peer, focus: hit ? [hit] : [] });
+  }, [
+    crew.selected,
+    crew.messagesFor,
+    crew.messages,
+    crew.agents,
+    crew.highlightId,
+  ]);
 
   function togglePeek(peer: string, focus: string[] = []) {
     setPeek((cur) =>

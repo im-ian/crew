@@ -53,6 +53,8 @@ export function useCrew() {
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedKind, setSelectedKind] = useState<Kind>("agent");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Right after a switch, `messages` are still the last chat's.
+  const [messagesFor, setMessagesFor] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [stick, setStick] = useState(true);
   const [connected, setConnected] = useState<boolean | null>(null);
@@ -369,6 +371,7 @@ export function useCrew() {
       return;
     }
     setMessages(await api.getMessages(id));
+    setMessagesFor(id);
   }, []);
 
   async function onSend(raw: string) {
@@ -867,6 +870,7 @@ export function useCrew() {
     selected,
     selectedKind,
     messages,
+    messagesFor,
     query,
     setQuery,
     unread,

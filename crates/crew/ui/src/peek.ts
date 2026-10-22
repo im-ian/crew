@@ -102,7 +102,7 @@ export function peekMessages(
   for (const m of messages) {
     const ref = noteRef(m, roster(agentIds));
     if (ref) {
-      if (ref.otherId !== peerId || !agentIds.has(peerId)) continue;
+      if (ref.otherId !== peerId) continue;
       const row = asSpeech(m, ref.kind === "sent" ? selfId : peerId);
       if (!row) continue;
       // A tell back from the turn the peer asked for is the answer: the daemon

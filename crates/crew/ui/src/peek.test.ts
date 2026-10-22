@@ -70,6 +70,22 @@ describe("peekPeerId", () => {
 });
 
 describe("peekMessages", () => {
+  it("reads a side chat with a bot that was deleted", () => {
+    const rows = peekMessages(
+      [
+        msg("system", "bot-gone", "rock", { kind: "received" }),
+        msg("assistant", "beta", "paper", { peer: "bot-gone" }),
+      ],
+      "bot-gone",
+      "beta",
+      AGENTS,
+    );
+    expect(rows.map((m) => [m.from, m.text])).toEqual([
+      ["bot-gone", "rock"],
+      ["beta", "paper"],
+    ]);
+  });
+
   it("rebuilds the initiator's sent + handoff as both speakers", () => {
     const rows = peekMessages(
       [
