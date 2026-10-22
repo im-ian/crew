@@ -11,7 +11,7 @@ type Props = {
 export function ShortcutHelp({ open, onClose }: Props) {
   const t = useT();
   return (
-    <Modal open={open} title={t("shortcut.title")} onClose={onClose} wide>
+    <Modal open={open} title={t("shortcut.title")} onClose={onClose} className="wide">
       <div className="shortcut-list">
         {groupedShortcuts().map((g) => (
           <section key={g.group}>
