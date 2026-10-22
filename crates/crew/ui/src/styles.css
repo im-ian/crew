@@ -1318,7 +1318,8 @@ button.channel-who:hover {
   color: var(--ink);
   box-shadow: var(--bubble-edge);
 }
-.channel-msg .bubble.incoming + .bubble.incoming {
+.channel-msg .bubble.incoming + .bubble.incoming,
+.bubble-row + .bubble-row {
   margin-top: 3px;
 }
 .row.them .bubble.incoming.stack-first {
@@ -1388,7 +1389,11 @@ button.channel-who:hover {
   color: var(--idle);
   opacity: 1;
 }
-/* Parked outside the message column so revealing it never reflows the thread. */
+.bubble-row {
+  position: relative;
+  max-width: 100%;
+}
+/* Parked beside its own balloon so revealing it never reflows the thread. */
 .msg-actions {
   position: absolute;
   bottom: 0;
@@ -1402,7 +1407,7 @@ button.channel-who:hover {
   right: -22px;
   left: auto;
 }
-.row:hover .msg-actions .copy-btn,
+.bubble-row:hover .msg-actions .copy-btn,
 .xfer:hover .msg-actions .copy-btn,
 .copy-btn:focus-visible {
   opacity: 1;
