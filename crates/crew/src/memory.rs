@@ -1,4 +1,5 @@
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use crate::paths;
@@ -10,7 +11,8 @@ pub fn read(agent_id: &str) -> String {
 pub fn write(agent_id: &str, text: &str) -> anyhow::Result<()> {
     let path = paths::memory_path(agent_id);
     ensure_parent(&path)?;
-    fs::write(path, text)?;
+    // A bot's turn or `crew memory append` may read it mid-write.
+    paths::write_atomic(&path, text.as_bytes())?;
     Ok(())
 }
 
@@ -21,13 +23,26 @@ pub fn append(agent_id: &str, text: &str) -> anyhow::Result<()> {
     }
     let path = paths::memory_path(agent_id);
     ensure_parent(&path)?;
-    let mut cur = fs::read_to_string(&path).unwrap_or_default();
-    if !cur.is_empty() && !cur.ends_with('\n') {
-        cur.push('\n');
+    // Append in place rather than read and rewrite: bots append on their own,
+    // sometimes several at once, and a rewrite from a stale or failed read
+    // dropped the other notes.
+    let mut file = OpenOptions::new()
+        .read(true)
+        .append(true)
+        .create(true)
+        .open(&path)?;
+    let mut line = String::new();
+    if file.metadata()?.len() > 0 {
+        let mut last = [0u8];
+        file.seek(SeekFrom::End(-1))?;
+        file.read_exact(&mut last)?;
+        if last[0] != b'\n' {
+            line.push('\n');
+        }
     }
-    cur.push_str(add);
-    cur.push('\n');
-    fs::write(path, cur)?;
+    line.push_str(add);
+    line.push('\n');
+    file.write_all(line.as_bytes())?;
     Ok(())
 }
 
@@ -80,6 +95,28 @@ mod tests {
             assert_eq!(read("beta"), "one\ntwo\n");
             copy("missing", "gamma").unwrap();
             assert!(read("gamma").is_empty());
+        });
+    }
+
+    #[test]
+    fn concurrent_appends_keep_every_note() {
+        with_home_dir(|| {
+            write("alpha", "keep me").unwrap();
+            std::thread::scope(|s| {
+                for t in 0..8 {
+                    s.spawn(move || {
+                        for i in 0..25 {
+                            append("alpha", &format!("note {t}-{i}")).unwrap();
+                        }
+                    });
+                }
+            });
+            // Racing over "keep me" having no newline can leave a blank line;
+            // what matters is that no note is lost.
+            let text = read("alpha");
+            let notes = text.lines().filter(|l| !l.is_empty()).count();
+            assert_eq!(notes, 1 + 8 * 25, "{text}");
+            assert!(text.starts_with("keep me\n"));
         });
     }
 
