@@ -91,6 +91,9 @@ export function App() {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.isComposing) return;
+      // The skills window handles its own Escape, and no shortcut should act
+      // on the app hidden behind it.
+      if (skillsOpen) return;
       if (settingsOpen && e.key === "Escape") {
         e.preventDefault();
         setSettingsOpen(false);
@@ -178,7 +181,7 @@ export function App() {
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [helpOpen, settingsOpen, peek]);
+  }, [helpOpen, settingsOpen, skillsOpen, peek]);
 
   return (
     <div className="app">

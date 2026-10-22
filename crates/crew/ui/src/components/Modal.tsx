@@ -5,10 +5,10 @@ type Props = {
   title: string;
   onClose: () => void;
   children: ReactNode;
-  wide?: boolean;
+  className?: string;
 };
 
-export function Modal({ open, title, onClose, children, wide }: Props) {
+export function Modal({ open, title, onClose, children, className }: Props) {
   return (
     <div
       className={"modal" + (open ? " open" : "")}
@@ -16,7 +16,7 @@ export function Modal({ open, title, onClose, children, wide }: Props) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className={"dialog" + (wide ? " wide" : "")}>
+      <div className={"dialog" + (className ? " " + className : "")}>
         <h3>{title}</h3>
         {children}
       </div>
