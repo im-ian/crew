@@ -968,6 +968,23 @@ fn tells_after(anchor: &str, to: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// `anchor` ran `crew tell to` in the turn in progress. That tell drops the
+/// turn's reply to `to` on arrival. A teammate the user named does not.
+fn tells_back(anchor: &str, to: &str) -> bool {
+    serial_board()
+        .lock()
+        .ok()
+        .and_then(|board| {
+            board.queues.get(anchor).map(|q| {
+                q.iter().any(|j| {
+                    let SerialKind::Tell { from, .. } = &j.kind;
+                    j.to == to && from == anchor
+                })
+            })
+        })
+        .unwrap_or(false)
+}
+
 fn defer_tell(anchor: &str, to: &str, from: &str, text: &str, origin: Option<TurnOrigin>) {
     let epoch = serial_epoch(anchor);
     let _ = defer_tell_if_epoch(anchor, epoch, to, from, text, origin);
@@ -2721,7 +2738,13 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
     };
     let targets = targeting::postback_targets(&origin, agent);
     if let Some(peer) = targets.agent {
-        if known_agent(&peer) && !text.is_empty() && msg.choice.is_none() {
+        // Its own tell back is the answer the peer gets. A handoff row as well
+        // showed the peer one answer twice.
+        if known_agent(&peer)
+            && !text.is_empty()
+            && msg.choice.is_none()
+            && !tells_back(agent, &peer)
+        {
             crate::transcript::push_handoff(&peer, agent, &text);
             enqueue_handoff(&peer, agent, &text);
         }
@@ -3024,6 +3047,43 @@ mod daemon_tests {
         crate::transcript::drop_agent(&peer);
         configs().lock().unwrap().remove(&peer);
         clear_agent_context(&peer);
+    }
+
+    /// 가위바위보의 신 answered 클로드 "**바위.**" and also ran `crew tell` back
+    /// with "바위.". 클로드's chat showed the throw twice.
+    #[test]
+    fn a_reply_with_a_tell_back_leaves_no_handoff() {
+        paths::testing::with_home("tell-back", || {
+            let peer = test_id("asker");
+            let speaker = format!("rival-{peer}");
+            configs().lock().unwrap().insert(
+                peer.clone(),
+                AgentConfig::new(peer.clone(), peer.clone(), vec!["cat".into()], None),
+            );
+            crate::transcript::load_agent(&peer);
+            set_origin(&speaker, TurnOrigin::mention_tell(&peer));
+            defer_tell(&speaker, &peer, &speaker, "바위.", None);
+            let reply = ChatMessage {
+                id: "r1".into(),
+                role: Role::Assistant,
+                from: speaker.clone(),
+                text: "**바위.**".into(),
+                ts: 1,
+                queued: false,
+                peer: None,
+                kind: None,
+                approval: None,
+                choice: None,
+            };
+            on_assistant_sealed(&speaker, &reply);
+            assert!(crate::transcript::messages(&peer).is_empty());
+            assert!(take_handoffs(&peer).is_empty());
+
+            clear_serial_after(&speaker);
+            take_origin(&speaker);
+            crate::transcript::drop_agent(&peer);
+            configs().lock().unwrap().remove(&peer);
+        });
     }
 
     #[test]
