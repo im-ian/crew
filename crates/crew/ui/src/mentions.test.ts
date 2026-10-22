@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   injectMentionChips,
+  mentionIds,
   mentionRuns,
   mentionText,
   resolveMention,
@@ -20,6 +21,14 @@ describe("resolveMention", () => {
     expect(resolveMention("ALPHA", agents)?.id).toBe("alpha");
     expect(resolveMention("춘식이", agents)?.id).toBe("gamma");
     expect(resolveMention("nobody", agents)).toBeUndefined();
+  });
+});
+
+describe("mentionIds", () => {
+  it("sends a typed name as its id and leaves the rest alone", () => {
+    expect(mentionIds("@춘식이, @Alpha 봐줘 @nobody mail@alpha", agents)).toBe(
+      "@gamma, @alpha 봐줘 @nobody mail@alpha",
+    );
   });
 });
 
@@ -46,6 +55,16 @@ describe("injectMentionChips", () => {
 
   it("leaves an unknown mention as written", () => {
     expect(injectMentionChips("<p>@nobody</p>", agents)).toBe("<p>@nobody</p>");
+  });
+
+  it("ends an id where a Korean particle starts", () => {
+    expect(injectMentionChips("<p>@gamma에게 전했어</p>", agents)).toBe(
+      '<p><span class="mention-chip" data-mention="gamma"></span>에게 전했어</p>',
+    );
+  });
+
+  it("leaves a name as written, since only ids are stored", () => {
+    expect(injectMentionChips("<p>@춘식이 봐줘</p>", agents)).toBe("<p>@춘식이 봐줘</p>");
   });
 
   it("ignores an @ glued to the end of a word", () => {

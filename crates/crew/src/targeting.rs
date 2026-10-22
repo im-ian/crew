@@ -189,7 +189,7 @@ mod tests {
     fn one_on_one_tells_skip_self() {
         let r = roster();
         assert_eq!(
-            one_on_one_tell_targets("please @beta and @춘식이", "alpha", &r),
+            one_on_one_tell_targets("please @beta and @gamma", "alpha", &r),
             vec!["beta", "gamma"]
         );
         assert!(one_on_one_tell_targets("no mentions", "alpha", &r).is_empty());

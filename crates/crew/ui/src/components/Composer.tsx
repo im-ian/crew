@@ -4,7 +4,7 @@ import { flushSync } from "react-dom";
 import type { AgentInfo, Kind, Skill } from "../types";
 import { api } from "../api";
 import { useT } from "../LocaleContext";
-import { resolveMention, trimMentionPunct } from "../mentions";
+import { mentionIds, resolveMention, trimMentionPunct } from "../mentions";
 import { oneLine, wrapReply, type ReplyTarget } from "../reply";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
@@ -291,7 +291,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         e.preventDefault();
         const el = inputRef.current;
         if (!el) return;
-        const text = serializeEditor(el).trim();
+        const text = mentionIds(serializeEditor(el).trim(), agents);
         const files = attaches.map(attachMarkdown).filter(Boolean);
         let raw = [text, files.join("\n")].filter(Boolean).join("\n\n");
         if (!raw.trim()) return;

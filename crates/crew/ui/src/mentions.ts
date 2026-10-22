@@ -49,12 +49,30 @@ function attr(s: string): string {
     .replace(/</g, "&lt;");
 }
 
+/**
+ * What the composer sends: a handle typed by name and never picked from the
+ * menu (pasted, or the menu dismissed) goes out as `@id`, the only form the
+ * rest of Crew reads.
+ */
+export function mentionIds(text: string, agents: readonly AgentInfo[]): string {
+  return text.replace(/(^|\s)@(\S+)/g, (all, pre: string, raw: string) => {
+    const token = trimMentionPunct(raw);
+    const agent = token ? resolveMention(token, agents) : undefined;
+    return agent ? pre + "@" + agent.id + raw.slice(token.length) : all;
+  });
+}
+
 export type MentionRun = { text: string; mention: boolean };
 
 /**
  * The one place that decides where a handle starts and ends. `injectMentionChips`
  * and `mentionRuns` both scan for the same thing and would drift apart as two
  * copies; only what they build from a hit differs.
+ *
+ * A handle is `@` and an id; names are for the screen, and the composer sends
+ * them as ids (`mentionIds`). Ids are ASCII, so one ends at the first other
+ * character: `@bot-x에게` and `@bot-x,` both name `bot-x`. `mention_tokens`
+ * in the daemon reads the same way, so a chip here is a tell there.
  *
  * Returns the resolved label and how many characters of `text` it consumed.
  */
@@ -64,10 +82,10 @@ export function handleAt(
   agents: readonly AgentInfo[],
 ): { sigil: string; id: string; label: string; length: number } | undefined {
   if (text[i] !== "@") return undefined;
-  const raw = (text.slice(i + 1).match(/^[^\s<]+/) || [""])[0];
-  const token = trimMentionPunct(raw);
+  const token = (text.slice(i + 1).match(/^[A-Za-z0-9_-]+/) || [""])[0];
   if (!token) return undefined;
-  const agent = resolveMention(token, agents);
+  const lower = token.toLowerCase();
+  const agent = agents.find((a) => a.id.toLowerCase() === lower);
   if (!agent) return undefined;
   return {
     sigil: "@",
