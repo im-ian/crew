@@ -14,7 +14,7 @@ import type {
 import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { messageDefinitions } from "../markdown";
-import { noteRef, sentTarget } from "../peek";
+import { displayWho, noteRef, sentTarget } from "../peek";
 import {
   dotsAfter,
   momentStamp,
@@ -1488,12 +1488,6 @@ function ReplyButton({ onClick }: { onClick: () => void }) {
       <Reply size={13} />
     </button>
   );
-}
-
-/** A deleted bot leaves only its id behind, which tells the reader nothing. */
-function displayWho(id: string, agent: AgentInfo | null, t: TFn): string {
-  if (agent) return agent.name || agent.id;
-  return id.startsWith("#") ? id : t("thread.deletedBot");
 }
 
 function isCrewMarkerLine(line: string): boolean {

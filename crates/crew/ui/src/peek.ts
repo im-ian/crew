@@ -1,8 +1,19 @@
+import type { TFn } from "./i18n";
 import { splitReply } from "./reply";
 import type { AgentInfo, ChatMessage } from "./types";
 
 export function sentTarget(from: string): string | null {
   return from.startsWith("to:") ? from.slice(3) : null;
+}
+
+/** A deleted bot leaves only its id behind, which tells the reader nothing. */
+export function displayWho(
+  id: string,
+  agent: AgentInfo | null,
+  t: TFn,
+): string {
+  if (agent) return agent.name || agent.id;
+  return id.startsWith("#") ? id : t("thread.deletedBot");
 }
 
 /** The other bot on a sent/received/handoff row. Channels are not a peek. */
