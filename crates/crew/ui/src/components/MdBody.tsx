@@ -24,6 +24,12 @@ const TAGS = new Set([
   "H2",
   "H3",
   "SPAN",
+  "TABLE",
+  "THEAD",
+  "TBODY",
+  "TR",
+  "TH",
+  "TD",
 ]);
 
 type Props = {
@@ -133,6 +139,14 @@ function nodeToReact(
         {isOut ? <CornerDownRight className="md-mark" size={14} /> : null}
         <pre>{kids}</pre>
         <CopyButton text={text} className="code-copy" />
+      </div>
+    );
+  }
+  if (tag === "TABLE") {
+    // The wrapper scrolls; a table restyled to scroll itself stops reading as a table.
+    return (
+      <div key={key} className="md-table">
+        <table>{kids}</table>
       </div>
     );
   }

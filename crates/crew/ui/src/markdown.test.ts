@@ -29,6 +29,10 @@ describe("renderMarkdown", () => {
     expect(renderMarkdown("`a` %%CODE0%%")).toBe("<p><code>a</code> %%CODE0%%</p>");
   });
 
+  it("keeps emphasis inside the list item it started in", () => {
+    expect(renderMarkdown("- **a\n- b**")).toBe("<ul><li>**a</li><li>b**</li></ul>");
+  });
+
   it("builds headings and both list kinds", () => {
     expect(renderMarkdown("## 제목")).toBe("<h2>제목</h2>");
     expect(renderMarkdown("- one\n- two")).toBe("<ul><li>one</li><li>two</li></ul>");
@@ -49,6 +53,49 @@ describe("renderMarkdown", () => {
     expect(renderMarkdown("![shot](/tmp/a.png)")).toContain(
       '<img alt="shot" src="/tmp/a.png" />',
     );
+  });
+});
+
+describe("tables", () => {
+  it("builds a table from a header, a delimiter row and body rows", () => {
+    expect(renderMarkdown("| ID | 이름 |\n| --- | --- |\n| 4861 | **QA** |\n| 4885 | Dev |")).toBe(
+      "<table><thead><tr><th>ID</th><th>이름</th></tr></thead>" +
+        "<tbody><tr><td>4861</td><td><strong>QA</strong></td></tr>" +
+        "<tr><td>4885</td><td>Dev</td></tr></tbody></table>",
+    );
+  });
+
+  it("reads alignment, outer pipes are optional, and an escaped pipe stays in its cell", () => {
+    expect(renderMarkdown("a | b | c\n:-: | --: | :--\n1 \\| 2 | 3")).toBe(
+      '<table><thead><tr><th class="md-center">a</th><th class="md-right">b</th><th>c</th></tr></thead>' +
+        '<tbody><tr><td class="md-center">1 | 2</td><td class="md-right">3</td><td></td></tr></tbody></table>',
+    );
+  });
+
+  it("ends at a blank line and can follow a sentence directly", () => {
+    expect(renderMarkdown("결과:\n| a |\n| - |\n| 1 |\n\n끝")).toBe(
+      "<p>결과:</p><table><thead><tr><th>a</th></tr></thead>" +
+        "<tbody><tr><td>1</td></tr></tbody></table><p>끝</p>",
+    );
+  });
+
+  it("marks up each cell on its own", () => {
+    expect(renderMarkdown("| user_id | created_at | c |\n| --- | --- | --- |\n| **a | b** | `c` |")).toBe(
+      "<table><thead><tr><th>user_id</th><th>created_at</th><th>c</th></tr></thead>" +
+        "<tbody><tr><td>**a</td><td>b**</td><td><code>c</code></td></tr></tbody></table>",
+    );
+  });
+
+  it("ends at a line that opens another block", () => {
+    expect(renderMarkdown("| a |\n| - |\n| 1 |\n- 참고: x | y")).toBe(
+      "<table><thead><tr><th>a</th></tr></thead><tbody><tr><td>1</td></tr></tbody></table>" +
+        "<ul><li>참고: x | y</li></ul>",
+    );
+  });
+
+  it("leaves pipes alone without a matching delimiter row", () => {
+    expect(renderMarkdown("a | b\nc | d")).toBe("<p>a | b<br>c | d</p>");
+    expect(renderMarkdown("| a | b |\n| --- |")).not.toContain("<table>");
   });
 });
 

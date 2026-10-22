@@ -77,4 +77,11 @@ describe("splitBubbles", () => {
   it("splits after a bold run that ended a sentence", () => {
     expect(splitBubbles("**끝났어.**다음으로")).toEqual(["**끝났어.**", "다음으로"]);
   });
+
+  it("never splits inside a table row", () => {
+    const table = "| 클래스 | 설명 |\n| --- | --- |\n| React.Component | 기본 |\n| a | 완료.**다음** |";
+    expect(splitBubbles(table + "\n끝.다음")).toEqual([table + "\n끝.", "다음"]);
+    const bare = "상태 | 메모\n--- | ---\n4861 | 완료.다음 단계";
+    expect(splitBubbles(bare)).toEqual([bare]);
+  });
 });

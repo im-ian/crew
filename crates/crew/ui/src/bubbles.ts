@@ -14,6 +14,15 @@ function lastContentChar(text: string, end: number): string {
   return j >= 0 ? text[j] : "";
 }
 
+/**
+ * A table row's cells are not sentences, and a split inside one breaks the
+ * table. Rows can drop their outer pipes, so any line with a pipe counts.
+ */
+function lineHasPipe(text: string, start: number): boolean {
+  const end = text.indexOf("\n", start);
+  return text.slice(start, end < 0 ? undefined : end).includes("|");
+}
+
 function maybeSplitAfterMarkup(
   text: string,
   i: number,
@@ -44,6 +53,7 @@ export function splitBubbles(text: string): string[] {
   let fence = false;
   let bold = false;
   let code = false;
+  let pipeLine = false;
 
   const flush = (end: number, next: number) => {
     const piece = text.slice(start, end).trim();
@@ -52,6 +62,7 @@ export function splitBubbles(text: string): string[] {
   };
 
   while (i < text.length) {
+    if (i === 0 || text[i - 1] === "\n") pipeLine = lineHasPipe(text, i);
     if (!code && text.startsWith("```", i)) {
       fence = !fence;
       i += 3;
@@ -65,14 +76,14 @@ export function splitBubbles(text: string): string[] {
       const closing = code;
       code = !code;
       i += 1;
-      if (closing) maybeSplitAfterMarkup(text, i, 1, flush);
+      if (closing && !pipeLine) maybeSplitAfterMarkup(text, i, 1, flush);
       continue;
     }
     if (!code && text.startsWith("**", i)) {
       const closing = bold;
       bold = !bold;
       i += 2;
-      if (closing) maybeSplitAfterMarkup(text, i, 2, flush);
+      if (closing && !pipeLine) maybeSplitAfterMarkup(text, i, 2, flush);
       continue;
     }
     if (!code && !bold && text[i] === "\n" && text[i + 1] === "\n") {
@@ -87,7 +98,7 @@ export function splitBubbles(text: string): string[] {
     }
     // Only a sentence glued to the next with no space is two messages run
     // together; sentences in one paragraph are one thought and share a balloon.
-    if (!code && !bold && isSentenceEnd(text[i])) {
+    if (!code && !bold && !pipeLine && isSentenceEnd(text[i])) {
       const next = text[i + 1];
       const prev = lastContentChar(text, i);
       const afterHangul = /[가-힣]/.test(prev);
