@@ -2105,11 +2105,6 @@ fn tell_agent_origin(
         }
     }
     let from = from_id(from);
-    if from != "user" && from != to && take_handoff_from(to, &from).is_some() {
-        // `to` hears this instead of the reply that was waiting for it. Left
-        // in its chat, that reply showed one answer twice.
-        crate::transcript::drop_handoff(to, &from);
-    }
     ensure_accepts_turn(to)?;
     // Hold this tell until the sender is idle so it does not overlap that turn.
     if allow_defer && from != "user" && from != to {
@@ -2144,7 +2139,20 @@ fn tell_agent_origin(
     let parent = origin.or_else(|| get_origin(&from));
     let origin = targeting::inherit_origin(parent.as_ref(), parsed);
     let msg = crate::transcript::push_system(to, &from, text, asked_by(&origin, to));
-    submit_delivery_then(to, &envelope, true, Some(msg.id), origin, then)?;
+    // `to` hears this instead of the reply waiting for it from `from`. Taken
+    // before the delivery starts, which would put that reply in front of it.
+    let replaced = (from != "user" && from != to)
+        .then(|| take_handoff_from(to, &from))
+        .flatten();
+    if let Err(err) = submit_delivery_then(to, &envelope, true, Some(msg.id), origin, then) {
+        // Nothing went out, so the reply is still the answer.
+        restore_handoffs(to, replaced.into_iter().collect());
+        return Err(err);
+    }
+    if replaced.is_some() {
+        // Left in its chat, that reply showed one answer twice.
+        crate::transcript::drop_handoff(to, &from);
+    }
     if from != "user" && from != to {
         let known = agents()
             .lock()
@@ -3039,32 +3047,12 @@ mod daemon_tests {
             // Busy, so the tell waits in the inbox instead of starting a CLI.
             headless_status(&asker, AgentStatus::Working);
             set_origin(&speaker, TurnOrigin::mention_tell(&asker));
-            let reply = ChatMessage {
-                id: "r1".into(),
-                role: Role::Assistant,
-                from: speaker.clone(),
-                text: "**바위.**".into(),
-                ts: 1,
-                queued: false,
-                peer: None,
-                kind: None,
-                approval: None,
-                choice: None,
-            };
-            on_assistant_sealed(&speaker, &reply);
-            let handoffs = || {
-                crate::transcript::messages(&asker)
-                    .iter()
-                    .filter(|m| m.kind == Some(crate::protocol::MessageKind::Handoff))
-                    .count()
-            };
-            // Until the tell lands the reply is the answer: a stop can still
-            // drop the tell.
-            assert_eq!(handoffs(), 1);
+            on_assistant_sealed(&speaker, &sealed_reply(&speaker, "**바위.**"));
+            assert_eq!(handoff_rows(&asker), 1);
 
             tell_agent_origin(&speaker, &asker, "바위.", None, false, &mut VecDeque::new())
                 .unwrap();
-            assert_eq!(handoffs(), 0);
+            assert_eq!(handoff_rows(&asker), 0);
             let last = crate::transcript::messages(&asker).pop().expect("the tell");
             assert_eq!(last.text, "바위.");
             assert!(take_handoffs(&asker).is_empty());
@@ -3074,6 +3062,76 @@ mod daemon_tests {
             headless_status(&asker, AgentStatus::Idle);
             remove_agent(&asker).unwrap();
         });
+    }
+
+    /// A tell that never goes out leaves the reply as the answer. Taken when
+    /// the tell was run, the reply went with a tell that a stop then cleared,
+    /// or that was refused on the way.
+    #[test]
+    fn a_tell_that_does_not_go_out_keeps_the_reply() {
+        paths::testing::with_home("tell-fails", || {
+            let [asker, speaker] = ["fail-asker", "fail-speaker"].map(test_id);
+            for id in [&asker, &speaker] {
+                claude_bot(id);
+                // Busy, so nothing starts a CLI.
+                headless_status(id, AgentStatus::Working);
+            }
+            set_origin(&speaker, TurnOrigin::mention_tell(&asker));
+            on_assistant_sealed(&speaker, &sealed_reply(&speaker, "**바위.**"));
+
+            // Held until the speaker's turn is over, and stopped with it.
+            tell_agent(&speaker, &asker, "바위.").unwrap();
+            clear_serial_after(&speaker);
+            assert_eq!(handoff_rows(&asker), 1);
+
+            // Refused: the bots already relayed this chain too many times.
+            let spent = TurnOrigin {
+                from: asker.clone(),
+                hops: targeting::MAX_RELAY_HOPS,
+                ..TurnOrigin::default()
+            };
+            tell_agent_origin(
+                &speaker,
+                &asker,
+                "바위.",
+                Some(spent),
+                false,
+                &mut VecDeque::new(),
+            )
+            .unwrap_err();
+            assert_eq!(handoff_rows(&asker), 1);
+            let waiting = take_handoffs(&asker).pop().expect("the reply still waits");
+            assert_eq!(waiting.text, "**바위.**");
+
+            take_origin(&speaker);
+            for id in [&asker, &speaker] {
+                clear_inbox(id);
+                headless_status(id, AgentStatus::Idle);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    fn sealed_reply(from: &str, text: &str) -> ChatMessage {
+        ChatMessage {
+            id: test_id("reply"),
+            role: Role::Assistant,
+            from: from.into(),
+            text: text.into(),
+            ts: 1,
+            queued: false,
+            peer: None,
+            kind: None,
+            approval: None,
+            choice: None,
+        }
+    }
+
+    fn handoff_rows(agent: &str) -> usize {
+        crate::transcript::messages(agent)
+            .iter()
+            .filter(|m| m.kind == Some(crate::protocol::MessageKind::Handoff))
+            .count()
     }
 
     #[test]
