@@ -23,17 +23,22 @@ describe("splitBubbles", () => {
     ]);
   });
 
-  it("splits a Korean sentence that has a space after the period", () => {
+  it("keeps the sentences of one paragraph in one balloon", () => {
     expect(splitBubbles("확인했어요. 이제 고칠게요.")).toEqual([
-      "확인했어요.",
-      "이제 고칠게요.",
+      "확인했어요. 이제 고칠게요.",
+    ]);
+    expect(splitBubbles("확인했어요.\n이제 고칠게요.")).toEqual([
+      "확인했어요.\n이제 고칠게요.",
     ]);
   });
 
-  it("splits a sentence that continues on the next line", () => {
-    expect(splitBubbles("확인했어요.\n이제 고칠게요.")).toEqual([
-      "확인했어요.",
-      "이제 고칠게요.",
+  it("gives each paragraph of a long answer its own balloon", () => {
+    const text =
+      "계정은 **3개**입니다. 세 계정 모두 활성 상태입니다.\n\n" +
+      "`social_accounts`에서 3건입니다. 비활성 연결은 없습니다. 나머지 1명은 나중에 연결했습니다.";
+    expect(splitBubbles(text)).toEqual([
+      "계정은 **3개**입니다. 세 계정 모두 활성 상태입니다.",
+      "`social_accounts`에서 3건입니다. 비활성 연결은 없습니다. 나머지 1명은 나중에 연결했습니다.",
     ]);
   });
 
