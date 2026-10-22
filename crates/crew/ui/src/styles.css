@@ -1401,8 +1401,9 @@ button.channel-who:hover {
   flex-direction: column-reverse;
   gap: 1px;
 }
-.row.them .msg-actions { right: -22px; }
-.row.me .msg-actions { left: -22px; }
+/* The padding bridges the gap to the balloon so the pointer never drops the hover. */
+.row.them .msg-actions { right: -22px; padding-left: 2px; }
+.row.me .msg-actions { left: -22px; padding-right: 2px; }
 .xfer .msg-actions {
   right: -22px;
   left: auto;
