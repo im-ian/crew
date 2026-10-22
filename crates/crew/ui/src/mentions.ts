@@ -76,7 +76,8 @@ export function mentionIds(text: string, agents: readonly AgentInfo[]): string {
     .join("");
 }
 
-export type MentionRun = { text: string; mention: boolean };
+/** A run of preview text, or a handle when `agent` is the bot it names. */
+export type MentionRun = { text: string; agent?: AgentInfo };
 
 /**
  * The one place that decides where a handle starts and ends. `injectMentionChips`
@@ -89,13 +90,15 @@ export type MentionRun = { text: string; mention: boolean };
  * (`@bot-x에게`) or closing punctuation (`@bot-x,`) does, the `.ai` in
  * `@claude.ai` does not. `mention_tokens` in the daemon reads it the same way.
  *
- * Returns the resolved label and how many characters of `text` it consumed.
+ * Returns the resolved bot and how many characters of `text` it consumed.
  */
 export function handleAt(
   text: string,
   i: number,
   agents: readonly AgentInfo[],
-): { sigil: string; id: string; label: string; length: number } | undefined {
+):
+  | { sigil: string; agent: AgentInfo; label: string; length: number }
+  | undefined {
   if (text[i] !== "@") return undefined;
   const raw = (text.slice(i + 1).match(/^[^\s<]+/) || [""])[0];
   const token = (raw.match(/^[A-Za-z0-9_-]+/) || [""])[0];
@@ -106,7 +109,7 @@ export function handleAt(
   if (!agent) return undefined;
   return {
     sigil: "@",
-    id: agent.id,
+    agent,
     label: mentionLabel(agent),
     length: 1 + token.length,
   };
@@ -122,7 +125,7 @@ export function mentionRuns(
 ): MentionRun[] {
   if (!text) return [];
   if (!agents.length) {
-    return [{ text, mention: false }];
+    return [{ text }];
   }
   const runs: MentionRun[] = [];
   let plain = "";
@@ -131,9 +134,9 @@ export function mentionRuns(
   while (i < text.length) {
     const hit = prevWs ? handleAt(text, i, agents) : undefined;
     if (hit) {
-      if (plain) runs.push({ text: plain, mention: false });
+      if (plain) runs.push({ text: plain });
       plain = "";
-      runs.push({ text: hit.sigil + hit.label, mention: true });
+      runs.push({ text: hit.sigil + hit.label, agent: hit.agent });
       i += hit.length;
       prevWs = false;
       continue;
@@ -142,11 +145,11 @@ export function mentionRuns(
     prevWs = /\s/.test(text[i]);
     i += 1;
   }
-  if (plain) runs.push({ text: plain, mention: false });
+  if (plain) runs.push({ text: plain });
   return runs;
 }
 
-/** The preview as it reads on screen, for matching a search query against it. */
+/** The preview with each handle as `@name`, for matching a search query. */
 export function mentionText(text: string, agents: readonly AgentInfo[]): string {
   return mentionRuns(text, agents)
     .map((r) => r.text)
@@ -198,7 +201,7 @@ export function injectMentionChips(html: string, agents: readonly AgentInfo[]): 
     }
     const hit = prevWs ? handleAt(html, i, agents) : undefined;
     if (hit) {
-      out += `<span class="mention-chip" data-mention="${attr(hit.id)}"></span>`;
+      out += `<span class="mention-chip" data-mention="${attr(hit.agent.id)}"></span>`;
       i += hit.length;
       prevWs = false;
       continue;

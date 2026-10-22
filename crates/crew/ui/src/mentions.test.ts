@@ -120,33 +120,33 @@ describe("injectMentionChips", () => {
 describe("mentionRuns", () => {
   it("reads a mentioned id back as the roster name", () => {
     expect(mentionRuns("@gamma 확인해줘", agents)).toEqual([
-      { text: "@춘식이", mention: true },
-      { text: " 확인해줘", mention: false },
+      { text: "@춘식이", agent: agents[1] },
+      { text: " 확인해줘" },
     ]);
   });
 
   it("keeps trailing punctuation outside the mention", () => {
     expect(mentionRuns("@alpha, 봐줘", agents)).toEqual([
-      { text: "@Alpha", mention: true },
-      { text: ", 봐줘", mention: false },
+      { text: "@Alpha", agent: agents[0] },
+      { text: ", 봐줘" },
     ]);
   });
 
   it("leaves a hash as written", () => {
     expect(mentionRuns("#ship 에 올렸어", agents)).toEqual([
-      { text: "#ship 에 올렸어", mention: false },
+      { text: "#ship 에 올렸어" },
     ]);
   });
 
   it("leaves an unknown handle as written", () => {
     expect(mentionRuns("@nobody 안녕", agents)).toEqual([
-      { text: "@nobody 안녕", mention: false },
+      { text: "@nobody 안녕" },
     ]);
   });
 
   it("ignores an @ that is not a handle start", () => {
     expect(mentionRuns("mail me@alpha now", agents)).toEqual([
-      { text: "mail me@alpha now", mention: false },
+      { text: "mail me@alpha now" },
     ]);
   });
 });
@@ -154,13 +154,13 @@ describe("mentionRuns", () => {
 describe("mentionRuns edge cases", () => {
   it("does not swallow a character on a doubled hash", () => {
     expect(mentionRuns("##ship 올려", agents)).toEqual([
-      { text: "##ship 올려", mention: false },
+      { text: "##ship 올려" },
     ]);
   });
 
   it("returns the text whole when there is no roster", () => {
     expect(mentionRuns("@alpha ping", [])).toEqual([
-      { text: "@alpha ping", mention: false },
+      { text: "@alpha ping" },
     ]);
     expect(mentionRuns("", agents)).toEqual([]);
   });
