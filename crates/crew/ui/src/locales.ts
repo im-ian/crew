@@ -242,6 +242,8 @@ export const KO = {
   "skills.note": "입력창에 /이름 을 치면 이 내용이 들어갑니다.",
   "skills.deleteAgain": "한 번 더 누르면 삭제",
   "skills.unsaved": "저장하지 않은 변경이 있습니다. 한 번 더 누르면 버립니다.",
+  "skills.exists": "/{name} 스킬이 이미 있습니다. 덮어쓸까요?",
+  "skills.overwrite": "덮어쓰기",
 
   "conn.checking": "데몬 확인 중…",
   "conn.ok": "데몬 연결됨",
@@ -495,6 +497,8 @@ export const EN: { [K in MessageKey]: string } = {
   "skills.note": "Typing /name in the composer drops this text in.",
   "skills.deleteAgain": "Press again to delete",
   "skills.unsaved": "You have unsaved changes. Press again to discard them.",
+  "skills.exists": "A skill named /{name} already exists. Overwrite it?",
+  "skills.overwrite": "Overwrite",
 
   "conn.checking": "Checking daemon…",
   "conn.ok": "Daemon connected",
