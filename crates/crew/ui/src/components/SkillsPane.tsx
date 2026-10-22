@@ -61,13 +61,18 @@ export function SkillsPane({ open, onClose }: Props) {
     setError("");
     try {
       const saved = await api.saveSkill(n, body);
-      // A rename writes a new file; drop the one it replaced.
-      if (editing && editing !== saved.name) {
+      // A rename writes a new file; drop the one it replaced. Names match
+      // without case, and so does the macOS disk: "Foo" → "foo" wrote over
+      // Foo.md, so dropping "Foo" would delete the save.
+      const same = (a: string) => a.toLowerCase() === saved.name.toLowerCase();
+      if (editing && !same(editing)) {
         await api.removeSkill(editing).catch(() => {});
       }
-      setSkills(await api.listSkills());
-      setEditing(saved.name);
-      setName(saved.name);
+      const list = await api.listSkills();
+      const kept = list.find((s) => same(s.name))?.name ?? saved.name;
+      setSkills(list);
+      setEditing(kept);
+      setName(kept);
     } catch (err) {
       setError(String(err));
     } finally {
