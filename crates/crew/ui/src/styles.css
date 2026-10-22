@@ -3344,6 +3344,8 @@ textarea.textin {
 }
 .skill-detail {
   gap: var(--space-14);
+  /* A short window scrolls the editor rather than squeezing the body field. */
+  overflow-y: auto;
 }
 .skill-list {
   flex: 1;
@@ -3421,7 +3423,6 @@ textarea.textin {
 /* The body takes whatever height the name, note, and buttons leave. */
 .skill-detail .field-block:has(.skill-body) {
   flex: 1;
-  min-height: 0;
 }
 textarea.textin.skill-body {
   flex: 1;
