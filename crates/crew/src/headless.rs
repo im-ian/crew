@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::Context;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::config::{AgentConfig, TurnSession};
@@ -70,6 +71,7 @@ pub fn open(
 
 pub fn clear_session(agent_id: &str) {
     let _ = fs::remove_file(paths::cli_session_path(agent_id));
+    let _ = fs::remove_file(paths::cli_memory_path(agent_id));
 }
 
 pub fn load_session(agent_id: &str) -> Option<String> {
@@ -117,6 +119,71 @@ fn with_recap(recap: &str, prompt: &str) -> String {
          so far, oldest first; `assistant` lines are the bot's earlier replies, errors \
          its old CLI printed included. Read it for context only; do not answer it. \
          Answer the message after it.\n<chat>\n{recap}\n</chat>\n\n{prompt}"
+    )
+}
+
+/// The bot's memory as its CLI session knows it: `start` sits in the session's
+/// system prompt, `seen` is the newest it has been told.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+struct MemorySeen {
+    start: String,
+    seen: String,
+}
+
+fn load_memory_seen(agent_id: &str) -> Option<MemorySeen> {
+    let raw = fs::read_to_string(paths::cli_memory_path(agent_id)).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+fn save_memory_seen(agent_id: &str, seen: &MemorySeen) -> anyhow::Result<()> {
+    let path = paths::cli_memory_path(agent_id);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, serde_json::to_string(seen)?)?;
+    Ok(())
+}
+
+/// What this turn's session knows of the memory, and a note for the prompt if
+/// it changed since. claude and codex replay the system prompt a session
+/// started with, and a new one there costs grok its prompt cache, so a resumed
+/// session keeps its first memory in the system prompt and hears of changes
+/// in the prompt instead.
+fn memory_for_turn(
+    resume: bool,
+    known: Option<MemorySeen>,
+    now: &str,
+    prompt: &str,
+) -> (MemorySeen, Option<String>) {
+    if !resume {
+        let fresh = MemorySeen {
+            start: now.to_string(),
+            seen: now.to_string(),
+        };
+        return (fresh, None);
+    }
+    // A session from before this was tracked is told once.
+    let known = known.unwrap_or_else(|| MemorySeen {
+        start: now.to_string(),
+        seen: String::new(),
+    });
+    // A slash command only runs if it comes first, so the news waits a turn.
+    if known.seen == now || prompt.starts_with('/') {
+        return (known, None);
+    }
+    let told = MemorySeen {
+        start: known.start,
+        seen: now.to_string(),
+    };
+    (told, Some(memory_note(now)))
+}
+
+fn memory_note(memory: &str) -> String {
+    let body = if memory.is_empty() { "(empty)" } else { memory };
+    format!(
+        "[crew system] Your memory changed since you last saw it. It is now as \
+         below; use this instead of the `# Your memory` section in your \
+         instructions.\n<memory>\n{body}\n</memory>"
     )
 }
 
@@ -281,7 +348,18 @@ fn run_turn(
         Some(recap) => with_recap(recap, &prompt),
         None => prompt,
     };
-    let argv = cfg.turn_cmd(&prompt, turn_session.as_ref(), &roster);
+    let memory_now = crate::memory::read(&session.id);
+    let (memory_seen, note) = memory_for_turn(
+        turn_session.as_ref().is_some_and(|s| s.resume),
+        load_memory_seen(&session.id),
+        memory_now.trim(),
+        &prompt,
+    );
+    let prompt = match note {
+        Some(note) => format!("{note}\n\n{prompt}"),
+        None => prompt,
+    };
+    let argv = cfg.turn_cmd(&prompt, turn_session.as_ref(), &roster, &memory_seen.start);
     let cwd = crate::config::Config::default_cwd(&cfg);
     if let Err(err) = crate::paths::create_cwd(&cwd) {
         eprintln!("[crew] cwd {}: {err:#}", cwd.display());
@@ -308,6 +386,10 @@ fn run_turn(
             // next. Codex may never name a thread, so a saved session is not the test.
             if recap.is_some() && outcome.got_text {
                 clear_recap(&session.id);
+            }
+            // Like the recap: a turn that failed leaves the news for the next.
+            if outcome.got_text && !dead {
+                let _ = save_memory_seen(&session.id, &memory_seen);
             }
             if dead {
                 if let Ok(mut inner) = session.inner.lock() {
@@ -1141,6 +1223,39 @@ mod tests {
         let raw = "Starting session\nOpt out of sending data\n? for shortcuts\nHello there\nMCP servers connected\n";
         assert_eq!(strip_tui_noise(raw), "Hello there");
         assert!(strip_tui_noise("Starting session\nOpt out").is_empty());
+    }
+
+    #[test]
+    fn a_resumed_session_keeps_its_first_memory_and_hears_of_changes() {
+        let seen = |start: &str, seen: &str| MemorySeen {
+            start: start.into(),
+            seen: seen.into(),
+        };
+        let turn = |resume, known, now| memory_for_turn(resume, known, now, "hi");
+        // A new session gets the memory in its system prompt and no note.
+        assert_eq!(turn(false, Some(seen("a", "b")), "c"), (seen("c", "c"), None));
+        // Nothing changed: same system prompt, no note.
+        assert_eq!(turn(true, Some(seen("a", "a")), "a"), (seen("a", "a"), None));
+        // Changed: the system prompt keeps "a", the note carries "b".
+        let (k, note) = turn(true, Some(seen("a", "a")), "b");
+        assert_eq!(k, seen("a", "b"));
+        assert!(note.unwrap().contains("<memory>\nb\n</memory>"));
+        // Told once, not again.
+        assert_eq!(turn(true, Some(seen("a", "b")), "b"), (seen("a", "b"), None));
+        // Emptied.
+        let (_, note) = turn(true, Some(seen("a", "a")), "");
+        assert!(note.unwrap().contains("(empty)"));
+        // A session from before tracking is told once, unless there is nothing.
+        let (k, note) = turn(true, None, "b");
+        assert_eq!(k, seen("b", "b"));
+        assert!(note.is_some());
+        assert_eq!(turn(true, None, ""), (seen("", ""), None));
+        // A slash command keeps the news for the next turn.
+        let wait = memory_for_turn(true, Some(seen("a", "a")), "b", "/compact");
+        assert_eq!(wait, (seen("a", "a"), None));
+        let (k, note) = memory_for_turn(true, None, "b", "/compact");
+        assert!(note.is_none());
+        assert!(turn(true, Some(k), "b").1.is_some());
     }
 
     #[test]
