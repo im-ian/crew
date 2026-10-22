@@ -184,6 +184,9 @@ struct PendingDelivery {
 struct PendingHandoff {
     from: String,
     text: String,
+    /// The row id of a tell from the same bot, waiting in the inbox to take
+    /// this reply's place. Nothing ahead of that tell carries the reply.
+    held: Option<String>,
 }
 
 fn clear_agent_context(id: &str) {
@@ -208,6 +211,7 @@ fn enqueue_handoff(peer: &str, from: &str, text: &str) {
         q.push(PendingHandoff {
             from: from.to_string(),
             text,
+            held: None,
         });
     }
 }
@@ -216,7 +220,7 @@ fn enqueue_handoff(peer: &str, from: &str, text: &str) {
 fn take_handoff_from(peer: &str, from: &str) -> Option<PendingHandoff> {
     let mut map = pending_handoffs().lock().ok()?;
     let q = map.get_mut(peer)?;
-    let at = q.iter().position(|h| h.from == from)?;
+    let at = q.iter().position(|h| h.from == from && h.held.is_none())?;
     let item = q.remove(at);
     if q.is_empty() {
         map.remove(peer);
@@ -229,7 +233,57 @@ fn take_handoffs(agent: &str) -> Vec<PendingHandoff> {
         Ok(m) => m,
         Err(_) => return Vec::new(),
     };
-    map.remove(agent).unwrap_or_default()
+    let Some(q) = map.get_mut(agent) else {
+        return Vec::new();
+    };
+    let (held, free) = std::mem::take(q)
+        .into_iter()
+        .partition(|h| h.held.is_some());
+    *q = held;
+    if q.is_empty() {
+        map.remove(agent);
+    }
+    free
+}
+
+/// A tell from `from` is on its way to `peer`, as row `tell`. The reply it
+/// takes the place of waits for it, so nothing ahead of it carries the reply.
+fn hold_handoff(peer: &str, from: &str, tell: &str) {
+    if let Ok(mut map) = pending_handoffs().lock() {
+        let held = map
+            .get_mut(peer)
+            .and_then(|q| q.iter_mut().find(|h| h.from == from && h.held.is_none()));
+        if let Some(h) = held {
+            h.held = Some(tell.to_string());
+        }
+    }
+}
+
+/// The tell `tell` reached `peer`, or never will. A reply it reached `peer`
+/// in place of goes, row and all. One it never will waits for the next prompt.
+fn settle_handoff(peer: &str, tell: &str, reached: bool) {
+    let dropped = {
+        let Ok(mut map) = pending_handoffs().lock() else {
+            return;
+        };
+        let Some(q) = map.get_mut(peer) else {
+            return;
+        };
+        let Some(at) = q.iter().position(|h| h.held.as_deref() == Some(tell)) else {
+            return;
+        };
+        if !reached {
+            q[at].held = None;
+            return;
+        }
+        let h = q.remove(at);
+        if q.is_empty() {
+            map.remove(peer);
+        }
+        h
+    };
+    // Left in the chat, that reply showed one answer twice.
+    crate::transcript::drop_handoff(peer, &dropped.from);
 }
 
 fn restore_handoffs(agent: &str, mut items: Vec<PendingHandoff>) {
@@ -580,12 +634,13 @@ fn is_slash_command(text: &str) -> bool {
 }
 
 /// `then` goes on the bot with the turn, and stays with the caller when the
-/// turn does not start.
+/// turn does not start. `msg_id` is the row the delivery shows as.
 fn start_delivery(
     start: Starting,
     text: &str,
     newline: bool,
     origin: TurnOrigin,
+    msg_id: Option<&str>,
     then: &mut VecDeque<SerialJob>,
 ) -> anyhow::Result<()> {
     let id = start.0.clone();
@@ -632,6 +687,14 @@ fn start_delivery(
             }
         }
     }
+    if let Some(tell) = msg_id {
+        match &started {
+            Ok(()) => settle_handoff(id, tell, true),
+            // Back in the inbox, still the reply's stand-in.
+            Err(err) if is_busy_err(err) => {}
+            Err(_) => settle_handoff(id, tell, false),
+        }
+    }
     drop(start);
     if started.is_ok() {
         crate::transcript::drop_pending_approval(id);
@@ -673,7 +736,14 @@ fn submit_delivery_then(
     }
     if !agent_busy(id)? {
         if let Some(start) = claim_start(id) {
-            match start_delivery(start, text, newline, origin.clone(), then) {
+            match start_delivery(
+                start,
+                text,
+                newline,
+                origin.clone(),
+                msg_id.as_deref(),
+                then,
+            ) {
                 Err(err) if is_busy_err(&err) => {}
                 started => return started,
             }
@@ -747,6 +817,7 @@ fn pump_inbox_inner(id: &str) {
         &item.text,
         item.newline,
         item.origin.clone(),
+        item.msg_id.as_deref(),
         &mut item.then,
     ) {
         Ok(()) => {
@@ -2139,19 +2210,16 @@ fn tell_agent_origin(
     let parent = origin.or_else(|| get_origin(&from));
     let origin = targeting::inherit_origin(parent.as_ref(), parsed);
     let msg = crate::transcript::push_system(to, &from, text, asked_by(&origin, to));
-    // `to` hears this instead of the reply waiting for it from `from`. Taken
-    // before the delivery starts, which would put that reply in front of it.
-    let replaced = (from != "user" && from != to)
-        .then(|| take_handoff_from(to, &from))
-        .flatten();
-    if let Err(err) = submit_delivery_then(to, &envelope, true, Some(msg.id), origin, then) {
-        // Nothing went out, so the reply is still the answer.
-        restore_handoffs(to, replaced.into_iter().collect());
-        return Err(err);
+    // `to` hears this instead of the reply waiting for it from `from`, once
+    // the delivery starts (`settle_handoff`).
+    if from != "user" && from != to {
+        hold_handoff(to, &from, &msg.id);
     }
-    if replaced.is_some() {
-        // Left in its chat, that reply showed one answer twice.
-        crate::transcript::drop_handoff(to, &from);
+    if let Err(err) = submit_delivery_then(to, &envelope, true, Some(msg.id.clone()), origin, then)
+    {
+        // Nothing went out, so the reply is still the answer.
+        settle_handoff(to, &msg.id, false);
+        return Err(err);
     }
     if from != "user" && from != to {
         let known = agents()
@@ -3043,24 +3111,81 @@ mod daemon_tests {
         paths::testing::with_home("tell-back", || {
             let asker = test_id("asker");
             let speaker = format!("rival-{asker}");
-            claude_bot(&asker);
-            // Busy, so the tell waits in the inbox instead of starting a CLI.
-            headless_status(&asker, AgentStatus::Working);
+            fake_bot(&asker, "알았어");
             set_origin(&speaker, TurnOrigin::mention_tell(&asker));
             on_assistant_sealed(&speaker, &sealed_reply(&speaker, "**바위.**"));
             assert_eq!(handoff_rows(&asker), 1);
 
+            // Busy, so the tell waits in the inbox. Until it starts the reply
+            // is the answer, and a message ahead of the tell does not carry it.
+            headless_status(&asker, AgentStatus::Working);
             tell_agent_origin(&speaker, &asker, "바위.", None, false, &mut VecDeque::new())
                 .unwrap();
-            assert_eq!(handoff_rows(&asker), 0);
-            let last = crate::transcript::messages(&asker).pop().expect("the tell");
-            assert_eq!(last.text, "바위.");
+            assert_eq!(handoff_rows(&asker), 1);
             assert!(take_handoffs(&asker).is_empty());
 
-            take_origin(&speaker);
-            clear_inbox(&asker);
             headless_status(&asker, AgentStatus::Idle);
+            pump_inbox(&asker);
+            wait_idle(&asker);
+            assert_eq!(handoff_rows(&asker), 0);
+            let prompt = fs::read_to_string(paths::home_dir().join("prompt")).unwrap();
+            assert!(prompt.contains("바위."), "{prompt}");
+            assert!(!prompt.contains("**바위.**"), "{prompt}");
+
+            take_origin(&speaker);
             remove_agent(&asker).unwrap();
+        });
+    }
+
+    /// The tell waits in a terminal bot's inbox, and the terminal exits before
+    /// its turn. The tell never reaches it, so the reply stays the answer.
+    #[test]
+    fn a_tell_that_never_starts_keeps_the_reply() {
+        paths::testing::with_home("tell-exit", || {
+            paths::write_notifications_enabled(false);
+            let term = test_id("tell-term");
+            let speaker = format!("rival-{term}");
+            insert_spawned_agent(AgentConfig::new(
+                term.clone(),
+                term.clone(),
+                vec!["cat".into()],
+                Some(paths::home_dir().display().to_string()),
+            ))
+            .unwrap();
+            let set_term = |to| match agents().lock().unwrap().get(&term) {
+                Some(LiveAgent::Pty(s)) => s.inner.lock().unwrap().status = to,
+                _ => panic!("cat runs on a terminal"),
+            };
+            set_origin(&speaker, TurnOrigin::mention_tell(&term));
+            on_assistant_sealed(&speaker, &sealed_reply(&speaker, "**바위.**"));
+            set_term(AgentStatus::Working);
+            tell_agent_origin(&speaker, &term, "바위.", None, false, &mut VecDeque::new()).unwrap();
+            set_term(AgentStatus::Exited);
+            pump_inbox(&term);
+            assert_eq!(handoff_rows(&term), 1);
+            assert!(take_handoffs(&term).is_empty(), "held for the tell");
+
+            // A start that fails lets the reply go with the next prompt.
+            let tell = crate::transcript::messages(&term)
+                .iter()
+                .rfind(|m| m.text == "바위.")
+                .map(|m| m.id.clone())
+                .expect("the tell's row");
+            assert!(start_delivery(
+                claim_start(&term).unwrap(),
+                "바위.",
+                true,
+                TurnOrigin::user(),
+                Some(&tell),
+                &mut VecDeque::new()
+            )
+            .is_err());
+            assert_eq!(handoff_rows(&term), 1);
+            let waiting = take_handoffs(&term).pop().expect("the reply waits again");
+            assert_eq!(waiting.text, "**바위.**");
+
+            take_origin(&speaker);
+            remove_agent(&term).unwrap();
         });
     }
 
@@ -3980,6 +4105,7 @@ exec sleep 1"#,
             "hi",
             true,
             TurnOrigin::user(),
+            None,
             &mut VecDeque::new()
         )
         .is_err());
