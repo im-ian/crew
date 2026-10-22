@@ -2213,6 +2213,11 @@ button.choice-option:disabled {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--working) 70%, transparent);
   animation: msg-flash 1.5s var(--ease-out);
 }
+/* Side chat: keep the clicked run's ring up longer than a search flash.
+   PeekRoom drops `.flash` at 3.1s, just after this ends. */
+.peek-thread .row.flash .bubble {
+  animation-duration: 3s;
+}
 @keyframes msg-flash {
   0% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--working) 80%, transparent); }
   100% { box-shadow: 0 0 0 0 transparent; }
