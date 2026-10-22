@@ -551,9 +551,10 @@ fn save_skill(
     name: String,
     body: String,
     previous: Option<String>,
-    overwrite: bool,
+    overwrite: Option<String>,
 ) -> Result<crate::skills::Saved, String> {
-    crate::skills::save(&name, &body, previous.as_deref(), overwrite).map_err(|e| e.to_string())
+    crate::skills::save(&name, &body, previous.as_deref(), overwrite.as_deref())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

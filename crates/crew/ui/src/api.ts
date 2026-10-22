@@ -97,7 +97,12 @@ export const api = {
   searchCrew: (query: string) => invoke<SearchHit[]>("search_crew", { query }),
   listSkills: () => invoke<Skill[]>("list_skills"),
   lookupSkill: (query: string) => invoke<Skill | null>("lookup_skill", { query }),
-  saveSkill: (name: string, body: string, previous: string | null, overwrite: boolean) =>
+  saveSkill: (
+    name: string,
+    body: string,
+    previous: string | null,
+    overwrite: string | null,
+  ) =>
     invoke<SavedSkill>("save_skill", { name, body, previous, overwrite }),
   removeSkill: (name: string) => invoke<void>("remove_skill", { name }),
   saveUpload: (name: string, data: string) =>

@@ -1,5 +1,6 @@
 use std::fs;
-use std::path::PathBuf;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
 
 use crate::paths;
 
@@ -15,27 +16,43 @@ pub fn dir() -> PathBuf {
 
 pub fn list() -> Vec<Skill> {
     let dir = dir();
-    let mut out = Vec::new();
-    let entries = match fs::read_dir(&dir) {
-        Ok(e) => e,
-        Err(_) => return out,
-    };
-    for ent in entries.flatten() {
-        let path = ent.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("md") {
-            continue;
-        }
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        let body = fs::read_to_string(&path).unwrap_or_default();
-        out.push(Skill {
-            name: stem.to_string(),
-            body,
-        });
-    }
+    let mut out: Vec<Skill> = stems(&dir)
+        .into_iter()
+        .map(|name| {
+            let body = fs::read_to_string(dir.join(format!("{name}.md"))).unwrap_or_default();
+            Skill { name, body }
+        })
+        .collect();
     out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     out
+}
+
+/// The skill names in `dir`: the stems of its .md files, as stored.
+fn stems(dir: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("md"))
+        .filter_map(|p| p.file_stem()?.to_str().map(str::to_string))
+        .collect()
+}
+
+/// Skill names match without case, like the macOS disk.
+fn same_name(a: &str, b: &str) -> bool {
+    a.to_lowercase() == b.to_lowercase()
+}
+
+/// Whether two paths are one file. The macOS disk also folds Unicode form,
+/// so a Korean name typed precomposed lands on a decomposed file of the same
+/// name, which a string compare would miss.
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (fs::metadata(a), fs::metadata(b)) {
+        (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+        _ => false,
+    }
 }
 
 /// Match `/name` or a prefix against skill file stems. Exact stem wins,
@@ -50,7 +67,7 @@ pub fn lookup_in(query: &str, skills: &[Skill]) -> Option<Skill> {
         return None;
     }
     let lower = q.to_lowercase();
-    if let Some(hit) = skills.iter().find(|s| s.name.eq_ignore_ascii_case(q)) {
+    if let Some(hit) = skills.iter().find(|s| same_name(&s.name, q)) {
         return Some(hit.clone());
     }
     let prefixed: Vec<_> = skills
@@ -82,36 +99,42 @@ pub enum Saved {
     Exists { name: String },
 }
 
-/// Save `body` as `name`. `previous` is the skill being edited, so a rename
-/// moves its file. Names match without case, like `lookup` and the macOS
-/// disk, and another skill under `name` is only replaced with `overwrite`.
+/// Save `body` as `name`. `previous` is the stem of the skill being edited,
+/// so a rename moves its file. Another skill the save would land on is only
+/// replaced when `overwrite` names it: the one the user was asked about.
 pub fn save(
     name: &str,
     body: &str,
     previous: Option<&str>,
-    overwrite: bool,
+    overwrite: Option<&str>,
 ) -> anyhow::Result<Saved> {
     let name = sanitize_name(name);
     if name.is_empty() {
         anyhow::bail!("skill name is empty");
     }
-    let same = |other: &str| other.to_lowercase() == name.to_lowercase();
-    let previous = previous.map(sanitize_name).filter(|p| !p.is_empty());
     let dir = dir();
     fs::create_dir_all(&dir)?;
-    let clash = list()
-        .into_iter()
-        .find(|s| same(&s.name) && previous.as_deref().is_none_or(|p| !same(p)));
+    let file = |stem: &str| dir.join(format!("{stem}.md"));
+    let path = file(&name);
+    let stems = stems(&dir);
+    // As stored, so a file named outside the app still renames; and only an
+    // existing stem, so it cannot point outside the folder.
+    let previous = previous.filter(|p| stems.iter().any(|s| s == p));
+    let clash = stems.iter().find(|s| {
+        Some(s.as_str()) != previous && (same_name(s, &name) || same_file(&file(s), &path))
+    });
     if let Some(other) = clash {
-        if !overwrite {
-            return Ok(Saved::Exists { name: other.name });
+        if overwrite != Some(other.as_str()) {
+            return Ok(Saved::Exists {
+                name: other.clone(),
+            });
         }
-        fs::remove_file(dir.join(format!("{}.md", other.name)))?;
+        // Move it under the new name first. The rename or write below then
+        // replaces it in one step, and a failure before that leaves it whole.
+        fs::rename(file(other), &path)?;
     }
-    let path = dir.join(format!("{name}.md"));
     if let Some(prev) = previous.filter(|p| *p != name) {
-        // Missing is fine: the body is written below either way.
-        let _ = fs::rename(dir.join(format!("{prev}.md")), &path);
+        fs::rename(file(prev), &path)?;
     }
     fs::write(&path, body)?;
     Ok(Saved::Saved {
@@ -175,7 +198,7 @@ mod tests {
     }
 
     fn save(name: &str, body: &str) -> anyhow::Result<Skill> {
-        match super::save(name, body, None, false)? {
+        match super::save(name, body, None, None)? {
             Saved::Saved { skill } => Ok(skill),
             Saved::Exists { name } => anyhow::bail!("{name} exists"),
         }
@@ -193,18 +216,49 @@ mod tests {
             let ask = Saved::Exists {
                 name: "report".into(),
             };
-            assert_eq!(super::save("Report", "new", None, false).unwrap(), ask);
+            assert_eq!(super::save("Report", "new", None, None).unwrap(), ask);
             assert_eq!(
-                super::save("report", "x", Some("draft"), false).unwrap(),
+                super::save("report", "x", Some("draft"), None).unwrap(),
                 ask,
                 "renaming another skill onto it asks too"
+            );
+            assert_eq!(
+                super::save("report", "x", Some("draft"), Some("other")).unwrap(),
+                ask,
+                "an answer about another skill is no answer"
             );
             assert_eq!(lookup("report").unwrap().body, "old", "nothing written");
             assert_eq!(names(), ["draft", "report"]);
 
-            super::save("report", "draft body", Some("draft"), true).expect("overwrite");
+            super::save("report", "draft body", Some("draft"), Some("report")).expect("overwrite");
             assert_eq!(names(), ["report"], "the rename replaced it");
             assert_eq!(lookup("report").unwrap().body, "draft body");
+        });
+    }
+
+    #[test]
+    fn a_rename_moves_a_file_named_outside_the_app() {
+        crate::paths::testing::with_home("skills-raw", || {
+            fs::create_dir_all(dir()).unwrap();
+            fs::write(dir().join("my skill.md"), "raw").unwrap();
+            super::save("tidy", "raw 2", Some("my skill"), None).expect("rename");
+            assert_eq!(names(), ["tidy"]);
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_decomposed_korean_name_still_asks() {
+        crate::paths::testing::with_home("skills-nfd", || {
+            // 보고, decomposed into jamo the way Finder can store it.
+            let nfd = "\u{1107}\u{1169}\u{1100}\u{1169}";
+            fs::create_dir_all(dir()).unwrap();
+            fs::write(dir().join(format!("{nfd}.md")), "old").unwrap();
+            assert_eq!(
+                super::save("보고", "new", None, None).unwrap(),
+                Saved::Exists { name: nfd.into() }
+            );
+            assert_eq!(fs::read_to_string(dir().join("보고.md")).unwrap(), "old");
         });
     }
 
@@ -212,7 +266,7 @@ mod tests {
     fn a_case_only_rename_keeps_the_skill() {
         crate::paths::testing::with_home("skills-case", || {
             save("Foo", "body").expect("save");
-            let saved = super::save("foo", "body 2", Some("Foo"), false).expect("rename");
+            let saved = super::save("foo", "body 2", Some("Foo"), None).expect("rename");
             assert!(
                 matches!(saved, Saved::Saved { .. }),
                 "its own name is no clash"

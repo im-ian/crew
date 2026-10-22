@@ -23,7 +23,8 @@ export function SkillsPane({ open, onClose }: Props) {
   // What the user tried to leave to while edits were unsaved; the same
   // press again goes through and drops them.
   const [leaving, setLeaving] = useState<string | null>(null);
-  // Another skill already has the typed name; the next save overwrites it.
+  // Another skill already has the typed name; the next save overwrites that
+  // one, and only that one.
   const [clash, setClash] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const saved = skills.find((s) => s.name === editing);
@@ -87,8 +88,9 @@ export function SkillsPane({ open, onClose }: Props) {
     setBusy(true);
     setError("");
     try {
-      const res = await api.saveSkill(n, body, editing, clash !== null);
+      const res = await api.saveSkill(n, body, editing, clash);
       if (res.kind === "exists") {
+        setLeaving(null);
         setClash(res.name);
         return;
       }
