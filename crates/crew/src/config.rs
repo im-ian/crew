@@ -642,6 +642,15 @@ impl AgentConfig {
     }
 
     pub fn spawn_cmd_with(&self, fresh_session: bool, roster: &[AgentConfig]) -> Vec<String> {
+        self.argv_with_memory(fresh_session, roster, &crate::memory::read(&self.id))
+    }
+
+    fn argv_with_memory(
+        &self,
+        fresh_session: bool,
+        roster: &[AgentConfig],
+        memory: &str,
+    ) -> Vec<String> {
         let mut args = self.cmd.clone();
         if args.is_empty() {
             return args;
@@ -651,7 +660,7 @@ impl AgentConfig {
             strip_resume_flags(&program, &mut args);
         }
         inject_model_effort(&program, &mut args, self.model.as_deref(), self.effort);
-        inject_system_prefix(&program, &mut args, self, roster);
+        inject_system_prefix(&program, &mut args, self, roster, memory);
         args
     }
 
@@ -663,14 +672,16 @@ impl AgentConfig {
 
     /// argv for one headless turn. Always strips stored resume flags, then
     /// attaches this turn's session (`--resume` / `--session-id` / `exec resume`)
-    /// plus the real print/json flags for that CLI.
+    /// plus the real print/json flags for that CLI. `memory` is what goes in the
+    /// system prompt; the caller picks it so a resumed session keeps its own.
     pub fn turn_cmd(
         &self,
         prompt: &str,
         session: Option<&TurnSession>,
         roster: &[AgentConfig],
+        memory: &str,
     ) -> Vec<String> {
-        let mut args = self.spawn_cmd_with(true, roster);
+        let mut args = self.argv_with_memory(true, roster, memory);
         match self.binary_name().as_str() {
             "grok" => apply_grok_turn(&mut args, prompt, session),
             "claude" => apply_claude_turn(&mut args, prompt, session),
@@ -811,7 +822,7 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         "To ask the human user in this chat to pick, actually run `crew ask --question \"어느 쪽을 고를래?\" --option A --option B --option C`. To ask them to type a value, run `crew ask --question \"로그인\" --input 아이디 --input 비밀번호`. Crew shows a card and prints their answer. Never send this to a teammate. Do not crew tell the options. Do not ask the user to type the letter. This is not a substitute for `crew tell`, `crew agent set`, or `crew routine add`.\n",
     );
     s.push_str(&format!(
-        "Your memory survives chat resets. It is under `{MEMORY_HEADING}` at the end of these instructions (absent while empty) and may be out of date; `crew memory show` prints the current one. It is your only memory: keep notes there, not in other memory files or tools. Keep it yourself: when you learn something later chats need (the user's name, preferences, a decision) or the user asks you to remember it, actually run `crew memory append <<'EOF'` with one short line, then `EOF`. To correct or forget something, run `crew memory show`, then `crew memory set <<'EOF'` with the whole new memory; it replaces everything. Always pass the text in a quoted heredoc like this, so the shell leaves `$` and backticks alone. A schedule is a routine, not a memory. Do not save what is already there, one-off chatter, or passwords, tokens and other secrets. Do not only claim you remembered.\n",
+        "Your memory survives chat resets. It is under `{MEMORY_HEADING}` at the end of these instructions (absent while empty); if it changes between turns, a `[crew system]` note gives you the new one, and `crew memory show` prints it now. It is your only memory: keep notes there, not in other memory files or tools. Keep it yourself: when you learn something later chats need (the user's name, preferences, a decision) or the user asks you to remember it, actually run `crew memory append <<'EOF'` with one short line, then `EOF`. To correct or forget something, run `crew memory show`, then `crew memory set <<'EOF'` with the whole new memory; it replaces everything. Always pass the text in a quoted heredoc like this, so the shell leaves `$` and backticks alone. A schedule is a routine, not a memory. Do not save what is already there, one-off chatter, or passwords, tokens and other secrets. Do not only claim you remembered.\n",
     ));
     s
 }
@@ -928,9 +939,10 @@ fn inject_system_prefix(
     args: &mut Vec<String>,
     agent: &AgentConfig,
     roster: &[AgentConfig],
+    memory: &str,
 ) {
     inject_team_rules(program, args, agent, roster);
-    inject_memory(program, args, &agent.id);
+    inject_memory(program, args, memory);
 }
 
 fn inject_team_rules(
@@ -1027,9 +1039,8 @@ fn apply_session_flags(
     args.push(session.id.clone());
 }
 
-fn inject_memory(program: &str, args: &mut Vec<String>, agent_id: &str) {
-    let text = crate::memory::read(agent_id);
-    let text = text.trim();
+fn inject_memory(program: &str, args: &mut Vec<String>, memory: &str) {
+    let text = memory.trim();
     if text.is_empty() {
         return;
     }
@@ -1318,7 +1329,7 @@ mod tests {
             Some("grok-4"),
             Some(Effort::High),
         );
-        let argv = c.turn_cmd("hello", None, &[]);
+        let argv = c.turn_cmd("hello", None, &[], "");
         assert_eq!(argv[0], "grok");
         assert!(argv.contains(&"--always-approve".to_string()));
         assert!(argv.contains(&"--output-format".to_string()));
@@ -1330,7 +1341,7 @@ mod tests {
             id: "11111111-2222-4333-8444-555555555555".into(),
             resume: true,
         };
-        let argv = c.turn_cmd("hi", Some(&resume), &[]);
+        let argv = c.turn_cmd("hi", Some(&resume), &[], "");
         assert!(argv.contains(&"--resume".to_string()));
         assert!(argv.contains(&resume.id));
         assert!(!argv.contains(&"--session-id".to_string()));
@@ -1338,7 +1349,7 @@ mod tests {
             id: resume.id.clone(),
             resume: false,
         };
-        let argv = c.turn_cmd("hi", Some(&fresh), &[]);
+        let argv = c.turn_cmd("hi", Some(&fresh), &[], "");
         assert!(argv.contains(&"--session-id".to_string()));
         assert!(!argv.contains(&"--resume".to_string()));
     }
@@ -1346,7 +1357,7 @@ mod tests {
     #[test]
     fn claude_turn_uses_print_and_stream_json() {
         let c = cfg(&["claude", "--dangerously-skip-permissions"], None, None);
-        let argv = c.turn_cmd("hello", None, &[]);
+        let argv = c.turn_cmd("hello", None, &[], "");
         assert!(argv.contains(&"-p".to_string()));
         assert!(argv.contains(&"--output-format".to_string()));
         assert!(argv.contains(&"stream-json".to_string()));
@@ -1357,7 +1368,7 @@ mod tests {
             id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee".into(),
             resume: true,
         };
-        let argv = c.turn_cmd("next", Some(&resume), &[]);
+        let argv = c.turn_cmd("next", Some(&resume), &[], "");
         assert!(argv.contains(&"--resume".to_string()));
         assert_eq!(argv.last().map(|s| s.as_str()), Some("next"));
     }
@@ -1365,7 +1376,7 @@ mod tests {
     #[test]
     fn codex_turn_inserts_exec_json_and_resume() {
         let c = cfg(&["codex", "--yolo"], None, None);
-        let argv = c.turn_cmd("hello", None, &[]);
+        let argv = c.turn_cmd("hello", None, &[], "");
         assert_eq!(argv[0], "codex");
         assert_eq!(argv[1], "exec");
         assert!(argv.contains(&"--yolo".to_string()));
@@ -1375,7 +1386,7 @@ mod tests {
             id: "0199a213-81c0-7800-8aa1-bbab2a035a53".into(),
             resume: true,
         };
-        let argv = c.turn_cmd("again", Some(&resume), &[]);
+        let argv = c.turn_cmd("again", Some(&resume), &[], "");
         assert_eq!(argv[1], "exec");
         assert_eq!(argv[2], "resume");
         assert_eq!(argv[3], resume.id);
@@ -1816,7 +1827,7 @@ mod tests {
         assert!(rules.contains("crew memory append <<'EOF'"));
         assert!(rules.contains("run `crew memory show`, then `crew memory set <<'EOF'`"));
         assert!(rules.contains("`# Your memory`"));
-        assert!(rules.contains("may be out of date"));
+        assert!(rules.contains("if it changes between turns, a `[crew system]` note"));
         assert!(rules.contains("your only memory"));
         assert!(rules.contains("A schedule is a routine, not a memory"));
         assert!(rules.contains("secrets"));
