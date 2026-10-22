@@ -204,8 +204,6 @@ function nodeToReact(
   if (tag === "A") {
     const href = el.getAttribute("href") || "";
     const title = el.getAttribute("title") || undefined;
-    // A `#section` link has nowhere to go in a chat.
-    if (href.startsWith("#")) return <span key={key}>{kids}</span>;
     if (isLocalHref(href, baseDir)) {
       return (
         <a
@@ -222,10 +220,19 @@ function nodeToReact(
         </a>
       );
     }
+    // Only the web and mail open outside the app. `#section`, a relative path
+    // with no folder to resolve it, or an unknown scheme has nowhere to go.
+    if (!/^(https?|mailto):/i.test(href)) {
+      return (
+        <span key={key} title={title}>
+          {kids}
+        </span>
+      );
+    }
     return (
       <a
         key={key}
-        href={href || undefined}
+        href={href}
         title={title}
         target="_blank"
         rel="noopener noreferrer"
@@ -249,7 +256,7 @@ function nodeToReact(
       key,
       className: cls || undefined,
       // A list that picks up after a code block keeps counting.
-      start: tag === "OL" ? Number(el.getAttribute("start")) || undefined : undefined,
+      start: tag === "OL" && el.hasAttribute("start") ? Number(el.getAttribute("start")) : undefined,
       style: el.style.textAlign ? { textAlign: el.style.textAlign } : undefined,
     },
     ...kids,
