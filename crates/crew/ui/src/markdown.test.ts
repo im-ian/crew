@@ -26,6 +26,7 @@ describe("renderMarkdown", () => {
     expect(renderMarkdown("`social_accounts`에서 `signup_type`, `a*b*c`")).toBe(
       "<p><code>social_accounts</code>에서 <code>signup_type</code>, <code>a*b*c</code></p>",
     );
+    expect(renderMarkdown("`a` %%CODE0%%")).toBe("<p><code>a</code> %%CODE0%%</p>");
   });
 
   it("builds headings and both list kinds", () => {
