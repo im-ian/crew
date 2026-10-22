@@ -1,41 +1,36 @@
-/** A fenced block is the answer to the line above it, so they share a balloon. */
-function fenceFollows(text: string, i: number): boolean {
-  let j = i;
-  while (text[j] === "\n") j += 1;
-  return text.startsWith("```", j);
-}
+const FENCE_OPEN = /^ {0,3}(`{3,})/;
+const FENCE_CLOSE = /^ {0,3}(`{3,})\s*$/;
 
 /** Split one assistant turn into chat balloons, one per paragraph. */
 export function splitBubbles(text: string): string[] {
-  if (!text) return [];
   const parts: string[] = [];
-  let start = 0;
-  let i = 0;
-  let fence = false;
+  let lines: string[] = [];
+  let fence = "";
+  let gap = false;
 
-  const flush = (end: number) => {
-    const piece = text.slice(start, end).trim();
+  const flush = () => {
+    const piece = lines.join("\n").trim();
     if (piece) parts.push(piece);
+    lines = [];
   };
 
-  while (i < text.length) {
-    if (text.startsWith("```", i)) {
-      fence = !fence;
-      i += 3;
-      continue;
+  for (const line of text.split("\n")) {
+    if (fence) {
+      // Only a bare run at least as long as the opener closes it, so a
+      // ```` block can show a ``` one.
+      const close = FENCE_CLOSE.exec(line);
+      if (close && close[1].length >= fence.length) fence = "";
+    } else if (!line.trim()) {
+      gap = true;
+    } else {
+      const open = FENCE_OPEN.exec(line);
+      // A fenced block is the answer to the line above it, so they share a balloon.
+      if (gap && !open) flush();
+      gap = false;
+      if (open) fence = open[1];
     }
-    if (!fence && text[i] === "\n" && text[i + 1] === "\n") {
-      if (fenceFollows(text, i)) {
-        i += 1;
-        continue;
-      }
-      flush(i);
-      while (text[i] === "\n") i += 1;
-      start = i;
-      continue;
-    }
-    i += 1;
+    lines.push(line);
   }
-  flush(text.length);
+  flush();
   return parts;
 }

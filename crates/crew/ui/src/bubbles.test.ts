@@ -12,6 +12,15 @@ describe("splitBubbles", () => {
     expect(splitBubbles("first\n\n\n\nsecond")).toEqual(["first", "second"]);
     // A stray marker used to hold every later blank line shut.
     expect(splitBubbles("`a\n\nb")).toEqual(["`a", "b"]);
+    expect(splitBubbles("wrap it in ``` fences.\n\nnext")).toEqual([
+      "wrap it in ``` fences.",
+      "next",
+    ]);
+  });
+
+  it("takes a line of only spaces, or a CRLF break, as blank", () => {
+    expect(splitBubbles("first\n  \nsecond")).toEqual(["first", "second"]);
+    expect(splitBubbles("first\r\n\r\nsecond")).toEqual(["first", "second"]);
   });
 
   it("keeps a single line whole", () => {
@@ -58,6 +67,8 @@ describe("splitBubbles", () => {
   it("never splits inside a fenced block", () => {
     const text = "이거 봐.\n\n```rust\nfn a() {}\n\nfn b() {}\n```";
     expect(splitBubbles(text)).toEqual([text]);
+    const nested = "````md\n```js\nx\n\n```\n````";
+    expect(splitBubbles(nested + "\n\n끝")).toEqual([nested, "끝"]);
   });
 
   it("keeps a command and its output in one balloon", () => {
