@@ -807,7 +807,7 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         }
     }
     s.push_str(
-        "When the user writes @id or @display-name, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, so after `crew tell`, end your turn. Do not wait, sleep, or check for the reply.\n",
+        "A teammate is written `@<id>`, and Crew shows it as their name. To name a teammate in your reply, write `@<id>` too; that only shows their name and sends nothing. When the user writes one, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, so after `crew tell`, end your turn. Do not wait, sleep, or check for the reply.\n",
     );
     s.push_str(
         "To change your display name, actually run `crew agent set --name \"New Name\"` (id defaults to CREW_AGENT_ID). Do not only claim you renamed yourself.\n",
@@ -853,11 +853,11 @@ pub fn roster_update_text(agent: &AgentConfig, roster: &[AgentConfig]) -> String
         body.push_str(&parts.join("; "));
         body.push('.');
     }
-    body.push_str(" When the user writes @id or @display-name they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>`. Do not ask the user to switch chats. Do not pretend.");
+    body.push_str(" A teammate is written `@<id>`, and Crew shows it as their name; write them that way in your reply too. When the user writes one they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>`. Do not ask the user to switch chats. Do not pretend.");
     body
 }
 
-/// `@id` / `@display-name` tokens in `text` that name a teammate (not `self_id`).
+/// `@id` tokens in `text` that name a teammate (not `self_id`).
 pub fn mentioned_teammate_ids(text: &str, self_id: &str, roster: &[AgentConfig]) -> Vec<String> {
     let mut found = Vec::new();
     let mut seen = HashSet::new();
@@ -886,19 +886,25 @@ pub fn with_mention_hint(text: &str, self_id: &str, roster: &[AgentConfig]) -> S
     format!("{text}\n\n[crew system]\n{note}")
 }
 
+/// A handle is `@` and an id. Ids are ASCII (`valid_agent_id`), so one ends at
+/// the first other character, as long as that ends the word too: a Korean
+/// particle (`@bot-x에게`) or closing punctuation (`@bot-x,`) does, the `.ai`
+/// in `@claude.ai` does not. Names are for the screen only; the composer
+/// turns them into ids. `handleAt` in the UI reads a handle the same way.
 pub(crate) fn mention_tokens(text: &str) -> Vec<String> {
-    sigil_tokens(text, '@')
-}
-
-fn sigil_tokens(text: &str, sigil: char) -> Vec<String> {
     let mut out = Vec::new();
     let mut prev_ws = true;
     for (idx, ch) in text.char_indices() {
-        if ch == sigil && prev_ws {
-            let rest = &text[idx + ch.len_utf8()..];
-            let raw: String = rest.chars().take_while(|c| !c.is_whitespace()).collect();
-            let token = raw.trim_end_matches(is_mention_punct);
-            if !token.is_empty() {
+        if ch == '@' && prev_ws {
+            let raw = text[idx + 1..].split(char::is_whitespace).next().unwrap_or("");
+            let end = raw
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+                .unwrap_or(raw.len());
+            let (token, rest) = raw.split_at(end);
+            let ends = rest.is_empty()
+                || !rest.starts_with(|c: char| c.is_ascii())
+                || rest.chars().all(is_mention_punct);
+            if !token.is_empty() && ends {
                 out.push(token.to_string());
             }
         }
@@ -919,16 +925,9 @@ pub(crate) fn resolve_mention(
     self_id: &str,
     roster: &[AgentConfig],
 ) -> Option<String> {
-    let lower = token.to_lowercase();
     roster
         .iter()
-        .find(|a| {
-            a.id != self_id
-                && (a.id == token
-                    || a.name == token
-                    || a.id.to_lowercase() == lower
-                    || a.display_name().to_lowercase() == lower)
-        })
+        .find(|a| a.id != self_id && a.id.eq_ignore_ascii_case(token))
         .map(|a| a.id.clone())
 }
 
@@ -1499,7 +1498,7 @@ mod tests {
         assert!(rules.contains("beta — Beta — reviewer"));
         assert!(!rules.contains("alpha — Alpha"));
         assert!(rules.contains("crew tell"));
-        assert!(rules.contains("@id"));
+        assert!(rules.contains("@<id>"));
     }
 
     #[test]
@@ -1756,7 +1755,7 @@ mod tests {
         assert!(text.contains("beta — Beta — reviewer"));
         assert!(!text.contains("alpha — Alpha"));
         assert!(text.contains("crew tell"));
-        assert!(text.contains("@id"));
+        assert!(text.contains("@<id>"));
         let solo = roster_update_text(&alpha, &[alpha.clone()]);
         assert!(solo.contains("Teammates: (none)"));
     }
@@ -1768,13 +1767,28 @@ mod tests {
         let beta = AgentConfig::new("beta".into(), "Beta".into(), vec!["cat".into()], None);
         let roster = [alpha.clone(), choon, beta];
 
+        // An id ends where a Korean particle starts.
         assert_eq!(
-            mentioned_teammate_ids("@춘식이 안녕", "alpha", &roster),
+            mentioned_teammate_ids("@choonsik에게 안녕", "alpha", &roster),
             vec!["choonsik"]
         );
         assert_eq!(
-            mentioned_teammate_ids("ask @beta, then @춘식이.", "alpha", &roster),
+            mentioned_teammate_ids("ask @beta, then @choonsik.", "alpha", &roster),
             vec!["beta", "choonsik"]
+        );
+        // A name is for the screen; the composer sends it as an id.
+        assert_eq!(
+            mentioned_teammate_ids("@춘식이 안녕", "alpha", &roster),
+            Vec::<String>::new()
+        );
+        // An id has to end the word, so a domain or a path names no one.
+        assert_eq!(
+            mentioned_teammate_ids("see @beta.com and @beta/cli, @beta's", "alpha", &roster),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            mentioned_teammate_ids("@beta: hi", "alpha", &roster),
+            vec!["beta"]
         );
         assert_eq!(
             mentioned_teammate_ids("hello @nobody and @alpha", "alpha", &roster),
@@ -1802,7 +1816,7 @@ mod tests {
         let alpha = AgentConfig::new("alpha".into(), "Alpha".into(), vec!["cat".into()], None);
         let beta = AgentConfig::new("beta".into(), "Beta".into(), vec!["cat".into()], None);
         let rules = team_rules(&alpha, &[alpha.clone(), beta]);
-        assert!(rules.contains("@id"));
+        assert!(rules.contains("@<id>"));
         assert!(rules.contains("naming a teammate for YOU"));
         assert!(rules.contains("crew tell"));
         assert!(rules.contains("Do not ask the user to switch chats"));

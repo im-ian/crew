@@ -24,17 +24,23 @@ export function mentionLabel(agent: AgentInfo): string {
   return agent.name || agent.id;
 }
 
+function resolveId(token: string, agents: readonly AgentInfo[]): AgentInfo | undefined {
+  const lower = token.toLowerCase();
+  return agents.find((a) => a.id.toLowerCase() === lower);
+}
+
+/**
+ * An id wins over a name that spells it, across the whole roster, so the
+ * `@id` a picked chip sends stays the bot it was picked as.
+ */
 export function resolveMention(
   token: string,
   agents: readonly AgentInfo[],
 ): AgentInfo | undefined {
   const lower = token.toLowerCase();
-  return agents.find(
-    (a) =>
-      a.id === token ||
-      a.name === token ||
-      a.id.toLowerCase() === lower ||
-      mentionLabel(a).toLowerCase() === lower,
+  return (
+    resolveId(token, agents) ??
+    agents.find((a) => a.name === token || mentionLabel(a).toLowerCase() === lower)
   );
 }
 
@@ -49,12 +55,39 @@ function attr(s: string): string {
     .replace(/</g, "&lt;");
 }
 
+/**
+ * What the composer sends: a handle typed by name and never picked from the
+ * menu (pasted, or the menu dismissed) goes out as `@id`, the only form the
+ * rest of Crew reads.
+ */
+export function mentionIds(text: string, agents: readonly AgentInfo[]): string {
+  // Code is left as written, as the chips leave it. Odd parts are the code.
+  return text
+    .split(/(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`)/)
+    .map((part, i) =>
+      i % 2
+        ? part
+        : part.replace(/(^|\s)@(\S+)/g, (all, pre: string, raw: string) => {
+            const token = trimMentionPunct(raw);
+            const agent = token ? resolveMention(token, agents) : undefined;
+            return agent ? pre + "@" + agent.id + raw.slice(token.length) : all;
+          }),
+    )
+    .join("");
+}
+
 export type MentionRun = { text: string; mention: boolean };
 
 /**
  * The one place that decides where a handle starts and ends. `injectMentionChips`
  * and `mentionRuns` both scan for the same thing and would drift apart as two
  * copies; only what they build from a hit differs.
+ *
+ * A handle is `@` and an id; names are for the screen, and the composer sends
+ * them as ids (`mentionIds`). Ids are ASCII, so one ends at the first other
+ * character, as long as that ends the word too: a Korean particle
+ * (`@bot-x에게`) or closing punctuation (`@bot-x,`) does, the `.ai` in
+ * `@claude.ai` does not. `mention_tokens` in the daemon reads it the same way.
  *
  * Returns the resolved label and how many characters of `text` it consumed.
  */
@@ -65,9 +98,11 @@ export function handleAt(
 ): { sigil: string; id: string; label: string; length: number } | undefined {
   if (text[i] !== "@") return undefined;
   const raw = (text.slice(i + 1).match(/^[^\s<]+/) || [""])[0];
-  const token = trimMentionPunct(raw);
-  if (!token) return undefined;
-  const agent = resolveMention(token, agents);
+  const token = (raw.match(/^[A-Za-z0-9_-]+/) || [""])[0];
+  const rest = raw.slice(token.length);
+  const ends = !rest || /^[^\x00-\x7f]/.test(rest) || !trimMentionPunct(rest);
+  if (!token || !ends) return undefined;
+  const agent = resolveId(token, agents);
   if (!agent) return undefined;
   return {
     sigil: "@",
