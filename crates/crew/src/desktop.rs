@@ -606,6 +606,38 @@ fn open_path(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// The webview drops `target=_blank`. Hand a web or mail link to `open`.
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    let raw = web_url(&url)?;
+    std::process::Command::new("open")
+        .arg(raw)
+        .status()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// One argument for `open`. A space, a control character, or any other scheme stays out.
+fn web_url(url: &str) -> Result<&str, String> {
+    let raw = url.trim();
+    if raw.is_empty() || raw.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("url is not a web link".into());
+    }
+    let lower = raw.to_ascii_lowercase();
+    let prefix = ["https://", "http://", "mailto:"]
+        .into_iter()
+        .find(|prefix| lower.starts_with(prefix));
+    let Some(prefix) = prefix else {
+        return Err("url is not a web link".into());
+    };
+    let rest = &raw[prefix.len()..];
+    // `https://` and `mailto:` name nothing. `http:///etc` is not a host.
+    if rest.is_empty() || rest.starts_with('/') {
+        return Err("url is not a web link".into());
+    }
+    Ok(raw)
+}
+
 #[tauri::command]
 fn save_upload(name: String, data: String) -> Result<String, String> {
     let bytes = crate::avatar::decode_input(&data).map_err(|e| e.to_string())?;
@@ -706,6 +738,7 @@ pub fn run() -> anyhow::Result<()> {
             peek_pending_focus,
             take_pending_focus,
             open_path,
+            open_url,
             set_dock_badge,
             set_locale,
             set_notifications
@@ -735,5 +768,37 @@ mod tests {
             ping_failure("cannot connect to daemon at /x/crew.sock".into()),
             "cannot connect to daemon at /x/crew.sock"
         );
+    }
+
+    #[test]
+    fn a_web_or_mail_link_is_one_open_argument() {
+        assert_eq!(
+            web_url("https://example.com/a?b=1#c").unwrap(),
+            "https://example.com/a?b=1#c"
+        );
+        assert_eq!(web_url("  HTTP://Example.com  ").unwrap(), "HTTP://Example.com");
+        assert_eq!(
+            web_url("mailto:a@b.co?subject=hi").unwrap(),
+            "mailto:a@b.co?subject=hi"
+        );
+    }
+
+    #[test]
+    fn anything_but_a_web_link_stays_closed() {
+        for bad in [
+            "",
+            "   ",
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "https://example.com extra",
+            "https://example.com\nopen",
+            "https://",
+            "http:///",
+            "mailto:",
+            "/tmp/x",
+            "notes.md",
+        ] {
+            assert!(web_url(bad).is_err(), "{bad}");
+        }
     }
 }

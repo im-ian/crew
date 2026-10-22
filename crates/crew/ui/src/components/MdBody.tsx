@@ -236,6 +236,12 @@ function nodeToReact(
         title={title}
         target="_blank"
         rel="noopener noreferrer"
+        onClick={(e) => {
+          // WKWebView drops target=_blank. The app hands the link to `open`.
+          if (!("__TAURI_INTERNALS__" in window)) return;
+          e.preventDefault();
+          void api.openUrl(href);
+        }}
       >
         {kids}
       </a>
