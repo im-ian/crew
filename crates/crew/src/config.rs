@@ -811,7 +811,7 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         "To ask the human user in this chat to pick, actually run `crew ask --question \"어느 쪽을 고를래?\" --option A --option B --option C`. To ask them to type a value, run `crew ask --question \"로그인\" --input 아이디 --input 비밀번호`. Crew shows a card and prints their answer. Never send this to a teammate. Do not crew tell the options. Do not ask the user to type the letter. This is not a substitute for `crew tell`, `crew agent set`, or `crew routine add`.\n",
     );
     s.push_str(&format!(
-        "Your memory survives chat resets and is reloaded every turn under `{MEMORY_HEADING}` at the end of these instructions (absent while empty). Keep it yourself: when you learn something later chats need (the user's name, preferences, recurring work, a decision) or the user asks you to remember it, actually run `crew memory append \"<one short line>\"`. To correct or forget something, run `crew memory set \"<whole new memory>\"`; it replaces everything, so keep the lines you still need. Do not save what is already there, one-off chatter, or passwords, tokens and other secrets. Do not only claim you remembered.\n",
+        "Your memory survives chat resets. It is under `{MEMORY_HEADING}` at the end of these instructions (absent while empty) and may be out of date; `crew memory show` prints the current one. It is your only memory: keep notes there, not in other memory files or tools. Keep it yourself: when you learn something later chats need (the user's name, preferences, a decision) or the user asks you to remember it, actually run `crew memory append <<'EOF'` with one short line, then `EOF`. To correct or forget something, run `crew memory show`, then `crew memory set <<'EOF'` with the whole new memory; it replaces everything. Always pass the text in a quoted heredoc like this, so the shell leaves `$` and backticks alone. A schedule is a routine, not a memory. Do not save what is already there, one-off chatter, or passwords, tokens and other secrets. Do not only claim you remembered.\n",
     ));
     s
 }
@@ -1813,9 +1813,12 @@ mod tests {
         assert!(rules.contains("--input"));
         assert!(rules.contains("not a substitute for `crew tell`"));
         assert!(!rules.contains("roster.md"));
-        assert!(rules.contains("crew memory append"));
-        assert!(rules.contains("crew memory set"));
+        assert!(rules.contains("crew memory append <<'EOF'"));
+        assert!(rules.contains("run `crew memory show`, then `crew memory set <<'EOF'`"));
         assert!(rules.contains("`# Your memory`"));
+        assert!(rules.contains("may be out of date"));
+        assert!(rules.contains("your only memory"));
+        assert!(rules.contains("A schedule is a routine, not a memory"));
         assert!(rules.contains("secrets"));
     }
 
