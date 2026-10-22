@@ -14,6 +14,11 @@ function lastContentChar(text: string, end: number): string {
   return j >= 0 ? text[j] : "";
 }
 
+/** A table row's cells are not sentences, and a split inside one breaks the table. */
+function inTableRow(text: string, i: number): boolean {
+  return text.slice(text.lastIndexOf("\n", i - 1) + 1, i).trimStart().startsWith("|");
+}
+
 function maybeSplitAfterMarkup(
   text: string,
   i: number,
@@ -21,7 +26,7 @@ function maybeSplitAfterMarkup(
   flush: (end: number, next: number) => void,
 ) {
   const last = text[i - markLen - 1];
-  if (!isSentenceEnd(last)) return;
+  if (!isSentenceEnd(last) || inTableRow(text, i)) return;
   const next = text[i];
   if (next && next !== " " && next !== "\n" && (isNewStart(next) || next === "*")) {
     flush(i, i);
@@ -87,7 +92,7 @@ export function splitBubbles(text: string): string[] {
     }
     // Only a sentence glued to the next with no space is two messages run
     // together; sentences in one paragraph are one thought and share a balloon.
-    if (!code && !bold && isSentenceEnd(text[i])) {
+    if (!code && !bold && isSentenceEnd(text[i]) && !inTableRow(text, i)) {
       const next = text[i + 1];
       const prev = lastContentChar(text, i);
       const afterHangul = /[가-힣]/.test(prev);
