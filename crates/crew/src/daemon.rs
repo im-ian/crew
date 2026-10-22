@@ -2362,15 +2362,16 @@ fn remove_agent(id: &str) -> anyhow::Result<()> {
     };
     configs().lock().expect("configs mutex").remove(id);
     crate::avatar::clear(id);
-    crate::memory::remove(id);
     crate::headless::clear_session(id);
     crate::headless::clear_recap(id);
     clear_inbox(id);
     clear_agent_context(id);
     session.kill();
-    // After the kill: an in-flight headless turn persists through
-    // `push_tool`, which would write the file back moments after we unlink it.
+    // After the kill: an in-flight headless turn persists through `push_tool`
+    // and may run `crew memory append`, either of which would write its file
+    // back moments after we unlink it.
     crate::transcript::drop_agent(id);
+    crate::memory::remove(id);
     save_state()?;
     inject_roster_update(None);
     Ok(())
