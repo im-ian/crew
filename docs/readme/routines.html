@@ -69,36 +69,13 @@
       font-size: 13px;
       font-weight: 650;
     }
-    .who-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      border: 0;
-      background: transparent;
-      color: var(--ink);
-      padding: 4px 8px 4px 4px;
-      border-radius: 8px;
-      font: inherit;
+    .thread {
+      -webkit-mask-image: none;
+      mask-image: none;
+      max-width: calc(100% - 420px);
     }
-    .who-name { font-weight: 600; font-size: 14px; }
-    .sheet { animation: none; overflow: hidden; }
-    .overlay { display: flex; }
-    .agent-sheet { width: 420px; }
-    textarea.textin {
-      min-height: 48px;
-      height: 48px;
-      resize: none;
-    }
-    .routine {
-      grid-template-columns: 1fr;
-      align-items: start;
-    }
-    .routine-actions {
-      flex-wrap: wrap;
-      justify-content: flex-start;
-    }
-    .pane-tabs { margin: 14px 0 14px; }
-    .form-stack { gap: 12px; }
+    .sheet { animation: none; }
+    .overlay.open { animation: none; }
   </style>
 </head>
 <body>
@@ -111,104 +88,133 @@
           <div class="search-row">
             <input class="search" placeholder="검색" value="" readonly />
             <button class="icon-btn" type="button" aria-label="추가">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 12h14" />
+                <path d="M12 5v14" />
               </svg>
             </button>
           </div>
           <div class="rail-lists">
             <div class="rail-section grouped">
               <div class="group-head">
-                <button class="group-toggle" type="button"><span class="group-chevron">▾</span></button>
+                <button class="group-toggle" type="button">
+                  <svg class="group-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </button>
                 <button class="group-name" type="button">팀</button>
               </div>
               <button class="rail-row active" type="button">
                 <span class="avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
                 <span class="rail-row-text">
-                  <span class="agent-name">Grok</span>
-                  <span class="agent-preview">반영함. 표 밑에 권한 범위 문장 하나.</span>
+                  <span class="agent-name">
+                    <span class="agent-name-label"><span class="agent-name-text">Grok</span></span>
+                    <time class="rail-stamp">오전 8:01</time>
+                  </span>
+                  <span class="agent-preview">알겠어요, 다시 켤 때까지 쉴게요.</span>
                 </span>
               </button>
               <button class="rail-row" type="button">
                 <span class="avatar has-face"><img src="face-square.svg" alt="" /></span>
                 <span class="rail-row-text">
-                  <span class="agent-name">Claude</span>
+                  <span class="agent-name">
+                    <span class="agent-name-label"><span class="agent-name-text">Claude</span></span>
+                    <time class="rail-stamp">10. 21.</time>
+                  </span>
                   <span class="agent-preview">한 단락으로 줄이자.</span>
                 </span>
               </button>
               <button class="rail-row" type="button">
                 <span class="avatar has-face"><img src="face-circle.svg" alt="" /></span>
                 <span class="rail-row-text">
-                  <span class="agent-name">Codex</span>
-                  <span class="agent-preview">예시 로스터는 agents.example.json</span>
+                  <span class="agent-name">
+                    <span class="agent-name-label"><span class="agent-name-text">Codex</span></span>
+                    <time class="rail-stamp">10. 21.</time>
+                  </span>
+                  <span class="agent-preview">테스트 세 개 더 넣었어.</span>
                 </span>
-              </button>
-              <button class="rail-row unread" type="button">
-                <span class="avatar"><span class="hash-face">#</span></span>
-                <span class="rail-row-text">
-                  <span class="agent-name">출시</span>
-                  <span class="agent-preview">오늘 README 초안 리뷰하자</span>
-                </span>
-                <span class="unread-dot"></span>
               </button>
             </div>
           </div>
           <div class="rail-foot">
             <button class="icon-btn" type="button" title="설정" aria-label="설정">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <circle cx="8" cy="8" r="2.15" stroke="currentColor" stroke-width="1.4" />
-                <path
-                  d="M8 1.7v1.6M8 12.7v1.6M1.7 8h1.6M12.7 8h1.6M3.4 3.4l1.15 1.15M11.45 11.45l1.15 1.15M3.4 12.6l1.15-1.15M11.45 4.55l1.15-1.15"
-                  stroke="currentColor"
-                  stroke-width="1.4"
-                  stroke-linecap="round"
-                />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" />
+                <circle cx="12" cy="12" r="3" />
               </svg>
             </button>
           </div>
         </aside>
         <main>
           <div class="titlebar-align"></div>
+          <div class="update-banner-slot"></div>
+          <div class="conn-banner-slot"></div>
           <header>
             <div class="head-identity">
-              <button class="who-btn" type="button">
+              <button class="who-btn" type="button" style="--who-color:#ff6a00">
                 <span class="avatar who-avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
                 <span class="who-name">Grok</span>
               </button>
+              <span class="head-run" title="Grok · grok-4 · 생각 기본">Grok · grok-4 · 생각 기본</span>
             </div>
+            <button type="button" class="head-action" title="봇 설정 ⌘⇧R" aria-label="봇 설정">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4" />
+                <path d="M12 8h.01" />
+              </svg>
+            </button>
           </header>
           <div class="thread-wrap">
-            <!-- Only the strip left of the sheet shows; keep the talk inside it. -->
-            <div class="thread" style="max-width: 440px; margin: 0">
+            <div class="thread">
+              <time class="thread-time">오전 8:01</time>
               <div class="row me">
                 <div class="me-msg">
-                  <div class="bubble">평일 8시마다 할 일 브리핑해줘</div>
+                  <div class="bubble-row">
+                    <div class="bubble md"><p>평일 8시마다 할 일 브리핑해줘</p></div>
+                  </div>
                 </div>
               </div>
-              <div class="row them">
+              <div class="row them incoming">
                 <span class="avatar msg-avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
-                <div class="bubble incoming">평일 8:00로 등록했어요. 첫 실행은 내일이에요.</div>
+                <div class="channel-msg">
+                  <div class="channel-who" style="color:#ff6a00">Grok</div>
+                  <div class="bubble-row">
+                    <div class="bubble md incoming"><p>평일 오전 8:00로 등록했어요. 첫 실행은 내일이에요.</p></div>
+                  </div>
+                </div>
               </div>
               <div class="sys-note">‘주간 리뷰’ 루틴을 껐습니다.</div>
-              <div class="row them">
+              <div class="row them incoming">
                 <span class="avatar msg-avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
-                <div class="bubble incoming">알겠어요, 다시 켤 때까지 쉴게요.</div>
+                <div class="channel-msg">
+                  <div class="channel-who" style="color:#ff6a00">Grok</div>
+                  <div class="bubble-row">
+                    <div class="bubble md incoming"><p>알겠어요, 다시 켤 때까지 쉴게요.</p></div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-          <div class="composer">
+          <form class="composer">
             <div class="composer-box">
               <div class="composer-row">
                 <button type="button" class="attach-btn" aria-label="추가">
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M5 12h14" />
+                    <path d="M12 5v14" />
                   </svg>
                 </button>
                 <div class="composer-input is-empty" data-placeholder="Grok에게 메시지 (@이름으로 부르기)"></div>
-                <button type="submit">↑</button>
+                <button type="submit" aria-label="보내기" disabled>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m5 12 7-7 7 7" />
+                    <path d="M12 19V5" />
+                  </svg>
+                </button>
               </div>
             </div>
-          </div>
+          </form>
           <div class="overlay open">
             <div class="sheet agent-sheet">
               <div class="sheet-head">

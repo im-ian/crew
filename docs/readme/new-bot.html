@@ -69,18 +69,7 @@
       font-size: 13px;
       font-weight: 650;
     }
-    .who-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      border: 0;
-      background: transparent;
-      color: var(--ink);
-      padding: 4px 8px 4px 4px;
-      border-radius: 8px;
-      font: inherit;
-    }
-    .who-name { font-weight: 600; font-size: 14px; }
+    .thread { -webkit-mask-image: none; mask-image: none; }
     .modal {
       position: absolute;
     }
@@ -99,58 +88,60 @@
           <div class="search-row">
             <input class="search" placeholder="검색" value="" readonly />
             <button class="icon-btn" type="button" aria-label="추가">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 12h14" />
+                <path d="M12 5v14" />
               </svg>
             </button>
           </div>
           <div class="rail-lists">
             <div class="rail-section grouped">
               <div class="group-head">
-                <button class="group-toggle" type="button"><span class="group-chevron">▾</span></button>
+                <button class="group-toggle" type="button">
+                  <svg class="group-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </button>
                 <button class="group-name" type="button">팀</button>
               </div>
               <button class="rail-row active" type="button">
                 <span class="avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
                 <span class="rail-row-text">
-                  <span class="agent-name">Grok</span>
-                  <span class="agent-preview">반영함. 표 밑에 권한 범위 문장 하나.</span>
+                  <span class="agent-name">
+                    <span class="agent-name-label"><span class="agent-name-text">Grok</span></span>
+                    <time class="rail-stamp">오후 2:22</time>
+                  </span>
+                  <span class="agent-preview">README 설치 섹션, clone 빌드랑 cargo install --git 둘 다 넣을까?</span>
                 </span>
               </button>
-              <button class="rail-row" type="button">
+              <button class="rail-row unread" type="button">
                 <span class="avatar has-face"><img src="face-square.svg" alt="" /></span>
                 <span class="rail-row-text">
-                  <span class="agent-name">Claude</span>
+                  <span class="agent-name">
+                    <span class="agent-name-label"><span class="agent-name-text">Claude</span></span>
+                    <time class="rail-stamp">오후 1:04</time>
+                  </span>
                   <span class="agent-preview">한 단락으로 줄이자.</span>
                 </span>
+                <span class="unread-dot"></span>
               </button>
               <button class="rail-row" type="button">
                 <span class="avatar has-face"><img src="face-circle.svg" alt="" /></span>
                 <span class="rail-row-text">
-                  <span class="agent-name">Codex</span>
-                  <span class="agent-preview">예시 로스터는 agents.example.json</span>
+                  <span class="agent-name">
+                    <span class="agent-name-label"><span class="agent-name-text">Codex</span></span>
+                    <time class="rail-stamp">10. 21.</time>
+                  </span>
+                  <span class="agent-preview">테스트 세 개 더 넣었어.</span>
                 </span>
-              </button>
-              <button class="rail-row unread" type="button">
-                <span class="avatar"><span class="hash-face">#</span></span>
-                <span class="rail-row-text">
-                  <span class="agent-name">출시</span>
-                  <span class="agent-preview">오늘 README 초안 리뷰하자</span>
-                </span>
-                <span class="unread-dot"></span>
               </button>
             </div>
           </div>
           <div class="rail-foot">
             <button class="icon-btn" type="button" title="설정" aria-label="설정">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <circle cx="8" cy="8" r="2.15" stroke="currentColor" stroke-width="1.4" />
-                <path
-                  d="M8 1.7v1.6M8 12.7v1.6M1.7 8h1.6M12.7 8h1.6M3.4 3.4l1.15 1.15M11.45 11.45l1.15 1.15M3.4 12.6l1.15-1.15M11.45 4.55l1.15-1.15"
-                  stroke="currentColor"
-                  stroke-width="1.4"
-                  stroke-linecap="round"
-                />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" />
+                <circle cx="12" cy="12" r="3" />
               </svg>
             </button>
           </div>
@@ -161,38 +152,50 @@
           <div class="conn-banner-slot"></div>
           <header>
             <div class="head-identity">
-              <button class="who-btn" type="button">
+              <button class="who-btn" type="button" style="--who-color:#ff6a00">
                 <span class="avatar who-avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
                 <span class="who-name">Grok</span>
               </button>
+              <span class="head-run" title="Grok · grok-4 · 생각 기본">Grok · grok-4 · 생각 기본</span>
             </div>
+            <button type="button" class="head-action" title="봇 설정 ⌘⇧R" aria-label="봇 설정">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4" />
+                <path d="M12 8h.01" />
+              </svg>
+            </button>
           </header>
           <div class="thread-wrap">
             <div class="thread">
               <div class="row me">
                 <div class="me-msg">
-                  <div class="bubble">README 설치 섹션, clone 빌드랑 cargo install --git 둘 다 넣을까?</div>
+                  <div class="bubble-row">
+                    <div class="bubble md"><p>README 설치 섹션, clone 빌드랑 cargo install --git 둘 다 넣을까?</p></div>
+                  </div>
                 </div>
-              </div>
-              <div class="row them">
-                <span class="avatar msg-avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
-                <div class="bubble incoming">둘 다 적어. clone은 고치기 쉽고, <code>cargo install --git</code>은 PATH에 바로 올라가.</div>
               </div>
             </div>
           </div>
-          <div class="composer">
+          <form class="composer">
             <div class="composer-box">
               <div class="composer-row">
                 <button type="button" class="attach-btn" aria-label="추가">
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M5 12h14" />
+                    <path d="M12 5v14" />
                   </svg>
                 </button>
                 <div class="composer-input is-empty" data-placeholder="Grok에게 메시지 (@이름으로 부르기)"></div>
-                <button type="submit">↑</button>
+                <button type="submit" aria-label="보내기" disabled>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m5 12 7-7 7 7" />
+                    <path d="M12 19V5" />
+                  </svg>
+                </button>
               </div>
             </div>
-          </div>
+          </form>
         </main>
       </div>
       <div class="modal open">

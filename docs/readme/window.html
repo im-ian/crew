@@ -58,57 +58,8 @@
       height: 100%;
       display: block;
     }
-    .hash-face {
-      width: 100%;
-      height: 100%;
-      border-radius: 50%;
-      background: #3a3a3c;
-      color: #f0f0f0;
-      display: grid;
-      place-items: center;
-      font-size: 13px;
-      font-weight: 650;
-    }
-    .who-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      border: 0;
-      background: transparent;
-      color: var(--ink);
-      padding: 4px 8px 4px 4px;
-      border-radius: 8px;
-      font: inherit;
-    }
-    .who-name { font-weight: 600; font-size: 14px; }
-    .xfer {
-      display: flex;
-      justify-content: flex-start;
-      padding: 4px 0;
-    }
-    .xfer-chip {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      background: var(--active);
-      border-radius: 999px;
-      padding: 4px 10px 4px 4px;
-      font-size: 13px;
-      color: var(--muted);
-    }
-    .mention-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 999px;
-      padding: 1px 8px 1px 3px;
-      font-weight: 600;
-      font-size: 13px;
-    }
-    .row.me .mention-chip { background: rgba(0, 0, 0, 0.18); }
-    .mention-chip .avatar { width: 16px; height: 16px; }
-    .plus-menu { animation: none; }
+    .thread { -webkit-mask-image: none; mask-image: none; }
+    .plus-menu, .peek-room { animation: none; }
   </style>
 </head>
 <body>
@@ -121,143 +72,221 @@
           <div class="search-row">
             <input class="search" placeholder="검색" value="" readonly />
             <button class="icon-btn" type="button" aria-label="추가">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 12h14" />
+                <path d="M12 5v14" />
               </svg>
             </button>
           </div>
           <div class="rail-lists">
             <div class="rail-section grouped">
               <div class="group-head">
-                <button class="group-toggle" type="button"><span class="group-chevron">▾</span></button>
+                <button class="group-toggle" type="button">
+                  <svg class="group-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </button>
                 <button class="group-name" type="button">팀</button>
               </div>
               <button class="rail-row active" type="button">
                 <span class="avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
                 <span class="rail-row-text">
-                  <span class="agent-name">Grok</span>
+                  <span class="agent-name">
+                    <span class="agent-name-label"><span class="agent-name-text">Grok</span></span>
+                    <time class="rail-stamp">오후 2:22</time>
+                  </span>
                   <span class="agent-preview">반영함. 표 밑에 권한 범위 문장 하나.</span>
                 </span>
               </button>
-              <button class="rail-row" type="button">
+              <button class="rail-row unread" type="button">
                 <span class="avatar has-face"><img src="face-square.svg" alt="" /></span>
                 <span class="rail-row-text">
-                  <span class="agent-name">Claude</span>
+                  <span class="agent-name">
+                    <span class="agent-name-label"><span class="agent-name-text">Claude</span></span>
+                    <time class="rail-stamp">오후 1:04</time>
+                  </span>
                   <span class="agent-preview">한 단락으로 줄이자.</span>
                 </span>
+                <span class="unread-dot"></span>
               </button>
               <button class="rail-row" type="button">
                 <span class="avatar has-face"><img src="face-circle.svg" alt="" /></span>
                 <span class="rail-row-text">
-                  <span class="agent-name">Codex</span>
-                  <span class="agent-preview">예시 로스터는 agents.example.json</span>
+                  <span class="agent-name">
+                    <span class="agent-name-label"><span class="agent-name-text">Codex</span></span>
+                    <time class="rail-stamp">10. 21.</time>
+                  </span>
+                  <span class="agent-preview">테스트 세 개 더 넣었어.</span>
                 </span>
-              </button>
-              <button class="rail-row unread" type="button">
-                <span class="avatar"><span class="hash-face">#</span></span>
-                <span class="rail-row-text">
-                  <span class="agent-name">출시</span>
-                  <span class="agent-preview">오늘 README 초안 리뷰하자</span>
-                </span>
-                <span class="unread-dot"></span>
               </button>
             </div>
           </div>
           <div class="rail-foot">
             <button class="icon-btn" type="button" title="설정" aria-label="설정">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <circle cx="8" cy="8" r="2.15" stroke="currentColor" stroke-width="1.4" />
-                <path
-                  d="M8 1.7v1.6M8 12.7v1.6M1.7 8h1.6M12.7 8h1.6M3.4 3.4l1.15 1.15M11.45 11.45l1.15 1.15M3.4 12.6l1.15-1.15M11.45 4.55l1.15-1.15"
-                  stroke="currentColor"
-                  stroke-width="1.4"
-                  stroke-linecap="round"
-                />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" />
+                <circle cx="12" cy="12" r="3" />
               </svg>
             </button>
           </div>
         </aside>
-        <main>
+        <main class="has-peek">
           <div class="titlebar-align"></div>
+          <div class="update-banner-slot"></div>
+          <div class="conn-banner-slot"></div>
           <header>
             <div class="head-identity">
-              <button class="who-btn" type="button">
+              <button class="who-btn" type="button" style="--who-color:#ff6a00">
                 <span class="avatar who-avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
                 <span class="who-name">Grok</span>
               </button>
+              <span class="head-run" title="Grok · grok-4 · 생각 기본">Grok · grok-4 · 생각 기본</span>
             </div>
+            <button type="button" class="head-action" title="봇 설정 ⌘⇧R" aria-label="봇 설정">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4" />
+                <path d="M12 8h.01" />
+              </svg>
+            </button>
           </header>
           <div class="thread-wrap">
             <div class="thread">
+              <time class="thread-time">오후 2:18</time>
               <div class="row me">
                 <div class="me-msg">
-                  <div class="bubble">README 설치 섹션, clone 빌드랑 cargo install --git 둘 다 넣을까?</div>
-                </div>
-              </div>
-              <div class="row them">
-                <span class="avatar msg-avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
-                <div class="bubble incoming">둘 다 적어. clone은 고치기 쉽고, <code>cargo install --git</code>은 PATH에 바로 올라가.</div>
-              </div>
-              <div class="row me">
-                <div class="me-msg">
-                  <div class="bubble">
-                    <span class="mention-chip">
-                      <span class="avatar has-face"><img src="face-square.svg" alt="" /></span>
-                      Claude
-                    </span>
-                    권한 플래그 문구만 봐줘
+                  <div class="bubble-row">
+                    <div class="bubble md"><p>README 설치 섹션, clone 빌드랑 cargo install --git 둘 다 넣을까?</p></div>
                   </div>
                 </div>
               </div>
-              <div class="row them">
+              <div class="row them incoming">
                 <span class="avatar msg-avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
-                <div class="bubble incoming">리뷰 넘겼어. <code>--always-approve</code> / <code>--dangerously-skip-permissions</code> / <code>--yolo</code>가 뭘 건너뛰는지 한 단락으로 쓰라고 했어.</div>
+                <div class="channel-msg">
+                  <div class="channel-who" style="color:#ff6a00">Grok</div>
+                  <div class="bubble-row">
+                    <div class="bubble md incoming"><p>둘 다 적어. clone은 고치기 쉽고, <code>cargo install --git</code>은 PATH에 바로 올라가.</p></div>
+                  </div>
+                </div>
+              </div>
+              <div class="tool-run">
+                <button type="button" class="tool-run-head" aria-expanded="false">
+                  <svg class="note-caret" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                  도구 2개
+                  <span aria-hidden="true">·</span>
+                  <span class="tool-run-names">read_file · edit_file</span>
+                </button>
+              </div>
+              <div class="row me">
+                <div class="me-msg">
+                  <div class="bubble-row">
+                    <div class="bubble md"><p><button type="button" class="mention-chip"><span class="avatar mention-chip-avatar has-face"><img src="face-square.svg" alt="" /></span><span class="mention-chip-name">Claude</span></button> 권한 플래그 문구만 봐줘</p></div>
+                  </div>
+                </div>
+              </div>
+              <div class="row them incoming">
+                <span class="avatar msg-avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
+                <div class="channel-msg">
+                  <div class="channel-who" style="color:#ff6a00">Grok</div>
+                  <div class="bubble-row">
+                    <div class="bubble md incoming"><p>리뷰 넘겼어. <code>--always-approve</code> / <code>--dangerously-skip-permissions</code> / <code>--yolo</code>가 뭘 건너뛰는지 한 단락으로 쓰라고 했어.</p></div>
+                  </div>
+                </div>
               </div>
               <div class="xfer">
                 <div class="xfer-chip">
-                  <span class="avatar has-face" style="width:22px;height:22px"><img src="face-square.svg" alt="" /></span>
-                  <span class="xfer-label">받은 메시지</span>
-                  <span>한 단락으로 줄이자. 플래그 표는 그대로 두고, 그 아래 경고 문장 하나만.</span>
+                  <button type="button" class="xfer-label is-toggle is-peeking" aria-expanded="true">
+                    <svg class="note-caret" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                    핸드오프
+                  </button>
+                  <button type="button" class="who-btn" style="--who-color:#9b7dff">
+                    <span class="avatar who-avatar has-face"><img src="face-square.svg" alt="" /></span>
+                    <span class="who-name">Claude</span>
+                  </button>
                 </div>
               </div>
-              <div class="row them">
+              <div class="row them incoming">
                 <span class="avatar msg-avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
-                <div class="bubble incoming">반영함. 표 밑에 권한 범위 문장 하나. 채널에도 올려둘게.</div>
+                <div class="channel-msg">
+                  <div class="channel-who" style="color:#ff6a00">Grok</div>
+                  <div class="bubble-row">
+                    <div class="bubble md incoming"><p>반영함. 표 밑에 권한 범위 문장 하나.</p></div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-          <div class="composer">
-            <div class="composer-box">
-              <div class="composer-row">
-                <div class="plus-wrap">
-                  <div class="plus-menu" role="menu">
-                    <button type="button" role="menuitem">
-                      <span class="plus-menu-icon" aria-hidden="true">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                          <path d="M10.2 4.4L5.15 9.45a2.15 2.15 0 103.04 3.04l5.2-5.2a3.4 3.4 0 10-4.81-4.81L3.4 7.66" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
-                        </svg>
-                      </span>
-                      파일 첨부
-                    </button>
-                    <button type="button" role="menuitem">
-                      <span class="plus-menu-icon is-teach" aria-hidden="true">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                          <circle cx="8" cy="8" r="5.4" stroke="currentColor" stroke-width="1.5" />
-                          <circle cx="8" cy="8" r="2.2" fill="currentColor" />
-                        </svg>
-                      </span>
-                      작업 가르치기
+          <form class="composer">
+              <div class="composer-box">
+                <div class="composer-row">
+                  <div class="plus-wrap">
+                    <button type="button" class="attach-btn" aria-label="추가" aria-expanded="false">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M5 12h14" />
+                        <path d="M12 5v14" />
+                      </svg>
                     </button>
                   </div>
-                  <button type="button" class="attach-btn is-open" aria-label="추가" aria-expanded="true">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                      <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                  <div class="composer-input is-empty" data-placeholder="Grok에게 메시지 (@이름으로 부르기)"></div>
+                  <button type="submit" aria-label="보내기" disabled>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="m5 12 7-7 7 7" />
+                      <path d="M12 19V5" />
                     </svg>
                   </button>
                 </div>
-                <div class="composer-input is-empty" data-placeholder="Grok에게 메시지 (@이름으로 부르기)"></div>
-                <button type="submit">↑</button>
               </div>
+          </form>
+          <div class="peek-room" role="complementary" aria-labelledby="peek-title">
+            <div class="titlebar-align"></div>
+            <header class="peek-head">
+              <h2 id="peek-title" class="sr-only">Grok · Claude</h2>
+              <div class="peek-pair">
+                <div class="who-btn is-static" style="--who-color:#ff6a00">
+                  <span class="avatar who-avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
+                  <span class="who-name">Grok</span>
+                </div>
+                <span class="peek-swap" aria-hidden="true">↔</span>
+                <div class="who-btn is-static" style="--who-color:#9b7dff">
+                  <span class="avatar who-avatar has-face"><img src="face-square.svg" alt="" /></span>
+                  <span class="who-name">Claude</span>
+                </div>
+              </div>
+              <button type="button" class="head-action" title="채팅 닫기" aria-label="채팅 닫기">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+              </button>
+            </header>
+            <div class="thread peek-thread">
+              <div class="row them incoming">
+                <span class="avatar msg-avatar has-face"><img src="face-teardrop.svg" alt="" /></span>
+                <div class="channel-msg">
+                  <div class="channel-who" style="color:#ff6a00">Grok</div>
+                  <div class="bubble md incoming"><p>권한 플래그 문구만 봐줘. <code>--always-approve</code> / <code>--dangerously-skip-permissions</code> / <code>--yolo</code>가 뭘 건너뛰는지 한 단락으로.</p></div>
+                </div>
+              </div>
+              <div class="row them incoming">
+                <span class="avatar msg-avatar has-face"><img src="face-square.svg" alt="" /></span>
+                <div class="channel-msg">
+                  <div class="channel-who" style="color:#9b7dff">Claude</div>
+                  <div class="bubble md incoming"><p>한 단락으로 줄이자. 플래그 표는 그대로 두고, 그 아래 경고 문장 하나만.</p></div>
+                </div>
+              </div>
+            </div>
+            <div class="peek-foot">
+              <p class="peek-note">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+                <span>이 채팅은 보기 전용이에요</span>
+              </p>
             </div>
           </div>
         </main>
