@@ -142,6 +142,14 @@ function nodeToReact(
       </div>
     );
   }
+  if (tag === "TABLE") {
+    // The wrapper scrolls; a table restyled to scroll itself stops reading as a table.
+    return (
+      <div key={key} className="md-table">
+        <table>{kids}</table>
+      </div>
+    );
+  }
   if (tag === "IMG") {
     const raw = el.getAttribute("src") || "";
     return (
