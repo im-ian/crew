@@ -3325,21 +3325,46 @@ textarea.textin {
   outline: 2px solid color-mix(in srgb, var(--working) 55%, transparent);
   outline-offset: 2px;
 }
-.skill-list {
+.dialog.skills-dialog {
+  width: min(780px, calc(100% - 40px));
+}
+.skill-split {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  gap: var(--space-20);
+  height: min(500px, 70vh);
+  margin-top: var(--space-16);
+}
+.skill-side,
+.skill-detail {
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
-  max-height: 190px;
+  gap: var(--space-10);
+  min-height: 0;
+}
+.skill-detail {
+  gap: var(--space-14);
+}
+.skill-list {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
 }
 .skill-row {
-  display: grid;
-  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
-  gap: var(--space-10);
-  align-items: baseline;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
   width: 100%;
   padding: var(--space-8) var(--space-10);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--ink);
@@ -3348,22 +3373,68 @@ textarea.textin {
   cursor: pointer;
 }
 .skill-row:hover { background: var(--hover); }
-.skill-row.is-open { border-color: var(--field-focus); background: var(--hover); }
-.skill-name {
-  font-size: 13.5px;
-  font-weight: 600;
-  white-space: nowrap;
-}
+.skill-row.is-open { background: var(--active); }
+.skill-name,
 .skill-peek {
   min-width: 0;
-  color: var(--muted);
-  font-size: var(--text-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.skill-name {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.skill-peek {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.skill-empty {
+  margin: auto;
+  padding: var(--space-12);
+  color: var(--muted);
+  font-size: var(--text-md);
+  text-align: center;
+}
+.skill-new {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+/* The name is what you type after a slash, so the field shows that slash. */
+.skill-slug {
+  position: relative;
+}
+.skill-slug::before {
+  content: "/";
+  position: absolute;
+  left: var(--space-12);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: var(--text-lg);
+  pointer-events: none;
+}
+.skill-slug .textin {
+  padding-left: calc(var(--space-12) + 0.75em);
+}
+/* The body takes whatever height the name, note, and buttons leave. */
+.skill-detail .field-block:has(.skill-body) {
+  flex: 1;
+  min-height: 0;
+}
 textarea.textin.skill-body {
-  min-height: 150px;
+  flex: 1;
+  min-height: 120px;
+  resize: none;
+}
+@media (max-width: 640px) {
+  .skill-split {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .skill-list { max-height: 180px; }
+  textarea.textin.skill-body { min-height: 180px; }
 }
 .apply-note.is-error {
   color: var(--blocked);

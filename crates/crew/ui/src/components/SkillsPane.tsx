@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useT } from "../LocaleContext";
 import { api } from "../api";
+import { Plus } from "../icons";
 import type { Skill } from "../types";
 import { Field } from "./Field";
 import { Modal } from "./Modal";
@@ -19,6 +20,9 @@ export function SkillsPane({ open, onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [armed, setArmed] = useState(false);
   const [error, setError] = useState("");
+  const nameRef = useRef<HTMLInputElement>(null);
+  const saved = skills.find((s) => s.name === editing);
+  const dirty = !saved || name.trim() !== saved.name || body !== saved.body;
 
   useEffect(() => {
     if (!open) return;
@@ -47,6 +51,7 @@ export function SkillsPane({ open, onClose }: Props) {
     setBody("");
     setArmed(false);
     setError("");
+    nameRef.current?.focus();
   }
 
   async function save() {
@@ -89,13 +94,24 @@ export function SkillsPane({ open, onClose }: Props) {
   }
 
   return (
-    <Modal open={open} title={t("skills.title")} onClose={onClose}>
-      <div className="form-stack">
-        <div className="pane-block">
-          <div className="pane-label">{t("skills.list")}</div>
+    <Modal
+      open={open}
+      title={t("skills.title")}
+      onClose={onClose}
+      className="skills-dialog"
+    >
+      <div className="skill-split">
+        <div className="skill-side">
+          <div className="field-head">
+            <div className="pane-label">{t("skills.list")}</div>
+            <button type="button" className="field-action skill-new" onClick={startNew}>
+              <Plus size={13} />
+              {t("skills.new")}
+            </button>
+          </div>
           <div className="skill-list">
             {!skills.length ? (
-              <div className="empty-routines">{t("skills.empty")}</div>
+              <div className="skill-empty">{t("skills.empty")}</div>
             ) : (
               skills.map((s) => (
                 <button
@@ -111,17 +127,21 @@ export function SkillsPane({ open, onClose }: Props) {
             )}
           </div>
         </div>
-        <div className="pane-block">
+        <div className="skill-detail">
           <div className="pane-label">{editing ? t("common.edit") : t("skills.new")}</div>
           <Field label={t("field.name")} htmlFor="skill-name">
-            <input
-              id="skill-name"
-              className="textin"
-              autoComplete="off"
-              placeholder={t("skills.namePh")}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
+            <div className="skill-slug">
+              <input
+                id="skill-name"
+                ref={nameRef}
+                className="textin"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={t("skills.namePh")}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
           </Field>
           <Field label={t("skills.body")} htmlFor="skill-body">
             <textarea
@@ -134,25 +154,25 @@ export function SkillsPane({ open, onClose }: Props) {
           </Field>
           {error ? <p className="apply-note is-error">{error}</p> : null}
           <p className="apply-note">{t("skills.note")}</p>
-          <div className="actions">
+          <div className={"actions" + (editing ? " spread" : "")}>
+            {editing ? (
+              <button
+                type="button"
+                className="danger"
+                disabled={busy}
+                onClick={() => void remove()}
+              >
+                {armed ? t("skills.deleteAgain") : t("common.delete")}
+              </button>
+            ) : null}
             <button
               type="button"
               className="primary"
-              disabled={busy || !name.trim() || !body.trim()}
+              disabled={busy || !dirty || !name.trim() || !body.trim()}
               onClick={() => void save()}
             >
               {t("common.save")}
             </button>
-            {editing ? (
-              <button type="button" disabled={busy} onClick={() => void remove()}>
-                {armed ? t("skills.deleteAgain") : t("common.delete")}
-              </button>
-            ) : null}
-            {editing ? (
-              <button type="button" onClick={startNew}>
-                {t("skills.new")}
-              </button>
-            ) : null}
           </div>
         </div>
       </div>
