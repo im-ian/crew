@@ -936,11 +936,13 @@ button.avatar {
   user-select: none;
 }
 /* A handle inside a preview: the thread's chip, shrunk to the 12.5px line
-   so the row keeps its height. */
+   so the row keeps its height. An ink tint, not `--chip`: the light rail's
+   hover grey is the chip's own, and the pill would vanish under the cursor. */
 .agent-preview .mention-chip {
   height: 15px;
   gap: 3px;
   padding: 0 var(--space-6) 0 var(--space-2);
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
 }
 .agent-preview .mention-chip-avatar {
   width: 11px;

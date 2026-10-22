@@ -898,11 +898,8 @@ function ItemRow({
         {item.preview ? (
           <div className="agent-preview">
             {previewRuns.map((run, i) =>
-              run.id ? (
-                <MentionChip
-                  key={i}
-                  agent={agents.find((a) => a.id === run.id)}
-                />
+              run.agent ? (
+                <MentionChip key={i} agent={run.agent} />
               ) : (
                 <span key={i}>{run.text}</span>
               ),
