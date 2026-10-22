@@ -92,13 +92,14 @@ export function peekMessages(
     const ref = noteRef(m, roster(agentIds));
     if (ref) {
       if (ref.otherId !== peerId || !agentIds.has(peerId)) continue;
+      const row = asSpeech(m, ref.kind === "sent" ? selfId : peerId);
+      if (!row) continue;
       // A tell back from the turn the peer asked for is the answer: the daemon
       // drops that turn's reply for it, so the peer never heard the reply.
       if (ref.kind === "sent" && m.peer === peerId) {
         while (out.length && replies.has(out[out.length - 1].id)) out.pop();
       }
-      const row = asSpeech(m, ref.kind === "sent" ? selfId : peerId);
-      if (row) out.push(row);
+      out.push(row);
       continue;
     }
     // The rest of a turn the peer asked for: this bot's reply, and the user's

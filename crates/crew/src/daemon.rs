@@ -968,23 +968,6 @@ fn tells_after(anchor: &str, to: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// `anchor` ran `crew tell to` in the turn in progress. That tell drops the
-/// turn's reply to `to` on arrival. A teammate the user named does not.
-fn tells_back(anchor: &str, to: &str) -> bool {
-    serial_board()
-        .lock()
-        .ok()
-        .and_then(|board| {
-            board.queues.get(anchor).map(|q| {
-                q.iter().any(|j| {
-                    let SerialKind::Tell { from, .. } = &j.kind;
-                    j.to == to && from == anchor
-                })
-            })
-        })
-        .unwrap_or(false)
-}
-
 fn defer_tell(anchor: &str, to: &str, from: &str, text: &str, origin: Option<TurnOrigin>) {
     let epoch = serial_epoch(anchor);
     let _ = defer_tell_if_epoch(anchor, epoch, to, from, text, origin);
@@ -2122,8 +2105,10 @@ fn tell_agent_origin(
         }
     }
     let from = from_id(from);
-    if from != "user" && from != to {
-        take_handoff_from(to, &from);
+    if from != "user" && from != to && take_handoff_from(to, &from).is_some() {
+        // `to` hears this instead of the reply that was waiting for it. Left
+        // in its chat, that reply showed one answer twice.
+        crate::transcript::drop_handoff(to, &from);
     }
     ensure_accepts_turn(to)?;
     // Hold this tell until the sender is idle so it does not overlap that turn.
@@ -2738,13 +2723,7 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
     };
     let targets = targeting::postback_targets(&origin, agent);
     if let Some(peer) = targets.agent {
-        // Its own tell back is the answer the peer gets. A handoff row as well
-        // showed the peer one answer twice.
-        if known_agent(&peer)
-            && !text.is_empty()
-            && msg.choice.is_none()
-            && !tells_back(agent, &peer)
-        {
+        if known_agent(&peer) && !text.is_empty() && msg.choice.is_none() {
             crate::transcript::push_handoff(&peer, agent, &text);
             enqueue_handoff(&peer, agent, &text);
         }
@@ -3050,19 +3029,16 @@ mod daemon_tests {
     }
 
     /// 가위바위보의 신 answered 클로드 "**바위.**" and also ran `crew tell` back
-    /// with "바위.". 클로드's chat showed the throw twice.
+    /// with "바위.". 클로드 heard the tell alone, and its chat showed both.
     #[test]
-    fn a_reply_with_a_tell_back_leaves_no_handoff() {
+    fn a_tell_back_takes_the_place_of_the_reply() {
         paths::testing::with_home("tell-back", || {
-            let peer = test_id("asker");
-            let speaker = format!("rival-{peer}");
-            configs().lock().unwrap().insert(
-                peer.clone(),
-                AgentConfig::new(peer.clone(), peer.clone(), vec!["cat".into()], None),
-            );
-            crate::transcript::load_agent(&peer);
-            set_origin(&speaker, TurnOrigin::mention_tell(&peer));
-            defer_tell(&speaker, &peer, &speaker, "바위.", None);
+            let asker = test_id("asker");
+            let speaker = format!("rival-{asker}");
+            claude_bot(&asker);
+            // Busy, so the tell waits in the inbox instead of starting a CLI.
+            headless_status(&asker, AgentStatus::Working);
+            set_origin(&speaker, TurnOrigin::mention_tell(&asker));
             let reply = ChatMessage {
                 id: "r1".into(),
                 role: Role::Assistant,
@@ -3076,13 +3052,27 @@ mod daemon_tests {
                 choice: None,
             };
             on_assistant_sealed(&speaker, &reply);
-            assert!(crate::transcript::messages(&peer).is_empty());
-            assert!(take_handoffs(&peer).is_empty());
+            let handoffs = || {
+                crate::transcript::messages(&asker)
+                    .iter()
+                    .filter(|m| m.kind == Some(crate::protocol::MessageKind::Handoff))
+                    .count()
+            };
+            // Until the tell lands the reply is the answer: a stop can still
+            // drop the tell.
+            assert_eq!(handoffs(), 1);
 
-            clear_serial_after(&speaker);
+            tell_agent_origin(&speaker, &asker, "바위.", None, false, &mut VecDeque::new())
+                .unwrap();
+            assert_eq!(handoffs(), 0);
+            let last = crate::transcript::messages(&asker).pop().expect("the tell");
+            assert_eq!(last.text, "바위.");
+            assert!(take_handoffs(&asker).is_empty());
+
             take_origin(&speaker);
-            crate::transcript::drop_agent(&peer);
-            configs().lock().unwrap().remove(&peer);
+            clear_inbox(&asker);
+            headless_status(&asker, AgentStatus::Idle);
+            remove_agent(&asker).unwrap();
         });
     }
 

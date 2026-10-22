@@ -159,6 +159,26 @@ describe("peekMessages", () => {
     ]);
   });
 
+  it("keeps the reply when the tell back says nothing", () => {
+    const rows = peekMessages(
+      [
+        msg("system", "alpha", "가위", { kind: "received", peer: "alpha" }),
+        msg("assistant", "beta", "바위", { peer: "alpha" }),
+        msg("system", "to:alpha", "[crew from:beta]", {
+          kind: "sent",
+          peer: "alpha",
+        }),
+      ],
+      "alpha",
+      "beta",
+      AGENTS,
+    );
+    expect(rows.map((m) => [m.from, m.text])).toEqual([
+      ["alpha", "가위"],
+      ["beta", "바위"],
+    ]);
+  });
+
   it("keeps a reply to another peer out", () => {
     const rows = peekMessages(
       [msg("assistant", "beta", "for gamma", { peer: "gamma" })],
