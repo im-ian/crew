@@ -180,21 +180,35 @@ pub fn set_peer(agent: &str, peer: Option<String>) -> Option<String> {
 
 pub fn preview(agent: &str) -> Option<String> {
     let msgs = messages(agent);
-    // The newest, as in `last_ts`.
-    let last = msgs.iter().max_by_key(|m| m.ts)?;
-    let mut t: String = crate::rows::display_text(last)
+    // Newest sentence. A tool call is newer while it runs, and its text is the
+    // arguments (`{ "command": ... }`), which was showing in the channel list.
+    // A row that still has nothing to quote is skipped, so the sentence before
+    // it stays up.
+    msgs.iter()
+        .filter_map(|m| preview_line(m).map(|line| (m.ts, line)))
+        .max_by_key(|(ts, _)| *ts)
+        .map(|(_, line)| line)
+}
+
+/// What the channel list can quote from one row. Tool arguments and a bare
+/// JSON dump are not a sentence. A question on that row still is.
+fn preview_line(msg: &ChatMessage) -> Option<String> {
+    if msg.kind == Some(MessageKind::Tool) && msg.choice.is_none() && msg.approval.is_none() {
+        return None;
+    }
+    let mut t: String = crate::rows::display_text(msg)
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
-    if t.is_empty() {
-        t = last
+    if t.is_empty() || (msg.role != Role::User && is_raw_payload(&t)) {
+        t = msg
             .choice
             .as_ref()
             .and_then(|c| c.questions.first())
             .map(|q| q.question.clone())
             .unwrap_or_default();
     }
-    if t.is_empty() {
+    if t.is_empty() || (msg.role != Role::User && is_raw_payload(&t)) {
         return None;
     }
     let clipped: String = t.chars().take(48).collect();
@@ -203,6 +217,17 @@ pub fn preview(agent: &str) -> Option<String> {
     } else {
         Some(clipped)
     }
+}
+
+fn is_raw_payload(text: &str) -> bool {
+    let t = text.trim();
+    if !(t.starts_with('{') || t.starts_with('[')) {
+        return false;
+    }
+    matches!(
+        serde_json::from_str::<serde_json::Value>(t),
+        Ok(serde_json::Value::Object(_)) | Ok(serde_json::Value::Array(_))
+    )
 }
 
 /// Characters of chat a CLI that joins mid-conversation reads before its first turn.
@@ -1628,6 +1653,82 @@ mod tests {
             assert!(last_ts(&agent) > note.ts, "the unread dot missed it");
             assert_eq!(preview(&agent).as_deref(), Some("working on it, done"));
             drop_agent(&agent);
+        });
+    }
+
+    /// The channel list quotes the last sentence. A command's arguments are
+    /// newer while the call runs, and used to show up as `{ "command": ...`.
+    #[test]
+    fn a_tool_call_stays_out_of_the_channel_preview() {
+        crate::paths::testing::with_home("preview-tool", || {
+            let n = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let agent = format!("preview-tool-{n}");
+            push_user(&agent, "user", "이 버그 고쳐줘");
+            begin_turn(&agent);
+            on_assistant_delta(&agent, "고쳐 보겠습니다.");
+            std::thread::sleep(Duration::from_millis(5));
+            push_tool(
+                &agent,
+                Some("call-1"),
+                "run_terminal_command",
+                "{\n  \"command\": \"cargo test -p crew\"\n}",
+            );
+            assert_eq!(preview(&agent).as_deref(), Some("고쳐 보겠습니다."));
+
+            let only = format!("preview-only-{n}");
+            push_user(&only, "user", "확인해줘");
+            std::thread::sleep(Duration::from_millis(5));
+            begin_turn(&only);
+            push_tool(
+                &only,
+                Some("call-2"),
+                "run_terminal_command",
+                "{\n  \"command\": \"ls\"\n}",
+            );
+            assert_eq!(preview(&only).as_deref(), Some("확인해줘"));
+
+            let dumped = format!("preview-dump-{n}");
+            push_user(&dumped, "user", "상태 알려줘");
+            std::thread::sleep(Duration::from_millis(5));
+            begin_turn(&dumped);
+            on_assistant_delta(&dumped, "{\n  \"command\": \"echo hi\"\n}");
+            assert_eq!(preview(&dumped).as_deref(), Some("상태 알려줘"));
+
+            let ask = format!("preview-ask-{n}");
+            push_user(&ask, "user", "골라");
+            std::thread::sleep(Duration::from_millis(5));
+            begin_turn(&ask);
+            push_tool(
+                &ask,
+                Some("call-q"),
+                "AskUserQuestion",
+                r#"{"questions":[{"question":"어느 쪽을 고를래?","options":[{"label":"A"},{"label":"B"}]}]}"#,
+            );
+            assert_eq!(preview(&ask).as_deref(), Some("어느 쪽을 고를래?"));
+
+            // An approval stuck on the command payload must not blank the list.
+            let gated = format!("preview-gate-{n}");
+            push_user(&gated, "user", "실행해도 될까");
+            begin_turn(&gated);
+            on_assistant_delta(&gated, "이 명령을 실행할까?");
+            std::thread::sleep(Duration::from_millis(5));
+            let tool = push_tool(
+                &gated,
+                Some("call-3"),
+                "run_terminal_command",
+                "{\n  \"command\": \"rm -rf build\"\n}",
+            );
+            set_approval(&gated, &tool.id, ApprovalState::Pending);
+            assert_eq!(preview(&gated).as_deref(), Some("이 명령을 실행할까?"));
+
+            drop_agent(&agent);
+            drop_agent(&only);
+            drop_agent(&dumped);
+            drop_agent(&ask);
+            drop_agent(&gated);
         });
     }
 
