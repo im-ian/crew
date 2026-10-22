@@ -74,10 +74,11 @@ export function PeekRoom({
 
   // The flash ring is a static style under its animation, so it has to come
   // off on the same clock the thread uses or the run stays outlined.
+  // `.peek-thread` runs `msg-flash` for 3s; drop the class just after.
   const [flashing, setFlashing] = useState(true);
   useEffect(() => {
     setFlashing(true);
-    const id = window.setTimeout(() => setFlashing(false), 1600);
+    const id = window.setTimeout(() => setFlashing(false), 3100);
     return () => window.clearTimeout(id);
   }, [peerId, focusKey]);
   const flash = new Set(flashing ? focus : []);
