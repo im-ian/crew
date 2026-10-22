@@ -30,6 +30,17 @@ describe("mentionIds", () => {
       "@gamma, @alpha 봐줘 @nobody mail@alpha",
     );
   });
+
+  it("keeps a picked chip's id over a name that spells it", () => {
+    const clash = [agent("bot-1", "codex"), agent("codex", "Codex")];
+    expect(mentionIds("@codex 봐줘", clash)).toBe("@codex 봐줘");
+  });
+
+  it("leaves code as written", () => {
+    expect(mentionIds("`@춘식이` @춘식이\n```\n@춘식이\n```\n~~~\n@춘식이", agents)).toBe(
+      "`@춘식이` @gamma\n```\n@춘식이\n```\n~~~\n@춘식이",
+    );
+  });
 });
 
 describe("trimMentionPunct", () => {
@@ -60,6 +71,15 @@ describe("injectMentionChips", () => {
   it("ends an id where a Korean particle starts", () => {
     expect(injectMentionChips("<p>@gamma에게 전했어</p>", agents)).toBe(
       '<p><span class="mention-chip" data-mention="gamma"></span>에게 전했어</p>',
+    );
+  });
+
+  it("needs the id to end the word", () => {
+    for (const html of ["<p>@alpha.ai</p>", "<p>@alpha/cli</p>", "<p>@alpha's</p>"]) {
+      expect(injectMentionChips(html, agents), html).toBe(html);
+    }
+    expect(injectMentionChips("<p>@alpha: 봐줘</p>", agents)).toContain(
+      '"alpha"></span>: 봐줘',
     );
   });
 

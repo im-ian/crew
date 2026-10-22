@@ -887,24 +887,37 @@ pub fn with_mention_hint(text: &str, self_id: &str, roster: &[AgentConfig]) -> S
 }
 
 /// A handle is `@` and an id. Ids are ASCII (`valid_agent_id`), so one ends at
-/// the first other character: `@bot-x에게` and `@bot-x,` both name `bot-x`.
-/// Names are for the screen only; the composer turns them into ids.
+/// the first other character, as long as that ends the word too: a Korean
+/// particle (`@bot-x에게`) or closing punctuation (`@bot-x,`) does, the `.ai`
+/// in `@claude.ai` does not. Names are for the screen only; the composer
+/// turns them into ids. `handleAt` in the UI reads a handle the same way.
 pub(crate) fn mention_tokens(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut prev_ws = true;
     for (idx, ch) in text.char_indices() {
         if ch == '@' && prev_ws {
-            let token: String = text[idx + 1..]
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-                .collect();
-            if !token.is_empty() {
-                out.push(token);
+            let raw = text[idx + 1..].split(char::is_whitespace).next().unwrap_or("");
+            let end = raw
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+                .unwrap_or(raw.len());
+            let (token, rest) = raw.split_at(end);
+            let ends = rest.is_empty()
+                || !rest.starts_with(|c: char| c.is_ascii())
+                || rest.chars().all(is_mention_punct);
+            if !token.is_empty() && ends {
+                out.push(token.to_string());
             }
         }
         prev_ws = ch.is_whitespace();
     }
     out
+}
+
+fn is_mention_punct(c: char) -> bool {
+    matches!(
+        c,
+        ',' | '.' | '!' | '?' | ':' | ';' | ')' | ']' | '}' | '"' | '\''
+    )
 }
 
 pub(crate) fn resolve_mention(
@@ -1767,6 +1780,15 @@ mod tests {
         assert_eq!(
             mentioned_teammate_ids("@춘식이 안녕", "alpha", &roster),
             Vec::<String>::new()
+        );
+        // An id has to end the word, so a domain or a path names no one.
+        assert_eq!(
+            mentioned_teammate_ids("see @beta.com and @beta/cli, @beta's", "alpha", &roster),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            mentioned_teammate_ids("@beta: hi", "alpha", &roster),
+            vec!["beta"]
         );
         assert_eq!(
             mentioned_teammate_ids("hello @nobody and @alpha", "alpha", &roster),
