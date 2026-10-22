@@ -122,6 +122,9 @@ export function ChatThread({
   const [away, setAway] = useState(false);
   const visible = visibleMessages(messages, showTools);
   const rows = threadRows(visible, agents);
+  // Side-chat folds alone are not a conversation with this bot: it still
+  // gets the empty state, under the folds that lead to them.
+  const talk = rows.some((row) => row.kind === "msg");
   // Keyed by row id, not by index: a filter or an inserted row would slide a
   // parallel array and stamp the wrong stretch.
   const clocks = useMemo(() => {
@@ -263,26 +266,47 @@ export function ChatThread({
   return (
     <div className="thread-wrap">
       <div className="thread" ref={ref} onScroll={syncStick}>
-        {!messages.length ? (
-          <EmptyChat agent={currentAgent} />
-        ) : (
-          rows.map((row) => {
-            const id = rowKey(row);
-            let node: ReactNode;
-            if (row.kind === "tools") {
-              node = (
-                <ToolGroup
+        {rows.map((row) => {
+          const id = rowKey(row);
+          let node: ReactNode;
+          if (row.kind === "tools") {
+            node = (
+              <ToolGroup
+                key={id}
+                items={row.msgs}
+                highlightId={highlightId}
+              />
+            );
+          } else if (row.kind === "notes") {
+            node = (
+              <NoteGroup
+                key={id}
+                peerId={row.peerId}
+                items={row.msgs}
+                agents={agents}
+                selectedKind={selectedKind}
+                onSelectAgent={openAgent}
+                onReply={onReply}
+                onJump={onJump}
+                peekFocus={peekFocus}
+                onPeek={onPeek}
+                highlightId={highlightId}
+              />
+            );
+          } else {
+            const m = row.msg;
+            // Dots sit under the reply that is arriving, from the first
+            // tokens until the turn ends.
+            const caret =
+              streaming &&
+              m.role === "assistant" &&
+              m.id === lastVisible?.id;
+            const flash = highlightId === m.id;
+            node =
+              m.role === "system" && m.from !== "user" ? (
+                <SystemOrIncoming
                   key={id}
-                  items={row.msgs}
-                  highlightId={highlightId}
-                />
-              );
-            } else if (row.kind === "notes") {
-              node = (
-                <NoteGroup
-                  key={id}
-                  peerId={row.peerId}
-                  items={row.msgs}
+                  message={m}
                   agents={agents}
                   selectedKind={selectedKind}
                   onSelectAgent={openAgent}
@@ -290,73 +314,49 @@ export function ChatThread({
                   onJump={onJump}
                   peekFocus={peekFocus}
                   onPeek={onPeek}
-                  highlightId={highlightId}
+                  flash={flash}
+                />
+              ) : (
+                <Bubble
+                  key={id}
+                  message={m}
+                  agents={agents}
+                  selected={selected}
+                  selectedKind={selectedKind}
+                  currentAgent={currentAgent}
+                  caret={caret}
+                  onSelectAgent={openAgent}
+                  onApprove={
+                    onApprove
+                      ? (allow) => onApprove(allow, m.from)
+                      : undefined
+                  }
+                  onAnswerChoice={
+                    onAnswerChoice
+                      ? (answers, values, closed) =>
+                          onAnswerChoice(m.from, m.id, answers, values, closed)
+                      : undefined
+                  }
+                  onReply={onReply}
+                  onJump={onJump}
+                  flash={flash}
                 />
               );
-            } else {
-              const m = row.msg;
-              // Dots sit under the reply that is arriving, from the first
-              // tokens until the turn ends.
-              const caret =
-                streaming &&
-                m.role === "assistant" &&
-                m.id === lastVisible?.id;
-              const flash = highlightId === m.id;
-              node =
-                m.role === "system" && m.from !== "user" ? (
-                  <SystemOrIncoming
-                    key={id}
-                    message={m}
-                    agents={agents}
-                    selectedKind={selectedKind}
-                    onSelectAgent={openAgent}
-                    onReply={onReply}
-                    onJump={onJump}
-                    peekFocus={peekFocus}
-                    onPeek={onPeek}
-                    flash={flash}
-                  />
-                ) : (
-                  <Bubble
-                    key={id}
-                    message={m}
-                    agents={agents}
-                    selected={selected}
-                    selectedKind={selectedKind}
-                    currentAgent={currentAgent}
-                    caret={caret}
-                    onSelectAgent={openAgent}
-                    onApprove={
-                      onApprove
-                        ? (allow) => onApprove(allow, m.from)
-                        : undefined
-                    }
-                    onAnswerChoice={
-                      onAnswerChoice
-                        ? (answers, values, closed) =>
-                            onAnswerChoice(m.from, m.id, answers, values, closed)
-                        : undefined
-                    }
-                    onReply={onReply}
-                    onJump={onJump}
-                    flash={flash}
-                  />
-                );
-            }
-            const time = clocks.get(id);
-            const start = arrive.get(id);
-            return (
-              <MsgSlot
-                key={id}
-                id={id}
-                start={start === undefined ? null : start}
-              >
-                {time ? <ThreadTime ts={time.ts} label={time.label} /> : null}
-                {node}
-              </MsgSlot>
-            );
-          })
-        )}
+          }
+          const time = clocks.get(id);
+          const start = arrive.get(id);
+          return (
+            <MsgSlot
+              key={id}
+              id={id}
+              start={start === undefined ? null : start}
+            >
+              {time ? <ThreadTime ts={time.ts} label={time.label} /> : null}
+              {node}
+            </MsgSlot>
+          );
+        })}
+        {talk ? null : <EmptyChat agent={currentAgent} />}
         {placeholders.map((agent) => {
           const id = "working-" + agent.id;
           const start = arrive.get(id);
