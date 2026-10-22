@@ -62,12 +62,15 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 > 사용자가 `@id`를 쓰면 그건 **너에게** 다른 봇을 가리키는 것이다. 이 세션에 남아라. 필요하면 직접 `crew tell <id> <text>`를 실행해라.
 > 이름을 바꿔 달라면 `crew agent set --name "새 이름"`을 실행해라. 반복 일을 맡기면 그 말을 cron으로 바꿔 `crew routine add`로 루틴을 만들고, 고치거나 지우라면 `crew routine edit` / `remove`를 실행해라.
 > 사람에게 고르라고 물으려면 `crew ask --question "..." --option A --option B`를 실행해라. 값을 적으라고 하려면 `--input 아이디`를 보태라. 다른 봇에게 묻지 마라.
+> 나중 대화에 필요한 걸 알게 되면 `crew memory append`로 적어라. 고치거나 잊으라면 `crew memory show`로 보고 `crew memory set`으로 다시 써라. 비밀은 적지 마라.
 
 그래서 1:1 대화에서 `@리뷰어 이 패치 봐줘`라고 쓰면, 지금 대화 중인 봇이 먼저 일을 하고 필요할 때 리뷰어 봇에게 넘겨요. 이름을 여러 개 적으면 지금 봇이 답을 끝낸 뒤에, 적힌 순서대로 한 명씩 답해요. 봇 사이의 릴레이는 사용자 메시지 하나당 최대 4홉이에요. 이름 변경과 루틴 등록은 채팅에서 시키면 봇이 같은 식으로 `crew`를 실행해요. 사람에게 A / B / C를 고르라고 묻거나 값을 적으라고 할 때도 `crew ask`로 그 봇의 채팅에 카드가 떠요.
 
 ### <img src="docs/readme/face-teardrop.png" width="28" height="28" alt=""> 메모리
 
-대화 기록은 지우면 아카이브로 옮겨가지만, `$CREW_HOME/memory/<id>.md`는 그대로 남아요. 다음 턴에 Grok은 `--rules`로, Claude는 `--append-system-prompt`로, Codex는 `-c developer_instructions=`로 다시 넣어 줘요. 봇을 복제하면 메모리도 함께 복사되고, 봇을 삭제하면 메모리 파일도 같이 지워져요.
+대화 기록은 지우면 아카이브로 옮겨가지만, `$CREW_HOME/memory/<id>.md`는 그대로 남아요. 메모리 탭에서 직접 적을 수도 있고, 봇이 대화하다 오래 남길 만한 걸 알게 되면 스스로 `crew memory append`로 적어요. 고치거나 잊을 땐 `crew memory set`으로 통째로 다시 쓰고, 비밀번호나 토큰은 적지 않아요.
+
+새 세션을 열 때 Grok은 `--rules`로, Claude는 `--append-system-prompt`로, Codex는 `-c developer_instructions=`로 메모리를 넣어 줘요. Claude와 Codex는 이어지는 턴에 처음 시스템 프롬프트를 그대로 쓰고, Grok은 시스템 프롬프트가 바뀌면 프롬프트 캐시를 잃어요. 그래서 세션 도중에 메모리가 바뀌면 시스템 프롬프트는 그대로 두고, 다음 턴 앞에 `[crew system]` 메모로 새 내용을 한 번 알려 줘요. 봇을 복제하면 메모리도 함께 복사되고, 봇을 삭제하면 메모리 파일도 같이 지워져요.
 
 ---
 
@@ -352,6 +355,7 @@ crew reset grok --drop-routines
 | `skills/<이름>.md` | `/이름` 스킬 |
 | `transcripts/<id>.jsonl` | 1:1 대화 |
 | `cli-sessions/<id>` | Grok/Claude/Codex 세션 id |
+| `cli-memory/<id>` | 그 세션이 아는 메모리 (바뀌면 알려 주려고) |
 | `archive/` | 지운 대화 |
 | `uploads/` | 첨부 파일 |
 | `crew.sock` / `crew.pid` | 데몬 |
