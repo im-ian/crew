@@ -32,9 +32,11 @@ md.core.ruler.push("command_output", (state) => {
   const t = state.tokens;
   for (let i = 3; i < t.length; i++) {
     const kids = t[i - 2].children;
+    // A tight list item hides its paragraph tag, so the command can't be marked.
     if (
       t[i].type === "fence" &&
       t[i - 3].type === "paragraph_open" &&
+      !t[i - 3].hidden &&
       t[i - 3].level === t[i].level &&
       kids?.length === 1 &&
       kids[0].type === "code_inline"
@@ -71,9 +73,10 @@ md.inline.ruler.before("html_inline", "br", (state, silent) => {
   return true;
 });
 
-// Math. `$5 and $10` is money, not a formula: the opening `$` touches its
-// formula, and the closing one touches it too and is not followed by a digit.
-const MATH_INLINE = /\$\$([^$]+?)\$\$|\$(?=\S)((?:\\.|[^\\$])*?\S)\$(?!\d)/y;
+// Math. `$5 and $10` is money and `$HOME/$USER` is shell, not a formula: the
+// opening `$` touches its formula, and the closing one touches it too and is
+// not followed by a letter or digit. A formula never runs into a code span.
+const MATH_INLINE = /\$\$([^$]+?)\$\$|\$(?=\S)((?:\\.|[^\\$`])*?[^\s`])\$(?!\w)/y;
 md.inline.ruler.after("escape", "math_inline", (state, silent) => {
   if (state.src.charCodeAt(state.pos) !== 0x24 /* $ */) return false;
   MATH_INLINE.lastIndex = state.pos;
@@ -98,10 +101,11 @@ function mathBlock(state: StateBlock, startLine: number, endLine: number, silent
   if (first.length > 4 && first.endsWith("$$")) {
     body = first.slice(2, -2);
   } else {
-    // An unclosed `$$` is text until its closing line arrives.
+    // A `$$` with no closing line before a blank one is text, so a stray one
+    // can't swallow the paragraphs after it.
     do last += 1;
-    while (last < endLine && !lineText(last).endsWith("$$"));
-    if (last >= endLine) return false;
+    while (last < endLine && !state.isEmpty(last) && !lineText(last).endsWith("$$"));
+    if (last >= endLine || state.isEmpty(last)) return false;
     body = [
       first.slice(2),
       state.getLines(startLine + 1, last, state.tShift[startLine], false),
@@ -147,16 +151,25 @@ function footnoteDef(state: StateBlock, startLine: number, endLine: number, sile
   const m = NOTE_DEF.exec(state.src);
   if (!m || state.sCount[startLine] - state.blkIndent >= 4) return false;
   if (silent) return true;
-  // Indented lines under the note continue it.
+  // Read before the checks below run this rule again and move `lastIndex`.
+  const first = state.src.slice(NOTE_DEF.lastIndex, state.eMarks[startLine]);
+  // The note runs on as a paragraph does, until a blank line or another block.
+  const terminators = state.md.block.ruler.getRules("paragraph");
+  const parentType = state.parentType;
+  state.parentType = "paragraph";
   let last = startLine + 1;
-  while (last < endLine && !state.isEmpty(last) && state.sCount[last] > state.blkIndent) last += 1;
+  for (; last < endLine && !state.isEmpty(last); last++) {
+    if (state.sCount[last] - state.blkIndent > 3) continue;
+    if (terminators.some((rule) => rule(state, last, endLine, true))) break;
+  }
+  state.parentType = parentType;
   notes(state.env).defined[m[1]] = true;
   const open = state.push("footnote_open", "p", 1);
   open.meta = { label: m[1] };
   open.map = [startLine, last];
   const inline = state.push("inline", "", 0);
   inline.content = (
-    state.src.slice(NOTE_DEF.lastIndex, state.eMarks[startLine]) +
+    first +
     "\n" +
     state.getLines(startLine + 1, last, state.blkIndent, false)
   ).trim();

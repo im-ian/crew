@@ -133,6 +133,13 @@ describe("the rest of markdown", () => {
     expect(html("정의 없는 [^x]")).toBe("<p>정의 없는 [^x]</p>");
   });
 
+  it("runs a note on to its next line, as a paragraph does", () => {
+    expect(html("본문[^1]\n\n[^1]: 첫 줄\n둘째 줄\n[^2]: 다음")).toBe(
+      '<p>본문<sup class="md-fnref">1</sup></p>' +
+        '<p class="md-footnote"><sup>1</sup> 첫 줄<br>둘째 줄</p><p class="md-footnote"><sup>2</sup> 다음</p>',
+    );
+  });
+
   it("finds a link or footnote defined in another balloon of the message", () => {
     const source = "[가이드][g]와 각주[^1]\n\n[g]: https://g.dev\n\n[^1]: 내용";
     expect(messageDefinitions("정의 없음")).toBe("");
@@ -146,6 +153,12 @@ describe("the rest of markdown", () => {
     expect(html("수식 $E = mc^2$처럼")).toMatch(/^<p>수식 <span class="md-math"><span class="katex">.*<\/span><\/span>처럼<\/p>$/);
     expect(html("$$\n\\frac{a}{b}\n$$")).toMatch(/^<div class="md-math md-math-block"><span class="katex-display">/);
     expect(html("$5 and $10, $ x$")).toBe("<p>$5 and $10, $ x$</p>");
+    expect(html("echo $HOME/$USER")).toBe("<p>echo $HOME/$USER</p>");
+    expect(html("$x `foo$`")).toBe("<p>$x <code>foo$</code></p>");
+  });
+
+  it("keeps a stray `$$` from swallowing the paragraphs after it", () => {
+    expect(html("$$ 비용\n\n다음 $$")).toBe("<p>$$ 비용</p><p>다음 $$</p>");
   });
 
   it("shows bad TeX as an error, not a crash", () => {
@@ -237,6 +250,12 @@ describe("command and output", () => {
 
   it("leaves a block that follows prose alone", () => {
     const html = renderMarkdown("결과예요.\n\n```\nhi\n```");
+    expect(html).not.toContain("md-cmd");
+    expect(html).not.toContain("md-out");
+  });
+
+  it("leaves a command in a tight list unmarked, output and all", () => {
+    const html = renderMarkdown("- `ls`\n  ```\n  out\n  ```");
     expect(html).not.toContain("md-cmd");
     expect(html).not.toContain("md-out");
   });
