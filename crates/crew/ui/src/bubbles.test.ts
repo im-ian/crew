@@ -10,17 +10,12 @@ describe("splitBubbles", () => {
   it("breaks on a blank line", () => {
     expect(splitBubbles("first\n\nsecond")).toEqual(["first", "second"]);
     expect(splitBubbles("first\n\n\n\nsecond")).toEqual(["first", "second"]);
+    // A stray marker used to hold every later blank line shut.
+    expect(splitBubbles("`a\n\nb")).toEqual(["`a", "b"]);
   });
 
   it("keeps a single line whole", () => {
     expect(splitBubbles("한 줄이면 하나")).toEqual(["한 줄이면 하나"]);
-  });
-
-  it("splits Korean sentences that were glued together", () => {
-    expect(splitBubbles("확인했어요.이제 고칠게요.")).toEqual([
-      "확인했어요.",
-      "이제 고칠게요.",
-    ]);
   });
 
   it("keeps the sentences of one paragraph in one balloon", () => {
@@ -42,12 +37,22 @@ describe("splitBubbles", () => {
     ]);
   });
 
-  it("does not split an English abbreviation on the same line", () => {
-    expect(splitBubbles("Mr. Smith arrived")).toEqual(["Mr. Smith arrived"]);
-  });
-
-  it("leaves a decimal or an ellipsis inside one bubble", () => {
-    expect(splitBubbles("버전 1.5 입니다")).toEqual(["버전 1.5 입니다"]);
+  it("never splits a line at a period, whatever follows it", () => {
+    for (const text of [
+      "설정파일.json을 열었어요",
+      "React.Component를 상속해요",
+      "README.MD 를 봐",
+      '그는 "끝났어."라고 말했다',
+      "*끝났어.*다음으로",
+      "**끝났어.**다음으로",
+      "음...그래요",
+      "Mr. Smith arrived",
+      "버전 1.5 입니다",
+      "`a.b` 를 봐",
+      "확인했어요.이제 고칠게요.",
+    ]) {
+      expect(splitBubbles(text)).toEqual([text]);
+    }
   });
 
   it("never splits inside a fenced block", () => {
@@ -70,17 +75,9 @@ describe("splitBubbles", () => {
     ]);
   });
 
-  it("never splits inside inline code", () => {
-    expect(splitBubbles("`a.b` 를 봐")).toEqual(["`a.b` 를 봐"]);
-  });
-
-  it("splits after a bold run that ended a sentence", () => {
-    expect(splitBubbles("**끝났어.**다음으로")).toEqual(["**끝났어.**", "다음으로"]);
-  });
-
-  it("never splits inside a table row", () => {
+  it("never splits inside a table", () => {
     const table = "| 클래스 | 설명 |\n| --- | --- |\n| React.Component | 기본 |\n| a | 완료.**다음** |";
-    expect(splitBubbles(table + "\n끝.다음")).toEqual([table + "\n끝.", "다음"]);
+    expect(splitBubbles(table + "\n\n끝.다음")).toEqual([table, "끝.다음"]);
     const bare = "상태 | 메모\n--- | ---\n4861 | 완료.다음 단계";
     expect(splitBubbles(bare)).toEqual([bare]);
   });
