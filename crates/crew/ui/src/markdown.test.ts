@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { definitionSource, isLocalHref, renderMarkdown, resolveLocalPath } from "./markdown";
+import { isLocalHref, messageDefinitions, renderMarkdown, resolveLocalPath } from "./markdown";
 
 /** The rendered html without the newlines markdown-it puts after tags. */
 const html = (text: string, source?: string) =>
-  renderMarkdown(text, source).replace(/>\n/g, ">").trim();
+  renderMarkdown(text, source && messageDefinitions(source)).replace(/>\n/g, ">").trim();
 
 describe("renderMarkdown", () => {
   it("escapes html that came from a bot", () => {
@@ -135,8 +135,7 @@ describe("the rest of markdown", () => {
 
   it("finds a link or footnote defined in another balloon of the message", () => {
     const source = "[가이드][g]와 각주[^1]\n\n[g]: https://g.dev\n\n[^1]: 내용";
-    expect(definitionSource(source)).toBe(source);
-    expect(definitionSource("정의 없음")).toBe("");
+    expect(messageDefinitions("정의 없음")).toBe("");
     expect(html("[가이드][g]와 각주[^1]", source)).toBe(
       '<p><a href="https://g.dev">가이드</a>와 각주<sup class="md-fnref">1</sup></p>',
     );

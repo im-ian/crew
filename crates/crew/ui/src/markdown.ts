@@ -194,18 +194,20 @@ md.renderer.rules.footnote_close = () => "</p>\n";
 const DEFINITION = /^ {0,3}\[[^\]]+\]:/m;
 
 /**
- * The message, when it defines a link or footnote that one of its other
- * balloons may use, else "". A message without one skips the second parse.
+ * A message's link and footnote definitions and footnote numbers, for its
+ * balloons to share, or "" when it defines none. It is a string so a balloon
+ * renders again only when they change, not on every streamed token.
  */
-export function definitionSource(source?: string): string {
-  return source && DEFINITION.test(source) ? source : "";
+export function messageDefinitions(source: string): string {
+  if (!DEFINITION.test(source)) return "";
+  const env: Env = {};
+  md.parse(source, env);
+  return JSON.stringify(env);
 }
 
-/** `source` is the whole message `text` came from, for its link and footnote definitions. */
-export function renderMarkdown(text: string, source = ""): string {
-  const env: Env = {};
-  if (source && source !== text) md.parse(source, env);
-  return md.render(String(text || ""), env);
+/** `defs` is `messageDefinitions` of the whole message `text` is a balloon of. */
+export function renderMarkdown(text: string, defs = ""): string {
+  return md.render(String(text || ""), defs ? JSON.parse(defs) : {});
 }
 
 export function resolveLocalPath(src: string, baseDir?: string): string | null {

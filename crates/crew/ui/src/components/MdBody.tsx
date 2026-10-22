@@ -2,7 +2,6 @@ import { createElement, useMemo, useRef, type ReactNode } from "react";
 import "katex/dist/katex.min.css";
 import { injectMentionChips } from "../mentions";
 import {
-  definitionSource,
   isLocalHref,
   mediaSrc,
   renderMarkdown,
@@ -52,8 +51,8 @@ type Props = {
   className?: string;
   onMention?: (id: string) => void;
   baseDir?: string;
-  /** The whole message `text` is a balloon of, for links and footnotes defined in another balloon. */
-  source?: string;
+  /** `messageDefinitions` of the message `text` is a balloon of, for links and footnotes defined in another balloon. */
+  defs?: string;
 };
 
 export function MdBody({
@@ -62,12 +61,11 @@ export function MdBody({
   className,
   onMention,
   baseDir,
-  source,
+  defs,
 }: Props) {
   const onMentionRef = useRef(onMention);
   onMentionRef.current = onMention;
   const clickable = !!onMention;
-  const defs = definitionSource(source);
   const nodes = useMemo(() => {
     const html = injectMentionChips(renderMarkdown(text, defs), agents);
     const handleAgent = onMention
