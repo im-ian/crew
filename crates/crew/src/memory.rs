@@ -16,6 +16,16 @@ pub fn write(agent_id: &str, text: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Writes `text` only if the memory still reads `base`, so an editor that
+/// loaded it earlier can't drop a note the bot has added since.
+pub fn write_if_unchanged(agent_id: &str, base: &str, text: &str) -> anyhow::Result<bool> {
+    if read(agent_id) != base {
+        return Ok(false);
+    }
+    write(agent_id, text)?;
+    Ok(true)
+}
+
 pub fn append(agent_id: &str, text: &str) -> anyhow::Result<()> {
     let add = text.trim_end();
     if add.is_empty() {
@@ -95,6 +105,18 @@ mod tests {
             assert_eq!(read("beta"), "one\ntwo\n");
             copy("missing", "gamma").unwrap();
             assert!(read("gamma").is_empty());
+        });
+    }
+
+    #[test]
+    fn write_if_unchanged_keeps_a_note_added_since() {
+        with_home_dir(|| {
+            assert!(write_if_unchanged("alpha", "", "one").unwrap());
+            append("alpha", "bot note").unwrap();
+            assert!(!write_if_unchanged("alpha", "one", "one, edited").unwrap());
+            assert_eq!(read("alpha"), "one\nbot note\n");
+            assert!(write_if_unchanged("alpha", "one\nbot note\n", "both").unwrap());
+            assert_eq!(read("alpha"), "both");
         });
     }
 

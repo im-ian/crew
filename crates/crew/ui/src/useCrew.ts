@@ -552,14 +552,16 @@ export function useCrew() {
     }
   }
 
-  async function saveMemory(text: string) {
+  async function saveMemory(text: string, base: string): Promise<boolean> {
     const id = selectedRef.current.id;
-    if (!id || selectedRef.current.kind !== "agent") return;
+    if (!id || selectedRef.current.kind !== "agent") return false;
     try {
-      await api.setMemory(id, text);
+      if (await api.setMemory(id, text, base)) return true;
+      showToast(t("memory.changed"));
     } catch (err) {
       showError(err);
     }
+    return false;
   }
 
   async function runRoutine(r: Routine) {

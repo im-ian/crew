@@ -33,7 +33,7 @@ type Props = {
   onDeleteRoutine: (r: Routine) => Promise<void>;
   onRunRoutine: (r: Routine) => Promise<void>;
   onLoadMemory: (id: string) => Promise<string>;
-  onSaveMemory: (text: string) => Promise<void>;
+  onSaveMemory: (text: string, base: string) => Promise<boolean>;
 };
 
 export function AgentPane({
@@ -130,12 +130,14 @@ function MemoryTab({
   open: boolean;
   agent: AgentInfo | null;
   onLoad: (id: string) => Promise<string>;
-  onSave: (text: string) => Promise<void>;
+  onSave: (text: string, base: string) => Promise<boolean>;
 }) {
   const t = useT();
   const [memory, setMemory] = useState("");
   const [saved, setSaved] = useState(false);
   const edited = useRef(false);
+  // The text as loaded. Save only goes through if the file still matches it.
+  const base = useRef("");
 
   useEffect(() => {
     if (!open || !agent) return;
@@ -143,17 +145,20 @@ function MemoryTab({
     setSaved(false);
     edited.current = false;
     void onLoad(agent.id).then((text) => {
+      base.current = text;
       setMemory(text);
       setSaved(false);
     });
   }, [open, agent?.id]);
 
   // The bot keeps its own memory, so a finished turn may have changed it.
-  // Pick that up unless the user is mid-edit; saving stale text would drop the bot's note.
+  // Show that unless the user is mid-edit.
   useEffect(() => {
     if (!open || !agent || agent.status === "working" || edited.current) return;
     void onLoad(agent.id).then((text) => {
-      if (!edited.current) setMemory(text);
+      if (edited.current) return;
+      base.current = text;
+      setMemory(text);
     });
   }, [agent?.status]);
 
@@ -179,7 +184,8 @@ function MemoryTab({
           type="button"
           className="primary"
           onClick={async () => {
-            await onSave(memory);
+            if (!(await onSave(memory, base.current))) return;
+            base.current = memory;
             setSaved(true);
             edited.current = false;
           }}
