@@ -73,18 +73,52 @@ pub fn lookup_in(query: &str, skills: &[Skill]) -> Option<Skill> {
         .cloned()
 }
 
-pub fn save(name: &str, body: &str) -> anyhow::Result<Skill> {
+/// What a save did: wrote the skill, or found another skill under that name
+/// and left both alone until the caller says to overwrite.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Saved {
+    Saved { skill: Skill },
+    Exists { name: String },
+}
+
+/// Save `body` as `name`. `previous` is the skill being edited, so a rename
+/// moves its file. Names match without case, like `lookup` and the macOS
+/// disk, and another skill under `name` is only replaced with `overwrite`.
+pub fn save(
+    name: &str,
+    body: &str,
+    previous: Option<&str>,
+    overwrite: bool,
+) -> anyhow::Result<Saved> {
     let name = sanitize_name(name);
     if name.is_empty() {
         anyhow::bail!("skill name is empty");
     }
+    let same = |other: &str| other.to_lowercase() == name.to_lowercase();
+    let previous = previous.map(sanitize_name).filter(|p| !p.is_empty());
     let dir = dir();
     fs::create_dir_all(&dir)?;
+    let clash = list()
+        .into_iter()
+        .find(|s| same(&s.name) && previous.as_deref().is_none_or(|p| !same(p)));
+    if let Some(other) = clash {
+        if !overwrite {
+            return Ok(Saved::Exists { name: other.name });
+        }
+        fs::remove_file(dir.join(format!("{}.md", other.name)))?;
+    }
     let path = dir.join(format!("{name}.md"));
+    if let Some(prev) = previous.filter(|p| *p != name) {
+        // Missing is fine: the body is written below either way.
+        let _ = fs::rename(dir.join(format!("{prev}.md")), &path);
+    }
     fs::write(&path, body)?;
-    Ok(Skill {
-        name,
-        body: body.to_string(),
+    Ok(Saved::Saved {
+        skill: Skill {
+            name,
+            body: body.to_string(),
+        },
     })
 }
 
@@ -138,6 +172,54 @@ mod tests {
             name: name.into(),
             body: body.into(),
         }
+    }
+
+    fn save(name: &str, body: &str) -> anyhow::Result<Skill> {
+        match super::save(name, body, None, false)? {
+            Saved::Saved { skill } => Ok(skill),
+            Saved::Exists { name } => anyhow::bail!("{name} exists"),
+        }
+    }
+
+    fn names() -> Vec<String> {
+        list().into_iter().map(|s| s.name).collect()
+    }
+
+    #[test]
+    fn save_asks_before_replacing_another_skill() {
+        crate::paths::testing::with_home("skills-clash", || {
+            save("report", "old").expect("save");
+            save("draft", "draft body").expect("save");
+            let ask = Saved::Exists {
+                name: "report".into(),
+            };
+            assert_eq!(super::save("Report", "new", None, false).unwrap(), ask);
+            assert_eq!(
+                super::save("report", "x", Some("draft"), false).unwrap(),
+                ask,
+                "renaming another skill onto it asks too"
+            );
+            assert_eq!(lookup("report").unwrap().body, "old", "nothing written");
+            assert_eq!(names(), ["draft", "report"]);
+
+            super::save("report", "draft body", Some("draft"), true).expect("overwrite");
+            assert_eq!(names(), ["report"], "the rename replaced it");
+            assert_eq!(lookup("report").unwrap().body, "draft body");
+        });
+    }
+
+    #[test]
+    fn a_case_only_rename_keeps_the_skill() {
+        crate::paths::testing::with_home("skills-case", || {
+            save("Foo", "body").expect("save");
+            let saved = super::save("foo", "body 2", Some("Foo"), false).expect("rename");
+            assert!(
+                matches!(saved, Saved::Saved { .. }),
+                "its own name is no clash"
+            );
+            assert_eq!(names(), ["foo"]);
+            assert_eq!(lookup("foo").unwrap().body, "body 2");
+        });
     }
 
     #[test]

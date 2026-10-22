@@ -6,6 +6,7 @@ import type {
   ModelList,
   FocusTarget,
   SearchHit,
+  SavedSkill,
   Skill,
 } from "./types";
 
@@ -96,8 +97,8 @@ export const api = {
   searchCrew: (query: string) => invoke<SearchHit[]>("search_crew", { query }),
   listSkills: () => invoke<Skill[]>("list_skills"),
   lookupSkill: (query: string) => invoke<Skill | null>("lookup_skill", { query }),
-  saveSkill: (name: string, body: string) =>
-    invoke<Skill>("save_skill", { name, body }),
+  saveSkill: (name: string, body: string, previous: string | null, overwrite: boolean) =>
+    invoke<SavedSkill>("save_skill", { name, body, previous, overwrite }),
   removeSkill: (name: string) => invoke<void>("remove_skill", { name }),
   saveUpload: (name: string, data: string) =>
     invoke<string>("save_upload", { name, data }),

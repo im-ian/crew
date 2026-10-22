@@ -34,6 +34,10 @@ export type Skill = {
   body: string;
 };
 
+export type SavedSkill =
+  | { kind: "saved"; skill: Skill }
+  | { kind: "exists"; name: string };
+
 export type SearchHit = {
   kind: "bot" | "routine" | "message" | "tool" | string;
   id: string;

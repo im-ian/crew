@@ -23,6 +23,8 @@ export function SkillsPane({ open, onClose }: Props) {
   // What the user tried to leave to while edits were unsaved; the same
   // press again goes through and drops them.
   const [leaving, setLeaving] = useState<string | null>(null);
+  // Another skill already has the typed name; the next save overwrites it.
+  const [clash, setClash] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const saved = skills.find((s) => s.name === editing);
   const dirty = !saved || name.trim() !== saved.name || body !== saved.body;
@@ -44,6 +46,7 @@ export function SkillsPane({ open, onClose }: Props) {
     setArmed(false);
     setError("");
     setLeaving(null);
+    setClash(null);
   }
 
   function leave(to: string, go: () => void) {
@@ -82,19 +85,15 @@ export function SkillsPane({ open, onClose }: Props) {
     setBusy(true);
     setError("");
     try {
-      const saved = await api.saveSkill(n, body);
-      // A rename writes a new file; drop the one it replaced. Names match
-      // without case, and so does the macOS disk: "Foo" → "foo" wrote over
-      // Foo.md, so dropping "Foo" would delete the save.
-      const same = (a: string) => a.toLowerCase() === saved.name.toLowerCase();
-      if (editing && !same(editing)) {
-        await api.removeSkill(editing).catch(() => {});
+      const res = await api.saveSkill(n, body, editing, clash !== null);
+      if (res.kind === "exists") {
+        setClash(res.name);
+        return;
       }
-      const list = await api.listSkills();
-      const kept = list.find((s) => same(s.name))?.name ?? saved.name;
-      setSkills(list);
-      setEditing(kept);
-      setName(kept);
+      setClash(null);
+      setSkills(await api.listSkills());
+      setEditing(res.skill.name);
+      setName(res.skill.name);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -169,6 +168,7 @@ export function SkillsPane({ open, onClose }: Props) {
                 onChange={(e) => {
                   setName(e.target.value);
                   setLeaving(null);
+                  setClash(null);
                 }}
               />
             </div>
@@ -187,6 +187,9 @@ export function SkillsPane({ open, onClose }: Props) {
           </Field>
           {error ? <p className="apply-note is-error">{error}</p> : null}
           {leaving ? <p className="apply-note is-error">{t("skills.unsaved")}</p> : null}
+          {clash ? (
+            <p className="apply-note is-error">{t("skills.exists", { name: clash })}</p>
+          ) : null}
           <p className="apply-note">{t("skills.note")}</p>
           <div className={"actions" + (editing ? " spread" : "")}>
             {editing ? (
@@ -205,7 +208,7 @@ export function SkillsPane({ open, onClose }: Props) {
               disabled={busy || !dirty || !name.trim() || !body.trim()}
               onClick={() => void save()}
             >
-              {t("common.save")}
+              {clash ? t("skills.overwrite") : t("common.save")}
             </button>
           </div>
         </div>

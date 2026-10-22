@@ -547,8 +547,13 @@ fn lookup_skill(query: String) -> Result<Option<crate::skills::Skill>, String> {
 }
 
 #[tauri::command]
-fn save_skill(name: String, body: String) -> Result<crate::skills::Skill, String> {
-    crate::skills::save(&name, &body).map_err(|e| e.to_string())
+fn save_skill(
+    name: String,
+    body: String,
+    previous: Option<String>,
+    overwrite: bool,
+) -> Result<crate::skills::Saved, String> {
+    crate::skills::save(&name, &body, previous.as_deref(), overwrite).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
