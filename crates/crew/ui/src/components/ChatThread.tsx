@@ -676,6 +676,7 @@ function Incoming({
                   (queued ? " queued" : "")
                 }
                 text={part}
+                source={body}
                 agents={agents}
                 onMention={onSelectAgent}
                 baseDir={agent?.cwd || undefined}

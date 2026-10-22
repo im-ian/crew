@@ -1,179 +1,219 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
+import katex from "katex";
+import MarkdownIt, { type Env, type StateBlock, type StateInline, type Token } from "markdown-it";
 
-export function escapeHtml(s: string): string {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
+// `html: false` keeps a bot's tags as text; `breaks` keeps each typed line its own line.
+const md = new MarkdownIt({ breaks: true, linkify: true });
+// `README.md` and `main.rs` end in real TLDs, so only link what carries a scheme.
+md.linkify.set({ fuzzyLink: false, fuzzyEmail: false });
 
-const TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+// Bots link files on this machine, and the bubble opens them itself.
+const validateLink = md.validateLink.bind(md);
+md.validateLink = (url) => /^file:/i.test(url.trim()) || validateLink(url);
+// A path stays as written, so `resolveLocalPath` gets the file's real name.
+const normalizeLink = md.normalizeLink.bind(md);
+md.normalizeLink = (url) =>
+  /^[a-z][a-z0-9+.-]*:/i.test(url) && !/^file:/i.test(url) ? normalizeLink(url) : url;
 
-/** A row's cells; `\|` is a literal pipe, not a column break. */
-function tableCells(line: string): string[] {
-  return line
-    .replace(/\\\|/g, "\u0000")
-    .trim()
-    .replace(/^\||\|$/g, "")
-    .split("|")
-    .map((c) => c.replace(/\u0000/g, "|").trim());
-}
-
-/** A header row is only a table when a delimiter row with as many cells sits under it. */
-function isTableStart(lines: string[], i: number): boolean {
-  const head = lines[i];
-  const sep = lines[i + 1];
+// The bubble's copy button and empty-output check read the block's text, so it
+// carries no trailing newline. `md-out` comes from the command rule below.
+md.renderer.rules.fence = md.renderer.rules.code_block = (tokens, i) => {
+  const cls = tokens[i].attrGet("class");
   return (
-    sep !== undefined &&
-    head.includes("|") &&
-    sep.includes("|") &&
-    TABLE_SEP.test(sep) &&
-    tableCells(head).length === tableCells(sep).length
+    "<pre" + (cls ? ' class="' + cls + '"' : "") + "><code>" +
+    md.utils.escapeHtml(tokens[i].content.replace(/\n$/, "")) +
+    "</code></pre>\n"
   );
-}
+};
 
-/** A line that opens a block of its own, so it ends a paragraph or a table above it. */
-function startsBlock(lines: string[], i: number): boolean {
-  const line = lines[i];
-  return (
-    /^(#{1,3})\s+/.test(line) ||
-    /^\s*[-*]\s+/.test(line) ||
-    /^\s*\d+\.\s+/.test(line) ||
-    /^%%FENCE\d+%%$/.test(line) ||
-    isTableStart(lines, i)
-  );
-}
-
-/** Code spans, emphasis, images and links, applied to one block's text at a time. */
-function renderInline(s: string): string {
-  // Set inline code aside like fences, or `a_b` and `c_d` italicise across spans.
-  const spans: string[] = [];
-  s = s.replace(/`([^`]+)`/g, (_, code) => {
-    spans.push("<code>" + code + "</code>");
-    return "\u0000" + (spans.length - 1) + "\u0000";
-  });
-  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
-  s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
-  s = s.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, "$1<em>$2</em>");
-  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '<img alt="$1" src="$2" />');
-  s = s.replace(
-    /\[([^\]]+)\]\((https?:\/\/[^)\s]+|file:\/\/[^)\s]+|\/[^)\s]+|\.\/[^)\s]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
-  );
-  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => spans[Number(i)]);
-}
-
-export function renderMarkdown(raw: string): string {
-  const fences: string[] = [];
-  let s = String(raw || "").replace(/```[^\n]*\n?([\s\S]*?)```/g, (_, code) => {
-    const i = fences.length;
-    fences.push(
-      "<pre><code>" + escapeHtml(String(code).replace(/\n$/, "")) + "</code></pre>",
-    );
-    return "\n%%FENCE" + i + "%%\n";
-  });
-  s = escapeHtml(s);
-  // Blocks first, then each block's own text: markup can't run across a cell,
-  // a list item or a paragraph.
-  const lines = s.split("\n");
-  const out: string[] = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    const fence = line.match(/^%%FENCE(\d+)%%$/);
-    if (fence) {
-      const block = fences[Number(fence[1])] || "";
-      const prev = out[out.length - 1];
-      // A line that is nothing but inline code, directly above a block, is the
-      // command that produced it; mark the pair so the bubble can label them.
-      if (prev && /^<p><code>[^<]*<\/code><\/p>$/.test(prev)) {
-        out[out.length - 1] = prev.replace("<p>", '<p class="md-cmd">');
-        out.push(block.replace("<pre>", '<pre class="md-out">'));
-      } else {
-        out.push(block);
-      }
-      i += 1;
-      continue;
+// A paragraph that is nothing but inline code, directly above a block, is the
+// command that produced it; mark the pair so the bubble can label them.
+md.core.ruler.push("command_output", (state) => {
+  const t = state.tokens;
+  for (let i = 3; i < t.length; i++) {
+    const kids = t[i - 2].children;
+    if (
+      t[i].type === "fence" &&
+      t[i - 3].type === "paragraph_open" &&
+      t[i - 3].level === t[i].level &&
+      kids?.length === 1 &&
+      kids[0].type === "code_inline"
+    ) {
+      t[i - 3].attrJoin("class", "md-cmd");
+      t[i].attrJoin("class", "md-out");
     }
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) {
-      const n = heading[1].length;
-      out.push("<h" + n + ">" + renderInline(heading[2]) + "</h" + n + ">");
-      i += 1;
-      continue;
-    }
-    if (isTableStart(lines, i)) {
-      const aligns = tableCells(lines[i + 1]).map((c) =>
-        /^:-+:$/.test(c) ? ' class="md-center"' : /-:$/.test(c) ? ' class="md-right"' : "",
-      );
-      const row = (cells: string[], tag: string) =>
-        "<tr>" +
-        aligns.map((a, j) => "<" + tag + a + ">" + renderInline(cells[j] ?? "") + "</" + tag + ">").join("") +
-        "</tr>";
-      const head = row(tableCells(line), "th");
-      i += 2;
-      const body: string[] = [];
-      while (
-        i < lines.length &&
-        lines[i].trim() &&
-        lines[i].includes("|") &&
-        !startsBlock(lines, i)
-      ) {
-        body.push(row(tableCells(lines[i]), "td"));
-        i += 1;
-      }
-      out.push(
-        "<table><thead>" + head + "</thead>" +
-          (body.length ? "<tbody>" + body.join("") + "</tbody>" : "") +
-          "</table>",
-      );
-      continue;
-    }
-    if (/^\s*[-*]\s+/.test(line)) {
-      const items: string[] = [];
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
-        items.push("<li>" + renderInline(lines[i].replace(/^\s*[-*]\s+/, "")) + "</li>");
-        i += 1;
-      }
-      out.push("<ul>" + items.join("") + "</ul>");
-      continue;
-    }
-    if (/^\s*\d+\.\s+/.test(line)) {
-      const items: string[] = [];
-      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-        items.push("<li>" + renderInline(lines[i].replace(/^\s*\d+\.\s+/, "")) + "</li>");
-        i += 1;
-      }
-      out.push("<ol>" + items.join("") + "</ol>");
-      continue;
-    }
-    if (!line.trim()) {
-      i += 1;
-      continue;
-    }
-    const para = [line];
-    i += 1;
-    while (i < lines.length && lines[i].trim() && !startsBlock(lines, i)) {
-      para.push(lines[i]);
-      i += 1;
-    }
-    out.push("<p>" + renderInline(para.join("\n")).replace(/\n/g, "<br>") + "</p>");
   }
-  return out.join("");
+});
+
+// `- [ ]` and `- [x]` items are a checklist.
+md.core.ruler.push("task_list", (state) => {
+  const t = state.tokens;
+  for (let i = 2; i < t.length; i++) {
+    const first = t[i].children?.[0];
+    const box = first?.type === "text" && /^\[([ xX])\]\s+/.exec(first.content);
+    if (t[i].type !== "inline" || t[i - 2].type !== "list_item_open" || !box) continue;
+    first.content = first.content.slice(box[0].length);
+    const input = new state.Token("html_inline", "", 0);
+    input.content = '<input type="checkbox" disabled' + (box[1] === " " ? "" : " checked") + ">";
+    t[i].children!.unshift(input);
+    t[i - 2].attrJoin("class", "md-task");
+  }
+});
+
+// `<br>` is the one tag a bot uses to break a line, often in a table cell.
+// Every other tag stays text.
+const BR = /<br\s*\/?>/iy;
+md.inline.ruler.before("html_inline", "br", (state, silent) => {
+  BR.lastIndex = state.pos;
+  if (!BR.test(state.src)) return false;
+  if (!silent) state.push("hardbreak", "br", 0);
+  state.pos = BR.lastIndex;
+  return true;
+});
+
+// Math. `$5 and $10` is money, not a formula: the opening `$` touches its
+// formula, and the closing one touches it too and is not followed by a digit.
+const MATH_INLINE = /\$\$([^$]+?)\$\$|\$(?=\S)((?:\\.|[^\\$])*?\S)\$(?!\d)/y;
+md.inline.ruler.after("escape", "math_inline", (state, silent) => {
+  if (state.src.charCodeAt(state.pos) !== 0x24 /* $ */) return false;
+  MATH_INLINE.lastIndex = state.pos;
+  const m = MATH_INLINE.exec(state.src);
+  if (!m) return false;
+  if (!silent) {
+    const t = state.push("math_inline", "", 0);
+    t.content = m[1] ?? m[2];
+    t.markup = m[1] === undefined ? "$" : "$$";
+  }
+  state.pos = MATH_INLINE.lastIndex;
+  return true;
+});
+
+function mathBlock(state: StateBlock, startLine: number, endLine: number, silent: boolean) {
+  const lineText = (n: number) =>
+    state.src.slice(state.bMarks[n] + state.tShift[n], state.eMarks[n]).trimEnd();
+  const first = lineText(startLine);
+  if (state.sCount[startLine] - state.blkIndent >= 4 || !first.startsWith("$$")) return false;
+  let last = startLine;
+  let body: string;
+  if (first.length > 4 && first.endsWith("$$")) {
+    body = first.slice(2, -2);
+  } else {
+    // An unclosed `$$` is text until its closing line arrives.
+    do last += 1;
+    while (last < endLine && !lineText(last).endsWith("$$"));
+    if (last >= endLine) return false;
+    body = [
+      first.slice(2),
+      state.getLines(startLine + 1, last, state.tShift[startLine], false),
+      lineText(last).slice(0, -2),
+    ].join("\n");
+  }
+  if (silent) return true;
+  const t = state.push("math_block", "div", 0);
+  t.content = body.trim();
+  t.map = [startLine, last + 1];
+  t.block = true;
+  state.line = last + 1;
+  return true;
+}
+md.block.ruler.before("fence", "math_block", mathBlock, {
+  alt: ["paragraph", "reference", "blockquote", "list"],
+});
+
+function tex(src: string, displayMode: boolean): string {
+  try {
+    return katex.renderToString(src, { displayMode, throwOnError: false });
+  } catch {
+    return md.utils.escapeHtml(src);
+  }
+}
+md.renderer.rules.math_inline = (tokens, i) =>
+  '<span class="md-math">' + tex(tokens[i].content, tokens[i].markup === "$$") + "</span>";
+md.renderer.rules.math_block = (tokens, i) =>
+  '<div class="md-math md-math-block">' + tex(tokens[i].content, true) + "</div>\n";
+
+// Footnotes. A balloon is too short to gather notes at its foot, so a note
+// stays where it was written and takes the number of its first reference.
+type Notes = { defined: Record<string, true>; num: Record<string, number>; count: number };
+const notes = (env: Env): Notes => (env.notes ??= { defined: {}, num: {}, count: 0 }) as Notes;
+const noteNum = (env: Env | undefined, token: Token) => {
+  const label = (token.meta as { label: string }).label;
+  return String(notes(env ?? {}).num[label] ?? md.utils.escapeHtml(label));
+};
+
+const NOTE_DEF = /\[\^([^\]\s]+)\]:[ \t]*/y;
+function footnoteDef(state: StateBlock, startLine: number, endLine: number, silent: boolean) {
+  NOTE_DEF.lastIndex = state.bMarks[startLine] + state.tShift[startLine];
+  const m = NOTE_DEF.exec(state.src);
+  if (!m || state.sCount[startLine] - state.blkIndent >= 4) return false;
+  if (silent) return true;
+  // Indented lines under the note continue it.
+  let last = startLine + 1;
+  while (last < endLine && !state.isEmpty(last) && state.sCount[last] > state.blkIndent) last += 1;
+  notes(state.env).defined[m[1]] = true;
+  const open = state.push("footnote_open", "p", 1);
+  open.meta = { label: m[1] };
+  open.map = [startLine, last];
+  const inline = state.push("inline", "", 0);
+  inline.content = (
+    state.src.slice(NOTE_DEF.lastIndex, state.eMarks[startLine]) +
+    "\n" +
+    state.getLines(startLine + 1, last, state.blkIndent, false)
+  ).trim();
+  inline.map = open.map;
+  inline.children = [];
+  state.push("footnote_close", "p", -1);
+  state.line = last;
+  return true;
+}
+md.block.ruler.before("reference", "footnote_def", footnoteDef, {
+  alt: ["paragraph", "reference"],
+});
+
+const NOTE_REF = /\[\^([^\]\s]+)\]/y;
+function footnoteRef(state: StateInline, silent: boolean) {
+  NOTE_REF.lastIndex = state.pos;
+  const m = state.src.charCodeAt(state.pos + 1) === 0x5e /* ^ */ && NOTE_REF.exec(state.src);
+  if (!m || !notes(state.env).defined[m[1]]) return false;
+  if (!silent) {
+    const n = notes(state.env);
+    n.num[m[1]] ??= ++n.count;
+    state.push("footnote_ref", "sup", 0).meta = { label: m[1] };
+  }
+  state.pos = NOTE_REF.lastIndex;
+  return true;
+}
+md.inline.ruler.before("link", "footnote_ref", footnoteRef);
+
+md.renderer.rules.footnote_ref = (tokens, i, _o, env) =>
+  '<sup class="md-fnref">' + noteNum(env, tokens[i]) + "</sup>";
+md.renderer.rules.footnote_open = (tokens, i, _o, env) =>
+  '<p class="md-footnote"><sup>' + noteNum(env, tokens[i]) + "</sup> ";
+md.renderer.rules.footnote_close = () => "</p>\n";
+
+const DEFINITION = /^ {0,3}\[[^\]]+\]:/m;
+
+/**
+ * The message, when it defines a link or footnote that one of its other
+ * balloons may use, else "". A message without one skips the second parse.
+ */
+export function definitionSource(source?: string): string {
+  return source && DEFINITION.test(source) ? source : "";
+}
+
+/** `source` is the whole message `text` came from, for its link and footnote definitions. */
+export function renderMarkdown(text: string, source = ""): string {
+  const env: Env = {};
+  if (source && source !== text) md.parse(source, env);
+  return md.render(String(text || ""), env);
 }
 
 export function resolveLocalPath(src: string, baseDir?: string): string | null {
   const s = src.trim();
-  if (!s) return null;
-  if (
-    s.startsWith("data:") ||
-    s.startsWith("blob:") ||
-    s.startsWith("http://") ||
-    s.startsWith("https://") ||
-    s.startsWith("asset:") ||
-    s.startsWith("tauri://")
-  ) {
+  if (!s || s.startsWith("#")) return null;
+  // Any scheme but `file:` (http, data, blob, mailto, asset, tauri...) is not
+  // a path. `C:\` is a drive, not a scheme.
+  if (/^[a-z][a-z0-9+.-]*:/i.test(s) && !/^file:/i.test(s) && !/^[A-Za-z]:[\\/]/.test(s)) {
     return null;
   }
   let path = s;

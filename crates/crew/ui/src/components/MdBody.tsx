@@ -1,6 +1,13 @@
 import { createElement, useMemo, useRef, type ReactNode } from "react";
+import "katex/dist/katex.min.css";
 import { injectMentionChips } from "../mentions";
-import { isLocalHref, mediaSrc, renderMarkdown, resolveLocalPath } from "../markdown";
+import {
+  definitionSource,
+  isLocalHref,
+  mediaSrc,
+  renderMarkdown,
+  resolveLocalPath,
+} from "../markdown";
 import { api } from "../api";
 import type { AgentInfo } from "../types";
 import { useT } from "../LocaleContext";
@@ -23,6 +30,13 @@ const TAGS = new Set([
   "H1",
   "H2",
   "H3",
+  "H4",
+  "H5",
+  "H6",
+  "BLOCKQUOTE",
+  "HR",
+  "S",
+  "SUP",
   "SPAN",
   "TABLE",
   "THEAD",
@@ -38,6 +52,8 @@ type Props = {
   className?: string;
   onMention?: (id: string) => void;
   baseDir?: string;
+  /** The whole message `text` is a balloon of, for links and footnotes defined in another balloon. */
+  source?: string;
 };
 
 export function MdBody({
@@ -46,17 +62,19 @@ export function MdBody({
   className,
   onMention,
   baseDir,
+  source,
 }: Props) {
   const onMentionRef = useRef(onMention);
   onMentionRef.current = onMention;
   const clickable = !!onMention;
+  const defs = definitionSource(source);
   const nodes = useMemo(() => {
-    const html = injectMentionChips(renderMarkdown(text), agents);
+    const html = injectMentionChips(renderMarkdown(text, defs), agents);
     const handleAgent = onMention
       ? (id: string) => onMentionRef.current?.(id)
       : undefined;
     return htmlToReact(html, agents, handleAgent, baseDir);
-  }, [text, agents, clickable, baseDir, onMention]);
+  }, [text, defs, agents, clickable, baseDir, onMention]);
   return <div className={className}>{nodes}</div>;
 }
 
@@ -112,10 +130,34 @@ function nodeToReact(
   onMention: ((id: string) => void) | undefined,
   baseDir?: string,
 ): ReactNode {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+  if (node.nodeType === Node.TEXT_NODE) {
+    // markdown-it puts a newline between block tags; it is layout, not text.
+    const text = node.textContent || "";
+    return /^\s*\n\s*$/.test(text) ? null : text;
+  }
   if (node.nodeType !== Node.ELEMENT_NODE) return null;
   const el = node as HTMLElement;
   const tag = el.tagName;
+  if (el.classList.contains("md-math")) {
+    // KaTeX's own markup, positioned by its inline styles. markdown-it escaped
+    // the bot's text before KaTeX saw it, so nothing here came from the bot as HTML.
+    return createElement(tag.toLowerCase(), {
+      key,
+      className: el.className,
+      dangerouslySetInnerHTML: { __html: el.innerHTML },
+    });
+  }
+  if (tag === "INPUT") {
+    return (
+      <input
+        key={key}
+        type="checkbox"
+        checked={el.hasAttribute("checked")}
+        disabled
+        readOnly
+      />
+    );
+  }
   if (el.classList.contains("mention-chip")) {
     // Old transcripts can still carry a room chip. Show the name; do not open a room.
     const channelId = el.getAttribute("data-channel") || "";
@@ -156,17 +198,22 @@ function nodeToReact(
       <img
         key={key}
         alt={el.getAttribute("alt") || ""}
+        title={el.getAttribute("title") || undefined}
         src={mediaSrc(raw, baseDir)}
       />
     );
   }
   if (tag === "A") {
     const href = el.getAttribute("href") || "";
+    const title = el.getAttribute("title") || undefined;
+    // A `#section` link has nowhere to go in a chat.
+    if (href.startsWith("#")) return <span key={key}>{kids}</span>;
     if (isLocalHref(href, baseDir)) {
       return (
         <a
           key={key}
           href={href}
+          title={title}
           onClick={(e) => {
             e.preventDefault();
             const path = resolveLocalPath(href, baseDir);
@@ -181,6 +228,7 @@ function nodeToReact(
       <a
         key={key}
         href={href || undefined}
+        title={title}
         target="_blank"
         rel="noopener noreferrer"
       >
@@ -199,7 +247,13 @@ function nodeToReact(
   }
   return createElement(
     tag.toLowerCase(),
-    cls ? { key, className: cls } : { key },
+    {
+      key,
+      className: cls || undefined,
+      // A list that picks up after a code block keeps counting.
+      start: tag === "OL" ? Number(el.getAttribute("start")) || undefined : undefined,
+      style: el.style.textAlign ? { textAlign: el.style.textAlign } : undefined,
+    },
     ...kids,
   );
 }

@@ -213,6 +213,7 @@ function PeekBubble({
               key={m.id + "-" + i}
               className={"bubble md incoming" + stack}
               text={part}
+              source={m.text}
               agents={agents}
               baseDir={agent?.cwd || undefined}
             />
