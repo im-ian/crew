@@ -96,6 +96,13 @@ export function App() {
         setSettingsOpen(false);
         return;
       }
+      if (skillsOpen && e.key === "Escape") {
+        e.preventDefault();
+        // Leave a field first, so Escape mid-edit doesn't drop unsaved text.
+        if (isTypingTarget(e.target)) (e.target as HTMLElement).blur();
+        else setSkillsOpen(false);
+        return;
+      }
       if (helpOpen && e.key === "Escape") {
         e.preventDefault();
         setHelpOpen(false);
@@ -178,7 +185,7 @@ export function App() {
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [helpOpen, settingsOpen, peek]);
+  }, [helpOpen, settingsOpen, skillsOpen, peek]);
 
   return (
     <div className="app">
