@@ -549,15 +549,8 @@ impl Config {
         paths::ensure_home()?;
         let path = paths::agents_path();
         let raw = serde_json::to_string_pretty(self)?;
-        // Whole or not at all: the CLI reads this file while the daemon may be
-        // writing it. One temp name per write, since daemon threads save too.
-        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let tmp = path.with_extension(format!("json.{}-{n}.tmp", std::process::id()));
-        fs::write(&tmp, raw + "\n")?;
-        fs::rename(&tmp, &path).inspect_err(|_| {
-            let _ = fs::remove_file(&tmp);
-        })?;
+        // The CLI reads this file while the daemon may be writing it.
+        paths::write_atomic(&path, (raw + "\n").as_bytes())?;
         Ok(())
     }
 

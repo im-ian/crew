@@ -349,6 +349,20 @@ pub fn memory_path(agent_id: &str) -> PathBuf {
     memory_dir().join(format!("{}.md", safe_agent_id(agent_id)))
 }
 
+/// Whole or not at all, for a file another process may read mid-write. One
+/// temp name per write, since daemon threads write too.
+pub fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".{}-{n}.tmp", std::process::id()));
+    let tmp = path.with_file_name(name);
+    fs::write(&tmp, data)?;
+    fs::rename(&tmp, path).inspect_err(|_| {
+        let _ = fs::remove_file(&tmp);
+    })
+}
+
 pub fn cli_sessions_dir() -> PathBuf {
     home_dir().join("cli-sessions")
 }
