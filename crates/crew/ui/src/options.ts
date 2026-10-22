@@ -55,3 +55,33 @@ export function cliFromCmd(cmd?: string[] | null): CliKind | null {
   if (base === "codex") return "codex";
   return null;
 }
+
+const EFFORT_LABEL: Record<string, MessageKey> = {
+  low: "effort.low",
+  medium: "effort.medium",
+  high: "effort.high",
+};
+
+// An empty model is the CLI default; pass that id when the list has reported it.
+export function modelLine(
+  agent: { cmd?: string[] | null; model?: string | null; effort?: string | null },
+  defaultModel: string | null | undefined,
+  t: TFn,
+): string | null {
+  const cli = cliFromCmd(agent.cmd);
+  if (!cli) return null;
+  const cliLabel = CLIS.find((c) => c.value === cli)?.label ?? cli;
+  const model = agent.model?.trim() || defaultModel?.trim() || t("model.default");
+  const effort = t(EFFORT_LABEL[agent.effort?.trim() || ""] ?? "effort.default");
+  return `${cliLabel} · ${model} · ${t("field.effort")} ${effort}`;
+}
+
+// Undefined: the CLI is missing, so ask again later. Null: it is installed and
+// reported no default id. A string is that id.
+export function pinnedDefault(list: {
+  installed: boolean;
+  default?: string | null;
+}): string | null | undefined {
+  if (!list.installed) return undefined;
+  return list.default?.trim() || null;
+}
