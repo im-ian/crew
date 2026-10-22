@@ -57,6 +57,7 @@ describe("injectMentionChips", () => {
       "<p><code>@alpha</code></p>",
       "<pre><code>@alpha</code></pre>",
       '<p><a href="#">@alpha</a></p>',
+      '<p><span class="md-math"><span class="katex"><span>hi @alpha</span></span></span></p>',
     ]) {
       expect(injectMentionChips(html, agents), html).toBe(html);
     }
