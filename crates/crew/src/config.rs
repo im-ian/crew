@@ -549,15 +549,8 @@ impl Config {
         paths::ensure_home()?;
         let path = paths::agents_path();
         let raw = serde_json::to_string_pretty(self)?;
-        // Whole or not at all: the CLI reads this file while the daemon may be
-        // writing it. One temp name per write, since daemon threads save too.
-        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let tmp = path.with_extension(format!("json.{}-{n}.tmp", std::process::id()));
-        fs::write(&tmp, raw + "\n")?;
-        fs::rename(&tmp, &path).inspect_err(|_| {
-            let _ = fs::remove_file(&tmp);
-        })?;
+        // The CLI reads this file while the daemon may be writing it.
+        paths::write_atomic(&path, (raw + "\n").as_bytes())?;
         Ok(())
     }
 
@@ -817,8 +810,13 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
     s.push_str(
         "To ask the human user in this chat to pick, actually run `crew ask --question \"어느 쪽을 고를래?\" --option A --option B --option C`. To ask them to type a value, run `crew ask --question \"로그인\" --input 아이디 --input 비밀번호`. Crew shows a card and prints their answer. Never send this to a teammate. Do not crew tell the options. Do not ask the user to type the letter. This is not a substitute for `crew tell`, `crew agent set`, or `crew routine add`.\n",
     );
+    s.push_str(&format!(
+        "Your memory survives chat resets. It is under `{MEMORY_HEADING}` at the end of these instructions (absent while empty) and may be out of date; `crew memory show` prints the current one. It is your only memory: keep notes there, not in other memory files or tools. Keep it yourself: when you learn something later chats need (the user's name, preferences, a decision) or the user asks you to remember it, actually run `crew memory append <<'EOF'` with one short line, then `EOF`. To correct or forget something, run `crew memory show`, then `crew memory set <<'EOF'` with the whole new memory; it replaces everything. Always pass the text in a quoted heredoc like this, so the shell leaves `$` and backticks alone. A schedule is a routine, not a memory. Do not save what is already there, one-off chatter, or passwords, tokens and other secrets. Do not only claim you remembered.\n",
+    ));
     s
 }
+
+const MEMORY_HEADING: &str = "# Your memory";
 
 /// Short `[crew system]` note for running PTYs when the roster changes.
 pub fn roster_update_text(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
@@ -1035,6 +1033,7 @@ fn inject_memory(program: &str, args: &mut Vec<String>, agent_id: &str) {
     if text.is_empty() {
         return;
     }
+    let text = &format!("{MEMORY_HEADING}\n{text}");
     match program {
         "grok" => append_flag_value(args, "--rules", text),
         "claude" => append_flag_value(args, "--append-system-prompt", text),
@@ -1814,7 +1813,13 @@ mod tests {
         assert!(rules.contains("--input"));
         assert!(rules.contains("not a substitute for `crew tell`"));
         assert!(!rules.contains("roster.md"));
-        assert!(!rules.contains("crew memory show"));
+        assert!(rules.contains("crew memory append <<'EOF'"));
+        assert!(rules.contains("run `crew memory show`, then `crew memory set <<'EOF'`"));
+        assert!(rules.contains("`# Your memory`"));
+        assert!(rules.contains("may be out of date"));
+        assert!(rules.contains("your only memory"));
+        assert!(rules.contains("A schedule is a routine, not a memory"));
+        assert!(rules.contains("secrets"));
     }
 
     #[test]
@@ -1827,6 +1832,7 @@ mod tests {
             let team_at = rules.find("You are Crew agent `t`").expect("team_rules");
             let mem_at = rules.find("remember the harbor").expect("memory");
             assert!(team_at < mem_at, "{rules}");
+            assert!(rules.ends_with("# Your memory\nremember the harbor"), "{rules}");
         });
     }
 

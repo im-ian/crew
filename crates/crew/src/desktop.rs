@@ -160,13 +160,15 @@ fn get_memory(agent: String) -> Result<String, String> {
     Ok(crate::memory::read(agent))
 }
 
+/// `base` is the text the tab loaded; false means the bot changed it since and
+/// nothing was written.
 #[tauri::command]
-fn set_memory(agent: String, text: String) -> Result<(), String> {
+fn set_memory(agent: String, text: String, base: String) -> Result<bool, String> {
     let agent = agent.trim();
     if agent.is_empty() {
         return Err("agent is required".into());
     }
-    crate::memory::write(agent, &text).map_err(|e| e.to_string())
+    crate::memory::write_if_unchanged(agent, &base, &text).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

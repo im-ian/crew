@@ -532,6 +532,11 @@ fn run_memory(cmd: MemoryCmd) -> anyhow::Result<()> {
         MemoryCmd::Set { agent, mut text } => {
             let id = memory_agent(agent, &mut text)?;
             let body = memory_body(text)?;
+            // Bots run with stdin closed, so a bare `set` or an empty `$VAR`
+            // would erase every note.
+            if body.trim().is_empty() {
+                anyhow::bail!("memory set needs text; it replaces the whole memory");
+            }
             crate::memory::write(&id, &body)?;
             Ok(())
         }
