@@ -120,14 +120,14 @@ describe("injectMentionChips", () => {
 describe("mentionRuns", () => {
   it("reads a mentioned id back as the roster name", () => {
     expect(mentionRuns("@gamma 확인해줘", agents)).toEqual([
-      { text: "@춘식이", mention: true },
+      { text: "@춘식이", mention: true, id: "gamma" },
       { text: " 확인해줘", mention: false },
     ]);
   });
 
   it("keeps trailing punctuation outside the mention", () => {
     expect(mentionRuns("@alpha, 봐줘", agents)).toEqual([
-      { text: "@Alpha", mention: true },
+      { text: "@Alpha", mention: true, id: "alpha" },
       { text: ", 봐줘", mention: false },
     ]);
   });

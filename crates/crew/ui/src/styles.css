@@ -935,10 +935,20 @@ button.avatar {
   white-space: nowrap;
   user-select: none;
 }
-/* A handle inside a preview: the chip's colour cue without its pill, which
-   would not fit a 12.5px row. */
-.preview-mention {
-  color: var(--ink);
+/* A handle inside a preview: the thread's chip, shrunk to the 12.5px line
+   so the row keeps its height. */
+.agent-preview .mention-chip {
+  height: 15px;
+  gap: 3px;
+  padding: 0 var(--space-6) 0 var(--space-2);
+}
+.agent-preview .mention-chip-avatar {
+  width: 11px;
+  height: 11px;
+  font-size: 6px;
+}
+.agent-preview .mention-chip-name {
+  font-size: inherit;
 }
 .empty-rail {
   color: var(--faint);

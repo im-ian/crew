@@ -17,6 +17,7 @@ import { listStamp } from "../clock";
 import { mentionRuns, mentionText } from "../mentions";
 import { numberDuplicateNames } from "../rail";
 import { Avatar } from "./Avatar";
+import { MentionChip } from "./MentionChip";
 import { ChevronDown, Plus, Settings } from "../icons";
 
 const RAIL_DEFAULT = 232;
@@ -896,11 +897,16 @@ function ItemRow({
         </div>
         {item.preview ? (
           <div className="agent-preview">
-            {previewRuns.map((run, i) => (
-              <span key={i} className={run.mention ? "preview-mention" : undefined}>
-                {run.text}
-              </span>
-            ))}
+            {previewRuns.map((run, i) =>
+              run.id ? (
+                <MentionChip
+                  key={i}
+                  agent={agents.find((a) => a.id === run.id)}
+                />
+              ) : (
+                <span key={i}>{run.text}</span>
+              ),
+            )}
           </div>
         ) : null}
       </div>

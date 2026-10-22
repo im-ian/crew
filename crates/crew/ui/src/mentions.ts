@@ -76,7 +76,7 @@ export function mentionIds(text: string, agents: readonly AgentInfo[]): string {
     .join("");
 }
 
-export type MentionRun = { text: string; mention: boolean };
+export type MentionRun = { text: string; mention: boolean; id?: string };
 
 /**
  * The one place that decides where a handle starts and ends. `injectMentionChips`
@@ -133,7 +133,7 @@ export function mentionRuns(
     if (hit) {
       if (plain) runs.push({ text: plain, mention: false });
       plain = "";
-      runs.push({ text: hit.sigil + hit.label, mention: true });
+      runs.push({ text: hit.sigil + hit.label, mention: true, id: hit.id });
       i += hit.length;
       prevWs = false;
       continue;
