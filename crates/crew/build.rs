@@ -43,6 +43,7 @@ fn main() {
             "peek_pending_focus",
             "take_pending_focus",
             "open_path",
+            "open_url",
             "set_dock_badge",
             "set_locale",
             "set_notifications",

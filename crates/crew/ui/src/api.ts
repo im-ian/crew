@@ -104,6 +104,7 @@ export const api = {
   peekPendingFocus: () => invoke<FocusTarget | null>("peek_pending_focus"),
   takePendingFocus: () => invoke<FocusTarget | null>("take_pending_focus"),
   openPath: (path: string) => invoke<void>("open_path", { path }),
+  openUrl: (url: string) => invoke<void>("open_url", { url }),
   setDockBadge: (count: number) => invoke<void>("set_dock_badge", { count }),
   setLocale: (locale: string) => invoke<void>("set_locale", { locale }),
   setNotifications: (enabled: boolean) =>

@@ -49,6 +49,7 @@
     "allow-peek-pending-focus",
     "allow-take-pending-focus",
     "allow-open-path",
+    "allow-open-url",
     "allow-set-dock-badge",
     "allow-set-locale",
     "allow-set-notifications",
