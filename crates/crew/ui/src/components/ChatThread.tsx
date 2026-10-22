@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useArriving } from "../arrive";
 import { useLocale, useT } from "../LocaleContext";
 import type { TFn } from "../i18n";
 import type { ReplyTarget } from "../reply";
@@ -36,20 +37,6 @@ const STICK_PX = 24;
 function rowKey(row: ThreadRow): string {
   if (row.kind === "msg") return row.msg.id;
   return row.msgs[0].id;
-}
-// Streaming text is its own sign of life, so the wait dots only cover a bot
-// that has gone quiet this long. It must outlast a CLI's tail after the last
-// word (grok sends `end` ~0.5s later), or the dots flash as a reply ends.
-const QUIET_MS = 1000;
-
-/** True once `value` has held still for `ms`. */
-function useQuiet(value: string, ms: number): boolean {
-  const [still, setStill] = useState<string | null>(null);
-  useEffect(() => {
-    const t = setTimeout(() => setStill(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return still === value;
 }
 
 type Props = {
@@ -125,10 +112,6 @@ export function ChatThread({
       onSelectAgent(id);
     });
   const lastVisible = dotsAfter(visible);
-  const quiet = useQuiet(
-    lastVisible ? lastVisible.id + "\n" + lastVisible.text : "",
-    QUIET_MS,
-  );
   function workingPlaceholders(): AgentInfo[] {
     const live = streaming && currentAgent ? [currentAgent] : [];
     return live.filter((a) => {
@@ -150,6 +133,12 @@ export function ChatThread({
       (a) => !messages.some((m) => m.from === a.id && m.approval === "pending"),
     );
   }
+
+  const placeholders = workingPlaceholders();
+  const arrive = useArriving([
+    ...rows.map(rowKey),
+    ...placeholders.map((agent) => "working-" + agent.id),
+  ]);
 
   function syncStick() {
     const el = ref.current;
@@ -178,7 +167,6 @@ export function ChatThread({
     selected,
     selectedKind,
     streaming,
-    quiet,
     highlightId,
     showTools,
   ]);
@@ -247,9 +235,10 @@ export function ChatThread({
               );
             } else {
               const m = row.msg;
+              // Dots sit under the reply that is arriving, from the first
+              // tokens until the turn ends.
               const caret =
                 streaming &&
-                quiet &&
                 m.role === "assistant" &&
                 m.id === lastVisible?.id;
               const flash = highlightId === m.id;
@@ -296,31 +285,41 @@ export function ChatThread({
             }
             const time = clocks.get(id);
             return (
-              <Fragment key={id}>
+              <div
+                key={id}
+                className={arrive.has(id) ? "msg-slot msg-arrive" : "msg-slot"}
+              >
                 {time ? <ThreadTime ts={time.ts} label={time.label} /> : null}
                 {node}
-              </Fragment>
+              </div>
             );
           })
         )}
-        {workingPlaceholders().map((agent) => (
-          <Incoming
-            key={"working-" + agent.id}
-            message={{
-              id: "working-" + agent.id,
-              role: "assistant",
-              from: agent.id,
-              text: "",
-              ts: 0,
-            }}
-            agent={agent}
-            who={agent.name || agent.id}
-            agents={agents}
-            caret
-            openName={false}
-            onSelectAgent={openAgent}
-          />
-        ))}
+        {placeholders.map((agent) => {
+          const id = "working-" + agent.id;
+          return (
+            <div
+              key={id}
+              className={arrive.has(id) ? "msg-slot msg-arrive" : "msg-slot"}
+            >
+              <Incoming
+                message={{
+                  id,
+                  role: "assistant",
+                  from: agent.id,
+                  text: "",
+                  ts: 0,
+                }}
+                agent={agent}
+                who={agent.name || agent.id}
+                agents={agents}
+                caret
+                openName={false}
+                onSelectAgent={openAgent}
+              />
+            </div>
+          );
+        })}
         {blockedCards().map((agent) => (
           <ApprovalCard
             key={"block-" + agent.id}

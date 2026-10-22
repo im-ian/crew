@@ -1088,6 +1088,24 @@ header .who-name {
   -webkit-mask-image: var(--thread-fade);
   mask-image: var(--thread-fade);
 }
+/* One thread child per row, so a clock and its balloon share the entrance. */
+.msg-slot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-14);
+  max-width: 100%;
+  min-width: 0;
+}
+.msg-arrive {
+  animation: msg-arrive 0.28s var(--ease-out) both;
+}
+@keyframes msg-arrive {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg-arrive { animation: none; }
+}
 .jump-bottom {
   position: absolute;
   left: 50%;
