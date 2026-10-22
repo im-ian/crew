@@ -667,19 +667,28 @@ function Incoming({
                   : " stack-mid"
               : "";
           return (
-            <MdBody
-              key={m.id + "-" + i}
-              className={
-                "bubble md incoming" +
-                stack +
-                (caret && last ? " streaming" : "") +
-                (queued ? " queued" : "")
-              }
-              text={part}
-              agents={agents}
-              onMention={onSelectAgent}
-              baseDir={agent?.cwd || undefined}
-            />
+            <div key={m.id + "-" + i} className="bubble-row">
+              <MdBody
+                className={
+                  "bubble md incoming" +
+                  stack +
+                  (caret && last ? " streaming" : "") +
+                  (queued ? " queued" : "")
+                }
+                text={part}
+                agents={agents}
+                onMention={onSelectAgent}
+                baseDir={agent?.cwd || undefined}
+              />
+              <MsgActions
+                copy={part}
+                onReply={
+                  onReply && part
+                    ? () => onReply(makeReply({ ...m, text: part }, agents, t))
+                    : undefined
+                }
+              />
+            </div>
           );
         })}
         {queued ? <QueueWait /> : null}
@@ -691,14 +700,6 @@ function Incoming({
           />
         ) : null}
         <ApprovalCard state={m.approval} onApprove={onApprove} />
-        <MsgActions
-          copy={body.trim()}
-          onReply={
-            onReply && body.trim()
-              ? () => onReply(makeReply({ ...m, text: body }, agents, t))
-              : undefined
-          }
-        />
       </div>
     </div>
   );
@@ -1251,23 +1252,25 @@ function Bubble({
       <div className="me-msg">
         {reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
         {body.trim() ? (
-          <MdBody
-            className={cls}
-            text={body}
-            agents={agents}
-            onMention={onSelectAgent}
-            baseDir={currentAgent?.cwd || undefined}
-          />
+          <div className="bubble-row">
+            <MdBody
+              className={cls}
+              text={body}
+              agents={agents}
+              onMention={onSelectAgent}
+              baseDir={currentAgent?.cwd || undefined}
+            />
+            <MsgActions
+              copy={body.trim()}
+              onReply={
+                onReply
+                  ? () => onReply(makeReply({ ...m, text: body }, agents, t))
+                  : undefined
+              }
+            />
+          </div>
         ) : null}
         {queued ? <QueueWait /> : null}
-        <MsgActions
-          copy={body.trim()}
-          onReply={
-            onReply && body.trim()
-              ? () => onReply(makeReply({ ...m, text: body }, agents, t))
-              : undefined
-          }
-        />
       </div>
     </div>
   );

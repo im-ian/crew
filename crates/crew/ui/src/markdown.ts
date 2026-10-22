@@ -17,7 +17,12 @@ export function renderMarkdown(raw: string): string {
     return "\n%%FENCE" + i + "%%\n";
   });
   s = escapeHtml(s);
-  s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
+  // Set inline code aside like fences, or `a_b` and `c_d` italicise across spans.
+  const spans: string[] = [];
+  s = s.replace(/`([^`]+)`/g, (_, code) => {
+    spans.push("<code>" + code + "</code>");
+    return "\u0000" + (spans.length - 1) + "\u0000";
+  });
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
   s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
@@ -27,6 +32,7 @@ export function renderMarkdown(raw: string): string {
     /\[([^\]]+)\]\((https?:\/\/[^)\s]+|file:\/\/[^)\s]+|\/[^)\s]+|\.\/[^)\s]+)\)/g,
     '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
   );
+  s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => spans[Number(i)]);
   const lines = s.split("\n");
   const out: string[] = [];
   let i = 0;

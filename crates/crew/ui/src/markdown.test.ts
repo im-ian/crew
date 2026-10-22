@@ -22,6 +22,13 @@ describe("renderMarkdown", () => {
     );
   });
 
+  it("leaves underscores and stars inside inline code alone", () => {
+    expect(renderMarkdown("`social_accounts`에서 `signup_type`, `a*b*c`")).toBe(
+      "<p><code>social_accounts</code>에서 <code>signup_type</code>, <code>a*b*c</code></p>",
+    );
+    expect(renderMarkdown("`a` %%CODE0%%")).toBe("<p><code>a</code> %%CODE0%%</p>");
+  });
+
   it("builds headings and both list kinds", () => {
     expect(renderMarkdown("## 제목")).toBe("<h2>제목</h2>");
     expect(renderMarkdown("- one\n- two")).toBe("<ul><li>one</li><li>two</li></ul>");

@@ -85,28 +85,17 @@ export function splitBubbles(text: string): string[] {
       start = i;
       continue;
     }
+    // Only a sentence glued to the next with no space is two messages run
+    // together; sentences in one paragraph are one thought and share a balloon.
     if (!code && !bold && isSentenceEnd(text[i])) {
-      let j = i + 1;
-      while (text[j] === " ") j += 1;
-      const next = text[j];
+      const next = text[i + 1];
       const prev = lastContentChar(text, i);
       const afterHangul = /[가-힣]/.test(prev);
-      if (next === "\n") {
-        while (text[j] === "\n") j += 1;
-        if (text[j] && isNewStart(text[j]) && !text.startsWith("```", j)) {
-          flush(i + 1, j);
-          i = j;
-          continue;
-        }
-      } else if (
+      if (
         next &&
-        ((j === i + 1 &&
-          (isNewStart(next) || (afterHangul && /[a-z*]/.test(next)))) ||
-          (j > i + 1 && /[가-힣]/.test(next)))
+        (isNewStart(next) || (afterHangul && /[a-z*]/.test(next)))
       ) {
-        flush(i + 1, j);
-        i = j;
-        continue;
+        flush(i + 1, i + 1);
       }
     }
     i += 1;
