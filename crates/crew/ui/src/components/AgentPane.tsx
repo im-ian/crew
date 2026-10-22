@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useT } from "../LocaleContext";
 import type { AgentInfo, CliKind, PaneTab, Routine } from "../types";
 import { Field } from "./Field";
@@ -135,16 +135,27 @@ function MemoryTab({
   const t = useT();
   const [memory, setMemory] = useState("");
   const [saved, setSaved] = useState(false);
+  const edited = useRef(false);
 
   useEffect(() => {
     if (!open || !agent) return;
     setMemory("");
     setSaved(false);
+    edited.current = false;
     void onLoad(agent.id).then((text) => {
       setMemory(text);
       setSaved(false);
     });
   }, [open, agent?.id]);
+
+  // The bot keeps its own memory, so a finished turn may have changed it.
+  // Pick that up unless the user is mid-edit; saving stale text would drop the bot's note.
+  useEffect(() => {
+    if (!open || !agent || agent.status === "working" || edited.current) return;
+    void onLoad(agent.id).then((text) => {
+      if (!edited.current) setMemory(text);
+    });
+  }, [agent?.status]);
 
   return (
     <div className="form-stack">
@@ -158,6 +169,7 @@ function MemoryTab({
           onChange={(e) => {
             setMemory(e.target.value);
             setSaved(false);
+            edited.current = true;
           }}
         />
       </Field>
@@ -169,6 +181,7 @@ function MemoryTab({
           onClick={async () => {
             await onSave(memory);
             setSaved(true);
+            edited.current = false;
           }}
         >
           {t("common.save")}
