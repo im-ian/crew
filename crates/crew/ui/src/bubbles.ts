@@ -1,5 +1,13 @@
-const FENCE_OPEN = /^ {0,3}(`{3,})/;
-const FENCE_CLOSE = /^ {0,3}(`{3,})\s*$/;
+// At any indent, for a fence inside a nested list item. A ``` line with
+// another backtick on it is inline code, not a fence.
+const FENCE_OPEN = /^[ \t]*(`{3,}(?!.*`)|~{3,})/;
+const FENCE_CLOSE = /^[ \t]*(`{3,}|~{3,})\s*$/;
+
+/** A balloon of nothing but link definitions draws nothing; its links resolve without it. */
+const LINK_DEF = /^ {0,3}\[(?!\^)[^\]]+\]:[ \t]*\S/;
+
+/** A rule alone would be an empty balloon; the gap between balloons already divides them. */
+const RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 
 /** Split one assistant turn into chat balloons, one per paragraph. */
 export function splitBubbles(text: string): string[] {
@@ -10,16 +18,18 @@ export function splitBubbles(text: string): string[] {
 
   const flush = () => {
     const piece = lines.join("\n").trim();
-    if (piece) parts.push(piece);
+    if (piece && !RULE.test(piece) && !piece.split("\n").every((l) => LINK_DEF.test(l))) {
+      parts.push(piece);
+    }
     lines = [];
   };
 
   for (const line of text.split("\n")) {
     if (fence) {
-      // Only a bare run at least as long as the opener closes it, so a
-      // ```` block can show a ``` one.
+      // Only a bare run of the same mark at least as long as the opener
+      // closes it, so a ```` block can show a ``` one.
       const close = FENCE_CLOSE.exec(line);
-      if (close && close[1].length >= fence.length) fence = "";
+      if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = "";
     } else if (!line.trim()) {
       gap = true;
     } else {
@@ -32,5 +42,6 @@ export function splitBubbles(text: string): string[] {
     lines.push(line);
   }
   flush();
-  return parts;
+  // A message of nothing else still gets its balloon, to copy or reply to.
+  return parts.length || !text.trim() ? parts : [text.trim()];
 }

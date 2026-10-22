@@ -12,6 +12,7 @@ import type {
 } from "../types";
 import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
+import { messageDefinitions } from "../markdown";
 import { noteRef, sentTarget } from "../peek";
 import {
   dotsAfter,
@@ -614,6 +615,7 @@ function Incoming({
   const t = useT();
   const queued = !!m.queued;
   const { reply, body } = splitReply(m.text || "");
+  const defs = useMemo(() => messageDefinitions(body), [body]);
   // The wait dots get a bubble of their own under the text, not a tail on it.
   const parts = caret ? [...splitBubbles(body), ""] : splitBubbles(body);
   return (
@@ -676,6 +678,7 @@ function Incoming({
                   (queued ? " queued" : "")
                 }
                 text={part}
+                defs={defs}
                 agents={agents}
                 onMention={onSelectAgent}
                 baseDir={agent?.cwd || undefined}

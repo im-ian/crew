@@ -69,6 +69,22 @@ describe("splitBubbles", () => {
     expect(splitBubbles(text)).toEqual([text]);
     const nested = "````md\n```js\nx\n\n```\n````";
     expect(splitBubbles(nested + "\n\n끝")).toEqual([nested, "끝"]);
+    expect(splitBubbles("~~~\na\n\n```\nb\n~~~\n\n끝")).toEqual(["~~~\na\n\n```\nb\n~~~", "끝"]);
+    const nestedItem = "- a\n  - b\n    ```\n    x\n\n    y\n    ```";
+    expect(splitBubbles(nestedItem)).toEqual([nestedItem]);
+    // CommonMark reads this line as inline code, so it opens nothing.
+    expect(splitBubbles("```a``` 는 코드\n\n끝")).toEqual(["```a``` 는 코드", "끝"]);
+  });
+
+  it("drops a balloon of nothing but a rule", () => {
+    expect(splitBubbles("위\n\n---\n\n아래\n\n* * *")).toEqual(["위", "아래"]);
+    // A message of nothing else keeps one, so it can still be copied.
+    expect(splitBubbles("---")).toEqual(["---"]);
+  });
+
+  it("drops a balloon of nothing but link definitions", () => {
+    expect(splitBubbles("[가이드][g]를 봐.\n\n[g]: https://g.dev")).toEqual(["[가이드][g]를 봐."]);
+    expect(splitBubbles("본문[^1]\n\n[^1]: 각주")).toEqual(["본문[^1]", "[^1]: 각주"]);
   });
 
   it("keeps a command and its output in one balloon", () => {

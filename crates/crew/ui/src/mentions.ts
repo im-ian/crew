@@ -8,6 +8,10 @@ const BLOCK_TAGS = new Set([
   "H1",
   "H2",
   "H3",
+  "H4",
+  "H5",
+  "H6",
+  "BLOCKQUOTE",
   "PRE",
   "UL",
   "OL",
@@ -120,7 +124,10 @@ export function injectMentionChips(html: string, agents: readonly AgentInfo[]): 
   let i = 0;
   let prevWs = true;
   const stack: string[] = [];
-  const inSkip = () => stack.some((t) => SKIP_TAGS.has(t));
+  // Whether each open tag shuts chips out. KaTeX's markup goes to the page
+  // as it is, so a chip inside a formula would never become a chip.
+  const skips: boolean[] = [];
+  const inSkip = () => skips.includes(true);
 
   while (i < html.length) {
     if (html[i] === "<") {
@@ -136,9 +143,10 @@ export function injectMentionChips(html: string, agents: readonly AgentInfo[]): 
         .toUpperCase();
       if (close) {
         const idx = stack.lastIndexOf(name);
-        if (idx >= 0) stack.length = idx;
+        if (idx >= 0) stack.length = skips.length = idx;
       } else if (!raw.endsWith("/") && name && name !== "BR") {
         stack.push(name);
+        skips.push(SKIP_TAGS.has(name) || raw.includes('class="md-math'));
       }
       if (BLOCK_TAGS.has(name)) prevWs = true;
       out += html.slice(i, gt + 1);

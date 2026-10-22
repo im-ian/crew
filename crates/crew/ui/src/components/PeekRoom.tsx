@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { useT } from "../LocaleContext";
+import { messageDefinitions } from "../markdown";
 import { Lock, X } from "../icons";
 import { peekMessages } from "../peek";
 import type { AgentInfo, ChatMessage } from "../types";
@@ -174,6 +175,7 @@ function PeekBubble({
       )
     : undefined;
   const parts = splitBubbles(m.text || "");
+  const defs = useMemo(() => messageDefinitions(m.text || ""), [m.text]);
   return (
     <div
       className={"row them incoming" + (flash ? " flash" : "")}
@@ -213,6 +215,7 @@ function PeekBubble({
               key={m.id + "-" + i}
               className={"bubble md incoming" + stack}
               text={part}
+              defs={defs}
               agents={agents}
               baseDir={agent?.cwd || undefined}
             />
