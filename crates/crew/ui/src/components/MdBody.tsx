@@ -24,6 +24,12 @@ const TAGS = new Set([
   "H2",
   "H3",
   "SPAN",
+  "TABLE",
+  "THEAD",
+  "TBODY",
+  "TR",
+  "TH",
+  "TD",
 ]);
 
 type Props = {

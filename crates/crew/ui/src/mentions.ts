@@ -12,6 +12,8 @@ const BLOCK_TAGS = new Set([
   "UL",
   "OL",
   "BR",
+  "TH",
+  "TD",
 ]);
 
 export function mentionLabel(agent: AgentInfo): string {

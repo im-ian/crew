@@ -7,6 +7,31 @@ export function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;");
 }
 
+const TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+
+/** A row's cells; `\|` is a literal pipe, not a column break. */
+function tableCells(line: string): string[] {
+  return line
+    .replace(/\\\|/g, "\u0000")
+    .trim()
+    .replace(/^\||\|$/g, "")
+    .split("|")
+    .map((c) => c.replace(/\u0000/g, "|").trim());
+}
+
+/** A header row is only a table when a delimiter row with as many cells sits under it. */
+function isTableStart(lines: string[], i: number): boolean {
+  const head = lines[i];
+  const sep = lines[i + 1];
+  return (
+    sep !== undefined &&
+    head.includes("|") &&
+    sep.includes("|") &&
+    TABLE_SEP.test(sep) &&
+    tableCells(head).length === tableCells(sep).length
+  );
+}
+
 export function renderMarkdown(raw: string): string {
   const fences: string[] = [];
   let s = String(raw || "").replace(/```[^\n]*\n?([\s\S]*?)```/g, (_, code) => {
@@ -60,6 +85,28 @@ export function renderMarkdown(raw: string): string {
       i += 1;
       continue;
     }
+    if (isTableStart(lines, i)) {
+      const aligns = tableCells(lines[i + 1]).map((c) =>
+        /^:-+:$/.test(c) ? ' class="md-center"' : /-:$/.test(c) ? ' class="md-right"' : "",
+      );
+      const row = (cells: string[], tag: string) =>
+        "<tr>" +
+        aligns.map((a, j) => "<" + tag + a + ">" + (cells[j] ?? "") + "</" + tag + ">").join("") +
+        "</tr>";
+      const head = row(tableCells(line), "th");
+      i += 2;
+      const body: string[] = [];
+      while (i < lines.length && lines[i].trim() && lines[i].includes("|")) {
+        body.push(row(tableCells(lines[i]), "td"));
+        i += 1;
+      }
+      out.push(
+        "<table><thead>" + head + "</thead>" +
+          (body.length ? "<tbody>" + body.join("") + "</tbody>" : "") +
+          "</table>",
+      );
+      continue;
+    }
     if (/^\s*[-*]\s+/.test(line)) {
       const items: string[] = [];
       while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
@@ -90,7 +137,8 @@ export function renderMarkdown(raw: string): string {
       !/^(#{1,3})\s+/.test(lines[i]) &&
       !/^\s*[-*]\s+/.test(lines[i]) &&
       !/^\s*\d+\.\s+/.test(lines[i]) &&
-      !/^%%FENCE\d+%%$/.test(lines[i])
+      !/^%%FENCE\d+%%$/.test(lines[i]) &&
+      !isTableStart(lines, i)
     ) {
       para.push(lines[i]);
       i += 1;
