@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatThread, sideOnlyPeer } from "./components/ChatThread";
@@ -41,29 +41,17 @@ export function App() {
   const [showTools, setShowTools] = useState(loadShowTools);
   const [jumpSeq, setJumpSeq] = useState(0);
   // `focus` is the run that was clicked, so the panel opens on it rather than
-  // at the bottom of everything the two bots ever said. `undefined` until the
-  // reader opens or closes one: a bot with only side chats shows its latest.
-  const [picked, setPeek] = useState<
-    { peer: string; focus: string[] } | null | undefined
-  >();
+  // at the bottom of everything the two bots ever said.
+  const [peek, setPeek] = useState<{ peer: string; focus: string[] } | null>(
+    null,
+  );
   const updater = useUpdater();
   const renamingId = crew.pendingRenameId || renameId;
   const searchRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<ComposerHandle>(null);
-  const auto = useMemo(() => {
-    if (crew.messagesFor !== crew.selected) return null;
-    const hit = crew.highlightId;
-    const peer = sideOnlyPeer(crew.messages, crew.agents, hit);
-    return peer ? { peer, focus: hit ? [hit] : [] } : null;
-  }, [
-    crew.messagesFor,
-    crew.selected,
-    crew.messages,
-    crew.agents,
-    crew.highlightId,
-  ]);
-  const peek = picked === undefined ? auto : picked;
   const peekOpen = !!(peek && crew.currentAgent);
+  const autoFor = useRef<string | null>(null);
+  const hitFor = useRef<string | null>(null);
 
   function finishRename() {
     crew.clearPendingRename();
@@ -80,19 +68,37 @@ export function App() {
     return () => window.clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    setPeek(undefined);
+  // Layout effects, in this order: a switch shuts the panel before the next
+  // one opens, with no frame painted between.
+  useLayoutEffect(() => {
+    setPeek(null);
+    autoFor.current = null;
   }, [crew.selected, crew.selectedKind]);
 
-  // Once open, it stays: the first message to that bot should not shut it,
-  // nor a search hit slide to the latest side chat when the highlight clears.
-  useEffect(() => {
-    if (picked === undefined && auto) setPeek(auto);
-  }, [picked, auto]);
+  // A bot with only side chats opens its latest beside the empty thread, and
+  // a search hit opens the one it is in. Once per pick, when that bot's own
+  // messages land: a note arriving later must not pop it open mid-sentence.
+  useLayoutEffect(() => {
+    const sel = crew.selected;
+    const hit = crew.highlightId;
+    if (!sel || crew.messagesFor !== sel) return;
+    if (!hit) hitFor.current = null;
+    if (autoFor.current === sel && (!hit || hitFor.current === hit)) return;
+    autoFor.current = sel;
+    hitFor.current = hit;
+    const peer = sideOnlyPeer(crew.messages, crew.agents, hit);
+    if (peer) setPeek({ peer, focus: hit ? [hit] : [] });
+  }, [
+    crew.selected,
+    crew.messagesFor,
+    crew.messages,
+    crew.agents,
+    crew.highlightId,
+  ]);
 
   function togglePeek(peer: string, focus: string[] = []) {
-    setPeek(
-      peek && peek.peer === peer && peek.focus[0] === focus[0]
+    setPeek((cur) =>
+      cur && cur.peer === peer && cur.focus[0] === focus[0]
         ? null
         : { peer, focus },
     );
@@ -127,7 +133,7 @@ export function App() {
       const c = crewRef.current;
       if (c.confirmOpen) return;
       const typing = isTypingTarget(e.target);
-      if (peekOpen && e.key === "Escape") {
+      if (peek && e.key === "Escape") {
         if (typing) return;
         e.preventDefault();
         setPeek(null);
@@ -201,7 +207,7 @@ export function App() {
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [helpOpen, settingsOpen, skillsOpen, peekOpen]);
+  }, [helpOpen, settingsOpen, skillsOpen, peek]);
 
   return (
     <div className="app">
