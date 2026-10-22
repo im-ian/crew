@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ChatHeader } from "./components/ChatHeader";
-import { ChatThread } from "./components/ChatThread";
+import { ChatThread, sideOnlyPeer } from "./components/ChatThread";
 import { PeekRoom } from "./components/PeekRoom";
 import { Composer, type ComposerHandle } from "./components/Composer";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -41,14 +41,28 @@ export function App() {
   const [showTools, setShowTools] = useState(loadShowTools);
   const [jumpSeq, setJumpSeq] = useState(0);
   // `focus` is the run that was clicked, so the panel opens on it rather than
-  // at the bottom of everything the two bots ever said.
-  const [peek, setPeek] = useState<{ peer: string; focus: string[] } | null>(
-    null,
-  );
+  // at the bottom of everything the two bots ever said. `undefined` until the
+  // reader opens or closes one: a bot with only side chats shows its latest.
+  const [picked, setPeek] = useState<
+    { peer: string; focus: string[] } | null | undefined
+  >();
   const updater = useUpdater();
   const renamingId = crew.pendingRenameId || renameId;
   const searchRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<ComposerHandle>(null);
+  const auto = useMemo(() => {
+    if (crew.messagesFor !== crew.selected) return null;
+    const hit = crew.highlightId;
+    const peer = sideOnlyPeer(crew.messages, crew.agents, hit);
+    return peer ? { peer, focus: hit ? [hit] : [] } : null;
+  }, [
+    crew.messagesFor,
+    crew.selected,
+    crew.messages,
+    crew.agents,
+    crew.highlightId,
+  ]);
+  const peek = picked === undefined ? auto : picked;
   const peekOpen = !!(peek && crew.currentAgent);
 
   function finishRename() {
@@ -67,12 +81,18 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    setPeek(null);
+    setPeek(undefined);
   }, [crew.selected, crew.selectedKind]);
 
+  // Once open, it stays: the first message to that bot should not shut it,
+  // nor a search hit slide to the latest side chat when the highlight clears.
+  useEffect(() => {
+    if (picked === undefined && auto) setPeek(auto);
+  }, [picked, auto]);
+
   function togglePeek(peer: string, focus: string[] = []) {
-    setPeek((cur) =>
-      cur && cur.peer === peer && cur.focus[0] === focus[0]
+    setPeek(
+      peek && peek.peer === peer && peek.focus[0] === focus[0]
         ? null
         : { peer, focus },
     );
@@ -107,7 +127,7 @@ export function App() {
       const c = crewRef.current;
       if (c.confirmOpen) return;
       const typing = isTypingTarget(e.target);
-      if (peek && e.key === "Escape") {
+      if (peekOpen && e.key === "Escape") {
         if (typing) return;
         e.preventDefault();
         setPeek(null);
@@ -181,7 +201,7 @@ export function App() {
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [helpOpen, settingsOpen, skillsOpen, peek]);
+  }, [helpOpen, settingsOpen, skillsOpen, peekOpen]);
 
   return (
     <div className="app">

@@ -121,7 +121,11 @@ export function ChatThread({
   const ref = useRef<HTMLDivElement>(null);
   const [away, setAway] = useState(false);
   const visible = visibleMessages(messages, showTools);
-  const rows = threadRows(visible, agents);
+  const all = threadRows(visible, agents);
+  // A bot that has only talked with other bots has no conversation here: the
+  // thread stays empty, and its side chat opens beside it (`sideOnlyPeer`).
+  const direct = all.some((row) => row.kind === "msg");
+  const rows = direct ? all : [];
   // Keyed by row id, not by index: a filter or an inserted row would slide a
   // parallel array and stamp the wrong stretch.
   const clocks = useMemo(() => {
@@ -162,15 +166,12 @@ export function ChatThread({
     );
   }
 
-  const placeholders = workingPlaceholders();
+  // Without a conversation here, a turn can only be for a side chat.
+  const placeholders = direct ? workingPlaceholders() : [];
   const blocked = blockedCards();
-  // Side-chat folds alone are not a conversation with this bot: it still
-  // gets the empty state, under the folds that lead to them. Dots or an
-  // approval card mean it is busy here, and "start a chat" would contradict.
-  const empty =
-    !rows.some((row) => row.kind === "msg") &&
-    !placeholders.length &&
-    !blocked.length;
+  // An approval card means it is waiting on the reader here, and "start a
+  // chat" would contradict it.
+  const empty = !direct && !blocked.length;
   const arrive = useArriving(
     [
       ...rows.map(rowKey),
@@ -548,8 +549,9 @@ function TransferNote({
         ? t("thread.handoff")
         : t("thread.received");
   const { reply, body } = splitReply(m.text || "");
-  // A bot on the roster opens beside the thread; anything else still unfolds here.
-  const side = onPeek && agent ? () => onPeek(agent.id, [m.id]) : null;
+  // A bot, deleted or not, opens beside the thread; a room still unfolds here.
+  const side =
+    onPeek && !otherId.startsWith("#") ? () => onPeek(otherId, [m.id]) : null;
   // A search hit has to be readable without a click.
   const show = (!side && openBody) || flash;
   return (
@@ -601,12 +603,8 @@ function TransferNote({
               baseDir={agent?.cwd || undefined}
             />
           ) : null}
-          {onPeek && agent ? (
-            <button
-              type="button"
-              className="xfer-peek"
-              onClick={() => onPeek(agent.id, [m.id])}
-            >
+          {side ? (
+            <button type="button" className="xfer-peek" onClick={side}>
               {t("thread.viewFull")}
             </button>
           ) : null}
@@ -859,7 +857,9 @@ function NoteGroup({
   const hit = items.some((m) => m.id === highlightId);
   const agent = agents.find((a) => a.id === peerId) ?? null;
   const side =
-    onPeek && agent ? () => onPeek(peerId, items.map((m) => m.id)) : null;
+    onPeek && !peerId.startsWith("#")
+      ? () => onPeek(peerId, items.map((m) => m.id))
+      : null;
   const peeking = peekFocus === items[0].id;
   // A search hit inside a folded run has to be on screen to be highlighted.
   const show = (!side && open) || hit;
@@ -1536,6 +1536,27 @@ function isPlainEcho(raw: string, messages: ChatMessage[], index: number): boole
 
 function displayText(m: ChatMessage): string {
   return stripCrewMarkers(m.text || "");
+}
+
+/**
+ * The bot to show beside the thread when this chat has only side chats: the
+ * one whose run holds `hit`, else the one it spoke with last. `null` once
+ * the reader has a conversation here.
+ */
+export function sideOnlyPeer(
+  messages: ChatMessage[],
+  agents: AgentInfo[],
+  hit: string | null = null,
+): string | null {
+  const rows = threadRows(visibleMessages(messages, false), agents);
+  if (rows.some((row) => row.kind === "msg")) return null;
+  let peer: string | null = null;
+  for (const row of rows) {
+    if (row.kind !== "notes" || row.peerId.startsWith("#")) continue;
+    if (row.msgs.some((m) => m.id === hit)) return row.peerId;
+    peer = row.peerId;
+  }
+  return peer;
 }
 
 function visibleMessages(
