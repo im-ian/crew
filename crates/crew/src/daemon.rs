@@ -175,6 +175,9 @@ struct PendingDelivery {
     text: String,
     newline: bool,
     msg_id: Option<String>,
+    /// A line the user typed into a headless bot's 1:1. It starts together
+    /// with the lines typed after it that are still waiting (`next_run`).
+    joins: bool,
     origin: TurnOrigin,
     /// The rest of a chain, waiting on this delivery's turn. It goes on the
     /// bot when the delivery starts: until then a stop or a newer message for
@@ -391,6 +394,7 @@ fn enqueue_delivery(
     text: &str,
     newline: bool,
     msg_id: Option<String>,
+    joins: bool,
     origin: TurnOrigin,
     then: &mut VecDeque<SerialJob>,
 ) -> anyhow::Result<()> {
@@ -408,6 +412,7 @@ fn enqueue_delivery(
         text: text.to_string(),
         newline,
         msg_id,
+        joins,
         origin,
         then: std::mem::take(then),
     });
@@ -512,6 +517,7 @@ fn approve_agent(id: &str, allow: bool) -> anyhow::Result<()> {
             "User allowed this action. Continue.",
             true,
             None,
+            false,
             origin,
             &mut then,
         ) {
@@ -728,7 +734,15 @@ fn submit_delivery(
     msg_id: Option<String>,
     origin: TurnOrigin,
 ) -> anyhow::Result<()> {
-    submit_delivery_then(id, text, newline, msg_id, origin, &mut VecDeque::new())
+    submit_delivery_then(
+        id,
+        text,
+        newline,
+        msg_id,
+        false,
+        origin,
+        &mut VecDeque::new(),
+    )
 }
 
 /// `then` is the rest of a chain waiting on this delivery's turn. It is taken
@@ -738,6 +752,7 @@ fn submit_delivery_then(
     text: &str,
     newline: bool,
     msg_id: Option<String>,
+    joins: bool,
     origin: TurnOrigin,
     then: &mut VecDeque<SerialJob>,
 ) -> anyhow::Result<()> {
@@ -763,7 +778,7 @@ fn submit_delivery_then(
             }
         }
     }
-    enqueue_delivery(id, text, newline, msg_id, origin, then)?;
+    enqueue_delivery(id, text, newline, msg_id, joins, origin, then)?;
     // The turn that was in the way, or a start under way, can finish before
     // the push and find nothing to start. Nothing else would start this one.
     pump_inbox_inner(id);
@@ -796,6 +811,8 @@ fn steer_delivery(
                 text: text.to_string(),
                 newline: true,
                 msg_id: Some(msg_id),
+                // What was waiting keeps its place for after the steer.
+                joins: false,
                 origin: TurnOrigin::user(),
                 then: std::mem::take(then),
             });
@@ -850,43 +867,81 @@ fn pump_inbox_inner(id: &str) {
     let Some(start) = claim_start(id) else {
         return;
     };
-    let next = {
-        let mut map = match inbox().lock() {
-            Ok(m) => m,
-            Err(_) => return,
-        };
-        map.get_mut(id).and_then(|q| q.pop_front())
-    };
-    let Some(mut item) = next else {
+    let mut run = next_run(id);
+    let Some(first) = run.first() else {
         return;
     };
-    match start_delivery(
-        start,
-        &item.text,
-        item.newline,
-        item.origin.clone(),
-        item.msg_id.as_deref(),
-        &mut item.then,
-    ) {
+    // What the user said in a row while the bot was busy is one prompt: the
+    // bot starts on all of it, and none of it stays "waiting" behind the first.
+    let text = run
+        .iter()
+        .map(|item| item.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let (newline, origin, msg_id) = (first.newline, first.origin.clone(), first.msg_id.clone());
+    let named: Vec<usize> = run.iter().map(|item| item.then.len()).collect();
+    let mut then: VecDeque<SerialJob> = run
+        .iter_mut()
+        .flat_map(|item| std::mem::take(&mut item.then))
+        .collect();
+    match start_delivery(start, &text, newline, origin, msg_id.as_deref(), &mut then) {
         Ok(()) => {
-            if let Some(ref mid) = item.msg_id {
-                crate::transcript::set_queued(id, mid, false);
+            for item in &run {
+                unmark(id, item);
             }
         }
+        // Back one by one, each with the teammates it named, so each can still
+        // be cancelled on its own.
         Err(err) if is_busy_err(&err) => {
+            for (item, n) in run.iter_mut().zip(named) {
+                item.then = then.drain(..n).collect();
+            }
             if let Ok(mut map) = inbox().lock() {
-                map.entry(id.to_string()).or_default().push_front(item);
+                let q = map.entry(id.to_string()).or_default();
+                for item in run.into_iter().rev() {
+                    q.push_front(item);
+                }
             }
         }
         Err(err) => {
-            if let Some(ref mid) = item.msg_id {
-                crate::transcript::set_queued(id, mid, false);
+            for item in &run {
+                unmark(id, item);
             }
             eprintln!("[crew] inbox {id}: {err:#}");
             // The rest of its chain goes on without this bot.
-            release(item.then);
+            release(then);
             pump_inbox_inner(id);
         }
+    }
+}
+
+/// The next delivery waiting for `id`, with the lines the user typed after it
+/// when it is one of theirs.
+fn next_run(id: &str) -> Vec<PendingDelivery> {
+    let mut run = Vec::new();
+    let Ok(mut map) = inbox().lock() else {
+        return run;
+    };
+    let Some(q) = map.get_mut(id) else {
+        return run;
+    };
+    let Some(first) = q.pop_front() else {
+        return run;
+    };
+    let joins = first.joins;
+    run.push(first);
+    if joins {
+        while let Some(more) = q.pop_front_if(|next| next.joins) {
+            run.push(more);
+        }
+    }
+    run
+}
+
+/// `item`'s row stops showing as waiting.
+fn unmark(id: &str, item: &PendingDelivery) {
+    if let Some(mid) = &item.msg_id {
+        crate::transcript::set_queued(id, mid, false);
     }
 }
 
@@ -2124,14 +2179,17 @@ fn messages_agent(id: &str) -> anyhow::Result<Event> {
     })
 }
 
+fn is_headless(id: &str) -> bool {
+    matches!(
+        agents().lock().expect("agents mutex").get(id),
+        Some(LiveAgent::Headless(_))
+    )
+}
+
 fn apply_user_interrupt(id: &str, text: &str, steer: bool) -> anyhow::Result<UserSendAction> {
     let status = live_status(id)?;
     // A PTY bot cannot be stopped mid-turn, so a steer there waits like any send.
-    let steer = steer
-        && matches!(
-            agents().lock().expect("agents mutex").get(id),
-            Some(LiveAgent::Headless(_))
-        );
+    let steer = steer && is_headless(id);
     let action = crate::interrupt::member_turn_action(true, status, text, steer);
     match action {
         UserSendAction::Stop => interrupt_turn(id)?,
@@ -2188,11 +2246,15 @@ fn send_from_user(id: &str, shown: &str, text: &str, steer: bool) -> anyhow::Res
     let started = if action == UserSendAction::Redirect {
         steer_delivery(id, &delivered, msg.id, &mut then)
     } else {
+        // A terminal takes each Enter as a prompt of its own, so only a
+        // headless CLI gets waiting lines together. A command goes alone.
+        let joins = is_headless(id) && !is_slash_command(text);
         submit_delivery_then(
             id,
             &delivered,
             true,
             Some(msg.id),
+            joins,
             TurnOrigin::user(),
             &mut then,
         )
@@ -2300,8 +2362,15 @@ fn tell_agent_origin(
     if from != "user" && from != to {
         hold_handoff(to, &from, &msg.id);
     }
-    if let Err(err) = submit_delivery_then(to, &envelope, true, Some(msg.id.clone()), origin, then)
-    {
+    if let Err(err) = submit_delivery_then(
+        to,
+        &envelope,
+        true,
+        Some(msg.id.clone()),
+        false,
+        origin,
+        then,
+    ) {
         // Nothing went out, so the reply is still the answer.
         settle_handoff(to, &msg.id, false);
         return Err(err);
@@ -3102,6 +3171,7 @@ mod daemon_tests {
             "a",
             true,
             None,
+            false,
             TurnOrigin::user(),
             &mut VecDeque::new(),
         )
@@ -3111,6 +3181,7 @@ mod daemon_tests {
             "b",
             true,
             None,
+            false,
             TurnOrigin::user(),
             &mut VecDeque::new(),
         )
@@ -3133,6 +3204,7 @@ mod daemon_tests {
                 &i.to_string(),
                 true,
                 None,
+                false,
                 TurnOrigin::user(),
                 &mut VecDeque::new(),
             )
@@ -3143,6 +3215,7 @@ mod daemon_tests {
             "overflow",
             true,
             None,
+            false,
             TurnOrigin::user(),
             &mut VecDeque::new(),
         )
@@ -3620,6 +3693,48 @@ mod daemon_tests {
                 approve_agent(&bot, true).is_err(),
                 "nothing left to approve"
             );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// Lines typed while a bot works go out together as its next prompt, and
+    /// none stays "대기 중" once it starts. A command still goes alone.
+    #[test]
+    fn lines_sent_while_busy_start_the_next_turn_together() {
+        paths::testing::with_home("joined", || {
+            let bot = test_id("joined");
+            let log = paths::home_dir().join("prompts");
+            fake_bot_running(
+                &bot,
+                &format!("printf '%s|' \"$last\" >> '{}'", log.display()),
+            );
+            headless_status(&bot, AgentStatus::Working);
+            for line in [
+                "고쳐줘",
+                "[crew reply:1-2 from:bot]\n그 이미지\n\nPR은 따로",
+                "/compact",
+            ] {
+                send_agent(&bot, line).unwrap();
+            }
+            let waiting = || {
+                crate::transcript::messages(&bot)
+                    .iter()
+                    .filter(|m| m.queued)
+                    .count()
+            };
+            assert_eq!(waiting(), 3);
+
+            headless_status(&bot, AgentStatus::Idle);
+            pump_inbox(&bot);
+            eventually(Duration::from_secs(10), "both turns ran", || {
+                fs::read_to_string(&log).is_ok_and(|s| s.ends_with("/compact|"))
+            });
+            wait_idle(&bot);
+            assert_eq!(
+                fs::read_to_string(&log).unwrap(),
+                "고쳐줘\n\n[crew reply:1-2 from:bot]\n그 이미지\n\nPR은 따로|/compact|"
+            );
+            assert_eq!(waiting(), 0);
             remove_agent(&bot).unwrap();
         });
     }
@@ -4155,6 +4270,7 @@ exec sleep 1"#,
                     &i.to_string(),
                     true,
                     None,
+                    false,
                     TurnOrigin::user(),
                     &mut none,
                 )
@@ -4201,7 +4317,7 @@ exec sleep 1"#,
                 own: false,
             }]);
             let origin = TurnOrigin::mention_tell("chat-a");
-            enqueue_delivery(&term, "같이 봐줘", true, None, origin, &mut then).unwrap();
+            enqueue_delivery(&term, "같이 봐줘", true, None, false, origin, &mut then).unwrap();
             match agents().lock().unwrap().get(&term) {
                 Some(LiveAgent::Pty(s)) => s.inner.lock().unwrap().status = AgentStatus::Exited,
                 _ => panic!("cat runs on a terminal"),
