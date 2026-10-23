@@ -237,6 +237,7 @@ export function App() {
         onRenameGroup={crew.renameGroup}
         onRenameDone={finishRename}
         onMove={crew.moveToGroup}
+        onReorderGroup={crew.reorderGroup}
         unread={crew.unread}
         searchRef={searchRef}
         onOpenSettings={() => setSettingsOpen(true)}

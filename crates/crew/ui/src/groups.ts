@@ -155,6 +155,37 @@ export function railOrder(
   return out;
 }
 
+/** True when inserting `id` before `beforeId` (or at the end) would change `ids`. */
+export function groupOrderChanges(
+  ids: string[],
+  id: string,
+  beforeId: string | null,
+): boolean {
+  const from = ids.indexOf(id);
+  if (from < 0) return false;
+  const rest = ids.filter((key) => key !== id);
+  const to = beforeId == null ? rest.length : rest.indexOf(beforeId);
+  if (to < 0) return false;
+  return to !== from;
+}
+
+/** Move a folder before `beforeId`, or to the end of the folder list when it is null. */
+export function moveGroup(
+  layout: RailLayout,
+  groupId: string,
+  beforeId: string | null,
+): RailLayout {
+  const ids = layout.groups.map((g) => g.id);
+  if (!groupOrderChanges(ids, groupId, beforeId)) return layout;
+  const moving = layout.groups.find((g) => g.id === groupId);
+  if (!moving) return layout;
+  const groups = layout.groups.filter((g) => g.id !== groupId);
+  const idx = beforeId ? groups.findIndex((g) => g.id === beforeId) : -1;
+  if (idx < 0) groups.push(moving);
+  else groups.splice(idx, 0, moving);
+  return { groups, ungrouped: layout.ungrouped };
+}
+
 export function moveItem(
   layout: RailLayout,
   key: string,
