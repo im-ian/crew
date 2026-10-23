@@ -13,7 +13,9 @@ md.validateLink = (url) => /^file:/i.test(url.trim()) || validateLink(url);
 // A path stays as written, so `resolveLocalPath` gets the file's real name.
 const normalizeLink = md.normalizeLink.bind(md);
 md.normalizeLink = (url) =>
-  /^[a-z][a-z0-9+.-]*:/i.test(url) && !/^file:/i.test(url) ? normalizeLink(url) : url;
+  /^[a-z][a-z0-9+.-]*:/i.test(url) && !/^file:/i.test(url) && !/^[A-Za-z]:[\\/]/.test(url)
+    ? normalizeLink(url)
+    : url;
 
 // The bubble's copy button and empty-output check read the block's text, so it
 // carries no trailing newline. `md-out` comes from the command rule below.
@@ -197,6 +199,87 @@ function footnoteRef(state: StateInline, silent: boolean) {
   return true;
 }
 md.inline.ruler.before("link", "footnote_ref", footnoteRef);
+
+// An upload lives under "Application Support", so the path contains spaces.
+// A bare destination ends at the first space and the picture stays as text.
+function isFileDest(dest: string): boolean {
+  return (
+    dest.startsWith("/") ||
+    /^~[^/\s]*[\\/]/.test(dest) ||
+    (/^file:/i.test(dest) && /[\\/]/.test(dest)) ||
+    /^[A-Za-z]:[\\/]/.test(dest)
+  );
+}
+
+function spacedDest(state: StateInline, silent: boolean): boolean {
+  const src = state.src;
+  const max = state.posMax;
+  let pos = state.pos;
+  const bang = src.charCodeAt(pos) === 0x21; /* ! */
+  if (bang) {
+    if (src.charCodeAt(pos + 1) !== 0x5b) return false;
+  } else if (src.charCodeAt(pos) !== 0x5b) return false;
+  const labelStart = pos + (bang ? 2 : 1);
+  // Image alt text may contain a link. A link label may not.
+  const labelEnd = state.md.helpers.parseLinkLabel(state, pos + (bang ? 1 : 0), !bang);
+  if (labelEnd < 0) return false;
+  pos = labelEnd + 1;
+  if (pos >= max || src.charCodeAt(pos) !== 0x28) return false;
+  pos += 1;
+  while (pos < max && (src.charCodeAt(pos) === 32 || src.charCodeAt(pos) === 10)) pos += 1;
+  // Angle brackets are already a destination the stock rule accepts.
+  if (pos >= max || src.charCodeAt(pos) === 0x3c) return false;
+  const destStart = pos;
+  let level = 0;
+  let sawSpace = false;
+  for (; pos < max; pos++) {
+    const code = src.charCodeAt(pos);
+    if (code === 10) return false;
+    if (code === 32) sawSpace = true;
+    else if (code === 0x28) level += 1;
+    else if (code === 0x29) {
+      if (level === 0) break;
+      level -= 1;
+    }
+  }
+  if (!sawSpace || level !== 0 || pos >= max || src.charCodeAt(pos) !== 0x29) return false;
+  let dest = src.slice(destStart, pos).trim();
+  // A title after a path with no space belongs to the stock rule.
+  // A quote inside a path that already has a space is part of the name.
+  const titled = dest.match(/^(.*\S)\s+(["'])(?:(?!\2).)*\2\s*$/);
+  if (titled) {
+    if (!/\s/.test(titled[1])) return false;
+    dest = titled[1];
+  }
+  if (!dest || !isFileDest(dest)) return false;
+  const href = state.md.normalizeLink(dest);
+  if (!state.md.validateLink(href)) return false;
+  if (!silent) {
+    const content = src.slice(labelStart, labelEnd);
+    if (bang) {
+      const kids: Token[] = [];
+      state.md.inline.parse(content, state.md, state.env, kids);
+      const token = state.push("image", "img", 0);
+      token.attrs = [["src", href], ["alt", ""]];
+      token.children = kids;
+      token.content = content;
+    } else {
+      const oldMax = state.posMax;
+      state.pos = labelStart;
+      state.posMax = labelEnd;
+      const open = state.push("link_open", "a", 1);
+      open.attrs = [["href", href]];
+      state.linkLevel++;
+      state.md.inline.tokenize(state);
+      state.linkLevel--;
+      state.push("link_close", "a", -1);
+      state.posMax = oldMax;
+    }
+  }
+  state.pos = pos + 1;
+  return true;
+}
+md.inline.ruler.before("link", "spaced_dest", spacedDest);
 
 md.renderer.rules.footnote_ref = (tokens, i, _o, env) =>
   '<sup class="md-fnref">' + noteNum(env, tokens[i]) + "</sup>";
