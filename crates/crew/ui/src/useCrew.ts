@@ -118,14 +118,11 @@ export function useCrew() {
     void api.setDockBadge(unread.length).catch(() => null);
   }, [unread.length]);
 
-  const placeholder =
-    currentAgent?.status === "working"
-      ? t("composer.placeholder.redirect")
-      : currentAgent
-        ? t("composer.placeholder.agent", {
-            name: currentAgent.name || currentAgent.id,
-          })
-        : t("composer.placeholder.generic");
+  const placeholder = currentAgent
+    ? t("composer.placeholder.agent", {
+        name: currentAgent.name || currentAgent.id,
+      })
+    : t("composer.placeholder.generic");
 
   const tRef = useRef(t);
   tRef.current = t;

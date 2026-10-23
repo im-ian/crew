@@ -16,6 +16,7 @@ use crate::config::{
 };
 use crate::cron;
 use crate::headless::{self, HeadlessSession};
+use crate::interrupt::UserSendAction;
 use crate::paths;
 use crate::protocol::{AgentInfo, AgentStatus, ChatMessage, Event, Request, Role};
 use crate::pty_agent::{self, PtySession};
@@ -625,12 +626,7 @@ fn answer_choice(
         if closed {
             return Ok(());
         }
-        return send_agent_shown(
-            agent,
-            &crate::choice::format_answer_masked(&updated),
-            &text,
-            false,
-        );
+        return send_agent_shown(agent, &crate::choice::format_answer_masked(&updated), &text);
     }
     if closed {
         return Ok(());
@@ -640,12 +636,7 @@ fn answer_choice(
         anyhow::bail!("nothing selected");
     }
     // The picker is for the human. Continue only the bot that asked.
-    send_agent_shown(
-        agent,
-        &crate::choice::format_answer_masked(&updated),
-        &text,
-        false,
-    )
+    send_agent_shown(agent, &crate::choice::format_answer_masked(&updated), &text)
 }
 
 /// `/compact`, `/context`: a CLI command, which reads as one only when the
@@ -775,6 +766,40 @@ fn submit_delivery_then(
     enqueue_delivery(id, text, newline, msg_id, origin, then)?;
     // The turn that was in the way, or a start under way, can finish before
     // the push and find nothing to start. Nothing else would start this one.
+    pump_inbox_inner(id);
+    Ok(())
+}
+
+/// A user's message right after `halt_turn`. It starts now, or, when another
+/// start got in after the halt, waits first in line rather than behind what
+/// was already waiting. The inbox limit does not apply: it stands in for the
+/// turn it stopped.
+fn steer_delivery(
+    id: &str,
+    text: &str,
+    msg_id: String,
+    then: &mut VecDeque<SerialJob>,
+) -> anyhow::Result<()> {
+    if !agent_busy(id)? {
+        if let Some(start) = claim_start(id) {
+            match start_delivery(start, text, true, TurnOrigin::user(), Some(&msg_id), then) {
+                Err(err) if is_busy_err(&err) => {}
+                started => return started,
+            }
+        }
+    }
+    crate::transcript::set_queued(id, &msg_id, true);
+    if let Ok(mut map) = inbox().lock() {
+        map.entry(id.to_string())
+            .or_default()
+            .push_front(PendingDelivery {
+                text: text.to_string(),
+                newline: true,
+                msg_id: Some(msg_id),
+                origin: TurnOrigin::user(),
+                then: std::mem::take(then),
+            });
+    }
     pump_inbox_inner(id);
     Ok(())
 }
@@ -1787,14 +1812,12 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             }
             out
         }
-        Request::Send { agent, text, steer } => {
-            match send_agent_shown(&agent, &text, &text, steer) {
-                Ok(()) => vec![Event::Ok],
-                Err(err) => vec![Event::Error {
-                    message: err.to_string(),
-                }],
-            }
-        }
+        Request::Send { agent, text, steer } => match send_from_user(&agent, &text, &text, steer) {
+            Ok(()) => vec![Event::Ok],
+            Err(err) => vec![Event::Error {
+                message: err.to_string(),
+            }],
+        },
         Request::Interrupt { agent } => match interrupt_turn(&agent) {
             Ok(()) => vec![Event::Ok],
             Err(err) => vec![Event::Error {
@@ -2076,30 +2099,36 @@ fn messages_agent(id: &str) -> anyhow::Result<Event> {
     })
 }
 
-fn apply_user_interrupt(id: &str, text: &str, steer: bool) -> anyhow::Result<bool> {
+fn apply_user_interrupt(id: &str, text: &str, steer: bool) -> anyhow::Result<UserSendAction> {
     let status = live_status(id)?;
-    match crate::interrupt::member_turn_action(true, status, text, steer) {
-        crate::interrupt::UserSendAction::Stop => {
-            interrupt_turn(id)?;
-            Ok(false)
-        }
-        crate::interrupt::UserSendAction::Redirect => {
-            halt_turn(id)?;
-            Ok(true)
-        }
-        crate::interrupt::UserSendAction::Start => Ok(true),
+    // A PTY bot cannot be stopped mid-turn, so a steer there waits like any send.
+    let steer = steer
+        && matches!(
+            agents().lock().expect("agents mutex").get(id),
+            Some(LiveAgent::Headless(_))
+        );
+    let action = crate::interrupt::member_turn_action(true, status, text, steer);
+    match action {
+        UserSendAction::Stop => interrupt_turn(id)?,
+        UserSendAction::Redirect => halt_turn(id)?,
+        UserSendAction::Start => {}
     }
+    Ok(action)
 }
 
 fn send_agent(id: &str, text: &str) -> anyhow::Result<()> {
-    send_agent_shown(id, text, text, false)
+    send_agent_shown(id, text, text)
+}
+
+fn send_agent_shown(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
+    send_from_user(id, shown, text, false)
 }
 
 /// `steer` stops a turn under way and starts this message in its place, ahead
 /// of what was waiting. Without it, the message waits its turn.
-fn send_agent_shown(id: &str, shown: &str, text: &str, steer: bool) -> anyhow::Result<()> {
-    let proceed = apply_user_interrupt(id, text, steer)?;
-    if !proceed {
+fn send_from_user(id: &str, shown: &str, text: &str, steer: bool) -> anyhow::Result<()> {
+    let action = apply_user_interrupt(id, text, steer)?;
+    if action == UserSendAction::Stop {
         crate::transcript::push_user(id, "user", shown);
         return Ok(());
     }
@@ -2131,14 +2160,18 @@ fn send_agent_shown(id: &str, shown: &str, text: &str, steer: bool) -> anyhow::R
     } else {
         drop_mention_followers(id);
     }
-    let started = submit_delivery_then(
-        id,
-        &delivered,
-        true,
-        Some(msg.id),
-        TurnOrigin::user(),
-        &mut then,
-    );
+    let started = if action == UserSendAction::Redirect {
+        steer_delivery(id, &delivered, msg.id, &mut then)
+    } else {
+        submit_delivery_then(
+            id,
+            &delivered,
+            true,
+            Some(msg.id),
+            TurnOrigin::user(),
+            &mut then,
+        )
+    };
     if started.is_err() {
         let held = then.split_off(named_here.min(then.len()));
         if agent_busy(id).unwrap_or(true) {
@@ -3727,7 +3760,7 @@ exec sleep 5"#,
                 || asked("first-turn"),
             );
             send_agent(&bot, "waiting-turn").unwrap();
-            send_agent_shown(&bot, "steered-turn", "steered-turn", true).unwrap();
+            send_from_user(&bot, "steered-turn", "steered-turn", true).unwrap();
             eventually(Duration::from_secs(3), "the steer did not start", || {
                 asked("steered-turn")
             });
@@ -3739,6 +3772,34 @@ exec sleep 5"#,
             clear_inbox(&bot);
             interrupt_turn(&bot).unwrap();
             wait_idle(&bot);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A start that got in after the halt holds the bot. The steer waits first
+    /// in line, not behind the message that was already waiting.
+    #[test]
+    fn a_steer_that_has_to_wait_is_first_in_line() {
+        paths::testing::with_home("steer-line", || {
+            paths::write_notifications_enabled(false);
+            let bot = test_id("steer-line");
+            insert_spawned_agent(AgentConfig::new(
+                bot.clone(),
+                bot.clone(),
+                AgentCli::Claude.default_cmd(),
+                None,
+            ))
+            .unwrap();
+            let start = claim_start(&bot).expect("nothing is starting");
+            submit_delivery(&bot, "waiting", true, None, TurnOrigin::user()).unwrap();
+            steer_delivery(&bot, "steered", "steer-row".into(), &mut VecDeque::new()).unwrap();
+            let line: Vec<String> = inbox().lock().unwrap()[&bot]
+                .iter()
+                .map(|item| item.text.clone())
+                .collect();
+            assert_eq!(line, ["steered", "waiting"]);
+            drop(start);
+            clear_inbox(&bot);
             remove_agent(&bot).unwrap();
         });
     }

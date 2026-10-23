@@ -2830,6 +2830,18 @@ button.mention-chip:active {
 .composer-box .stop-btn:active {
   transform: scale(0.94);
 }
+/* It stops the turn, so it must not pass for send next to it. */
+.composer-box button.steer-btn {
+  background: transparent;
+  color: var(--ink);
+}
+.composer-box button.steer-btn:hover {
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+}
+.composer-box button.steer-btn:disabled {
+  background: transparent;
+  color: var(--btn-disabled-ink);
+}
 .overlay {
   grid-row: 1 / -1;
   grid-column: 1;

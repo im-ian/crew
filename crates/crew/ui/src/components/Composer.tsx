@@ -651,6 +651,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           <button
             ref={steerRef}
             type="submit"
+            className="steer-btn"
             title={t("composer.steerTitle")}
             aria-label={t("composer.steer")}
             disabled={!selected || (empty && !attaches.length)}
