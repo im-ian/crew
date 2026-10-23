@@ -12,8 +12,10 @@ import { WhoButton, whoColor } from "./WhoButton";
 
 type Props = {
   peerId: string;
-  /** The run that was clicked: scrolled to and flashed. */
+  /** The run that was clicked: flashed. */
   focus?: string[];
+  /** A search hit to open on instead of the bottom. */
+  hit?: string | null;
   self: AgentInfo;
   messages: ChatMessage[];
   agents: AgentInfo[];
@@ -23,6 +25,7 @@ type Props = {
 export function PeekRoom({
   peerId,
   focus = [],
+  hit = null,
   self,
   messages,
   agents,
@@ -63,14 +66,22 @@ export function PeekRoom({
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
   }, [tail]);
 
+  // Each open starts at the bottom, where the next note lands. Opening on the
+  // clicked run left the reader above the tail, so new notes landed out of
+  // sight. A search hit is the one exception: the panel opens on it.
   useEffect(() => {
     const el = threadRef.current;
-    const first = focus[0];
-    if (!el || !first) return;
-    el.querySelector(`[data-msg-id="${CSS.escape(first)}"]`)?.scrollIntoView({
-      block: "start",
-    });
-  }, [peerId, focusKey]);
+    if (!el) return;
+    const at = hit
+      ? el.querySelector(`[data-msg-id="${CSS.escape(hit)}"]`)
+      : null;
+    if (at) {
+      at.scrollIntoView({ block: "start" });
+      return;
+    }
+    el.scrollTop = el.scrollHeight;
+    atBottom.current = true;
+  }, [peerId, focusKey, hit]);
 
   // The flash ring is a static style under its animation, so it has to come
   // off on the same clock the thread uses or the run stays outlined.
