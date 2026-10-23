@@ -473,6 +473,7 @@ function SystemOrIncoming({
   peekFocus = null,
   onPeek,
   flash = false,
+  showChip = true,
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
@@ -483,6 +484,8 @@ function SystemOrIncoming({
   peekFocus?: string | null;
   onPeek?: (peerId: string, focus?: string[]) => void;
   flash?: boolean;
+  /** A lone note's run already names it, so a second chip would repeat it. */
+  showChip?: boolean;
 }) {
   const t = useT();
   if (m.from === "user") {
@@ -523,6 +526,7 @@ function SystemOrIncoming({
         peeking={peekFocus === m.id}
         onPeek={onPeek}
         flash={flash}
+        showChip={showChip}
       />
     );
   }
@@ -549,6 +553,7 @@ function TransferNote({
   peeking = false,
   onPeek,
   flash = false,
+  showChip = true,
 }: {
   kind: "sent" | "received" | "handoff";
   otherId: string;
@@ -560,13 +565,16 @@ function TransferNote({
   peeking?: boolean;
   onPeek?: (peerId: string, focus?: string[]) => void;
   flash?: boolean;
+  showChip?: boolean;
 }) {
   const agent = agents.find((a) => a.id === otherId) ?? null;
   const t = useT();
   const who = displayWho(otherId, agent, t);
   const open =
     onSelectAgent && agent ? () => onSelectAgent(agent.id) : undefined;
-  const [openBody, setOpenBody] = useState(false);
+  // Starts open when there is no chip of its own. A later note adds the chip
+  // without resetting this, so the body the reader had open stays open.
+  const [openBody, setOpenBody] = useState(!showChip);
   const label =
     kind === "sent"
       ? t("thread.sent")
@@ -577,34 +585,37 @@ function TransferNote({
   // A bot, deleted or not, opens beside the thread; a room still unfolds here.
   const side =
     onPeek && !otherId.startsWith("#") ? () => onPeek(otherId, [m.id]) : null;
-  // A search hit has to be readable without a click.
-  const show = (!side && openBody) || flash;
+  // A search hit has to be readable without a click. A note with no chip of
+  // its own is already open: the run header is that chip.
+  const show = !showChip || (!side && openBody) || flash;
   return (
     <div
       className={"xfer" + (m.queued ? " queued" : "") + (flash ? " flash" : "")}
       data-msg-id={m.id}
     >
-      <div className="xfer-chip">
-        {m.text ? (
-          <button
-            type="button"
-            className={"xfer-label is-toggle" + (peeking ? " is-peeking" : "")}
-            aria-expanded={side ? peeking : show}
-            onClick={side ?? (() => setOpenBody(!openBody))}
-          >
-            <ChevronDown className="note-caret" size={12} />
-            {label}
-          </button>
-        ) : (
-          <span className="xfer-label">{label}</span>
-        )}
-        <WhoButton
-          agent={agent}
-          who={who}
-          fallbackId={otherId}
-          onClick={open}
-        />
-      </div>
+      {showChip ? (
+        <div className="xfer-chip">
+          {m.text ? (
+            <button
+              type="button"
+              className={"xfer-label is-toggle" + (peeking ? " is-peeking" : "")}
+              aria-expanded={side ? peeking : show}
+              onClick={side ?? (() => setOpenBody(!openBody))}
+            >
+              <ChevronDown className="note-caret" size={12} />
+              {label}
+            </button>
+          ) : (
+            <span className="xfer-label">{label}</span>
+          )}
+          <WhoButton
+            agent={agent}
+            who={who}
+            fallbackId={otherId}
+            onClick={open}
+          />
+        </div>
+      ) : null}
       {show ? (
         <>
           {/* `.msg-actions` is absolutely positioned, so it leads here to sit
@@ -888,37 +899,33 @@ function NoteGroup({
   const peeking = peekFocus === items[0].id;
   // A search hit inside a folded run has to be on screen to be highlighted.
   const show = (!side && open) || hit;
-  // One note is not a run. The row is still a run so that a reply arriving
-  // does not change the element type and remount the note under the reader.
-  // A reply that belongs to the exchange is not a note, so it folds even alone.
-  const folds = items.length > 1 || !noteRef(items[0], agents);
+  // One note wears the same chip as many. The row stays a run, so opening it
+  // keeps this mounted and the note inside keeps its body when the next arrives.
   const who = displayWho(peerId, agent, t);
   const queued = items.some((m) => m.queued);
   return (
     <div className={"note-run" + (queued ? " queued" : "")}>
-      {folds ? (
-        <div className="note-run-chip">
-          <button
-            type="button"
-            className={"note-run-head" + (peeking ? " is-peeking" : "")}
-            aria-expanded={side ? peeking : show}
-            onClick={side ?? (() => setOpen(!open))}
-          >
-            <ChevronDown className="note-caret" size={12} />
-            {t("thread.noteRun", { n: items.length })}
-          </button>
-          <WhoButton
-            agent={agent}
-            who={who}
-            fallbackId={peerId}
-            onClick={
-              onSelectAgent && agent ? () => onSelectAgent(agent.id) : undefined
-            }
-          />
-        </div>
-      ) : null}
-      {folds && !show && queued ? <QueueWait /> : null}
-      {!folds || show
+      <div className="note-run-chip">
+        <button
+          type="button"
+          className={"note-run-head" + (peeking ? " is-peeking" : "")}
+          aria-expanded={side ? peeking : show}
+          onClick={side ?? (() => setOpen(!open))}
+        >
+          <ChevronDown className="note-caret" size={12} />
+          {t("thread.noteRun", { n: items.length })}
+        </button>
+        <WhoButton
+          agent={agent}
+          who={who}
+          fallbackId={peerId}
+          onClick={
+            onSelectAgent && agent ? () => onSelectAgent(agent.id) : undefined
+          }
+        />
+      </div>
+      {!show && queued ? <QueueWait /> : null}
+      {show
         ? items.map((m) =>
             m.role === "assistant" ? (
               <Bubble
@@ -945,6 +952,7 @@ function NoteGroup({
                 peekFocus={peekFocus}
                 onPeek={onPeek}
                 flash={highlightId === m.id}
+                showChip={items.length > 1}
               />
             ),
           )
