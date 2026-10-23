@@ -6,7 +6,7 @@ import {
   useState,
   type MouseEvent,
 } from "react";
-import { api, errMsg } from "./api";
+import { api, errMsg, newestOnly } from "./api";
 import { useT } from "./LocaleContext";
 import { loadNotify } from "./notifyPref";
 import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
@@ -88,6 +88,8 @@ export function useCrew() {
   paneOpenRef.current = paneOpen;
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
+  const listAgents = useRef(newestOnly(api.listAgents)).current;
+  const getMessages = useRef(newestOnly(api.getMessages)).current;
   const groupsRef = useRef<RailLayout>({ groups, ungrouped });
   groupsRef.current = { groups, ungrouped };
   const groupsLoaded = useRef(false);
@@ -324,10 +326,20 @@ export function useCrew() {
       setSearchHits([]);
       return;
     }
+    // A search for an earlier query can answer after this one.
+    let stale = false;
     const t = window.setTimeout(() => {
-      void api.searchCrew(q).then(setSearchHits).catch(() => setSearchHits([]));
+      void api
+        .searchCrew(q)
+        .catch(() => [])
+        .then((hits) => {
+          if (!stale) setSearchHits(hits);
+        });
     }, 160);
-    return () => window.clearTimeout(t);
+    return () => {
+      stale = true;
+      window.clearTimeout(t);
+    };
   }, [query]);
 
   function openSearchHit(hit: SearchHit) {
@@ -351,7 +363,8 @@ export function useCrew() {
   }
 
   const refreshList = useCallback(async () => {
-    const list = await api.listAgents();
+    const list = await listAgents();
+    if (!list) return;
     let { id: sel } = selectedRef.current;
     if (!sel || !list.some((a) => a.id === sel)) {
       sel = list[0]?.id ?? null;
@@ -375,7 +388,9 @@ export function useCrew() {
       setMessages([]);
       return;
     }
-    setMessages(await api.getMessages(id));
+    const next = await getMessages(id);
+    if (!next) return;
+    setMessages(next);
     setMessagesFor(id);
   }, []);
 
