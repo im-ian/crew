@@ -63,6 +63,34 @@ export function toPersist(layout: RailLayout): Group[] {
   ];
 }
 
+/** Folders a bot just wrote. Folders the window already has stay as they are,
+    so this poll cannot undo a rename or a drag that is still only local. */
+export function adoptNewGroups(local: RailLayout, remoteRaw: unknown): RailLayout | null {
+  const remote = normalizeGroups(remoteRaw);
+  const known = new Set(local.groups.map((g) => g.id));
+  const fresh = remote.groups.filter((g) => g.id !== UNGROUPED_ID && !known.has(g.id));
+  if (fresh.length === 0) return null;
+  const taken = new Set<string>();
+  const ordered = [...fresh]
+    .reverse()
+    .map((g) => {
+      const items = uniqueKeys(g.items.filter((k) => !taken.has(k)));
+      for (const key of items) taken.add(key);
+      return { ...g, items };
+    })
+    .reverse();
+  const keys = new Set(ordered.flatMap((g) => g.items));
+  return {
+    groups: [
+      ...local.groups
+        .filter((g) => g.id !== UNGROUPED_ID)
+        .map((g) => ({ ...g, items: g.items.filter((k) => !keys.has(k)) })),
+      ...ordered,
+    ],
+    ungrouped: local.ungrouped.filter((k) => !keys.has(k)),
+  };
+}
+
 export function uniqueGroupName(groups: Group[], base = "새 그룹"): string {
   const taken = new Set(groups.map((g) => g.name));
   if (!taken.has(base)) return base;

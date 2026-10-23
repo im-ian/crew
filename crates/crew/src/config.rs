@@ -801,6 +801,9 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         "To change your display name, actually run `crew agent set --name \"New Name\"` (id defaults to CREW_AGENT_ID). Do not only claim you renamed yourself.\n",
     );
     s.push_str(
+        "To create a bot, actually run `crew agent add --cli grok|claude|codex --name \"Name\"`. Crew mints the id and prints `ok <id>`. Pass an id first only when you already have one (`crew agent add <id> --cli grok --name \"Name\"`). To create a sidebar group, actually run `crew group add --name \"Name\"`, repeating `--bot <id>` for each bot that should sit in it. `crew group list` prints each group's id, name, and bots. Do not only claim you created a bot or a group.\n",
+    );
+    s.push_str(
         "To schedule recurring work, actually run `crew routine add --name \"...\" --schedule \"0 8 * * 1-5\" --prompt \"...\"`. Turn the user's words into 5-field cron yourself: numbers only, minute hour day month weekday (0 = Sunday), local time. If the day or time is unclear, ask with `crew ask` first. `crew routine list` shows yours; change one with `crew routine edit|remove|pause|resume <name>` (`crew routine --help`). Each prints your routines with their next run; tell the user the schedule and next run it shows. That creates a Crew routine, not a chat reminder.\n",
     );
     s.push_str(
@@ -1816,6 +1819,12 @@ mod tests {
         assert!(rules.contains("start each sentence on a new line, with no blank line between them"));
         assert!(rules.contains("Keep list items, options, tables, headings and code as they are"));
         assert!(rules.contains("crew agent set --name"));
+        assert!(rules.contains("crew agent add --cli grok|claude|codex --name"));
+        assert!(rules.contains("prints `ok <id>`"));
+        assert!(rules.contains("crew group add --name"));
+        assert!(rules.contains("repeating `--bot <id>`"));
+        assert!(rules.contains("`crew group list` prints each group's id, name, and bots"));
+        assert!(rules.contains("Do not only claim you created a bot or a group"));
         assert!(!rules.contains("crew channel"));
         assert!(rules.contains("in the order they were written"));
         assert!(rules.contains("after `crew tell`, end your turn"));
