@@ -15,8 +15,6 @@ type Props = {
   onSetFace: (shape?: string | null, color?: string | null) => Promise<void>;
   onSave: (fields: {
     name: string;
-    role: string;
-    description: string;
     model: string;
     effort: string;
     cwd: string;
@@ -35,8 +33,6 @@ export function InfoPane({
   const t = useT();
   const cli = cliFromCmd(agent?.cmd);
   const [name, setName] = useState("");
-  const [role, setRole] = useState("");
-  const [description, setDescription] = useState("");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
   const [cwd, setCwd] = useState("");
@@ -44,14 +40,12 @@ export function InfoPane({
   // Until the list refreshes the card still shows the old CLI's models, and a
   // pick from it would land on the new CLI.
   const switching = useRef(false);
-  const fieldsRef = useRef({ name, role, description, model, effort, cwd });
-  fieldsRef.current = { name, role, description, model, effort, cwd };
+  const fieldsRef = useRef({ name, model, effort, cwd });
+  fieldsRef.current = { name, model, effort, cwd };
 
   useEffect(() => {
     if (!open || !agent) return;
     setName(agent.name || agent.id || "");
-    setRole(agent.role || "");
-    setDescription(agent.description || "");
     setModel(agent.model || "");
     setEffort(agent.effort || "");
     setCwd(agent.cwd || "");
@@ -115,32 +109,6 @@ export function InfoPane({
           onChange={(e) => {
             setName(e.target.value);
             scheduleSave({ name: e.target.value });
-          }}
-          onBlur={() => void flushSave()}
-        />
-      </Field>
-      <Field label={t("field.role")} htmlFor="info-role">
-        <input
-          id="info-role"
-          className="textin"
-          placeholder={t("info.rolePh")}
-          value={role}
-          onChange={(e) => {
-            setRole(e.target.value);
-            scheduleSave({ role: e.target.value });
-          }}
-          onBlur={() => void flushSave()}
-        />
-      </Field>
-      <Field label={t("field.description")} htmlFor="info-description">
-        <textarea
-          id="info-description"
-          className="textin"
-          placeholder={t("info.descPh")}
-          value={description}
-          onChange={(e) => {
-            setDescription(e.target.value);
-            scheduleSave({ description: e.target.value });
           }}
           onBlur={() => void flushSave()}
         />

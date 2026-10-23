@@ -13,7 +13,6 @@ type Props = {
   onClose: () => void;
   onCreate: (args: {
     name: string;
-    persona: string;
     cli: CliKind;
     model: string;
     effort: string;
@@ -29,7 +28,6 @@ export function NewBotModal({
 }: Props) {
   const t = useT();
   const [name, setName] = useState("");
-  const [persona, setPersona] = useState("");
   const [model, setModel] = useState("");
   const [cli, setCli] = useState<CliKind>("grok");
   const [effort, setEffort] = useState("");
@@ -41,7 +39,6 @@ export function NewBotModal({
   useEffect(() => {
     if (!open) return;
     setName("");
-    setPersona("");
     setModel("");
     setCli("grok");
     setEffort("");
@@ -61,7 +58,6 @@ export function NewBotModal({
       nameRef.current?.focus();
       await onCreate({
         name: "",
-        persona,
         cli,
         model,
         effort,
@@ -74,7 +70,6 @@ export function NewBotModal({
     try {
       await onCreate({
         name: trimmed,
-        persona,
         cli,
         model,
         effort,
@@ -126,15 +121,6 @@ export function NewBotModal({
                 void submit();
               }
             }}
-          />
-        </Field>
-        <Field label={t("field.persona")} htmlFor="new-persona">
-          <textarea
-            id="new-persona"
-            className="textin"
-            placeholder={t("newBot.personaPh")}
-            value={persona}
-            onChange={(e) => setPersona(e.target.value)}
           />
         </Field>
         <Field label={t("field.ai")}>

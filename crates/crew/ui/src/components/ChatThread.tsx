@@ -169,12 +169,16 @@ export function ChatThread({
     );
   }
 
-  // Without a conversation here, a turn can only be for a side chat.
-  const placeholders = direct ? workingPlaceholders() : [];
+  // A new bot asks before any row exists, so the dots have to stand alone.
+  // A side-only thread already has rows, and those dots stay in the side chat.
+  const placeholders =
+    direct || (streaming && messages.length === 0)
+      ? workingPlaceholders()
+      : [];
   const blocked = blockedCards();
   // An approval card means it is waiting on the reader here, and "start a
   // chat" would contradict it.
-  const empty = !direct && !blocked.length;
+  const empty = !direct && !blocked.length && placeholders.length === 0;
   const arrive = useArriving(
     [
       ...rows.map(rowKey),
