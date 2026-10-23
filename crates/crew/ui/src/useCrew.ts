@@ -11,6 +11,7 @@ import { useT } from "./LocaleContext";
 import { loadNotify } from "./notifyPref";
 import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
 import {
+  adoptNewGroups,
   groupIdOf,
   itemKey,
   layoutChanged,
@@ -794,11 +795,24 @@ export function useCrew() {
         setConnDetail(errMsg(err));
       }
     }
+    async function refreshGroups() {
+      if (!groupsLoaded.current) return;
+      try {
+        const raw = await api.listGroups();
+        if (cancelled) return;
+        const next = adoptNewGroups(groupsRef.current, raw);
+        if (!next) return;
+        persistLayout(next);
+      } catch (err) {
+        console.error("refreshGroups", err);
+      }
+    }
     async function tickList() {
       try {
         await api.daemonPing();
       } catch (err) {
         lost(err);
+        void refreshGroups();
         return;
       }
       if (cancelled) return;
@@ -807,6 +821,7 @@ export function useCrew() {
       // Not awaited: a list stuck on a daemon that stopped answering must not
       // hold the ping, which is what notices and brings a dead daemon back.
       void pollList(refreshList).catch(lost);
+      void refreshGroups();
     }
     void tickList();
     void tickMessages();

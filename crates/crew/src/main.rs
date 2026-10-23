@@ -91,6 +91,9 @@ enum Cmd {
     /// Manage agents
     #[command(subcommand)]
     Agent(AgentCmd),
+    /// Sidebar groups
+    #[command(subcommand)]
+    Group(GroupCmd),
     /// Scheduled routines for a bot
     #[command(subcommand)]
     Routine(RoutineCmd),
@@ -103,7 +106,9 @@ enum Cmd {
 enum AgentCmd {
     List,
     Add {
-        id: String,
+        /// Agent id. Leave this out with `--name` and Crew mints one.
+        #[arg(value_name = "ID")]
+        id: Option<String>,
         #[arg(long)]
         name: Option<String>,
         #[arg(long)]
@@ -165,6 +170,20 @@ enum AgentCmd {
         cwd: Option<String>,
         #[arg(long)]
         unset_cwd: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum GroupCmd {
+    /// List groups. One row is id, name, then bot ids.
+    List,
+    /// Create a group. Each `--bot` is taken out of any other group.
+    Add {
+        #[arg(long)]
+        name: String,
+        /// Bot id to put in the new group. Repeat for more than one.
+        #[arg(long = "bot")]
+        bots: Vec<String>,
     },
 }
 
@@ -335,14 +354,34 @@ fn run() -> anyhow::Result<()> {
             cli,
         })) => {
             let cmd = resolve_add_cmd(cli, cmd)?;
-            let id = id.trim().to_string();
-            // With no daemon this writes straight into agents.json, so the
-            // daemon's guard never sees it. Refuse here too, before anything
-            // is created on disk for an id that is not going to be accepted.
-            if !config::valid_agent_id(&id) {
-                anyhow::bail!("{}", config::id_rule(&id));
-            }
-            let name = name.unwrap_or_else(|| id.clone());
+            let name_given = name.and_then(|n| {
+                let n = n.trim().to_string();
+                if n.is_empty() {
+                    None
+                } else {
+                    Some(n)
+                }
+            });
+            let id = match id {
+                Some(id) => {
+                    let id = id.trim().to_string();
+                    // With no daemon this writes straight into agents.json, so the
+                    // daemon's guard never sees it. Refuse here too, before anything
+                    // is created on disk for an id that is not going to be accepted.
+                    if !config::valid_agent_id(&id) {
+                        anyhow::bail!("{}", config::id_rule(&id));
+                    }
+                    id
+                }
+                None => {
+                    let Some(name) = name_given.as_deref() else {
+                        anyhow::bail!("pass an id, or --name so crew can mint one");
+                    };
+                    let cfg = Config::load()?;
+                    config::unique_agent_id(name, cfg.agents.iter().map(|a| a.id.as_str()))
+                }
+            };
+            let name = name_given.unwrap_or_else(|| id.clone());
             let cwd = Some(
                 cwd.filter(|s| !s.trim().is_empty())
                     .unwrap_or_else(|| config::default_add_cwd(&id)),
@@ -352,7 +391,7 @@ fn run() -> anyhow::Result<()> {
             }
             if paths::is_socket_live() {
                 match client::rpc(Request::AddAgent {
-                    id,
+                    id: id.clone(),
                     name,
                     cmd,
                     cwd,
@@ -360,6 +399,10 @@ fn run() -> anyhow::Result<()> {
                     effort,
                 })? {
                     Event::Error { message } => anyhow::bail!("{message}"),
+                    Event::Ok => {
+                        println!("ok {id}");
+                        Ok(())
+                    }
                     ev => client::print_event(ev),
                 }
             } else {
@@ -367,12 +410,13 @@ fn run() -> anyhow::Result<()> {
                 if cfg.agents.iter().any(|a| a.id == id) {
                     anyhow::bail!("agent {id} already exists");
                 }
-                let mut agent = AgentConfig::new(id, name, cmd, cwd);
+                let mut agent = AgentConfig::new(id.clone(), name, cmd, cwd);
                 agent.model = model.filter(|m| !m.is_empty());
                 agent.effort = effort;
                 cfg.agents.push(agent);
                 cfg.save()?;
                 write_roster(&cfg.agents)?;
+                println!("ok {id}");
                 Ok(())
             }
         }
@@ -521,6 +565,8 @@ fn run() -> anyhow::Result<()> {
                 Ok(())
             }
         }
+        Some(Cmd::Group(GroupCmd::List)) => list_groups_cmd(),
+        Some(Cmd::Group(GroupCmd::Add { name, bots })) => add_group_cmd(name, bots),
         Some(Cmd::Routine(sub)) => run_routine(sub),
         Some(Cmd::Memory(sub)) => run_memory(sub),
     }
@@ -849,6 +895,61 @@ fn set_routine_enabled(agent: &str, key: String, enabled: bool) -> anyhow::Resul
     }
 }
 
+fn list_groups_cmd() -> anyhow::Result<()> {
+    let groups = groups::load()?;
+    let shown: Vec<&groups::SidebarGroup> = groups
+        .iter()
+        .filter(|g| g.id != groups::UNGROUPED_ID)
+        .collect();
+    if shown.is_empty() {
+        println!("(no groups)");
+        return Ok(());
+    }
+    for g in shown {
+        println!("{}\t{}\t{}", g.id, g.name, bot_ids(&g.items));
+    }
+    Ok(())
+}
+
+fn add_group_cmd(name: String, bots: Vec<String>) -> anyhow::Result<()> {
+    let name = name.trim();
+    if name.is_empty() {
+        anyhow::bail!("group name is empty");
+    }
+    let cfg = Config::load()?;
+    let ids = config::unique_ids(bots);
+    for id in &ids {
+        if !config::valid_agent_id(id) {
+            anyhow::bail!("{}", config::id_rule(id));
+        }
+        if !cfg.agents.iter().any(|a| a.id == *id) {
+            anyhow::bail!("unknown bot {id}");
+        }
+    }
+    let mut groups = groups::load()?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let created = groups::add_group(&mut groups, name, &ids, now)?;
+    groups::save(&groups)?;
+    println!(
+        "ok {}\t{}\t{}",
+        created.id,
+        created.name,
+        bot_ids(&created.items)
+    );
+    Ok(())
+}
+
+fn bot_ids(items: &[String]) -> String {
+    items
+        .iter()
+        .filter_map(|item| item.strip_prefix("agent:"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn add_offline_routine(
     target: &str,
     name: String,
@@ -978,6 +1079,73 @@ mod tests {
             }
             _ => panic!("expected agent set"),
         }
+    }
+
+    #[test]
+    fn agent_add_can_omit_the_id() {
+        match parse_ok(&[
+            "crew", "agent", "add", "--cli", "grok", "--name", "리뷰어",
+        ])
+        .cmd
+        {
+            Some(Cmd::Agent(AgentCmd::Add { id, name, cli, .. })) => {
+                assert!(id.is_none());
+                assert_eq!(name.as_deref(), Some("리뷰어"));
+                assert_eq!(cli, Some(AgentCli::Grok));
+            }
+            _ => panic!("expected agent add"),
+        }
+        match parse_ok(&["crew", "agent", "add", "review", "--cli", "claude"]).cmd {
+            Some(Cmd::Agent(AgentCmd::Add { id, cli, .. })) => {
+                assert_eq!(id.as_deref(), Some("review"));
+                assert_eq!(cli, Some(AgentCli::Claude));
+            }
+            _ => panic!("expected agent add"),
+        }
+    }
+
+    #[test]
+    fn group_add_flags() {
+        match parse_ok(&[
+            "crew", "group", "add", "--name", "리뷰", "--bot", "review", "--bot", "impl",
+        ])
+        .cmd
+        {
+            Some(Cmd::Group(GroupCmd::Add { name, bots })) => {
+                assert_eq!(name, "리뷰");
+                assert_eq!(bots, vec!["review", "impl"]);
+            }
+            _ => panic!("expected group add"),
+        }
+    }
+
+    #[test]
+    fn group_add_writes_a_folder_for_a_known_bot() {
+        paths::testing::with_home("group-add", || {
+            let cfg = Config {
+                agents: vec![AgentConfig::new(
+                    "review".into(),
+                    "리뷰어".into(),
+                    vec!["grok".into()],
+                    None,
+                )],
+            };
+            cfg.save().unwrap();
+            assert!(add_group_cmd("작업".into(), vec!["review".into(), "missing".into()]).is_err());
+            add_group_cmd("작업".into(), vec!["review".into()]).unwrap();
+            add_group_cmd("작업".into(), vec!["review".into()]).unwrap();
+            let groups = groups::load().unwrap();
+            let named: Vec<_> = groups
+                .iter()
+                .filter(|g| g.id != groups::UNGROUPED_ID)
+                .collect();
+            assert_eq!(named.len(), 2);
+            assert_eq!(named[0].name, "작업");
+            assert!(named[0].items.is_empty());
+            assert_eq!(named[1].name, "작업 2");
+            assert_eq!(named[1].items, vec!["agent:review".to_string()]);
+            assert!(add_group_cmd("  ".into(), vec![]).is_err());
+        });
     }
 
     #[test]

@@ -1,9 +1,13 @@
 use std::fs;
 use std::path::Path;
 
+use anyhow::bail;
 use serde::{Deserialize, Serialize};
 
 use crate::paths;
+
+/// Saved order of bots that sit in no folder. Not a group a person named.
+pub const UNGROUPED_ID: &str = "__ungrouped";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SidebarGroup {
@@ -43,6 +47,73 @@ pub fn load_from(path: &Path) -> anyhow::Result<Vec<SidebarGroup>> {
 fn drop_channel_items(groups: &mut [SidebarGroup]) {
     for group in groups {
         group.items.retain(|item| !item.starts_with("channel:"));
+    }
+}
+
+/// Append a folder. `name` gains a ` 2` suffix when that name is taken.
+/// Each bot is removed from every other folder, including `__ungrouped`,
+/// so it sits in the new one only.
+pub fn add_group(
+    groups: &mut Vec<SidebarGroup>,
+    name: &str,
+    bot_ids: &[String],
+    now_ms: u128,
+) -> anyhow::Result<SidebarGroup> {
+    let name = name.trim();
+    if name.is_empty() {
+        bail!("group name is empty");
+    }
+    let name = unique_group_name(groups, name);
+    let id = new_group_id(groups, now_ms);
+    let mut items = Vec::new();
+    for bot in bot_ids {
+        let key = format!("agent:{bot}");
+        if items.iter().any(|item: &String| item == &key) {
+            continue;
+        }
+        for group in groups.iter_mut() {
+            group.items.retain(|item| item != &key);
+        }
+        items.push(key);
+    }
+    let created = SidebarGroup {
+        id,
+        name,
+        collapsed: false,
+        items,
+    };
+    groups.push(created.clone());
+    Ok(created)
+}
+
+fn unique_group_name(groups: &[SidebarGroup], base: &str) -> String {
+    let taken: std::collections::HashSet<&str> = groups.iter().map(|g| g.name.as_str()).collect();
+    if !taken.contains(base) {
+        return base.to_string();
+    }
+    let mut n = 2u32;
+    loop {
+        let cand = format!("{base} {n}");
+        if !taken.contains(cand.as_str()) {
+            return cand;
+        }
+        n += 1;
+    }
+}
+
+fn new_group_id(groups: &[SidebarGroup], now_ms: u128) -> String {
+    let taken: std::collections::HashSet<&str> = groups.iter().map(|g| g.id.as_str()).collect();
+    let base = format!("g{now_ms:x}");
+    if !taken.contains(base.as_str()) {
+        return base;
+    }
+    let mut n = 2u32;
+    loop {
+        let cand = format!("{base}-{n}");
+        if !taken.contains(cand.as_str()) {
+            return cand;
+        }
+        n += 1;
     }
 }
 
@@ -94,6 +165,55 @@ mod tests {
             serde_json::from_str(r#"[{"id":"g1","name":"개인"}]"#).unwrap();
         assert!(!groups[0].collapsed);
         assert!(groups[0].items.is_empty());
+    }
+
+    #[test]
+    fn add_group_moves_bots_and_uniquifies_the_name() {
+        let mut groups = vec![
+            SidebarGroup {
+                id: UNGROUPED_ID.into(),
+                name: String::new(),
+                collapsed: false,
+                items: vec!["agent:a2".into()],
+            },
+            SidebarGroup {
+                id: "g1".into(),
+                name: "작업".into(),
+                collapsed: false,
+                items: vec!["agent:a1".into(), "channel:room".into()],
+            },
+        ];
+        let created = add_group(
+            &mut groups,
+            "작업",
+            &["a1".into(), "a2".into(), "a1".into()],
+            0xabc,
+        )
+        .unwrap();
+        assert_eq!(created.id, "gabc");
+        assert_eq!(created.name, "작업 2");
+        assert_eq!(
+            created.items,
+            vec!["agent:a1".to_string(), "agent:a2".to_string()]
+        );
+        assert_eq!(groups[0].items, Vec::<String>::new());
+        assert_eq!(groups[1].items, vec!["channel:room".to_string()]);
+        assert_eq!(groups[2].id, "gabc");
+    }
+
+    #[test]
+    fn add_group_rejects_a_blank_name_and_avoids_a_taken_id() {
+        let mut groups = vec![SidebarGroup {
+            id: "g1".into(),
+            name: "개인".into(),
+            collapsed: false,
+            items: vec![],
+        }];
+        assert!(add_group(&mut groups, "  ", &[], 1).is_err());
+        assert_eq!(groups.len(), 1);
+        let created = add_group(&mut groups, "다른", &[], 1).unwrap();
+        assert_eq!(created.id, "g1-2");
+        assert_eq!(created.name, "다른");
     }
 
     #[test]

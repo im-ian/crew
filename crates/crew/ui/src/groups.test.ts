@@ -5,6 +5,7 @@ import {
   groupOrderChanges,
   moveGroup,
   moveItem,
+  adoptNewGroups,
   normalizeGroups,
   parseItemKey,
   pruneLayout,
@@ -71,6 +72,47 @@ describe("normalizeGroups", () => {
 
   it("omits the bucket when nothing is ungrouped", () => {
     expect(toPersist({ groups: [group("g1", [])], ungrouped: [] })).toHaveLength(1);
+  });
+});
+
+describe("adoptNewGroups", () => {
+  const local = {
+    groups: [group("g1", ["agent:a1"], false)],
+    ungrouped: ["agent:a2"],
+  };
+
+  it("takes a new folder and moves its bots out of the ones already open", () => {
+    const next = adoptNewGroups(local, [
+      { id: "g1", name: "renamed", items: ["agent:a1", "agent:a9"] },
+      { id: "gnew", name: "작업", items: ["agent:a1", "agent:a2"] },
+    ]);
+    expect(next).toEqual({
+      groups: [
+        group("g1", []),
+        { id: "gnew", name: "작업", collapsed: false, items: ["agent:a1", "agent:a2"] },
+      ],
+      ungrouped: [],
+    });
+  });
+
+  it("leaves the open layout alone when the file has no new folder", () => {
+    expect(
+      adoptNewGroups(local, [{ id: "g1", name: "renamed", items: [] }]),
+    ).toBeNull();
+  });
+
+  it("keeps a bot in the later new folder when two new folders name it", () => {
+    const next = adoptNewGroups(
+      { groups: [], ungrouped: [] },
+      [
+        { id: "g2", name: "먼저", items: ["agent:a1"] },
+        { id: "g3", name: "나중", items: ["agent:a1"] },
+      ],
+    );
+    expect(next?.groups.map((g) => [g.id, g.items])).toEqual([
+      ["g2", []],
+      ["g3", ["agent:a1"]],
+    ]);
   });
 });
 

@@ -296,7 +296,7 @@ Grok이 PATH에 있다면 예시 `grok` 봇에게 바로 말을 걸 수 있어�
 
 ## CLI
 
-CLI도 데스크톱과 같은 데몬, 같은 `agents.json`을 써요. 데몬이 꺼져 있어도 `agent` / `memory` / `routine`의 설정 변경은 파일에 바로 반영돼요. `tell`, `send`, `reset`, `routine run`처럼 살아 있는 세션이 필요한 명령은 데몬을 띄운 뒤에 실행해요.
+CLI도 데스크톱과 같은 데몬, 같은 `agents.json`을 써요. 데몬이 꺼져 있어도 `agent` / `memory` / `routine`의 설정 변경은 파일에 바로 반영돼요. `group`은 데몬을 거치지 않고 `groups.json`에 바로 써요. 켜져 있는 창은 새 그룹을 다음 목록 갱신에서 가져와요. `tell`, `send`, `reset`, `routine run`처럼 살아 있는 세션이 필요한 명령은 데몬을 띄운 뒤에 실행해요.
 
 봇 세션 안에서 `crew tell`을 실행하면 `CREW_AGENT_ID`가 보낸 사람이 돼요. `routine`은 봇 id를 생략하면 그 봇의 루틴을 가리켜요 (`crew routine edit 아침 …`). 루틴을 바꾸면 그 봇의 루틴이 다음 실행 시각과 함께 출력돼요. 에이전트 프로세스가 데몬을 새로 띄우지는 않아요.
 
@@ -314,6 +314,11 @@ crew agent set grok --name "그록봇 테스터"
 crew agent set grok --model grok-4 --effort high --shape circle --color "#ff6a00"
 crew agent clone grok --name "Grok 복사본"
 crew agent remove shell
+crew agent add --cli grok --name "리뷰어"
+
+crew group list
+crew group add --name "작업"
+crew group add --name "리뷰" --bot review --bot impl
 
 crew tell grok 이 파일의 테스트를 보강해줘
 crew tell review --from grok 방금 패치 리뷰해줘
@@ -337,7 +342,9 @@ crew reset grok
 crew reset grok --drop-routines
 ```
 
-`crew agent add`에는 `--cli grok|claude|codex` 또는 `--cmd …`가 필요해요. `--cmd`를 주면 `--cli`는 무시돼요. 작업 폴더를 생략하면 `/tmp/crew-demo/<id>`가 돼요.
+`crew agent add`에는 `--cli grok|claude|codex` 또는 `--cmd …`가 필요해요. `--cmd`를 주면 `--cli`는 무시돼요. id를 생략하고 `--name`을 주면 id를 만들어서 `ok <id>`로 출력해요. id를 직접 주면 그 id를 그대로 써요. 작업 폴더를 생략하면 `/tmp/crew-demo/<id>`가 돼요.
+
+`crew group add --name`은 사이드바 그룹을 만들어요. `--bot <id>`를 반복하면 그 봇을 다른 그룹에서 빼 새 그룹에 넣어요. 없는 봇 id는 거절해요. `crew group list`는 `id`, 이름, 봇 id를 탭으로 나눠 출력해요.
 
 ---
 
