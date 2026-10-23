@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clockLabel, clockLabels, listStamp } from "./clock";
+import { clockLabel, clockLabels, listStamp, messageClock, messageClockParts } from "./clock";
 
 const at = (h: number, m: number, day = 9) =>
   new Date(2026, 8, day, h, m).getTime();
@@ -16,6 +16,35 @@ describe("clockLabel", () => {
 
   it("has nothing to say without a stamp", () => {
     expect(clockLabel(0, "en")).toBe("");
+  });
+});
+
+describe("messageClock", () => {
+  it("is the wall clock for a message from today", () => {
+    const start = at(15, 24);
+    expect(messageClock(start, "en", start)).toMatch(/^3:24/);
+    expect(messageClock(start, "ko", start)).toContain("3:24");
+    expect(messageClock(start, "ko", start)).not.toMatch(/월/);
+    const parts = messageClockParts(start, "ko", start);
+    expect(parts.day).toBe("");
+    expect(messageClock(start, "ko", start)).toBe(parts.time);
+  });
+
+  it("keeps the date once the day has passed", () => {
+    const yesterday = at(15, 24, 9);
+    const now = at(12, 0, 10);
+    expect(messageClock(yesterday, "en", now)).toMatch(/September/);
+    expect(messageClock(yesterday, "en", now)).toMatch(/3:24/);
+    expect(messageClock(yesterday, "ko", now)).toMatch(/9월/);
+    expect(messageClock(yesterday, "ko", now)).toMatch(/3:24/);
+    const parts = messageClockParts(yesterday, "ko", now);
+    expect(parts.day).toMatch(/9월/);
+    expect(parts.time).toMatch(/3:24/);
+    expect(messageClock(yesterday, "ko", now)).toBe(`${parts.day} ${parts.time}`);
+  });
+
+  it("has nothing to say without a stamp", () => {
+    expect(messageClock(0, "en")).toBe("");
   });
 });
 

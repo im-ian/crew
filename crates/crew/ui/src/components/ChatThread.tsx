@@ -25,7 +25,7 @@ import {
   toolSummary,
   type ThreadRow,
 } from "../tools";
-import { clockLabels } from "../clock";
+import { clockLabels, messageClockParts } from "../clock";
 import { ChevronDown, Reply, X } from "../icons";
 import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
@@ -588,6 +588,17 @@ function TransferNote({
   // A search hit has to be readable without a click. A note with no chip of
   // its own is already open: the run header is that chip.
   const show = !showChip || (!side && openBody) || flash;
+  const actions = (
+    <MsgActions
+      copy={body.trim()}
+      ts={m.ts}
+      onReply={
+        onReply && body.trim()
+          ? () => onReply(makeReply({ ...m, from: otherId }, agents, t))
+          : undefined
+      }
+    />
+  );
   return (
     <div
       className={"xfer" + (m.queued ? " queued" : "") + (flash ? " flash" : "")}
@@ -614,20 +625,13 @@ function TransferNote({
             fallbackId={otherId}
             onClick={open}
           />
+          {actions}
         </div>
-      ) : null}
+      ) : (
+        actions
+      )}
       {show ? (
         <>
-          {/* `.msg-actions` is absolutely positioned, so it leads here to sit
-              early in the tab order rather than behind every link in the body. */}
-          <MsgActions
-            copy={body.trim()}
-            onReply={
-              onReply && body.trim()
-                ? () => onReply(makeReply({ ...m, from: otherId }, agents, t))
-                : undefined
-            }
-          />
           {reply ? (
             <ReplyQuote reply={reply} agents={agents} onJump={onJump} />
           ) : null}
@@ -793,19 +797,19 @@ function Incoming({
           </div>
         )}
         {reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
-        {parts.map((part, i) => {
-          const last = i === parts.length - 1;
-          const stack =
-            parts.length > 1
-              ? i === 0
-                ? " stack-first"
-                : last
-                  ? " stack-last"
-                  : " stack-mid"
-              : "";
-          const closing = dots.leaving && last;
-          const bubble = (
-            <>
+        <div className="bubble-stack">
+          {parts.map((part, i) => {
+            const last = i === parts.length - 1;
+            const stack =
+              parts.length > 1
+                ? i === 0
+                  ? " stack-first"
+                  : last
+                    ? " stack-last"
+                    : " stack-mid"
+                : "";
+            const closing = dots.leaving && last;
+            const bubble = (
               <MdBody
                 className={
                   "bubble md incoming" +
@@ -819,38 +823,39 @@ function Incoming({
                 onMention={onSelectAgent}
                 baseDir={agent?.cwd || undefined}
               />
-              <MsgActions
-                copy={part}
-                onReply={
-                  onReply && part
-                    ? () => onReply(makeReply({ ...m, text: part }, agents, t))
+            );
+            return (
+              <div
+                key={m.id + "-" + i}
+                className={"bubble-row" + (closing ? " dots-leave" : "")}
+                onAnimationEnd={
+                  closing
+                    ? (e) => {
+                        if (
+                          e.animationName !== "dots-leave" ||
+                          e.target !== e.currentTarget
+                        ) {
+                          return;
+                        }
+                        dots.finish();
+                      }
                     : undefined
                 }
-              />
-            </>
-          );
-          return (
-            <div
-              key={m.id + "-" + i}
-              className={"bubble-row" + (closing ? " dots-leave" : "")}
-              onAnimationEnd={
-                closing
-                  ? (e) => {
-                      if (
-                        e.animationName !== "dots-leave" ||
-                        e.target !== e.currentTarget
-                      ) {
-                        return;
-                      }
-                      dots.finish();
-                    }
-                  : undefined
-              }
-            >
-              {closing ? <div className="dots-clip">{bubble}</div> : bubble}
-            </div>
-          );
-        })}
+              >
+                {closing ? <div className="dots-clip">{bubble}</div> : bubble}
+              </div>
+            );
+          })}
+          <MsgActions
+            copy={body.trim()}
+            ts={m.ts}
+            onReply={
+              onReply && body.trim()
+                ? () => onReply(makeReply({ ...m, text: body.trim() }, agents, t))
+                : undefined
+            }
+          />
+        </div>
         {queued ? <QueueWait /> : null}
         {m.choice ? (
           <ChoiceCard
@@ -1421,6 +1426,7 @@ function Bubble({
             />
             <MsgActions
               copy={body.trim()}
+              ts={m.ts}
               onReply={
                 onReply
                   ? () => onReply(makeReply({ ...m, text: body }, agents, t))
@@ -1501,18 +1507,28 @@ function ThreadTime({ ts, label }: { ts: number; label: string }) {
   );
 }
 
-function MsgActions({
+export function MsgActions({
   copy,
+  ts = 0,
   onReply,
 }: {
   copy?: string;
+  ts?: number;
   onReply?: () => void;
 }) {
+  const { locale } = useLocale();
+  const { day, time } = messageClockParts(ts, locale);
   if (!copy && !onReply) return null;
   return (
     <div className="msg-actions">
-      {onReply ? <ReplyButton onClick={onReply} /> : null}
+      {time ? (
+        <time className="msg-time" dateTime={new Date(ts).toISOString()}>
+          {day ? <span className="msg-time-day">{day}</span> : null}
+          <span className="msg-time-clock">{time}</span>
+        </time>
+      ) : null}
       {copy ? <CopyButton text={copy} /> : null}
+      {onReply ? <ReplyButton onClick={onReply} /> : null}
     </div>
   );
 }

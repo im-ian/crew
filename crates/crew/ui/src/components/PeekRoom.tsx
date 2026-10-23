@@ -7,7 +7,7 @@ import { Lock, X } from "../icons";
 import { displayWho, peekMessages, subagentFace } from "../peek";
 import type { AgentInfo, ChatMessage } from "../types";
 import { Avatar } from "./Avatar";
-import { JumpBottom, useStick } from "./ChatThread";
+import { JumpBottom, MsgActions, useStick } from "./ChatThread";
 import { MdBody } from "./MdBody";
 import { WhoButton, whoColor } from "./WhoButton";
 
@@ -207,27 +207,30 @@ function PeekBubble({
         >
           {who}
         </div>
-        {parts.map((part, i) => {
-          const last = i === parts.length - 1;
-          const stack =
-            parts.length > 1
-              ? i === 0
-                ? " stack-first"
-                : last
-                  ? " stack-last"
-                  : " stack-mid"
-              : "";
-          return (
-            <MdBody
-              key={m.id + "-" + i}
-              className={"bubble md incoming" + stack}
-              text={part}
-              defs={defs}
-              agents={agents}
-              baseDir={agent?.cwd || undefined}
-            />
-          );
-        })}
+        <div className="bubble-stack">
+          {parts.map((part, i) => {
+            const last = i === parts.length - 1;
+            const stack =
+              parts.length > 1
+                ? i === 0
+                  ? " stack-first"
+                  : last
+                    ? " stack-last"
+                    : " stack-mid"
+                : "";
+            return (
+              <MdBody
+                key={m.id + "-" + i}
+                className={"bubble md incoming" + stack}
+                text={part}
+                defs={defs}
+                agents={agents}
+                baseDir={agent?.cwd || undefined}
+              />
+            );
+          })}
+          <MsgActions copy={m.text.trim()} ts={m.ts} />
+        </div>
       </div>
     </div>
   );

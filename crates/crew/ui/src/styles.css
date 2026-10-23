@@ -1097,7 +1097,10 @@ header .who-name {
 }
 .thread {
   min-height: 0;
-  overflow: auto;
+  /* A hovered chip hangs outside its balloon. Clip that axis so the hang cannot scroll the thread sideways. */
+  overflow-x: clip;
+  overflow-y: auto;
+  container-type: inline-size;
   overscroll-behavior: contain;
   padding: var(--space-12) var(--content-pad) var(--space-16);
   display: flex;
@@ -1446,6 +1449,14 @@ button.channel-who:hover {
   color: var(--idle);
   opacity: 1;
 }
+.bubble-stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 100%;
+  min-width: 0;
+}
 .bubble-row {
   position: relative;
   max-width: 100%;
@@ -1475,23 +1486,98 @@ button.channel-who:hover {
   .bubble-row.dots-leave,
   .bubble-row.dots-leave > .dots-clip { animation: none; }
 }
-/* Parked beside its own balloon so revealing it never reflows the thread. */
+/* Floated beside the balloon, level with its bottom. Out of flow, so opening it does not reflow the thread. */
 .msg-actions {
   position: absolute;
   bottom: 0;
+  z-index: 2;
   display: flex;
-  flex-direction: column-reverse;
-  gap: 1px;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+  width: max-content;
+  height: 20px;
+  padding: 0 2px 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--bg);
+  box-shadow: 0 0 0 1px var(--line);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease);
 }
-/* The padding bridges the gap to the balloon so the pointer never drops the hover. */
-.row.them .msg-actions { right: -22px; padding-left: 2px; }
-.row.me .msg-actions { left: -22px; padding-right: 2px; }
+.bubble-stack .msg-actions,
 .xfer .msg-actions {
-  right: -22px;
-  left: auto;
+  left: calc(100% + 8px);
+  right: auto;
 }
-.bubble-row:hover .msg-actions .copy-btn,
-.xfer:hover .msg-actions .copy-btn,
+.bubble-stack .msg-actions {
+  /* Avatar and gap, then the balloon. The pad is still inside the pane. */
+  max-width: calc(100cqw - 42px - 100% - 8px + var(--content-pad));
+}
+.xfer .msg-actions {
+  /* The note is centered, so each side gets half of what the balloon does not use. */
+  max-width: calc((100cqw - 100%) / 2 - 8px + var(--content-pad));
+}
+.me-msg .msg-actions {
+  right: calc(100% + 8px);
+  left: auto;
+  max-width: calc(100cqw - 100% - 8px + var(--content-pad));
+}
+/* The gap between the balloon and the chip is still part of the chip. */
+.bubble-stack .msg-actions::before,
+.xfer .msg-actions::before,
+.me-msg .msg-actions::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+}
+.bubble-stack .msg-actions::before,
+.xfer .msg-actions::before {
+  right: 100%;
+}
+.me-msg .msg-actions::before {
+  left: 100%;
+}
+.msg-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+}
+/* The date gives way first. The clock stays until the date is gone. */
+.msg-time-day {
+  flex: 0 100 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.msg-time-clock {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.msg-actions .copy-btn {
+  opacity: 1;
+  flex: none;
+}
+.channel-msg:hover .msg-actions,
+.me-msg:hover .msg-actions,
+.xfer:hover .msg-actions,
+.msg-actions:focus-within,
+.msg-actions:has(.copy-btn.is-done) {
+  opacity: 1;
+  pointer-events: auto;
+}
 .copy-btn:focus-visible {
   opacity: 1;
 }
@@ -2362,6 +2448,7 @@ button.choice-option:disabled {
   max-width: 92%;
 }
 .xfer-chip {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -2526,9 +2613,20 @@ button.who-btn:focus-visible {
 .peek-thread {
   min-height: 0;
 }
-/* Clear of the thread's top fade when a run is scrolled to the top. */
+/* Clear of the thread's top fade when a run is scrolled to the top.
+   The row is the measure for a chip that would otherwise run past the pane. */
 .peek-thread .row {
   scroll-margin-top: var(--space-12);
+  container-type: inline-size;
+}
+/* Room for a dated clock and the copy button beside the balloon. */
+.peek-thread .channel-msg {
+  max-width: min(72%, calc(100cqw - 42px - 7.5rem));
+}
+.peek-thread .bubble-stack .msg-actions {
+  left: calc(100% + 8px);
+  right: auto;
+  max-width: calc(100cqw - 42px - 100% - 8px + var(--content-pad));
 }
 .peek-foot {
   display: flex;

@@ -36,6 +36,31 @@ function dayLabel(ts: number, locale: string): string {
 }
 
 /**
+ * The clock a hover shows for one message. Today is the time. An older
+ * message keeps the date, so Tuesday's 3:24 does not look like today's.
+ */
+/** Date and time kept apart so a narrow chip can shorten the date only. */
+export function messageClockParts(
+  ts: number,
+  locale: string,
+  now = Date.now(),
+): { day: string; time: string } {
+  if (!ts) return { day: "", time: "" };
+  const time = clockLabel(ts, locale);
+  if (!time) return { day: "", time: "" };
+  if (new Date(ts).toDateString() === new Date(now).toDateString()) {
+    return { day: "", time };
+  }
+  return { day: dayLabel(ts, locale), time };
+}
+
+export function messageClock(ts: number, locale: string, now = Date.now()): string {
+  const { day, time } = messageClockParts(ts, locale, now);
+  if (!time) return "";
+  return day ? `${day} ${time}` : time;
+}
+
+/**
  * One centered stamp per quiet stretch. The first moment is stamped, and so
  * is the next row once an hour has passed since the previous one. A run of
  * messages inside that hour reads as one moment.
@@ -52,17 +77,12 @@ export function clockLabels(
   now = Date.now(),
 ): string[] {
   let prev = 0;
-  const today = new Date(now).toDateString();
   return stamps.map((ts) => {
     if (!ts) return "";
     const gap = prev ? ts - prev : CLOCK_GAP_MS;
     if (ts >= prev) prev = ts;
     if (gap < CLOCK_GAP_MS) return "";
-    const time = clockLabel(ts, locale);
-    if (!time) return "";
-    if (new Date(ts).toDateString() === today) return time;
-    const day = dayLabel(ts, locale);
-    return day ? `${day} ${time}` : time;
+    return messageClock(ts, locale, now);
   });
 }
 
