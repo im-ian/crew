@@ -95,8 +95,6 @@ export const KO = {
   "header.statusWorking": "작업 중",
   "header.statusBlocked": "확인 필요",
   "header.statusExited": "종료됨",
-  "header.botSettings": "봇 설정",
-  "header.botSettingsTitle": "봇 설정 ⌘⇧R",
 
   "composer.busy": "작업 중…",
   "composer.detach": "첨부 빼기",
@@ -360,8 +358,6 @@ export const EN: { [K in MessageKey]: string } = {
   "header.statusWorking": "Working",
   "header.statusBlocked": "Needs review",
   "header.statusExited": "Exited",
-  "header.botSettings": "Bot settings",
-  "header.botSettingsTitle": "Bot settings ⌘⇧R",
 
   "composer.busy": "Working…",
   "composer.detach": "Remove attachment",
