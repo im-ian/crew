@@ -13,7 +13,14 @@ export function displayWho(
   t: TFn,
 ): string {
   if (agent) return agent.name || agent.id;
+  const sub = subagentType(id);
+  if (sub) return t("thread.subagent", { name: sub });
   return id.startsWith("#") ? id : t("thread.deletedBot");
+}
+
+/** A bot's Claude subagent talks in notes as `sub:<type>`. */
+export function subagentType(id: string): string | null {
+  return id.startsWith("sub:") ? id.slice(4) : null;
 }
 
 /** The other bot on a sent/received/handoff row. Channels are not a peek. */

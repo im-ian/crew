@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read};
 use std::os::unix::process::CommandExt;
@@ -555,12 +555,20 @@ fn spawn_and_stream(
         let mut turn_end = false;
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
             for card in crate::tool_card::from_events(&v) {
+                if cli == CliKind::Claude && is_subagent_call(&v, &card.name) {
+                    continue;
+                }
                 crate::transcript::push_tool(
                     &session.id,
                     card.id.as_deref(),
                     &card.name,
                     &card.detail,
                 );
+            }
+            if cli == CliKind::Claude {
+                for (from, text) in claude_subagent_notes(&v, &mut state) {
+                    crate::transcript::push_subagent(&session.id, &from, &text);
+                }
             }
             turn_end = is_turn_end(cli, &v);
         }
@@ -705,6 +713,9 @@ struct ParseState {
     /// `spawn_subagent` calls that have not finished. The child's reply is
     /// `text` on this same stream, with no field that marks it as the child's.
     open_subagents: HashSet<String>,
+    /// Claude subagent calls whose report has not come back: call id → the
+    /// note peer (`sub:<type>`) the report is from.
+    claude_subagents: HashMap<String, String>,
 }
 
 fn ingest_line(cli: CliKind, line: &str, state: &mut ParseState) -> Option<String> {
@@ -813,6 +824,68 @@ fn grok_event(v: &Value) -> (&Value, &str) {
         return (update, kind);
     }
     (v, v.get("type").and_then(Value::as_str).unwrap_or(""))
+}
+
+/// Claude's subagent tool. It was `Task` before it was `Agent`.
+fn is_subagent_tool(name: &str) -> bool {
+    matches!(name, "Agent" | "Task")
+}
+
+/// The bot's own subagent call, which its notes stand in for. A call the
+/// subagent makes itself carries the bot's call as `parent_tool_use_id`.
+fn is_subagent_call(v: &Value, name: &str) -> bool {
+    is_subagent_tool(name) && v.get("parent_tool_use_id").map_or(true, Value::is_null)
+}
+
+/// A Claude subagent as a note exchange, like a teammate's: the prompt the bot
+/// hands over, then the report it gets back, each as (from, text). The
+/// subagent's words in between never reach this stream, only its tool calls.
+fn claude_subagent_notes(v: &Value, state: &mut ParseState) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    match v.get("type").and_then(Value::as_str) {
+        Some("assistant") if v.get("parent_tool_use_id").map_or(true, Value::is_null) => {
+            let blocks = v.pointer("/message/content").and_then(Value::as_array);
+            for block in blocks.into_iter().flatten() {
+                let name = block.get("name").and_then(Value::as_str).unwrap_or("");
+                if block.get("type").and_then(Value::as_str) != Some("tool_use")
+                    || !is_subagent_tool(name)
+                {
+                    continue;
+                }
+                let id = block.get("id").and_then(Value::as_str);
+                let prompt = block.pointer("/input/prompt").and_then(Value::as_str);
+                let (Some(id), Some(prompt)) = (id, prompt) else {
+                    continue;
+                };
+                let kind = block
+                    .pointer("/input/subagent_type")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("general-purpose");
+                let peer = format!("sub:{kind}");
+                out.push((format!("to:{peer}"), prompt.to_string()));
+                state.claude_subagents.insert(id.to_string(), peer);
+            }
+        }
+        // The tool result wraps the report in a hand-back frame; this is the
+        // report alone.
+        Some("system") if v.get("subtype").and_then(Value::as_str) == Some("task_notification") => {
+            let peer = v
+                .get("tool_use_id")
+                .and_then(Value::as_str)
+                .and_then(|id| state.claude_subagents.remove(id));
+            let summary = v
+                .get("summary")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            if let (Some(peer), Some(summary)) = (peer, summary) {
+                out.push((peer, summary.to_string()));
+            }
+        }
+        _ => {}
+    }
+    out
 }
 
 fn claude_text(v: &Value, state: &mut ParseState) -> Option<String> {
@@ -1226,6 +1299,59 @@ mod tests {
             &mut st,
         );
         assert_eq!(d.as_deref(), Some("둘 다 끝났습니다."));
+    }
+
+    #[test]
+    fn a_claude_subagent_is_a_note_exchange() {
+        let mut st = ParseState::default();
+        let mut notes = |line: &str| {
+            let v: Value = serde_json::from_str(line).unwrap();
+            claude_subagent_notes(&v, &mut st)
+        };
+        let start: Value = serde_json::from_str(
+            r#"{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","id":"toolu_1","name":"Agent","input":{}}},"parent_tool_use_id":null}"#,
+        )
+        .unwrap();
+        assert!(
+            is_subagent_call(&start, "Agent"),
+            "the notes stand in for its card"
+        );
+        assert_eq!(
+            notes(
+                r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Agent","input":{"description":"Find it","subagent_type":"Explore","prompt":"Where is the parser?"}}]},"parent_tool_use_id":null}"#
+            ),
+            vec![(
+                "to:sub:Explore".to_string(),
+                "Where is the parser?".to_string()
+            )]
+        );
+        // The subagent's own calls stay tool cards, a subagent of its own too.
+        let inner = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_2","name":"Agent","input":{"prompt":"deeper"}}]},"parent_tool_use_id":"toolu_1"}"#;
+        assert!(!is_subagent_call(
+            &serde_json::from_str(inner).unwrap(),
+            "Agent"
+        ));
+        assert!(notes(inner).is_empty());
+        // A background shell finishing is a task too.
+        assert!(notes(
+            r#"{"type":"system","subtype":"task_notification","tool_use_id":"toolu_9","status":"completed","summary":"Background command completed"}"#
+        )
+        .is_empty());
+        assert_eq!(
+            notes(
+                r#"{"type":"system","subtype":"task_notification","tool_use_id":"toolu_1","status":"completed","summary":"It is in headless.rs.\n"}"#
+            ),
+            vec![(
+                "sub:Explore".to_string(),
+                "It is in headless.rs.".to_string()
+            )]
+        );
+        assert_eq!(
+            notes(
+                r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_3","name":"Task","input":{"prompt":"Say hi"}}]}}"#
+            ),
+            vec![("to:sub:general-purpose".to_string(), "Say hi".to_string())]
+        );
     }
 
     #[test]

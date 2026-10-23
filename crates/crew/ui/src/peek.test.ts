@@ -38,6 +38,10 @@ describe("displayWho", () => {
     expect(displayWho("bot-mvj2zo29", null, t)).toBe("Deleted bot");
     expect(displayWho("#room", null, t)).toBe("#room");
   });
+
+  it("names a subagent by its type", () => {
+    expect(displayWho("sub:Explore", null, t)).toBe("Explore subagent");
+  });
 });
 
 describe("peekPeerId", () => {
@@ -70,6 +74,25 @@ describe("peekPeerId", () => {
 });
 
 describe("peekMessages", () => {
+  it("reads a subagent's prompt and report as a side chat", () => {
+    const rows = peekMessages(
+      [
+        msg("system", "to:sub:Explore", "where is the parser?", {
+          kind: "sent",
+        }),
+        msg("system", "sub:Explore", "in headless.rs", { kind: "received" }),
+        msg("assistant", "alpha", "Found it."),
+      ],
+      "sub:Explore",
+      "alpha",
+      AGENTS,
+    );
+    expect(rows.map((m) => [m.from, m.text])).toEqual([
+      ["alpha", "where is the parser?"],
+      ["sub:Explore", "in headless.rs"],
+    ]);
+  });
+
   it("reads a side chat with a bot that was deleted", () => {
     const rows = peekMessages(
       [

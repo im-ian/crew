@@ -404,17 +404,50 @@ pub fn push_tool(agent: &str, call_id: Option<&str>, name: &str, detail: &str) -
             if let Some(id) = call_id {
                 chat.tool_ids.insert(id.to_string(), msg.id.clone());
             }
-            if let Some(idx) = chat.pending_idx {
-                chat.messages.insert(idx, msg.clone());
-                chat.pending_idx = Some(idx + 1);
-            } else {
-                chat.messages.push(msg.clone());
-            }
+            insert_in_turn(chat, msg.clone());
             persist(agent, chat);
         }
     }
     emit(agent, msg.clone());
     msg
+}
+
+/// A note between a bot and its subagent: the prompt (`to:sub:<type>`) or the
+/// report (`sub:<type>`). Like a tool call, it happens inside the turn.
+pub fn push_subagent(agent: &str, from: &str, text: &str) -> ChatMessage {
+    let mut msg = ChatMessage {
+        id: new_id(),
+        role: Role::System,
+        from: from.to_string(),
+        text: text.to_string(),
+        ts: now_ms(),
+        queued: false,
+        peer: None,
+        kind: infer_system_kind(from),
+        approval: None,
+        choice: None,
+    };
+    if let Ok(mut map) = chats().lock() {
+        let chat = map
+            .entry(agent.to_string())
+            .or_insert_with(AgentChat::empty);
+        msg.peer = chat.peer.clone();
+        insert_in_turn(chat, msg.clone());
+        persist(agent, chat);
+    }
+    emit(agent, msg.clone());
+    msg
+}
+
+/// A row from inside a turn goes above the reply still being written, which
+/// stays one bubble for the whole turn.
+fn insert_in_turn(chat: &mut AgentChat, msg: ChatMessage) {
+    if let Some(idx) = chat.pending_idx {
+        chat.messages.insert(idx, msg);
+        chat.pending_idx = Some(idx + 1);
+    } else {
+        chat.messages.push(msg);
+    }
 }
 
 /// Attach a picker to the in-flight assistant row, or open a new one.
@@ -1535,6 +1568,32 @@ mod tests {
                 .count(),
             3
         );
+        drop_agent(&agent);
+    }
+
+    #[test]
+    fn subagent_notes_sit_above_the_reply_they_came_in() {
+        let agent = format!(
+            "sub-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        begin_turn(&agent);
+        on_assistant_delta(&agent, "I'll ask.");
+        let sent = push_subagent(&agent, "to:sub:Explore", "find the parser");
+        let got = push_subagent(&agent, "sub:Explore", "It is in headless.rs.");
+        on_assistant_delta(&agent, " Found it.");
+        let rows = messages(&agent);
+        assert_eq!(rows.len(), 3, "the reply stays one bubble");
+        assert_eq!(rows[0].id, sent.id);
+        assert_eq!(rows[0].kind, Some(MessageKind::Sent));
+        assert_eq!(rows[1].id, got.id);
+        assert_eq!(rows[1].kind, Some(MessageKind::Received));
+        assert_eq!(rows[2].role, Role::Assistant);
+        assert_eq!(rows[2].text, "I'll ask. Found it.");
         drop_agent(&agent);
     }
 
