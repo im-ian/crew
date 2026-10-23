@@ -964,6 +964,32 @@ fn cancel_queued(id: &str, msg_id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Rewrite `msg_id`, a line the user typed that still waits in `id`'s inbox,
+/// in its place. The teammates it names now are the ones told after it.
+fn edit_queued(id: &str, msg_id: &str, text: &str) -> anyhow::Result<()> {
+    if text.trim().is_empty() {
+        anyhow::bail!("an edited message needs text");
+    }
+    let roster = roster_vec();
+    let mut map = inbox().lock().map_err(|_| anyhow::anyhow!("inbox lock poisoned"))?;
+    let item = map
+        .get_mut(id)
+        .and_then(|q| q.iter_mut().find(|d| d.msg_id.as_deref() == Some(msg_id)))
+        .filter(|d| d.origin == TurnOrigin::user());
+    let Some(item) = item else {
+        anyhow::bail!("that message is no longer waiting");
+    };
+    // Under the inbox lock, as `set_queued` is: it cannot start half edited.
+    let old = crate::transcript::set_text(id, msg_id, text).unwrap_or_default();
+    item.text = crate::config::with_mention_hint(text, id, &roster);
+    // A command goes alone.
+    item.joins &= !is_slash_command(text);
+    let mut then = named_tells(text, id, &roster);
+    then.extend(item.then.drain(..).filter(|job| !job.named_by(id, &old)));
+    item.then = then;
+    Ok(())
+}
+
 #[cfg(test)]
 fn inbox_is_empty(id: &str) -> bool {
     inbox()
@@ -996,6 +1022,12 @@ impl SerialJob {
     fn named_in(&self, chat: &str) -> bool {
         let SerialKind::Tell { from, origin, .. } = &self.kind;
         from == "user" && origin.as_ref().and_then(|o| o.reply_agent.as_deref()) == Some(chat)
+    }
+
+    /// A teammate the user @named in `text`, typed into `chat`'s 1:1.
+    fn named_by(&self, chat: &str, text: &str) -> bool {
+        let SerialKind::Tell { text: told, .. } = &self.kind;
+        self.named_in(chat) && told == text
     }
 }
 
@@ -1904,6 +1936,16 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
                 message: err.to_string(),
             }],
         },
+        Request::EditQueued {
+            agent,
+            message_id,
+            text,
+        } => match edit_queued(&agent, &message_id, &text) {
+            Ok(()) => vec![Event::Ok],
+            Err(err) => vec![Event::Error {
+                message: err.to_string(),
+            }],
+        },
         Request::Approve { agent, allow } => match approve_agent(&agent, allow) {
             Ok(()) => vec![Event::Ok],
             Err(err) => vec![Event::Error {
@@ -2220,19 +2262,7 @@ fn send_from_user(id: &str, shown: &str, text: &str, steer: bool) -> anyhow::Res
     let msg = crate::transcript::push_user(id, "user", shown);
     // The teammates named here answer after this message's turn, so they ride
     // with it instead of waiting on whatever the bot is doing now.
-    let mut then: VecDeque<SerialJob> =
-        targeting::one_on_one_tell_targets(crate::rows::reply_body(text), id, &roster)
-            .into_iter()
-            .map(|to| SerialJob {
-                to,
-                kind: SerialKind::Tell {
-                    from: "user".into(),
-                    text: text.to_string(),
-                    origin: Some(TurnOrigin::mention_tell(id)),
-                },
-                own: false,
-            })
-            .collect();
+    let mut then = named_tells(text, id, &roster);
     let delivered = crate::config::with_mention_hint(text, id, &roster);
     let named_here = then.len();
     if matches!(live_status(id), Ok(AgentStatus::Blocked)) {
@@ -2273,6 +2303,22 @@ fn send_from_user(id: &str, shown: &str, text: &str, steer: bool) -> anyhow::Res
         }
     }
     started
+}
+
+/// A tell to each teammate the user @names in `text`, typed into `id`'s 1:1.
+fn named_tells(text: &str, id: &str, roster: &[AgentConfig]) -> VecDeque<SerialJob> {
+    targeting::one_on_one_tell_targets(crate::rows::reply_body(text), id, roster)
+        .into_iter()
+        .map(|to| SerialJob {
+            to,
+            kind: SerialKind::Tell {
+                from: "user".into(),
+                text: text.to_string(),
+                origin: Some(TurnOrigin::mention_tell(id)),
+            },
+            own: false,
+        })
+        .collect()
 }
 
 fn ensure_accepts_turn(id: &str) -> anyhow::Result<()> {
@@ -4047,6 +4093,58 @@ exec sleep 5"#,
 
             for id in [&bot, &b] {
                 set_status(id, AgentStatus::Idle);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// "@B 리뷰해줘" waits behind another line and the user rewrites it to
+    /// "@C 봐줘": it keeps its place, its row says the new text, and C is told
+    /// after it instead of B.
+    #[test]
+    fn an_edited_message_keeps_its_place() {
+        paths::testing::with_home("edit-queued", || {
+            paths::write_notifications_enabled(false);
+            let [bot, b, c] = ["edit-bot", "edit-b", "edit-c"].map(test_id);
+            for id in [&bot, &b, &c] {
+                insert_spawned_agent(AgentConfig::new(
+                    id.clone(),
+                    id.clone(),
+                    AgentCli::Claude.default_cmd(),
+                    None,
+                ))
+                .unwrap();
+            }
+            let set_status = |id: &str, to: AgentStatus| match agents().lock().unwrap().get(id) {
+                Some(LiveAgent::Headless(s)) => s.inner.lock().unwrap().status = to,
+                _ => panic!("claude runs headless"),
+            };
+            set_status(&bot, AgentStatus::Working);
+            send_agent(&bot, &format!("@{b} 리뷰해줘")).unwrap();
+            let row = crate::transcript::messages(&bot).last().unwrap().clone();
+            send_agent(&bot, "그 다음 거").unwrap();
+
+            let edited = format!("@{c} 봐줘");
+            edit_queued(&bot, &row.id, &edited).unwrap();
+            {
+                let map = inbox().lock().unwrap();
+                let q = &map[&bot];
+                assert_eq!(q[0].msg_id.as_deref(), Some(row.id.as_str()), "still first");
+                assert!(q[0].text.starts_with(&edited), "{}", q[0].text);
+                let named: Vec<_> = q[0].then.iter().map(|job| job.to.clone()).collect();
+                assert_eq!(named, vec![c.clone()]);
+            }
+            let now = crate::transcript::messages(&bot)
+                .into_iter()
+                .find(|m| m.id == row.id)
+                .unwrap();
+            assert_eq!(now.text, edited);
+            assert!(now.queued);
+            assert!(edit_queued(&bot, "no-such-row", "x").is_err());
+
+            set_status(&bot, AgentStatus::Idle);
+            clear_inbox(&bot);
+            for id in [&bot, &b, &c] {
                 remove_agent(id).unwrap();
             }
         });

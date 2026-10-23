@@ -404,19 +404,16 @@ export function useCrew() {
     }
   }
 
-  /** Whether the message was still waiting and is now taken back. */
-  async function cancelQueued(messageId: string): Promise<boolean> {
+  async function cancelQueued(messageId: string) {
     const { id } = selectedRef.current;
     // A double click would otherwise report the first cancel's row as gone.
-    if (!id || cancelling.current.has(messageId)) return false;
+    if (!id || cancelling.current.has(messageId)) return;
     cancelling.current.add(messageId);
     try {
       await api.cancelQueued(id, messageId);
       await refreshMessages();
-      return true;
     } catch (err) {
       showError(err);
-      return false;
     } finally {
       cancelling.current.delete(messageId);
     }

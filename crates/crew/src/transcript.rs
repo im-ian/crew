@@ -517,6 +517,21 @@ pub fn remove_row(agent: &str, id: &str) {
     persist(agent, chat);
 }
 
+/// `id`'s new text, persisted and pushed to the window. Returns what it said.
+pub fn set_text(agent: &str, id: &str, text: &str) -> Option<String> {
+    let (old, msg) = {
+        let mut map = chats().lock().ok()?;
+        let chat = map.get_mut(agent)?;
+        let m = chat.messages.iter_mut().rev().find(|m| m.id == id)?;
+        let old = std::mem::replace(&mut m.text, text.to_string());
+        let msg = m.clone();
+        persist(agent, chat);
+        (old, msg)
+    };
+    emit(agent, msg);
+    Some(old)
+}
+
 /// One row per tool call. `call_id` is the CLI's id for the call: later events
 /// for the same id fill the same card in instead of stacking another row.
 pub fn push_tool(agent: &str, call_id: Option<&str>, name: &str, detail: &str) -> ChatMessage {
