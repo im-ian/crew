@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { translate, type TFn } from "./i18n";
-import { modelLine, modelRows, pinnedDefault } from "./options";
+import { cliFromCmd, formatCmd, modelLine, modelRows, pinnedDefault } from "./options";
 
 const t: TFn = (key, vars) => translate("ko", key, vars);
 
@@ -45,10 +45,36 @@ describe("modelLine", () => {
     );
   });
 
-  it("stays quiet for a bot that is not one of the three CLIs", () => {
+  it("stays quiet for a terminal command", () => {
     expect(modelLine({ cmd: ["python"], model: "opus", effort: "high" }, null, t)).toBe(
       null,
     );
+  });
+
+  it("names a prompt-mode CLI without a think level it does not take", () => {
+    expect(modelLine({ cmd: ["gemini"], model: "", effort: "high" }, null, t)).toBe(
+      "Gemini · 기본값",
+    );
+    expect(
+      modelLine({ cmd: ["agy"], model: "gemini-3.8-flash-low", effort: "low" }, null, t),
+    ).toBe("Antigravity · gemini-3.8-flash-low · 생각 가볍게");
+  });
+
+  it("names a headless command by its program", () => {
+    expect(
+      modelLine({ cmd: ["my-ai", "--print"], headless: true, model: "", effort: "" }, null, t),
+    ).toBe("명령 · my-ai");
+  });
+});
+
+describe("cliFromCmd", () => {
+  it("knows the preset binaries and leaves a terminal alone", () => {
+    expect(cliFromCmd(["/opt/homebrew/bin/agy"])).toBe("agy");
+    expect(cliFromCmd(["opencode"])).toBe("opencode");
+    expect(cliFromCmd(["cat"])).toBeNull();
+    expect(cliFromCmd(["my-ai"], true)).toBe("custom");
+    expect(formatCmd(["my-ai", "say hi"])).toBe('my-ai "say hi"');
+    expect(formatCmd(["my-ai", "C:\\tools\\ai"])).toBe('my-ai "C:\\\\tools\\\\ai"');
   });
 });
 

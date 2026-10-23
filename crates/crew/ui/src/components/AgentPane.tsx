@@ -26,7 +26,7 @@ type Props = {
     effort: string;
     cwd: string;
   }) => Promise<void>;
-  onSetCli: (cli: CliKind) => Promise<boolean>;
+  onSetCli: (cli: CliKind, cmd?: string) => Promise<boolean>;
   onToggleRoutine: (r: Routine) => Promise<void>;
   onDeleteRoutine: (r: Routine) => Promise<void>;
   onRunRoutine: (r: Routine) => Promise<void>;

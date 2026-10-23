@@ -16,6 +16,7 @@ type Props = {
     cli: CliKind;
     model: string;
     effort: string;
+    cmd: string;
     shape: string | null;
     color: string | null;
   }) => Promise<void>;
@@ -30,6 +31,7 @@ export function NewBotModal({
   const [name, setName] = useState("");
   const [model, setModel] = useState("");
   const [cli, setCli] = useState<CliKind>("grok");
+  const [command, setCommand] = useState("");
   const [effort, setEffort] = useState("");
   const [shape, setShape] = useState<AvatarShape | "">("");
   const [color, setColor] = useState("");
@@ -41,6 +43,7 @@ export function NewBotModal({
     setName("");
     setModel("");
     setCli("grok");
+    setCommand("");
     setEffort("");
     // #3a3a3c is a swatch to pick, not a face to start from: on the dark
     // dialog it reads as an empty slot.
@@ -61,6 +64,7 @@ export function NewBotModal({
         cli,
         model,
         effort,
+        cmd: command,
         shape: shape || null,
         color: color || null,
       });
@@ -73,6 +77,7 @@ export function NewBotModal({
         cli,
         model,
         effort,
+        cmd: command,
         shape: shape || null,
         color: color || null,
       });
@@ -130,12 +135,15 @@ export function NewBotModal({
             effort={effort}
             active={open}
             pickInstalled
+            command={command}
             onCli={(next) => {
               setCli(next);
               setModel("");
+              if (next === "custom") setCommand("");
             }}
             onModel={setModel}
             onEffort={setEffort}
+            onCommand={setCommand}
           />
         </Field>
       </div>

@@ -16,7 +16,7 @@ export function ChatHeader({
   onOpenInfo,
 }: Props) {
   const t = useT();
-  const cli = currentAgent ? cliFromCmd(currentAgent.cmd) : null;
+  const cli = currentAgent ? cliFromCmd(currentAgent.cmd, currentAgent.headless) : null;
   const savedModel = currentAgent?.model?.trim() || "";
   // Keyed by CLI so a slow list cannot paint the previous bot's default.
   // Null is a real answer (installed, no default id). A missing key is not.

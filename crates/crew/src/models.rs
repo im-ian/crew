@@ -26,6 +26,11 @@ pub fn list_models(cli: AgentCli) -> anyhow::Result<ModelList> {
         AgentCli::Grok => list_grok_models()?,
         AgentCli::Claude => claude_models(),
         AgentCli::Codex => list_codex_models(),
+        AgentCli::Agy if !installed => ModelList::default(),
+        AgentCli::Agy => list_agy_models(),
+        // A missing binary is the answer. These CLIs have no model list we
+        // can read without guessing a command.
+        AgentCli::Gemini | AgentCli::Copilot | AgentCli::Opencode => ModelList::default(),
     };
     list.installed = installed;
     Ok(list)
@@ -123,6 +128,33 @@ pub fn parse_grok_models(text: &str) -> ModelList {
     ModelList {
         models,
         default,
+        ..ModelList::default()
+    }
+}
+
+/// `agy models` prints `id<tab>label` after a status line. A failed fetch
+/// is an empty list, not an error: the bot can still run on the CLI default.
+fn list_agy_models() -> ModelList {
+    let text = match capture("agy", &["models"]) {
+        Ok(text) => text,
+        Err(_) => return ModelList::default(),
+    };
+    parse_agy_models(&text)
+}
+
+pub fn parse_agy_models(text: &str) -> ModelList {
+    let mut models = Vec::new();
+    for line in text.lines() {
+        let id = line.split_whitespace().next().unwrap_or("");
+        let id_ok = id.chars().all(|c| {
+            c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '_'
+        }) && (id.contains('-') || id.contains('.'));
+        if id_ok {
+            push_unique(&mut models, id);
+        }
+    }
+    ModelList {
+        models,
         ..ModelList::default()
     }
 }
@@ -247,6 +279,21 @@ Available models:
         let list = parse_grok_models(text);
         assert_eq!(list.default.as_deref(), Some("grok-4.6"));
         assert_eq!(list.models, vec!["grok-4.6", "grok-4.5"]);
+    }
+
+    #[test]
+    fn agy_models_skip_the_status_line() {
+        let text = "\
+Fetching available models...
+gemini-3.8-flash-high\tGemini 3.8 Flash (High)
+claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)
+";
+        let list = parse_agy_models(text);
+        assert_eq!(
+            list.models,
+            vec!["gemini-3.8-flash-high", "claude-sonnet-4-6"]
+        );
+        assert!(list.default.is_none());
     }
 
     #[test]

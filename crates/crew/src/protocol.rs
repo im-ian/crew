@@ -45,6 +45,9 @@ pub enum Request {
         model: Option<String>,
         #[serde(default)]
         effort: Option<Effort>,
+        /// Unknown command: each message is appended as its last argument.
+        #[serde(default)]
+        headless: bool,
     },
     RemoveAgent {
         id: String,
@@ -91,10 +94,13 @@ pub enum Request {
         #[serde(default)]
         unset_cwd: bool,
     },
-    /// Move a bot to another CLI: `grok`, `claude`, or `codex`.
+    /// Move a bot to another CLI. `custom` needs `cmd`: the message is appended
+    /// as that command's last argument.
     SetCli {
         id: String,
         cli: String,
+        #[serde(default)]
+        cmd: Vec<String>,
     },
     Reset {
         agent: String,
@@ -275,6 +281,13 @@ pub struct AgentInfo {
     pub preview: Option<String>,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub last_ts: u64,
+    /// Unknown command that chats, instead of a long-lived terminal.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub headless: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 fn is_zero(n: &u64) -> bool {

@@ -413,6 +413,38 @@ pub fn recap(agent: &str) -> Option<String> {
     recap_of(&messages(agent))
 }
 
+/// The chat before the rows in `skip`, which this turn is already sending.
+/// Empty falls back to dropping only the last row, which is that message when
+/// it has no id here. A prompt-mode CLI has no session, so the turn sends this
+/// and then the new message.
+pub fn prior_recap_excluding(agent: &str, skip: &[String]) -> Option<String> {
+    excluding(&messages(agent), skip)
+}
+
+fn excluding(msgs: &[ChatMessage], skip: &[String]) -> Option<String> {
+    if skip.is_empty() {
+        return prior_of(msgs);
+    }
+    let kept: Vec<ChatMessage> = msgs
+        .iter()
+        .filter(|m| !skip.iter().any(|id| id == &m.id))
+        .cloned()
+        .collect();
+    recap_of(&kept)
+}
+
+fn prior_of(msgs: &[ChatMessage]) -> Option<String> {
+    let mut end = msgs.len();
+    if let Some(last) = msgs.iter().rposition(|m| {
+        !m.queued && m.kind != Some(MessageKind::Tool) && !is_subagent_note(m)
+    }) {
+        if msgs[last].role != Role::Assistant {
+            end = last;
+        }
+    }
+    recap_of(&msgs[..end])
+}
+
 fn recap_of(msgs: &[ChatMessage]) -> Option<String> {
     let mut lines = Vec::new();
     let mut used = 0;
@@ -1662,6 +1694,36 @@ mod tests {
         assert_eq!(
             recap_of(&msgs).as_deref(),
             Some("user: review this\n\nassistant: looks fine")
+        );
+        let prior = vec![
+            row(Role::User, "user", "first", None),
+            row(Role::Assistant, "bot", "answer", None),
+            row(Role::User, "user", "second", None),
+        ];
+        assert_eq!(
+            prior_of(&prior).as_deref(),
+            Some("user: first\n\nassistant: answer")
+        );
+        assert_eq!(prior_of(&prior[2..]), None);
+        let handoff = row(
+            Role::System,
+            "bob",
+            "done",
+            Some(MessageKind::Handoff),
+        );
+        let second = row(Role::User, "user", "second", None);
+        let third = row(Role::User, "user", "third", None);
+        let joined = vec![
+            row(Role::User, "user", "first", None),
+            row(Role::Assistant, "bot", "answer", None),
+            handoff.clone(),
+            second.clone(),
+            third.clone(),
+        ];
+        let skip = vec![handoff.id, second.id, third.id];
+        assert_eq!(
+            excluding(&joined, &skip).as_deref(),
+            Some("user: first\n\nassistant: answer")
         );
         assert_eq!(recap_of(&msgs[1..2]), None);
 

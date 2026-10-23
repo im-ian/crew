@@ -2,11 +2,31 @@ import type { TFn } from "./i18n";
 import type { MessageKey } from "./locales";
 import type { CliKind, ModelList } from "./types";
 
-export const CLIS: { value: CliKind; label: string }[] = [
-  { value: "grok", label: "Grok" },
-  { value: "claude", label: "Claude" },
-  { value: "codex", label: "Codex" },
+export const CLIS: { value: CliKind; label: string; effort: boolean }[] = [
+  { value: "grok", label: "Grok", effort: true },
+  { value: "claude", label: "Claude", effort: true },
+  { value: "codex", label: "Codex", effort: true },
+  { value: "agy", label: "Antigravity", effort: true },
+  { value: "gemini", label: "Gemini", effort: false },
+  { value: "copilot", label: "Copilot", effort: false },
+  { value: "opencode", label: "OpenCode", effort: true },
+  { value: "custom", label: "Command", effort: false },
 ];
+
+const CLI_BY_BIN: Record<string, CliKind> = {
+  grok: "grok",
+  claude: "claude",
+  codex: "codex",
+  agy: "agy",
+  gemini: "gemini",
+  copilot: "copilot",
+  opencode: "opencode",
+};
+
+export function cliLabel(cli: CliKind, t: TFn): string {
+  if (cli === "custom") return t("cli.custom");
+  return CLIS.find((c) => c.value === cli)?.label ?? cli;
+}
 
 // Claude takes fixed aliases, so each can say what it is for; grok and codex
 // list whatever their CLI reports.
@@ -46,14 +66,24 @@ export function effortOptions(t: TFn): { value: string; label: string }[] {
   }));
 }
 
-export function cliFromCmd(cmd?: string[] | null): CliKind | null {
+export function cliFromCmd(cmd?: string[] | null, headless?: boolean): CliKind | null {
   const raw = cmd?.[0];
-  if (!raw) return null;
+  if (!raw) return headless ? "custom" : null;
   const base = raw.split(/[\\/]/).pop()?.toLowerCase() ?? "";
-  if (base === "grok") return "grok";
-  if (base === "claude") return "claude";
-  if (base === "codex") return "codex";
-  return null;
+  const known = CLI_BY_BIN[base];
+  if (known) return known;
+  return headless ? "custom" : null;
+}
+
+export function formatCmd(cmd?: string[] | null): string {
+  return (cmd ?? []).map(quoteArg).join(" ");
+}
+
+function quoteArg(arg: string): string {
+  if (arg === "" || /[\s"'\\]/.test(arg)) {
+    return `"${arg.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  }
+  return arg;
 }
 
 const EFFORT_LABEL: Record<string, MessageKey> = {
@@ -64,16 +94,27 @@ const EFFORT_LABEL: Record<string, MessageKey> = {
 
 // An empty model is the CLI default; pass that id when the list has reported it.
 export function modelLine(
-  agent: { cmd?: string[] | null; model?: string | null; effort?: string | null },
+  agent: {
+    cmd?: string[] | null;
+    model?: string | null;
+    effort?: string | null;
+    headless?: boolean;
+  },
   defaultModel: string | null | undefined,
   t: TFn,
 ): string | null {
-  const cli = cliFromCmd(agent.cmd);
+  const cli = cliFromCmd(agent.cmd, agent.headless);
   if (!cli) return null;
-  const cliLabel = CLIS.find((c) => c.value === cli)?.label ?? cli;
+  const spec = CLIS.find((c) => c.value === cli);
+  const name = cliLabel(cli, t);
+  if (cli === "custom") {
+    const bin = agent.cmd?.[0]?.split(/[\\/]/).pop() || name;
+    return `${name} · ${bin}`;
+  }
   const model = agent.model?.trim() || defaultModel?.trim() || t("model.default");
+  if (!spec?.effort) return `${name} · ${model}`;
   const effort = t(EFFORT_LABEL[agent.effort?.trim() || ""] ?? "effort.default");
-  return `${cliLabel} · ${model} · ${t("field.effort")} ${effort}`;
+  return `${name} · ${model} · ${t("field.effort")} ${effort}`;
 }
 
 // Undefined: the CLI is missing, so ask again later. Null: it is installed and

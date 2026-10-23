@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AvatarShape } from "../avatar";
 import { useT } from "../LocaleContext";
-import { cliFromCmd } from "../options";
+import { cliFromCmd, formatCmd } from "../options";
 import type { AgentInfo, CliKind } from "../types";
 import { Avatar } from "./Avatar";
 import { FacePop } from "./FacePicker";
@@ -19,7 +19,7 @@ type Props = {
     effort: string;
     cwd: string;
   }) => Promise<void>;
-  onSetCli: (cli: CliKind) => Promise<boolean>;
+  onSetCli: (cli: CliKind, cmd?: string) => Promise<boolean>;
 };
 
 export function InfoPane({
@@ -31,17 +31,26 @@ export function InfoPane({
   onSetCli,
 }: Props) {
   const t = useT();
-  const cli = cliFromCmd(agent?.cmd);
+  const fromAgent = cliFromCmd(agent?.cmd, agent?.headless);
+  const [draftCli, setDraftCli] = useState<CliKind | null>(null);
+  const cli = draftCli ?? fromAgent;
   const [name, setName] = useState("");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
   const [cwd, setCwd] = useState("");
+  const [command, setCommand] = useState("");
   const saveTimer = useRef<number | null>(null);
   // Until the list refreshes the card still shows the old CLI's models, and a
   // pick from it would land on the new CLI.
   const switching = useRef(false);
   const fieldsRef = useRef({ name, model, effort, cwd });
   fieldsRef.current = { name, model, effort, cwd };
+
+  const cmdKey = agent?.cmd?.join("\0") ?? "";
+  useEffect(() => {
+    setDraftCli(null);
+    setCommand(formatCmd(agent?.cmd));
+  }, [open, agent?.id, agent?.headless, cmdKey]);
 
   useEffect(() => {
     if (!open || !agent) return;
@@ -120,14 +129,51 @@ export function InfoPane({
             cli={cli}
             model={model}
             effort={effort}
+            command={command}
             active={open}
             onCli={async (next) => {
+              if (next === "custom") {
+                setDraftCli("custom");
+                setCommand("");
+                return;
+              }
+              // Reselecting the bot's CLI cancels a Command draft. set_cli
+              // would succeed without changing anything, and the empty model
+              // would then be saved over the real one.
+              if (next === fromAgent) {
+                setDraftCli(null);
+                setCommand(formatCmd(agent?.cmd));
+                return;
+              }
               if (switching.current) return;
               switching.current = true;
               try {
                 // Land pending edits under the old CLI; the switch drops its model.
                 await flushSave();
-                if (await onSetCli(next)) setModel("");
+                if (await onSetCli(next)) {
+                  setDraftCli(null);
+                  setModel("");
+                }
+              } finally {
+                switching.current = false;
+              }
+            }}
+            onCommand={setCommand}
+            onCommandCommit={async (raw) => {
+              const trimmed = raw.trim();
+              if (!trimmed || trimmed === formatCmd(agent?.cmd).trim()) {
+                setDraftCli(null);
+                setCommand(formatCmd(agent?.cmd));
+                return;
+              }
+              if (switching.current) return;
+              switching.current = true;
+              try {
+                await flushSave();
+                if (await onSetCli("custom", trimmed)) {
+                  setDraftCli(null);
+                  setModel("");
+                }
               } finally {
                 switching.current = false;
               }

@@ -531,11 +531,11 @@ export function useCrew() {
   }
 
   /** False when the daemon refused, e.g. mid-turn; the error is shown. */
-  async function saveAgentCli(cli: CliKind): Promise<boolean> {
+  async function saveAgentCli(cli: CliKind, cmd?: string): Promise<boolean> {
     const id = selectedRef.current.id;
     if (!id || selectedRef.current.kind !== "agent") return false;
     try {
-      await api.setAgentCli(id, cli);
+      await api.setAgentCli(id, cli, cmd ?? null);
       await refreshList();
       return true;
     } catch (err) {
@@ -691,12 +691,18 @@ export function useCrew() {
     cli: CliKind;
     model: string;
     effort: string;
+    cmd: string;
     shape: string | null;
     color: string | null;
   }) {
     const name = args.name.trim();
     if (!name) {
       showError(t("error.nameRequired"));
+      return;
+    }
+    const cmd = args.cmd.trim();
+    if (args.cli === "custom" && !cmd) {
+      showError(t("error.cmdRequired"));
       return;
     }
     const model = args.model.trim();
@@ -708,6 +714,7 @@ export function useCrew() {
         effort: args.effort || null,
         role: null,
         description: null,
+        cmd: args.cli === "custom" ? cmd : null,
       });
       if (args.shape || args.color) {
         // The bot already exists. A face that fails to stick must not leave

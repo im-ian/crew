@@ -117,12 +117,16 @@ enum AgentCmd {
         model: Option<String>,
         #[arg(long, value_enum)]
         effort: Option<Effort>,
-        /// Fill default argv for grok / claude / codex. Ignored if --cmd is set.
+        /// Fill default argv for a known CLI. Ignored if --cmd is set.
         #[arg(long, value_enum)]
         cli: Option<AgentCli>,
         /// Command to spawn. Put this last so later flags (e.g. --always-approve) stay in cmd.
         #[arg(long, num_args = 1.., allow_hyphen_values = true)]
         cmd: Vec<String>,
+        /// With --cmd, chat through that command. Each message is its last argument.
+        /// Without this, a command Crew does not know stays a terminal.
+        #[arg(long)]
+        headless: bool,
     },
     Remove {
         id: String,
@@ -352,8 +356,10 @@ fn run() -> anyhow::Result<()> {
             model,
             effort,
             cli,
+            headless,
         })) => {
             let cmd = resolve_add_cmd(cli, cmd)?;
+            let headless = config::headless_cmd(headless, &cmd);
             let name_given = name.and_then(|n| {
                 let n = n.trim().to_string();
                 if n.is_empty() {
@@ -397,6 +403,7 @@ fn run() -> anyhow::Result<()> {
                     cwd,
                     model,
                     effort,
+                    headless,
                 })? {
                     Event::Error { message } => anyhow::bail!("{message}"),
                     Event::Ok => {
@@ -413,6 +420,7 @@ fn run() -> anyhow::Result<()> {
                 let mut agent = AgentConfig::new(id.clone(), name, cmd, cwd);
                 agent.model = model.filter(|m| !m.is_empty());
                 agent.effort = effort;
+                agent.headless = headless;
                 cfg.agents.push(agent);
                 cfg.save()?;
                 write_roster(&cfg.agents)?;
