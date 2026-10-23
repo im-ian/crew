@@ -39,6 +39,24 @@ export function newestOnly<A extends unknown[], T>(
   };
 }
 
+/**
+ * A poll that skips its turn while the last one is still out. A daemon that
+ * stops answering holds each call for the answer timeout, and an interval that
+ * kept firing would stack one more call per tick until it came back.
+ */
+export function oneAtATime() {
+  let busy = false;
+  return async (work: () => Promise<void>) => {
+    if (busy) return;
+    busy = true;
+    try {
+      await work();
+    } finally {
+      busy = false;
+    }
+  };
+}
+
 export const api = {
   listAgents: () => invoke<AgentInfo[]>("list_agents"),
   sendMessage: (agent: string, text: string, steer = false) =>

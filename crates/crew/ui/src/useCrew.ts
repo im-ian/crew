@@ -6,7 +6,7 @@ import {
   useState,
   type MouseEvent,
 } from "react";
-import { api, errMsg, newestOnly } from "./api";
+import { api, errMsg, newestOnly, oneAtATime } from "./api";
 import { useT } from "./LocaleContext";
 import { loadNotify } from "./notifyPref";
 import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
@@ -90,6 +90,8 @@ export function useCrew() {
   agentsRef.current = agents;
   const listAgents = useRef(newestOnly(api.listAgents)).current;
   const getMessages = useRef(newestOnly(api.getMessages)).current;
+  const pollMessages = useRef(oneAtATime()).current;
+  const pollList = useRef(oneAtATime()).current;
   const groupsRef = useRef<RailLayout>({ groups, ungrouped });
   groupsRef.current = { groups, ungrouped };
   const groupsLoaded = useRef(false);
@@ -795,8 +797,13 @@ export function useCrew() {
     const msgMs = hot ? 200 : 2000;
     // Status ends the wait dots, so it must not lag the messages while hot.
     const listMs = hot ? 200 : 2000;
-    const msgId = window.setInterval(() => void tickMessages(), msgMs);
-    const listId = window.setInterval(() => void tickList(), listMs);
+    // Only the interval waits its turn. The tick above runs on a switch, and
+    // must not sit behind a poll for the bot the user just left.
+    const msgId = window.setInterval(
+      () => void pollMessages(tickMessages),
+      msgMs,
+    );
+    const listId = window.setInterval(() => void pollList(tickList), listMs);
     return () => {
       cancelled = true;
       window.clearInterval(msgId);
