@@ -7,6 +7,7 @@ import { Lock, X } from "../icons";
 import { displayWho, peekMessages } from "../peek";
 import type { AgentInfo, ChatMessage } from "../types";
 import { Avatar } from "./Avatar";
+import { JumpBottom, useStick } from "./ChatThread";
 import { MdBody } from "./MdBody";
 import { WhoButton, whoColor } from "./WhoButton";
 
@@ -49,6 +50,9 @@ export function PeekRoom({
   // Beside the thread the reader may be partway up an old run when a new
   // note lands; only follow the tail if they were already at it.
   const atBottom = useRef(true);
+  const { away, sync, jump } = useStick(threadRef, (stick) => {
+    atBottom.current = stick;
+  });
   const focusKey = focus.join(",");
 
   useEffect(() => {
@@ -60,6 +64,7 @@ export function PeekRoom({
   useEffect(() => {
     const el = threadRef.current;
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
+    sync();
   }, [rows]);
 
   // Each open starts at the bottom, where the next note lands. Opening on the
@@ -76,7 +81,7 @@ export function PeekRoom({
     else el.scrollTop = el.scrollHeight;
     // A switch keeps this panel mounted, and a scroll that moves nothing
     // fires no event, so the last bot's position would carry over.
-    atBottom.current = nearBottom(el);
+    sync();
   }, [peerId, focusKey, openAtFocus]);
 
   // The flash ring is a static style under its animation, so it has to come
@@ -125,30 +130,27 @@ export function PeekRoom({
           <X />
         </button>
       </header>
-      <div
-        className="thread peek-thread"
-        ref={threadRef}
-        onScroll={(e) => {
-          atBottom.current = nearBottom(e.currentTarget);
-        }}
-      >
-        {rows.map((m) => {
-          const agent =
-            agents.find((a) => a.id === m.from) ??
-            (m.from === self.id ? self : null);
-          const who =
-            m.from === "user" ? t("thread.you") : displayWho(m.from, agent, t);
-          return (
-            <PeekBubble
-              key={m.id}
-              message={m}
-              agent={agent}
-              who={who}
-              agents={agents}
-              flash={flash.has(m.id)}
-            />
-          );
-        })}
+      <div className="thread-wrap">
+        <div className="thread peek-thread" ref={threadRef} onScroll={sync}>
+          {rows.map((m) => {
+            const agent =
+              agents.find((a) => a.id === m.from) ??
+              (m.from === self.id ? self : null);
+            const who =
+              m.from === "user" ? t("thread.you") : displayWho(m.from, agent, t);
+            return (
+              <PeekBubble
+                key={m.id}
+                message={m}
+                agent={agent}
+                who={who}
+                agents={agents}
+                flash={flash.has(m.id)}
+              />
+            );
+          })}
+        </div>
+        {away ? <JumpBottom onClick={jump} /> : null}
       </div>
       <div className="peek-foot">
         <p className="peek-note">
@@ -158,10 +160,6 @@ export function PeekRoom({
       </div>
     </div>
   );
-}
-
-function nearBottom(el: HTMLElement): boolean {
-  return el.scrollHeight - el.scrollTop - el.clientHeight < 24;
 }
 
 function PeekBubble({

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ARRIVE_MS, playArrive, useArriving } from "../arrive";
 import { useLocale, useT } from "../LocaleContext";
 import type { TFn } from "../i18n";
@@ -120,9 +120,9 @@ export function ChatThread({
   onPeek,
   showTools = false,
 }: Props) {
-  const { locale, t } = useLocale();
+  const { locale } = useLocale();
   const ref = useRef<HTMLDivElement>(null);
-  const [away, setAway] = useState(false);
+  const { away, sync: syncStick, jump: jumpBottom } = useStick(ref, onStick);
   const visible = visibleMessages(messages, showTools);
   const all = threadRows(visible, agents);
   // A bot that has only talked with other bots has no conversation here: the
@@ -187,23 +187,6 @@ export function ChatThread({
       return live instanceof HTMLElement ? live.getBoundingClientRect().height : 0;
     },
   );
-
-  function syncStick() {
-    const el = ref.current;
-    if (!el) return;
-    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const overflow = el.scrollHeight - el.clientHeight > 8;
-    onStick(gap < STICK_PX);
-    setAway(overflow && gap >= STICK_PX);
-  }
-
-  function jumpBottom() {
-    const el = ref.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-    onStick(true);
-    setAway(false);
-  }
 
   useEffect(() => {
     const el = ref.current;
@@ -408,18 +391,54 @@ export function ChatThread({
           />
         ))}
       </div>
-      {away ? (
-        <button
-          type="button"
-          className="jump-bottom"
-          title={t("thread.jumpBottom")}
-          aria-label={t("thread.jumpBottom")}
-          onClick={jumpBottom}
-        >
-          <ChevronDown size={18} />
-        </button>
-      ) : null}
+      {away ? <JumpBottom onClick={jumpBottom} /> : null}
     </div>
+  );
+}
+
+/**
+ * Whether a thread is at its bottom, for the thread and the side chat alike.
+ * The side chat once kept its own copy without the button, and new notes
+ * piled up out of sight there with nothing to say so.
+ */
+export function useStick(
+  ref: RefObject<HTMLDivElement | null>,
+  onStick: (stick: boolean) => void,
+) {
+  const [away, setAway] = useState(false);
+
+  function sync() {
+    const el = ref.current;
+    if (!el) return;
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const overflow = el.scrollHeight - el.clientHeight > 8;
+    onStick(gap < STICK_PX);
+    setAway(overflow && gap >= STICK_PX);
+  }
+
+  function jump() {
+    const el = ref.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    onStick(true);
+    setAway(false);
+  }
+
+  return { away, sync, jump };
+}
+
+export function JumpBottom({ onClick }: { onClick: () => void }) {
+  const t = useT();
+  return (
+    <button
+      type="button"
+      className="jump-bottom"
+      title={t("thread.jumpBottom")}
+      aria-label={t("thread.jumpBottom")}
+      onClick={onClick}
+    >
+      <ChevronDown size={18} />
+    </button>
   );
 }
 
