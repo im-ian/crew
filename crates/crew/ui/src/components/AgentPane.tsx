@@ -22,8 +22,6 @@ type Props = {
   onSetFace: (shape?: string | null, color?: string | null) => Promise<void>;
   onSave: (fields: {
     name: string;
-    role: string;
-    description: string;
     model: string;
     effort: string;
     cwd: string;

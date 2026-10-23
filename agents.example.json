@@ -23,8 +23,6 @@
       "cmd": ["claude", "--dangerously-skip-permissions"],
       "cwd": "/tmp/crew-demo/claude",
       "title": "Code reviewer",
-      "role": "Senior reviewer",
-      "description": "Read the diff, then comment.",
       "routines": []
     },
     {

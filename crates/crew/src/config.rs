@@ -765,45 +765,33 @@ fn inject_model_effort(
     }
 }
 
-pub fn persona_text(role: Option<&str>, description: Option<&str>) -> Option<String> {
-    let role = role.map(str::trim).filter(|s| !s.is_empty());
-    let description = description.map(str::trim).filter(|s| !s.is_empty());
-    match (role, description) {
-        (None, None) => None,
-        (Some(r), None) => Some(r.to_string()),
-        (None, Some(d)) => Some(d.to_string()),
-        (Some(r), Some(d)) => Some(format!("{r}\n\n{d}")),
-    }
+/// One-shot note for a bot that was just created. It asks what work to take.
+/// The caller wraps this in a `[crew system]` envelope so it is not a user line.
+pub fn new_bot_ask(english: bool) -> String {
+    let lang = if english {
+        "Write in English."
+    } else {
+        "Write in Korean."
+    };
+    format!(
+        "You were just created and have no assigned work yet. Ask the user, in one short message, what work or role they want you to take. Do not ask permission to proceed, do not start other work, and do not use tools. {lang}"
+    )
 }
 
 /// Short spawn-time prompt: identity, teammates, and how to `crew tell`.
 pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
     let mut s = String::new();
     s.push_str(&format!(
-        "You are Crew agent `{}` ({}).",
+        "You are Crew agent `{}` ({}).\n",
         agent.id,
         agent.display_name()
     ));
-    if let Some(persona) = persona_text(agent.role.as_deref(), agent.description.as_deref()) {
-        s.push(' ');
-        s.push_str(&persona);
-        if !persona.ends_with('.') && !persona.contains('\n') {
-            s.push('.');
-        }
-    }
-    s.push('\n');
     let mut others: Vec<&AgentConfig> = roster.iter().filter(|a| a.id != agent.id).collect();
     others.sort_by(|a, b| a.id.cmp(&b.id));
     if !others.is_empty() {
         s.push_str("Teammates:\n");
         for a in others {
-            let role = a
-                .role
-                .as_deref()
-                .map(str::trim)
-                .filter(|t| !t.is_empty())
-                .unwrap_or("-");
-            s.push_str(&format!("- {} — {} — {}\n", a.id, a.display_name(), role));
+            s.push_str(&format!("- {} — {}\n", a.id, a.display_name()));
         }
     }
     s.push_str(
@@ -843,15 +831,7 @@ pub fn roster_update_text(agent: &AgentConfig, roster: &[AgentConfig]) -> String
         body.push_str("Teammates: ");
         let parts: Vec<String> = others
             .into_iter()
-            .map(|a| {
-                let role = a
-                    .role
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|t| !t.is_empty())
-                    .unwrap_or("-");
-                format!("{} — {} — {}", a.id, a.display_name(), role)
-            })
+            .map(|a| format!("{} — {}", a.id, a.display_name()))
             .collect();
         body.push_str(&parts.join("; "));
         body.push('.');
@@ -1127,13 +1107,7 @@ pub fn format_roster(agents: &[AgentConfig]) -> String {
         let mut list: Vec<&AgentConfig> = agents.iter().collect();
         list.sort_by(|a, b| a.id.cmp(&b.id));
         for a in list {
-            let role = a
-                .role
-                .as_deref()
-                .map(str::trim)
-                .filter(|t| !t.is_empty())
-                .unwrap_or("-");
-            out.push_str(&format!("- `{}` — {} — {}\n", a.id, a.display_name(), role));
+            out.push_str(&format!("- `{}` — {}\n", a.id, a.display_name()));
             if let Some(title) = a.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
                 out.push_str(&format!("  title: {title}\n"));
             }
@@ -1434,7 +1408,7 @@ mod tests {
     }
 
     #[test]
-    fn grok_gets_rules_from_role_and_description() {
+    fn team_rules_omit_role_and_description() {
         let argv = cfg_persona(
             &["grok", "--always-approve"],
             Some("PM"),
@@ -1442,11 +1416,22 @@ mod tests {
         )
         .spawn_cmd(false);
         let rules = rules_after(&argv, "--rules");
-        assert!(rules.contains("PM"));
-        assert!(rules.contains("Keep replies short."));
-        assert!(rules.contains("`t`"));
+        assert!(!rules.contains("PM"));
+        assert!(!rules.contains("Keep replies short."));
+        assert!(rules.contains("You are Crew agent `t` (T)."));
         assert!(rules.contains("crew tell"));
         assert!(rules.contains("[crew from:"));
+    }
+
+    #[test]
+    fn new_bot_ask_is_one_question_in_the_ui_language() {
+        let ko = new_bot_ask(false);
+        assert!(ko.contains("what work or role"));
+        assert!(ko.contains("one short message"));
+        assert!(ko.contains("Do not ask permission"));
+        assert!(ko.contains("do not use tools"));
+        assert!(ko.contains("Write in Korean."));
+        assert!(new_bot_ask(true).contains("Write in English."));
     }
 
     #[test]
@@ -1454,7 +1439,7 @@ mod tests {
         let argv = cfg_persona(&["claude"], Some("reviewer"), None).spawn_cmd(false);
         assert_eq!(argv[0], "claude");
         assert_eq!(argv[1], "--append-system-prompt");
-        assert!(argv[2].contains("reviewer"));
+        assert!(!argv[2].contains("reviewer"));
         assert!(argv[2].contains("crew tell"));
     }
 
@@ -1471,7 +1456,7 @@ mod tests {
         assert!(argv.contains(&"--yolo".to_string()));
         let text = codex_config_after(&argv, "developer_instructions");
         assert!(text.contains("You are Crew agent `t`"));
-        assert!(text.contains("reviewer"));
+        assert!(!text.contains("reviewer"));
         assert!(text.contains("crew tell"));
         assert!(text.contains("crew agent set --name"));
         assert!(text.contains("crew routine add"));
@@ -1497,8 +1482,9 @@ mod tests {
         let rules = rules_after(&argv, "--rules");
         assert!(rules.contains("keep this"));
         assert!(rules.contains("You are Crew agent `alpha` (Alpha)."));
-        assert!(rules.contains("PM"));
-        assert!(rules.contains("beta — Beta — reviewer"));
+        assert!(!rules.contains("PM"));
+        assert!(rules.contains("- beta — Beta\n"));
+        assert!(!rules.contains("reviewer"));
         assert!(!rules.contains("alpha — Alpha"));
         assert!(rules.contains("crew tell"));
         assert!(rules.contains("@<id>"));
@@ -1509,7 +1495,8 @@ mod tests {
         let mut a = AgentConfig::new("alpha".into(), "Alpha".into(), vec!["cat".into()], None);
         a.role = Some("PM".into());
         let md = format_roster(&[a]);
-        assert!(md.contains("`alpha` — Alpha — PM"));
+        assert!(md.contains("`alpha` — Alpha\n"));
+        assert!(!md.contains("PM"));
         assert!(md.contains("crew tell"));
         assert!(md.contains("crew agent set --name"));
         assert!(md.contains("crew routine add"));
@@ -1755,7 +1742,8 @@ mod tests {
         let mut beta = AgentConfig::new("beta".into(), "Beta".into(), vec!["cat".into()], None);
         beta.role = Some("reviewer".into());
         let text = roster_update_text(&alpha, &[alpha.clone(), beta]);
-        assert!(text.contains("beta — Beta — reviewer"));
+        assert!(text.contains("beta — Beta"));
+        assert!(!text.contains("reviewer"));
         assert!(!text.contains("alpha — Alpha"));
         assert!(text.contains("crew tell"));
         assert!(text.contains("@<id>"));

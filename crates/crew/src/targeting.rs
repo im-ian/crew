@@ -21,6 +21,9 @@ pub struct TurnOrigin {
     /// The turn's one wake of the bot waiting on it is used up, by the wake or
     /// by a stop. Output the turn leaves behind cannot wake that bot again.
     pub wake_spent: bool,
+    /// A first question like "what should I do?" must not become an allow/deny
+    /// card. Relays start a fresh origin, so they still can.
+    pub skip_judgment: bool,
 }
 
 impl TurnOrigin {
