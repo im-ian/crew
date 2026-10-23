@@ -9,13 +9,11 @@ import { Info } from "../icons";
 type Props = {
   currentAgent: AgentInfo | null;
   onOpenInfo: () => void;
-  onOpenRoutines: () => void;
 };
 
 export function ChatHeader({
   currentAgent,
   onOpenInfo,
-  onOpenRoutines,
 }: Props) {
   const t = useT();
   const cli = currentAgent ? cliFromCmd(currentAgent.cmd) : null;
@@ -91,9 +89,9 @@ export function ChatHeader({
         <button
           type="button"
           className="head-action"
-          title={t("header.botSettingsTitle")}
-          aria-label={t("header.botSettings")}
-          onClick={onOpenRoutines}
+          title={t("header.botInfo")}
+          aria-label={t("header.botInfo")}
+          onClick={onOpenInfo}
         >
           <Info />
         </button>

@@ -263,9 +263,6 @@ export function App() {
           onOpenInfo={() => {
             if (crew.selected) crew.openInfo(crew.selected);
           }}
-          onOpenRoutines={() => {
-            if (crew.selected) crew.openRoutines(crew.selected);
-          }}
         />
         <ChatThread
           messages={crew.messages}
