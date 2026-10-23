@@ -3494,10 +3494,15 @@ textarea.textin.skill-body {
 .empty-routines {
   color: var(--muted);
   font-size: var(--text-md);
+  line-height: 1.45;
   padding: var(--space-18) var(--space-12);
   text-align: center;
   border: 1px dashed var(--line);
   border-radius: var(--radius-md);
+  /* The copy breaks after the first sentence. Keep a Korean word whole. */
+  white-space: pre-line;
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 .seg {
   display: grid;

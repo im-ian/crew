@@ -205,7 +205,7 @@ export const KO = {
 
   "routine.list": "등록된 루틴",
   "routine.menuHint": "우클릭해서 지금 실행하거나 삭제해요",
-  "routine.empty": "아직 예약된 일이 없습니다. 채팅에서 “평일 9시에 PR 정리해줘”처럼 부탁해 보세요",
+  "routine.empty": "아직 예약된 일이 없습니다.\n채팅에서 “평일 9시에 PR 정리해줘”처럼 부탁해 보세요",
   "dow.0": "일요일",
   "dow.1": "월요일",
   "dow.2": "화요일",
@@ -460,7 +460,7 @@ export const EN: { [K in MessageKey]: string } = {
 
   "routine.list": "Scheduled routines",
   "routine.menuHint": "Right-click to run now or delete",
-  "routine.empty": "Nothing scheduled yet. Ask in chat, like “every weekday at 9, tidy up my PRs”",
+  "routine.empty": "Nothing scheduled yet.\nAsk in chat, like “every weekday at 9, tidy up my PRs”",
   "dow.0": "Sunday",
   "dow.1": "Monday",
   "dow.2": "Tuesday",
