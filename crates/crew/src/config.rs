@@ -210,6 +210,11 @@ pub enum AgentCli {
     Grok,
     Claude,
     Codex,
+    /// Antigravity CLI. The binary is `agy`.
+    Agy,
+    Gemini,
+    Copilot,
+    Opencode,
 }
 
 impl AgentCli {
@@ -218,6 +223,12 @@ impl AgentCli {
             AgentCli::Grok => vec!["grok".into(), "--always-approve".into()],
             AgentCli::Claude => vec!["claude".into(), "--dangerously-skip-permissions".into()],
             AgentCli::Codex => vec!["codex".into(), "--yolo".into()],
+            AgentCli::Agy => vec!["agy".into(), "--dangerously-skip-permissions".into()],
+            AgentCli::Gemini => vec!["gemini".into(), "--approval-mode".into(), "yolo".into()],
+            AgentCli::Copilot => {
+                vec!["copilot".into(), "--allow-all".into(), "--no-ask-user".into()]
+            }
+            AgentCli::Opencode => vec!["opencode".into(), "run".into(), "--auto".into()],
         }
     }
 
@@ -226,7 +237,13 @@ impl AgentCli {
             "grok" => Ok(Self::Grok),
             "claude" => Ok(Self::Claude),
             "codex" => Ok(Self::Codex),
-            other => anyhow::bail!("cli must be grok, claude, or codex (got {other})"),
+            "agy" | "antigravity" => Ok(Self::Agy),
+            "gemini" => Ok(Self::Gemini),
+            "copilot" => Ok(Self::Copilot),
+            "opencode" => Ok(Self::Opencode),
+            other => anyhow::bail!(
+                "cli must be grok, claude, codex, agy, gemini, copilot, or opencode (got {other})"
+            ),
         }
     }
 
@@ -246,12 +263,73 @@ pub fn resolve_add_cmd(cli: Option<AgentCli>, cmd: Vec<String>) -> anyhow::Resul
     }
     match cli {
         Some(cli) => Ok(cli.default_cmd()),
-        None => anyhow::bail!("pass --cli grok|claude|codex or --cmd …"),
+        None => anyhow::bail!(
+            "pass --cli grok|claude|codex|agy|gemini|copilot|opencode or --cmd …"
+        ),
     }
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
+}
+
+/// Split a command line the way a person types it: whitespace separates
+/// arguments, and quotes keep a space inside one argument.
+pub fn split_cmd(input: &str) -> anyhow::Result<Vec<String>> {
+    let mut args = Vec::new();
+    let mut cur = String::new();
+    let mut chars = input.chars().peekable();
+    let mut in_arg = false;
+    let mut quote: Option<char> = None;
+    while let Some(c) = chars.next() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) if c == '\\' => {
+                in_arg = true;
+                if let Some(next) = chars.next() {
+                    cur.push(next);
+                }
+            }
+            Some(_) => {
+                in_arg = true;
+                cur.push(c);
+            }
+            None if c == '\\' => {
+                in_arg = true;
+                if let Some(next) = chars.next() {
+                    cur.push(next);
+                }
+            }
+            None if c == '"' || c == '\'' => {
+                in_arg = true;
+                quote = Some(c);
+            }
+            None if c.is_whitespace() => {
+                if in_arg {
+                    args.push(std::mem::take(&mut cur));
+                    in_arg = false;
+                }
+            }
+            None => {
+                in_arg = true;
+                cur.push(c);
+            }
+        }
+    }
+    if quote.is_some() {
+        anyhow::bail!("command has an unclosed quote");
+    }
+    if in_arg {
+        args.push(cur);
+    }
+    if args.is_empty() {
+        anyhow::bail!("command is empty");
+    }
+    Ok(args)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -527,6 +605,10 @@ pub struct AgentConfig {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<Effort>,
+    /// An unknown command that chats: each message is its last argument.
+    /// Known CLIs ignore this and follow their own program.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub headless: bool,
     #[serde(default)]
     pub routines: Vec<Routine>,
 }
@@ -577,6 +659,7 @@ impl AgentConfig {
             role: None,
             model: None,
             effort: None,
+            headless: false,
             routines: Vec::new(),
         }
     }
@@ -612,6 +695,7 @@ impl AgentConfig {
             role: self.role.clone(),
             model: self.model.clone(),
             effort: self.effort,
+            headless: self.headless,
             routines: self
                 .routines
                 .iter()
@@ -664,10 +748,20 @@ impl AgentConfig {
         args
     }
 
-    /// grok / claude / codex run as one-shot headless turns. `cat` and other
-    /// stubs stay on a long-lived PTY.
+    /// grok / claude / codex and the other known CLIs run as one-shot headless
+    /// turns. `cat` and other stubs stay on a long-lived PTY unless this bot
+    /// was created with `headless`, which appends each message as the last arg.
     pub fn uses_pty(&self) -> bool {
-        uses_pty_program(&self.binary_name())
+        uses_pty_program(&self.binary_name()) && !self.headless
+    }
+
+    /// No per-bot session flag. Each turn sends the chat so far in the prompt.
+    pub fn prompt_mode(&self) -> bool {
+        match self.binary_name().as_str() {
+            "grok" | "claude" | "codex" => false,
+            "gemini" | "agy" | "copilot" | "opencode" => true,
+            _ => self.headless,
+        }
     }
 
     /// argv for one headless turn. Always strips stored resume flags, then
@@ -682,10 +776,19 @@ impl AgentConfig {
         memory: &str,
     ) -> Vec<String> {
         let mut args = self.argv_with_memory(true, roster, memory);
+        let spoken = self
+            .prompt_mode()
+            .then(|| prompt_with_preamble(self, roster, memory, prompt));
+        let prompt = spoken.as_deref().unwrap_or(prompt);
         match self.binary_name().as_str() {
             "grok" => apply_grok_turn(&mut args, prompt, session),
             "claude" => apply_claude_turn(&mut args, prompt, session),
             "codex" => apply_codex_turn(&mut args, prompt, session),
+            "gemini" => apply_gemini_turn(&mut args, prompt),
+            "agy" => apply_agy_turn(&mut args, prompt),
+            "copilot" => apply_copilot_turn(&mut args, prompt),
+            "opencode" => apply_opencode_turn(&mut args, prompt),
+            _ if self.headless => apply_custom_turn(&mut args, prompt),
             _ => {}
         }
         args
@@ -693,7 +796,25 @@ impl AgentConfig {
 }
 
 pub fn uses_pty_program(program: &str) -> bool {
-    !matches!(program, "grok" | "claude" | "codex")
+    !matches!(
+        program,
+        "grok" | "claude" | "codex" | "gemini" | "agy" | "copilot" | "opencode"
+    )
+}
+
+/// `--headless` only marks a command Crew does not already know. A known CLI
+/// stays on its own flags, so the flag cannot turn grok into a raw last-arg.
+pub fn headless_cmd(flag: bool, cmd: &[String]) -> bool {
+    if !flag {
+        return false;
+    }
+    let raw = cmd.first().map(String::as_str).unwrap_or("");
+    let program = std::path::Path::new(raw)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(raw)
+        .to_ascii_lowercase();
+    uses_pty_program(&program)
 }
 
 /// CLI conversation to continue. `resume` false means a brand-new session id.
@@ -761,6 +882,42 @@ fn inject_model_effort(
                 }
             }
         }
+        "agy" => {
+            if let Some(model) = model.filter(|m| !m.is_empty()) {
+                if !has_flag(args, &["--model", "-m"]) {
+                    args.push("--model".into());
+                    args.push(model.to_string());
+                }
+            }
+            if let Some(effort) = effort {
+                if !has_flag(args, &["--effort"]) {
+                    args.push("--effort".into());
+                    args.push(effort.as_str().to_string());
+                }
+            }
+        }
+        "gemini" | "copilot" => {
+            if let Some(model) = model.filter(|m| !m.is_empty()) {
+                if !has_flag(args, &["--model", "-m"]) {
+                    args.push("--model".into());
+                    args.push(model.to_string());
+                }
+            }
+        }
+        "opencode" => {
+            if let Some(model) = model.filter(|m| !m.is_empty()) {
+                if !has_flag(args, &["--model", "-m"]) {
+                    let model = match effort {
+                        Some(effort) if !model.contains('#') => {
+                            format!("{model}#{}", effort.as_str())
+                        }
+                        _ => model.to_string(),
+                    };
+                    args.push("-m".into());
+                    args.push(model);
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -801,7 +958,7 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         "To change your display name, actually run `crew agent set --name \"New Name\"` (id defaults to CREW_AGENT_ID). Do not only claim you renamed yourself.\n",
     );
     s.push_str(
-        "To create a bot, actually run `crew agent add --cli grok|claude|codex --name \"Name\"`. Crew mints the id and prints `ok <id>`. Pass an id first only when you already have one (`crew agent add <id> --cli grok --name \"Name\"`). To create a sidebar group, actually run `crew group add --name \"Name\"`, repeating `--bot <id>` for each bot that should sit in it. `crew group list` prints each group's id, name, and bots. Do not only claim you created a bot or a group.\n",
+        "To create a bot, actually run `crew agent add --cli grok|claude|codex|agy|gemini|copilot|opencode --name \"Name\"`. Crew mints the id and prints `ok <id>`. Pass an id first only when you already have one (`crew agent add <id> --cli grok --name \"Name\"`). For a command Crew does not know, run `crew agent add --headless --cmd <program> [args] --name \"Name\"`; each message is appended as the last argument. Without `--headless`, an unknown command stays a terminal. To create a sidebar group, actually run `crew group add --name \"Name\"`, repeating `--bot <id>` for each bot that should sit in it. `crew group list` prints each group's id, name, and bots. Do not only claim you created a bot or a group.\n",
     );
     s.push_str(
         "To schedule recurring work, actually run `crew routine add --name \"...\" --schedule \"0 8 * * 1-5\" --prompt \"...\"`. Turn the user's words into 5-field cron yourself: numbers only, minute hour day month weekday (0 = Sunday), local time. If the day or time is unclear, ask with `crew ask` first. `crew routine list` shows yours; change one with `crew routine edit|remove|pause|resume <name>` (`crew routine --help`). Each prints your routines with their next run; tell the user the schedule and next run it shows. That creates a Crew routine, not a chat reminder.\n",
@@ -943,6 +1100,89 @@ fn inject_team_rules(
         "codex" => append_codex_config(args, "developer_instructions", &text),
         _ => {}
     }
+}
+
+/// Team rules and memory have no flag on these CLIs, so they lead the prompt.
+fn prompt_with_preamble(
+    agent: &AgentConfig,
+    roster: &[AgentConfig],
+    memory: &str,
+    prompt: &str,
+) -> String {
+    let mut body = team_rules(agent, roster);
+    let memory = memory.trim();
+    if !memory.is_empty() {
+        body.push_str("\n\n");
+        body.push_str(MEMORY_HEADING);
+        body.push('\n');
+        body.push_str(memory);
+    }
+    if !body.ends_with('\n') {
+        body.push('\n');
+    }
+    body.push('\n');
+    body.push_str(prompt);
+    body
+}
+
+fn apply_gemini_turn(args: &mut Vec<String>, prompt: &str) {
+    remove_switch(args, &["--yolo", "-y"]);
+    remove_flag_with_value(
+        args,
+        &["-p", "--prompt", "--output-format", "--approval-mode"],
+    );
+    args.push("--approval-mode".into());
+    args.push("yolo".into());
+    args.push("--output-format".into());
+    args.push("text".into());
+    args.push("-p".into());
+    args.push(prompt.to_string());
+}
+
+fn apply_agy_turn(args: &mut Vec<String>, prompt: &str) {
+    // `-p` is print mode. The prompt is the argument after it, so a value
+    // flag placed between them would be read as the prompt.
+    remove_switch(args, &["-p", "--print", "--prompt", "-i", "--prompt-interactive"]);
+    remove_flag_with_value(args, &["--output-format"]);
+    if !has_flag(args, &["--dangerously-skip-permissions"]) {
+        args.push("--dangerously-skip-permissions".into());
+    }
+    args.push("--output-format".into());
+    args.push("text".into());
+    args.push("-p".into());
+    args.push(prompt.to_string());
+}
+
+fn apply_copilot_turn(args: &mut Vec<String>, prompt: &str) {
+    remove_switch(args, &["-s", "--silent"]);
+    remove_flag_with_value(args, &["-p", "--output-format"]);
+    if !has_flag(args, &["--allow-all", "--yolo"]) {
+        args.push("--allow-all".into());
+    }
+    if !has_flag(args, &["--no-ask-user"]) {
+        args.push("--no-ask-user".into());
+    }
+    args.push("-s".into());
+    args.push("-p".into());
+    args.push(prompt.to_string());
+}
+
+fn apply_opencode_turn(args: &mut Vec<String>, prompt: &str) {
+    if args.get(1).map(String::as_str) != Some("run") {
+        args.insert(1, "run".into());
+    }
+    // `-c` is the last session in this directory, which may be another bot's.
+    // `-p` is the server password, not a prompt, so it stays.
+    remove_switch(args, &["--continue", "-c", "--fork"]);
+    remove_flag_with_value(args, &["--session", "-s", "--format"]);
+    if !has_flag(args, &["--auto"]) {
+        args.push("--auto".into());
+    }
+    args.push(prompt.to_string());
+}
+
+fn apply_custom_turn(args: &mut Vec<String>, prompt: &str) {
+    args.push(prompt.to_string());
 }
 
 fn apply_grok_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSession>) {
@@ -1139,6 +1379,22 @@ fn strip_resume_flags(program: &str, args: &mut Vec<String>) {
             if args.get(1).map(|s| s.as_str()) == Some("resume") {
                 args.remove(1);
             }
+        }
+        // A global "latest session" flag would continue some other bot's chat.
+        "gemini" => {
+            remove_flag_with_value(args, &["--resume", "--session-id", "--session-file"]);
+        }
+        "agy" => {
+            remove_switch(args, &["--continue", "-c"]);
+            remove_flag_with_value(args, &["--conversation"]);
+        }
+        "copilot" => {
+            remove_switch(args, &["--continue"]);
+            remove_flag_with_value(args, &["--resume", "--session-id"]);
+        }
+        "opencode" => {
+            remove_switch(args, &["--continue", "-c", "--fork"]);
+            remove_flag_with_value(args, &["--session", "-s"]);
         }
         _ => {}
     }
@@ -1371,6 +1627,131 @@ mod tests {
         assert_eq!(argv[3], resume.id);
         assert_eq!(argv.last().map(|s| s.as_str()), Some("again"));
         assert!(codex_config_after(&argv, "developer_instructions").contains("crew tell"));
+    }
+
+    #[test]
+    fn gemini_turn_is_text_and_does_not_keep_a_session_id() {
+        let c = cfg(&["gemini"], Some("gemini-2.5-flash"), Some(Effort::High));
+        let session = TurnSession {
+            id: "11111111-2222-4333-8444-555555555555".into(),
+            resume: true,
+        };
+        let argv = c.turn_cmd("hello", Some(&session), &[], "");
+        assert_eq!(argv[0], "gemini");
+        assert!(argv.windows(2).any(|w| w[0] == "--approval-mode" && w[1] == "yolo"));
+        assert!(argv.windows(2).any(|w| w[0] == "--output-format" && w[1] == "text"));
+        assert!(argv.windows(2).any(|w| w[0] == "--model" && w[1] == "gemini-2.5-flash"));
+        assert!(!argv.iter().any(|a| a == "--effort" || a == "high"));
+        let p = argv.iter().position(|a| a == "-p").expect("-p");
+        assert!(argv[p + 1].contains("crew tell"));
+        assert!(argv[p + 1].ends_with("hello"));
+        assert!(!argv.iter().any(|a| a.contains(&session.id)));
+    }
+
+    #[test]
+    fn agy_turn_prints_text_with_model_and_effort() {
+        let c = cfg(
+            &["agy", "--dangerously-skip-permissions"],
+            Some("gemini-3.8-flash-low"),
+            Some(Effort::Low),
+        );
+        let argv = c.turn_cmd("hello", None, &[], "");
+        assert_eq!(argv[0], "agy");
+        assert!(argv.contains(&"--dangerously-skip-permissions".to_string()));
+        assert!(argv.windows(2).any(|w| w[0] == "--output-format" && w[1] == "text"));
+        assert!(argv.windows(2).any(|w| w[0] == "--model" && w[1] == "gemini-3.8-flash-low"));
+        assert!(argv.windows(2).any(|w| w[0] == "--effort" && w[1] == "low"));
+        let p = argv.iter().position(|a| a == "-p").expect("-p");
+        assert!(argv[p + 1].ends_with("hello"));
+        assert!(!argv.iter().any(|a| a == "--continue" || a == "--conversation"));
+    }
+
+    #[test]
+    fn copilot_turn_is_silent_and_does_not_ask() {
+        let c = cfg(&["copilot"], Some("gpt-6"), None);
+        let argv = c.turn_cmd("hello", None, &[], "");
+        assert_eq!(argv[0], "copilot");
+        assert!(argv.contains(&"--allow-all".to_string()));
+        assert!(argv.contains(&"--no-ask-user".to_string()));
+        assert!(argv.contains(&"-s".to_string()));
+        assert!(argv.windows(2).any(|w| w[0] == "--model" && w[1] == "gpt-6"));
+        let p = argv.iter().position(|a| a == "-p").expect("-p");
+        assert!(argv[p + 1].ends_with("hello"));
+        assert!(!argv.iter().any(|a| a == "--resume" || a == "--session-id"));
+    }
+
+    #[test]
+    fn opencode_turn_runs_auto_and_puts_effort_on_the_model() {
+        let c = cfg(&["opencode"], Some("anthropic/claude"), Some(Effort::High));
+        let argv = c.turn_cmd("hello", None, &[], "");
+        assert_eq!(argv[0], "opencode");
+        assert_eq!(argv[1], "run");
+        assert!(argv.contains(&"--auto".to_string()));
+        assert!(argv.windows(2).any(|w| w[0] == "-m" && w[1] == "anthropic/claude#high"));
+        assert!(argv.last().unwrap().ends_with("hello"));
+        assert!(!argv.iter().any(|a| a == "-p" || a == "-c" || a == "--continue"));
+    }
+
+    #[test]
+    fn opencode_does_not_treat_password_flag_as_the_prompt() {
+        let c = cfg(&["opencode", "run", "-p", "secret", "--auto"], None, None);
+        let argv = c.turn_cmd("hello", None, &[], "");
+        let p = argv.iter().position(|a| a == "-p").expect("-p");
+        assert_eq!(argv[p + 1], "secret");
+        assert!(argv.last().unwrap().ends_with("hello"));
+    }
+
+    #[test]
+    fn headless_command_appends_the_message_and_cat_does_not() {
+        let cat = cfg(&["cat"], Some("whatever"), Some(Effort::High));
+        assert!(cat.uses_pty());
+        assert!(!cat.prompt_mode());
+        assert_eq!(cat.turn_cmd("hello", None, &[], "note"), vec!["cat"]);
+
+        let mut custom = cfg(&["my-ai", "--fast"], None, Some(Effort::High));
+        custom.headless = true;
+        assert!(!custom.uses_pty());
+        assert!(custom.prompt_mode());
+        let argv = custom.turn_cmd("hello", None, &[], "note");
+        assert_eq!(argv[0], "my-ai");
+        assert_eq!(argv[1], "--fast");
+        let prompt = argv.last().unwrap();
+        assert!(prompt.contains("crew tell"));
+        assert!(prompt.contains("# Your memory\nnote"));
+        assert!(prompt.ends_with("hello"));
+        assert!(!argv.iter().any(|a| a == "--model" || a == "--effort"));
+    }
+
+    #[test]
+    fn headless_flag_does_not_change_a_grok_turn() {
+        let mut c = cfg(&["grok", "--always-approve"], None, None);
+        c.headless = true;
+        assert!(!c.prompt_mode());
+        assert!(!c.uses_pty());
+        let argv = c.turn_cmd("hello", None, &[], "");
+        let p = argv.iter().position(|a| a == "-p").expect("-p");
+        assert_eq!(argv[p + 1], "hello");
+    }
+
+    #[test]
+    fn split_cmd_keeps_quoted_spaces() {
+        assert_eq!(
+            split_cmd(r#"my-ai --say "hello world""#).unwrap(),
+            vec!["my-ai", "--say", "hello world"]
+        );
+        assert!(split_cmd("   ").is_err());
+        assert!(split_cmd("\"open").is_err());
+        assert!(!headless_cmd(true, &["grok".into()]));
+        assert!(headless_cmd(true, &["my-ai".into()]));
+        assert!(!headless_cmd(false, &["my-ai".into()]));
+    }
+
+    #[test]
+    fn agent_without_headless_field_stays_a_terminal() {
+        let raw = r#"{"id":"a","name":"A","cmd":["cat"],"routines":[]}"#;
+        let back: AgentConfig = serde_json::from_str(raw).unwrap();
+        assert!(!back.headless);
+        assert!(back.uses_pty());
     }
 
     #[test]
@@ -1819,7 +2200,11 @@ mod tests {
         assert!(rules.contains("start each sentence on a new line, with no blank line between them"));
         assert!(rules.contains("Keep list items, options, tables, headings and code as they are"));
         assert!(rules.contains("crew agent set --name"));
-        assert!(rules.contains("crew agent add --cli grok|claude|codex --name"));
+        assert!(rules.contains(
+            "crew agent add --cli grok|claude|codex|agy|gemini|copilot|opencode --name"
+        ));
+        assert!(rules.contains("crew agent add --headless --cmd"));
+        assert!(rules.contains("Without `--headless`, an unknown command stays a terminal"));
         assert!(rules.contains("prints `ok <id>`"));
         assert!(rules.contains("crew group add --name"));
         assert!(rules.contains("repeating `--bot <id>`"));

@@ -3516,7 +3516,7 @@ button.mention-chip:active {
 }
 .model-pick-cols {
   display: grid;
-  grid-template-columns: 120px minmax(0, 1fr);
+  grid-template-columns: 168px minmax(0, 1fr);
   gap: var(--space-8);
 }
 .model-pick-col {
@@ -3524,7 +3524,7 @@ button.mention-chip:active {
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
-  /* Five rows; a long codex list scrolls rather than leaving the dialog. */
+  /* The CLI list scrolls rather than leaving the dialog. */
   max-height: 188px;
   overflow-y: auto;
 }
@@ -3563,6 +3563,12 @@ button.mention-chip:active {
   font-weight: 400;
 }
 .model-pick-row.on .model-pick-hint { color: var(--muted); }
+.model-pick-note {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
 .info-avatar {
   width: 72px;
   height: 72px;

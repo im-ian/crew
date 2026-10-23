@@ -413,6 +413,24 @@ pub fn recap(agent: &str) -> Option<String> {
     recap_of(&messages(agent))
 }
 
+/// The chat before the message this turn is answering. A prompt-mode CLI has
+/// no session to resume, so the turn sends this and then the new message.
+pub fn prior_recap(agent: &str) -> Option<String> {
+    prior_of(&messages(agent))
+}
+
+fn prior_of(msgs: &[ChatMessage]) -> Option<String> {
+    let mut end = msgs.len();
+    if let Some(last) = msgs.iter().rposition(|m| {
+        !m.queued && m.kind != Some(MessageKind::Tool) && !is_subagent_note(m)
+    }) {
+        if msgs[last].role != Role::Assistant {
+            end = last;
+        }
+    }
+    recap_of(&msgs[..end])
+}
+
 fn recap_of(msgs: &[ChatMessage]) -> Option<String> {
     let mut lines = Vec::new();
     let mut used = 0;
@@ -1663,6 +1681,16 @@ mod tests {
             recap_of(&msgs).as_deref(),
             Some("user: review this\n\nassistant: looks fine")
         );
+        let prior = vec![
+            row(Role::User, "user", "first", None),
+            row(Role::Assistant, "bot", "answer", None),
+            row(Role::User, "user", "second", None),
+        ];
+        assert_eq!(
+            prior_of(&prior).as_deref(),
+            Some("user: first\n\nassistant: answer")
+        );
+        assert_eq!(prior_of(&prior[2..]), None);
         assert_eq!(recap_of(&msgs[1..2]), None);
 
         let long = "x".repeat(RECAP_BUDGET);

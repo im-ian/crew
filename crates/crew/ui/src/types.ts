@@ -14,7 +14,15 @@ export type Group = {
   collapsed: boolean;
   items: string[];
 };
-export type CliKind = "grok" | "claude" | "codex";
+export type CliKind =
+  | "grok"
+  | "claude"
+  | "codex"
+  | "agy"
+  | "gemini"
+  | "copilot"
+  | "opencode"
+  | "custom";
 
 export type ModelList = {
   models: string[];
@@ -72,6 +80,8 @@ export type AgentInfo = {
   routines: Routine[];
   preview?: string | null;
   last_ts?: number;
+  /** Unknown command that chats. A terminal stub leaves this unset. */
+  headless?: boolean;
 };
 
 export type MessageKind = "sent" | "received" | "routine" | "handoff" | "tool";

@@ -40,6 +40,12 @@ fn parse_shape(shape: Option<String>) -> Result<Option<AvatarShape>, String> {
 // for every CLI each time it opens.
 #[tauri::command(async)]
 fn list_models(cli: String) -> Result<crate::models::ModelList, String> {
+    if cli.trim().eq_ignore_ascii_case("custom") {
+        return Ok(crate::models::ModelList {
+            installed: true,
+            ..crate::models::ModelList::default()
+        });
+    }
     let cli = AgentCli::from_key(&cli).map_err(|e| e.to_string())?;
     crate::models::list_models(cli).map_err(|e| e.to_string())
 }
@@ -318,8 +324,12 @@ fn set_agent(
 }
 
 #[tauri::command(async)]
-fn set_agent_cli(id: String, cli: String) -> Result<(), String> {
-    match client::rpc(Request::SetCli { id, cli }) {
+fn set_agent_cli(id: String, cli: String, cmd: Option<String>) -> Result<(), String> {
+    let cmd = match cmd.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(raw) => crate::config::split_cmd(raw).map_err(|e| e.to_string())?,
+        None => Vec::new(),
+    };
+    match client::rpc(Request::SetCli { id, cli, cmd }) {
         Ok(Event::Ok) | Ok(Event::Agents { .. }) => Ok(()),
         Ok(Event::Error { message }) => Err(message),
         Ok(_) => Err("unexpected daemon response".into()),
@@ -335,14 +345,22 @@ fn add_agent(
     effort: Option<String>,
     role: Option<String>,
     description: Option<String>,
+    cmd: Option<String>,
 ) -> Result<String, String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     let name = name.trim().to_string();
     if name.is_empty() {
         return Err("name is required".into());
     }
-    let cli = AgentCli::from_key(&cli).map_err(|e| e.to_string())?;
-    let cmd = resolve_add_cmd(Some(cli), Vec::new()).map_err(|e| e.to_string())?;
+    let (cmd, headless) = if cli.trim().eq_ignore_ascii_case("custom") {
+        let argv = crate::config::split_cmd(cmd.as_deref().unwrap_or("")).map_err(|e| e.to_string())?;
+        let headless = crate::config::headless_cmd(true, &argv);
+        (argv, headless)
+    } else {
+        let cli = AgentCli::from_key(&cli).map_err(|e| e.to_string())?;
+        let argv = resolve_add_cmd(Some(cli), Vec::new()).map_err(|e| e.to_string())?;
+        (argv, false)
+    };
     let effort = parse_effort(effort)?;
     let model = model.and_then(empty_to_none);
     let role = role.and_then(empty_to_none);
@@ -356,6 +374,7 @@ fn add_agent(
         cwd: None,
         model,
         effort,
+        headless,
     }) {
         Ok(Event::Ok) | Ok(Event::Agents { .. }) => {}
         Ok(Event::Error { message }) => return Err(message),

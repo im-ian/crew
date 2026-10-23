@@ -315,6 +315,8 @@ crew agent set grok --model grok-4 --effort high --shape circle --color "#ff6a00
 crew agent clone grok --name "Grok 복사본"
 crew agent remove shell
 crew agent add --cli grok --name "리뷰어"
+crew agent add --cli agy --name "안티그래비티"
+crew agent add --headless --cmd my-ai --print --name "내 봇"
 
 crew group list
 crew group add --name "작업"
@@ -342,7 +344,7 @@ crew reset grok
 crew reset grok --drop-routines
 ```
 
-`crew agent add`에는 `--cli grok|claude|codex` 또는 `--cmd …`가 필요해요. `--cmd`를 주면 `--cli`는 무시돼요. id를 생략하고 `--name`을 주면 id를 만들어서 `ok <id>`로 출력해요. id를 직접 주면 그 id를 그대로 써요. 작업 폴더를 생략하면 `/tmp/crew-demo/<id>`가 돼요.
+`crew agent add`에는 `--cli grok|claude|codex|agy|gemini|copilot|opencode` 또는 `--cmd …`가 필요해요. `--cmd`를 주면 `--cli`는 무시돼요. 모르는 명령을 대화로 쓰려면 `--headless`를 같이 주세요. 메시지는 그 명령의 마지막 인자로 붙어요. `--headless`가 없으면 모르는 명령은 터미널로 남아요. id를 생략하고 `--name`을 주면 id를 만들어서 `ok <id>`로 출력해요. id를 직접 주면 그 id를 그대로 써요. 작업 폴더를 생략하면 `/tmp/crew-demo/<id>`가 돼요.
 
 `crew group add --name`은 사이드바 그룹을 만들어요. `--bot <id>`를 반복하면 그 봇을 다른 그룹에서 빼 새 그룹에 넣어요. 없는 봇 id는 거절해요. `crew group list`는 `id`, 이름, 봇 id를 탭으로 나눠 출력해요.
 

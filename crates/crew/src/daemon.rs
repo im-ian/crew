@@ -2030,7 +2030,8 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             cwd,
             model,
             effort,
-        } => match add_agent(id, name, cmd, cwd, model, effort) {
+            headless,
+        } => match add_agent(id, name, cmd, cwd, model, effort, headless) {
             Ok(()) => vec![Event::Ok, snapshot_event()],
             Err(err) => vec![Event::Error {
                 message: err.to_string(),
@@ -2092,7 +2093,7 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
                 message: err.to_string(),
             }],
         },
-        Request::SetCli { id, cli } => match set_cli(&id, &cli) {
+        Request::SetCli { id, cli, cmd } => match set_cli(&id, &cli, cmd) {
             Ok(()) => vec![Event::Ok, snapshot_event()],
             Err(err) => vec![Event::Error {
                 message: err.to_string(),
@@ -2206,6 +2207,7 @@ fn list_agents() -> Vec<AgentInfo> {
                 routines: cfg.map(|c| c.routines.clone()).unwrap_or_default(),
                 preview: None,
                 last_ts: 0,
+                headless: cfg.is_some_and(|c| c.headless),
             }
         })
         .collect();
@@ -2571,6 +2573,7 @@ fn add_agent(
     cwd: Option<String>,
     model: Option<String>,
     effort: Option<crate::config::Effort>,
+    headless: bool,
 ) -> anyhow::Result<()> {
     let cwd = cwd
         .filter(|s| !s.trim().is_empty())
@@ -2584,6 +2587,7 @@ fn add_agent(
     );
     cfg.model = model.filter(|m| !m.is_empty());
     cfg.effort = effort;
+    cfg.headless = headless;
     insert_spawned_agent(cfg)?;
     ask_new_bot(&ask_id);
     Ok(())
@@ -2804,10 +2808,23 @@ fn set_agent(
 /// Moves a bot to another CLI in place: each turn builds its command and picks
 /// its parser from the config. The old CLI's session cannot follow, so the
 /// chat as it stands is saved for the new CLI's first turn.
-fn set_cli(id: &str, cli: &str) -> anyhow::Result<()> {
-    let cli = AgentCli::from_key(cli)?;
+fn set_cli(id: &str, cli: &str, cmd: Vec<String>) -> anyhow::Result<()> {
+    let custom = cli.eq_ignore_ascii_case("custom");
+    let parsed = if custom {
+        if cmd.is_empty() {
+            anyhow::bail!("pass a command");
+        }
+        None
+    } else {
+        Some(AgentCli::from_key(cli)?)
+    };
     let mut cfg = clone_agent_cfg(id)?;
-    if AgentCli::from_cmd(&cfg.cmd) == Some(cli) {
+    if let Some(parsed) = parsed {
+        if AgentCli::from_cmd(&cfg.cmd) == Some(parsed) && !cfg.headless {
+            return Ok(());
+        }
+    }
+    if custom && cfg.headless && cfg.cmd == cmd {
         return Ok(());
     }
     let session = {
@@ -2827,7 +2844,13 @@ fn set_cli(id: &str, cli: &str) -> anyhow::Result<()> {
     if let Some(recap) = crate::transcript::recap(id) {
         headless::save_recap(id, &recap)?;
     }
-    cfg.cmd = cli.default_cmd();
+    if custom {
+        cfg.headless = crate::config::headless_cmd(true, &cmd);
+        cfg.cmd = cmd;
+    } else {
+        cfg.cmd = parsed.expect("known cli").default_cmd();
+        cfg.headless = false;
+    }
     // Model names belong to the old CLI.
     cfg.model = None;
     persist_config(&cfg)?;
@@ -3158,11 +3181,11 @@ mod daemon_tests {
             headless::save_session(&bot, "claude-session").unwrap();
 
             session.inner.lock().unwrap().status = AgentStatus::Working;
-            assert!(set_cli(&bot, "codex").unwrap_err().to_string().contains("working"));
+            assert!(set_cli(&bot, "codex", Vec::new()).unwrap_err().to_string().contains("working"));
             assert_eq!(headless::load_session(&bot).as_deref(), Some("claude-session"));
             session.inner.lock().unwrap().status = AgentStatus::Idle;
 
-            set_cli(&bot, "codex").unwrap();
+            set_cli(&bot, "codex", Vec::new()).unwrap();
 
             let cfg = clone_agent_cfg(&bot).unwrap();
             assert_eq!(AgentCli::from_cmd(&cfg.cmd), Some(AgentCli::Codex));

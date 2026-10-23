@@ -123,6 +123,13 @@ fn with_recap(recap: &str, prompt: &str) -> String {
     )
 }
 
+fn with_prior(prior: &str, prompt: &str) -> String {
+    format!(
+        "[crew] Earlier chat, oldest first. Read it for context only; do not answer it. \
+         Answer the message after it.\n<chat>\n{prior}\n</chat>\n\n{prompt}"
+    )
+}
+
 /// The bot's memory as its CLI session knows it: `start` sits in the session's
 /// system prompt, `seen` is the newest it has been told.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -318,19 +325,25 @@ fn run_turn(
         .ok()
         .and_then(|i| i.session_id.clone())
         .or_else(|| load_session(&session.id));
-    let (turn_session, created_id) = match (program.as_str(), stored) {
-        ("codex", Some(id)) => (Some(TurnSession { id, resume: true }), None),
-        ("codex", None) => (None, None),
-        (_, Some(id)) => (Some(TurnSession { id, resume: true }), None),
-        (_, None) => {
-            let id = new_cli_uuid();
-            (
-                Some(TurnSession {
-                    id: id.clone(),
-                    resume: false,
-                }),
-                Some(id),
-            )
+    // Prompt-mode CLIs have no per-bot resume flag. Inventing an id would be
+    // saved here, and the next turn would skip the chat it still has to send.
+    let (turn_session, created_id) = if cfg.prompt_mode() {
+        (None, None)
+    } else {
+        match (program.as_str(), stored) {
+            ("codex", Some(id)) => (Some(TurnSession { id, resume: true }), None),
+            ("codex", None) => (None, None),
+            (_, Some(id)) => (Some(TurnSession { id, resume: true }), None),
+            (_, None) => {
+                let id = new_cli_uuid();
+                (
+                    Some(TurnSession {
+                        id: id.clone(),
+                        resume: false,
+                    }),
+                    Some(id),
+                )
+            }
         }
     };
     if let Some(id) = created_id.as_ref() {
@@ -340,7 +353,10 @@ fn run_turn(
     }
 
     // Only a new CLI session reads the recap: a resumed one already has it.
-    let recap = if turn_session.as_ref().map_or(true, |s| !s.resume) {
+    // Prompt mode reads the live chat instead, so the file would repeat it.
+    let recap = if cfg.prompt_mode() {
+        None
+    } else if turn_session.as_ref().map_or(true, |s| !s.resume) {
         load_recap(&session.id)
     } else {
         None
@@ -359,6 +375,14 @@ fn run_turn(
     let prompt = match note {
         Some(note) => format!("{note}\n\n{prompt}"),
         None => prompt,
+    };
+    let prompt = if cfg.prompt_mode() {
+        match crate::transcript::prior_recap(&session.id) {
+            Some(prior) => with_prior(&prior, &prompt),
+            None => prompt,
+        }
+    } else {
+        prompt
     };
     let argv = cfg.turn_cmd(&prompt, turn_session.as_ref(), &roster, &memory_seen.start);
     let cwd = crate::config::Config::default_cwd(&cfg);
@@ -397,17 +421,19 @@ fn run_turn(
                     inner.session_id = None;
                 }
                 clear_session(&session.id);
-            } else if let Some(id) = outcome
-                .session_id
-                .as_deref()
-                .or(created_id.as_deref())
-                .or(turn_session.as_ref().map(|s| s.id.as_str()))
-            {
-                if !id.is_empty() {
-                    if let Ok(mut inner) = session.inner.lock() {
-                        inner.session_id = Some(id.to_string());
+            } else if !cfg.prompt_mode() {
+                if let Some(id) = outcome
+                    .session_id
+                    .as_deref()
+                    .or(created_id.as_deref())
+                    .or(turn_session.as_ref().map(|s| s.id.as_str()))
+                {
+                    if !id.is_empty() {
+                        if let Ok(mut inner) = session.inner.lock() {
+                            inner.session_id = Some(id.to_string());
+                        }
+                        let _ = save_session(&session.id, id);
                     }
-                    let _ = save_session(&session.id, id);
                 }
             }
             if !outcome.got_text {
