@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -16,7 +17,6 @@ import { Pencil } from "../icons";
 import { useT } from "../LocaleContext";
 import { usePopover } from "../usePopover";
 import { BotFace } from "./BotFace";
-import { Field } from "./Field";
 
 type Props = {
   id?: string | null;
@@ -138,6 +138,20 @@ export function FacePicker({
   const selectedSwatch = AVATAR_SWATCHES.find(
     (c) => c.toLowerCase() === preview.toLowerCase(),
   );
+  const shapeRow = useRef<HTMLDivElement>(null);
+
+  // Keep the chosen shape inside this column. scrollIntoView would also
+  // scroll the sheet underneath the popover.
+  useLayoutEffect(() => {
+    const row = shapeRow.current;
+    const el = row?.querySelector<HTMLElement>(".shape-pick.on");
+    if (!row || !el) return;
+    const rowBox = row.getBoundingClientRect();
+    const elBox = el.getBoundingClientRect();
+    if (elBox.top >= rowBox.top && elBox.bottom <= rowBox.bottom) return;
+    const delta = elBox.top - rowBox.top - (row.clientHeight - elBox.height) / 2;
+    row.scrollTop += delta;
+  }, [resolved.shape]);
 
   function shuffle() {
     const next = randomFace(resolved);
@@ -154,20 +168,25 @@ export function FacePicker({
   }
 
   return (
-    <>
-      <div className="field-block">
-        <div className="field-head">
-          <label className="field">{t("field.shape")}</label>
-          <button
-            type="button"
-            className="field-action"
-            aria-label={t("face.randomAria")}
-            onClick={shuffle}
-          >
-            {t("face.random")}
-          </button>
-        </div>
-        <div className="shape-picker" role="listbox" aria-label={t("field.shape")}>
+    <div className="face-pick-cols">
+      <div className="field-head">
+        <label className="field">{t("field.shape")}</label>
+        <button
+          type="button"
+          className="field-action"
+          aria-label={t("face.randomAria")}
+          onClick={shuffle}
+        >
+          {t("face.random")}
+        </button>
+      </div>
+      <label className="field">{t("field.color")}</label>
+      <div
+        className="shape-picker"
+        role="listbox"
+        aria-label={t("field.shape")}
+        ref={shapeRow}
+      >
           {AVATAR_SHAPES.map((s) => (
             <button
               key={s}
@@ -181,26 +200,25 @@ export function FacePicker({
               <BotFace shape={s} color={preview} />
             </button>
           ))}
-        </div>
       </div>
-      <Field label={t("field.color")}>
-        <div className="color-row">
-          <div className="color-swatches">
-            {AVATAR_SWATCHES.map((c) => (
-              <button
-                key={c}
-                type="button"
-                className={"color-swatch" + (selectedSwatch === c ? " on" : "")}
-                style={{ background: c }}
-                title={c}
-                aria-label={c}
-                onClick={() => {
-                  setHex(c);
-                  flushColor(c);
-                }}
-              />
-            ))}
-          </div>
+      <div className="color-pane">
+        <div className="color-swatches">
+          {AVATAR_SWATCHES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className={"color-swatch" + (selectedSwatch === c ? " on" : "")}
+              style={{ background: c }}
+              title={c}
+              aria-label={c}
+              onClick={() => {
+                setHex(c);
+                flushColor(c);
+              }}
+            />
+          ))}
+        </div>
+        <div className="color-custom">
           <input
             className="color-native"
             type="color"
@@ -250,8 +268,8 @@ export function FacePicker({
             }}
           />
         </div>
-      </Field>
-    </>
+      </div>
+    </div>
   );
 }
 
