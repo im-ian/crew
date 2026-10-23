@@ -216,9 +216,12 @@ fn ping_failure(err: String) -> String {
     start_error().unwrap_or(err)
 }
 
-#[tauri::command]
+// Async so a daemon start stays off the UI thread. The ping is what the window
+// polls, and it is the call that brings a dead daemon back. `get_messages`
+// polls faster and must keep failing without spawning.
+#[tauri::command(async)]
 fn daemon_ping() -> Result<(), String> {
-    match client::rpc(Request::Ping) {
+    match client::rpc_connected(Request::Ping) {
         Ok(Event::Pong) => {
             set_start_error(None);
             Ok(())
