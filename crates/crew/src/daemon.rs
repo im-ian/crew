@@ -971,22 +971,42 @@ fn edit_queued(id: &str, msg_id: &str, text: &str) -> anyhow::Result<()> {
         anyhow::bail!("an edited message needs text");
     }
     let roster = roster_vec();
-    let mut map = inbox().lock().map_err(|_| anyhow::anyhow!("inbox lock poisoned"))?;
-    let item = map
-        .get_mut(id)
-        .and_then(|q| q.iter_mut().find(|d| d.msg_id.as_deref() == Some(msg_id)))
-        .filter(|d| d.origin == TurnOrigin::user());
-    let Some(item) = item else {
-        anyhow::bail!("that message is no longer waiting");
-    };
-    // Under the inbox lock, as `set_queued` is: it cannot start half edited.
-    let old = crate::transcript::set_text(id, msg_id, text).unwrap_or_default();
-    item.text = crate::config::with_mention_hint(text, id, &roster);
-    // A command goes alone.
-    item.joins &= !is_slash_command(text);
-    let mut then = named_tells(text, id, &roster);
-    then.extend(item.then.drain(..).filter(|job| !job.named_by(id, &old)));
-    item.then = then;
+    {
+        let mut map = inbox()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("inbox lock poisoned"))?;
+        let item = map
+            .get_mut(id)
+            .and_then(|q| q.iter_mut().find(|d| d.msg_id.as_deref() == Some(msg_id)));
+        let Some(item) = item else {
+            anyhow::bail!("that message is no longer waiting");
+        };
+        // Only a row that shows all the bot will get: not a choice answer with
+        // its secrets masked, nor a note the daemon wrote.
+        let old = crate::transcript::text_of(id, msg_id).filter(|old| {
+            item.origin == TurnOrigin::user()
+                && crate::config::with_mention_hint(old, id, &roster) == item.text
+        });
+        let Some(old) = old else {
+            anyhow::bail!("that message can't be edited");
+        };
+        item.text = crate::config::with_mention_hint(text, id, &roster);
+        // A line that went alone, a steer or a command, stays alone.
+        item.joins &= !is_slash_command(text);
+        // Its own tells lead, ahead of what it carries from a blocked turn. A
+        // newer message may have dropped them already.
+        let own = item
+            .then
+            .iter()
+            .take(named_tells(&old, id, &roster).len())
+            .take_while(|job| job.named_by(id, &old))
+            .count();
+        let mut then = named_tells(text, id, &roster);
+        then.extend(item.then.drain(own..));
+        item.then = then;
+    }
+    // Off the inbox lock: this writes the file.
+    crate::transcript::set_text(id, msg_id, text);
     Ok(())
 }
 
@@ -4100,7 +4120,7 @@ exec sleep 5"#,
 
     /// "@B 리뷰해줘" waits behind another line and the user rewrites it to
     /// "@C 봐줘": it keeps its place, its row says the new text, and C is told
-    /// after it instead of B.
+    /// after it instead of B. A tell it carries for an earlier line stays.
     #[test]
     fn an_edited_message_keeps_its_place() {
         paths::testing::with_home("edit-queued", || {
@@ -4123,6 +4143,15 @@ exec sleep 5"#,
             send_agent(&bot, &format!("@{b} 리뷰해줘")).unwrap();
             let row = crate::transcript::messages(&bot).last().unwrap().clone();
             send_agent(&bot, "그 다음 거").unwrap();
+            // "그 다음 거" dropped whom it named. Put back its own tell, and one
+            // it carries for the same line sent before it to a blocked turn.
+            {
+                let roster = roster_vec();
+                let mut map = inbox().lock().unwrap();
+                let first = &mut map.get_mut(&bot).unwrap()[0];
+                first.then = named_tells(&row.text, &bot, &roster);
+                first.then.extend(named_tells(&row.text, &bot, &roster));
+            }
 
             let edited = format!("@{c} 봐줘");
             edit_queued(&bot, &row.id, &edited).unwrap();
@@ -4132,7 +4161,7 @@ exec sleep 5"#,
                 assert_eq!(q[0].msg_id.as_deref(), Some(row.id.as_str()), "still first");
                 assert!(q[0].text.starts_with(&edited), "{}", q[0].text);
                 let named: Vec<_> = q[0].then.iter().map(|job| job.to.clone()).collect();
-                assert_eq!(named, vec![c.clone()]);
+                assert_eq!(named, vec![c.clone(), b.clone()], "the carried tell stays");
             }
             let now = crate::transcript::messages(&bot)
                 .into_iter()
@@ -4141,6 +4170,19 @@ exec sleep 5"#,
             assert_eq!(now.text, edited);
             assert!(now.queued);
             assert!(edit_queued(&bot, "no-such-row", "x").is_err());
+
+            // A row with a secret masked is not all the bot gets: it stays.
+            send_agent_shown(&bot, "토큰: ••••", "토큰: s3cret").unwrap();
+            let masked = crate::transcript::messages(&bot).last().unwrap().clone();
+            assert!(edit_queued(&bot, &masked.id, "토큰: ••••!").is_err());
+            {
+                let map = inbox().lock().unwrap();
+                let item = map[&bot]
+                    .iter()
+                    .find(|d| d.msg_id.as_deref() == Some(masked.id.as_str()))
+                    .unwrap();
+                assert_eq!(item.text, "토큰: s3cret");
+            }
 
             set_status(&bot, AgentStatus::Idle);
             clear_inbox(&bot);
