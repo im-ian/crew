@@ -6,7 +6,7 @@ import {
   useState,
   type MouseEvent,
 } from "react";
-import { api, errMsg } from "./api";
+import { api, errMsg, newestOnly } from "./api";
 import { useT } from "./LocaleContext";
 import { loadNotify } from "./notifyPref";
 import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
@@ -89,6 +89,8 @@ export function useCrew() {
   paneOpenRef.current = paneOpen;
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
+  const listAgents = useRef(newestOnly(api.listAgents)).current;
+  const getMessages = useRef(newestOnly(api.getMessages)).current;
   const groupsRef = useRef<RailLayout>({ groups, ungrouped });
   groupsRef.current = { groups, ungrouped };
   const groupsLoaded = useRef(false);
@@ -325,10 +327,20 @@ export function useCrew() {
       setSearchHits([]);
       return;
     }
+    // A search for an earlier query can answer after this one.
+    let stale = false;
     const t = window.setTimeout(() => {
-      void api.searchCrew(q).then(setSearchHits).catch(() => setSearchHits([]));
+      void api
+        .searchCrew(q)
+        .catch(() => [])
+        .then((hits) => {
+          if (!stale) setSearchHits(hits);
+        });
     }, 160);
-    return () => window.clearTimeout(t);
+    return () => {
+      stale = true;
+      window.clearTimeout(t);
+    };
   }, [query]);
 
   function openSearchHit(hit: SearchHit) {
@@ -352,7 +364,8 @@ export function useCrew() {
   }
 
   const refreshList = useCallback(async () => {
-    const list = await api.listAgents();
+    const list = await listAgents();
+    if (!list) return;
     let { id: sel } = selectedRef.current;
     if (!sel || !list.some((a) => a.id === sel)) {
       sel = list[0]?.id ?? null;
@@ -376,7 +389,9 @@ export function useCrew() {
       setMessages([]);
       return;
     }
-    setMessages(await api.getMessages(id));
+    const next = await getMessages(id);
+    if (!next) return;
+    setMessages(next);
     setMessagesFor(id);
   }, []);
 
@@ -477,8 +492,6 @@ export function useCrew() {
 
   async function saveAgentInfo(fields: {
     name: string;
-    role: string;
-    description: string;
     model: string;
     effort: string;
     cwd: string;
@@ -487,8 +500,6 @@ export function useCrew() {
     if (!id || selectedRef.current.kind !== "agent") return;
     const model = fields.model.trim();
     const name = fields.name.trim();
-    const role = fields.role.trim();
-    const description = fields.description.trim();
     const cwd = fields.cwd.trim();
     try {
       await api.setAgent({
@@ -498,11 +509,11 @@ export function useCrew() {
         unsetModel: !model,
         unsetEffort: !fields.effort,
         title: null,
-        role: role || null,
-        description: description || null,
+        role: null,
+        description: null,
         unsetTitle: false,
-        unsetRole: !role,
-        unsetDescription: !description,
+        unsetRole: false,
+        unsetDescription: false,
         shape: null,
         color: null,
         name: name || null,
@@ -673,7 +684,6 @@ export function useCrew() {
 
   async function createBot(args: {
     name: string;
-    persona: string;
     cli: CliKind;
     model: string;
     effort: string;
@@ -685,7 +695,6 @@ export function useCrew() {
       showError(t("error.nameRequired"));
       return;
     }
-    const persona = args.persona.trim();
     const model = args.model.trim();
     try {
       const id = await api.addAgent({
@@ -693,8 +702,8 @@ export function useCrew() {
         cli: args.cli || "grok",
         model: model || null,
         effort: args.effort || null,
-        role: persona || null,
-        description: persona || null,
+        role: null,
+        description: null,
       });
       if (args.shape || args.color) {
         // The bot already exists. A face that fails to stick must not leave

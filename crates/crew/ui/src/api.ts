@@ -20,6 +20,25 @@ export function errMsg(err: unknown): string {
   return String(err);
 }
 
+/**
+ * Daemon commands run off the main thread, side by side, so an answer can
+ * land after one sent later. Null means a later call already landed and this
+ * answer is older than what the window shows.
+ */
+export function newestOnly<A extends unknown[], T>(
+  fetch: (...args: A) => Promise<T>,
+): (...args: A) => Promise<T | null> {
+  let sent = 0;
+  let shown = 0;
+  return async (...args) => {
+    const seq = ++sent;
+    const value = await fetch(...args);
+    if (seq < shown) return null;
+    shown = seq;
+    return value;
+  };
+}
+
 export const api = {
   listAgents: () => invoke<AgentInfo[]>("list_agents"),
   sendMessage: (agent: string, text: string, steer = false) =>

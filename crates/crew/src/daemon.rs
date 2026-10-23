@@ -11,8 +11,8 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{broadcast, oneshot};
 
 use crate::config::{
-    empty_to_none, find_routine_index, parse_hex_color, roster_update_text, write_roster,
-    AgentCli, AgentConfig, AvatarShape, Config, Effort, Routine,
+    empty_to_none, find_routine_index, new_bot_ask, parse_hex_color, roster_update_text,
+    write_roster, AgentCli, AgentConfig, AvatarShape, Config, Effort, Routine,
 };
 use crate::cron;
 use crate::headless::{self, HeadlessSession};
@@ -2575,6 +2575,7 @@ fn add_agent(
     let cwd = cwd
         .filter(|s| !s.trim().is_empty())
         .or_else(|| Some(crate::config::default_add_cwd(&id)));
+    let ask_id = id.clone();
     let mut cfg = AgentConfig::new(
         id.clone(),
         if name.is_empty() { id } else { name },
@@ -2583,7 +2584,25 @@ fn add_agent(
     );
     cfg.model = model.filter(|m| !m.is_empty());
     cfg.effort = effort;
-    insert_spawned_agent(cfg)
+    insert_spawned_agent(cfg)?;
+    ask_new_bot(&ask_id);
+    Ok(())
+}
+
+/// A new headless bot speaks first and asks what work it should take.
+/// A shell stub has nothing to ask with. A failed turn still leaves the bot.
+fn ask_new_bot(id: &str) {
+    if !is_headless(id) {
+        return;
+    }
+    let text = crate::protocol::system_envelope(&new_bot_ask(crate::paths::locale() == "en"));
+    let origin = TurnOrigin {
+        skip_judgment: true,
+        ..TurnOrigin::user()
+    };
+    if let Err(err) = submit_delivery(id, &text, true, None, origin) {
+        eprintln!("[crew] new-bot ask {id}: {err:#}");
+    }
 }
 
 fn clone_agent(src_id: &str, name: Option<String>) -> anyhow::Result<String> {
@@ -3025,7 +3044,11 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
         }
     }
     // A reply the user cut off with a stop is not a question waiting on them.
-    if crate::interrupt::looks_like_judgment_question(&text) && !agent_interrupted(agent) {
+    // skip_judgment is a new bot asking what to take, not a permission check.
+    if !origin.skip_judgment
+        && crate::interrupt::looks_like_judgment_question(&text)
+        && !agent_interrupted(agent)
+    {
         crate::transcript::set_approval(agent, &msg.id, crate::protocol::ApprovalState::Pending);
         set_live_status(agent, AgentStatus::Blocked);
     }
@@ -4526,6 +4549,48 @@ exec sleep 1"#,
             on_assistant_sealed(&bot, &reply);
             assert!(crate::transcript::pending_approval(&bot).is_none());
             assert_eq!(live_status(&bot).unwrap(), AgentStatus::Idle);
+            take_origin(&bot);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// "What should I work on?" matches the allow/deny markers. A new bot's
+    /// first question is not a permission check, so that turn stays a reply.
+    /// The same sentence on an ordinary user turn still raises the card.
+    #[test]
+    fn a_new_bot_question_is_not_an_approval_card() {
+        paths::testing::with_home("new-bot-ask", || {
+            paths::write_notifications_enabled(false);
+            let bot = test_id("newborn");
+            insert_spawned_agent(AgentConfig::new(
+                bot.clone(),
+                bot.clone(),
+                AgentCli::Claude.default_cmd(),
+                None,
+            ))
+            .unwrap();
+            let seal = |origin: TurnOrigin| {
+                set_origin(&bot, origin);
+                let row = crate::transcript::push_system(&bot, "crew", "x", None);
+                let reply = ChatMessage {
+                    role: Role::Assistant,
+                    text: "What should I work on?".into(),
+                    ..row
+                };
+                on_assistant_sealed(&bot, &reply);
+            };
+
+            seal(TurnOrigin {
+                skip_judgment: true,
+                ..TurnOrigin::user()
+            });
+            assert!(crate::transcript::pending_approval(&bot).is_none());
+            assert_eq!(live_status(&bot).unwrap(), AgentStatus::Idle);
+
+            seal(TurnOrigin::user());
+            assert!(crate::transcript::pending_approval(&bot).is_some());
+            assert_eq!(live_status(&bot).unwrap(), AgentStatus::Blocked);
+
             take_origin(&bot);
             remove_agent(&bot).unwrap();
         });
