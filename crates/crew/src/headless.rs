@@ -715,13 +715,14 @@ struct ParseState {
     last_codex_item: Option<String>,
     last_codex_text: Option<String>,
     tool_after_text: bool,
-    /// Auto-compact starts this turn's stream over and sends the same message
-    /// again. The next text is a replay until it says something new.
+    /// Auto-compact starts this turn's stream over. Text after it is held
+    /// while it still matches what the user already saw.
     compact_replay: bool,
+    /// Tokens held since the compact, joined in arrival order.
+    replay_buf: String,
     /// Assistant text this turn already showed. Chunks are joined as the CLI
     /// sent them, without the blank line added after a tool.
     spoken: String,
-    last_said: String,
     /// `spawn_subagent` calls that have not finished. The child's reply is
     /// `text` on this same stream, with no field that marks it as the child's.
     open_subagents: HashSet<String>,
@@ -771,7 +772,15 @@ fn grok_text(v: &Value, state: &mut ParseState) -> Option<String> {
         kind,
         "auto_compact_started" | "auto_compact_completed" | "compaction_checkpoint"
     ) {
+        if !state.compact_replay {
+            state.replay_buf.clear();
+        }
         state.compact_replay = true;
+        return None;
+    }
+    if matches!(kind, "auto_compact_failed" | "auto_compact_cancelled") {
+        state.compact_replay = false;
+        state.replay_buf.clear();
         return None;
     }
     if let Some(chunk) = acp_message_chunk(v) {
@@ -805,37 +814,39 @@ fn grok_reply(chunk: String, state: &mut ParseState) -> Option<String> {
     };
     state.used_deltas = true;
     state.got_text = true;
-    state.last_said.clone_from(&chunk);
     state.spoken.push_str(&chunk);
     Some(chunk)
 }
 
-/// A compact resumes the stream from the top. Drop text the user already has,
-/// and keep only the tail when the replay grew.
+/// Streaming-json sends one token at a time, and a compact may repeat the
+/// sentence the user already has. Hold tokens while they still match that
+/// sentence. A different sentence is shown as soon as it diverges.
 fn fresh_after_compact(state: &mut ParseState, chunk: String) -> Option<String> {
     if !state.compact_replay {
         return Some(chunk);
     }
-    let shown = state.spoken.trim();
-    let trimmed = chunk.trim();
-    let repeats = trimmed.is_empty()
-        || trimmed == shown
-        || (!state.last_said.trim().is_empty() && trimmed == state.last_said.trim());
-    if repeats {
+    if chunk.trim().is_empty() {
         return None;
     }
-    if !shown.is_empty() {
-        if let Some(extra) = trimmed.strip_prefix(shown) {
-            let extra = extra.trim_start_matches(['\n', ' ', '\t']);
-            if extra.is_empty() {
-                return None;
-            }
-            state.compact_replay = false;
-            return Some(extra.to_string());
-        }
+    if state.spoken.is_empty() {
+        state.compact_replay = false;
+        return Some(chunk);
     }
+    let shown = state.spoken.clone();
+    state.replay_buf.push_str(&chunk);
+    if shown.starts_with(&state.replay_buf) {
+        return None;
+    }
+    let buf = std::mem::take(&mut state.replay_buf);
     state.compact_replay = false;
-    Some(chunk)
+    if let Some(extra) = buf.strip_prefix(&shown) {
+        let extra = extra.trim_start_matches('\n');
+        if extra.is_empty() {
+            return None;
+        }
+        return Some(extra.to_string());
+    }
+    Some(buf)
 }
 
 fn note_subagent_call(v: &Value, state: &mut ParseState) {
@@ -1340,7 +1351,57 @@ mod tests {
         );
         let grown = format!("{said} 코드에서 찾았습니다.");
         let next = ingest_line(CliKind::Grok, &grok_message(&grown), &mut st);
-        assert_eq!(next.as_deref(), Some("코드에서 찾았습니다."));
+        assert_eq!(next.as_deref(), Some(" 코드에서 찾았습니다."));
+    }
+
+    fn grok_tokens(st: &mut ParseState, parts: &[&str]) -> String {
+        let mut out = String::new();
+        for part in parts {
+            let line = format!(r#"{{"type":"text","data":"{part}"}}"#);
+            if let Some(chunk) = ingest_line(CliKind::Grok, &line, st) {
+                out.push_str(&chunk);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn grok_compact_drops_a_replay_that_arrives_as_tokens() {
+        let mut st = ParseState::default();
+        let parts = ["남은", " 두", " 건을", " 보겠습니다", "."];
+        assert_eq!(grok_tokens(&mut st, &parts), "남은 두 건을 보겠습니다.");
+        ingest_line(
+            CliKind::Grok,
+            r#"{"type":"tool_call","toolCallId":"1","toolName":"grep"}"#,
+            &mut st,
+        );
+        assert!(ingest_line(
+            CliKind::Grok,
+            r#"{"type":"auto_compact_completed","tokens_before":1,"tokens_after":1}"#,
+            &mut st,
+        )
+        .is_none());
+        assert_eq!(grok_tokens(&mut st, &["\n\n"]), "");
+        assert_eq!(grok_tokens(&mut st, &parts), "");
+        assert_eq!(
+            grok_tokens(&mut st, &[" 원인을", " 찾았습니다."]),
+            "\n\n 원인을 찾았습니다."
+        );
+    }
+
+    #[test]
+    fn grok_compact_shows_a_different_sentence_from_its_first_new_token() {
+        let mut st = ParseState::default();
+        assert_eq!(grok_tokens(&mut st, &["남은", " 두 건"]), "남은 두 건");
+        ingest_line(
+            CliKind::Grok,
+            r#"{"type":"auto_compact_completed"}"#,
+            &mut st,
+        );
+        assert_eq!(
+            grok_tokens(&mut st, &["남은", " 일을", " 합니다."]),
+            "남은 일을 합니다."
+        );
     }
 
     #[test]
