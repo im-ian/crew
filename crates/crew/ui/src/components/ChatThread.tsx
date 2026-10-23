@@ -80,6 +80,8 @@ type Props = {
   onApprove?: (allow: boolean, agentId?: string) => void;
   /** Take back the user's own message while it waits for the bot. */
   onCancelQueued?: (messageId: string) => void;
+  /** Take it back into the composer to be changed and sent again. */
+  onEditQueued?: (messageId: string, text: string, reply: ReplyTarget | null) => void;
   onAnswerChoice?: (
     agentId: string,
     messageId: string,
@@ -110,6 +112,7 @@ export function ChatThread({
   onSelectAgent,
   onApprove,
   onCancelQueued,
+  onEditQueued,
   onAnswerChoice,
   highlightId = null,
   onHighlightDone,
@@ -331,6 +334,11 @@ export function ChatThread({
                   }
                   onCancel={
                     onCancelQueued ? () => onCancelQueued(m.id) : undefined
+                  }
+                  onEdit={
+                    onEditQueued
+                      ? (text, reply) => onEditQueued(m.id, text, reply)
+                      : undefined
                   }
                   onReply={onReply}
                   onJump={onJump}
@@ -1358,6 +1366,7 @@ function Bubble({
   onApprove,
   onAnswerChoice,
   onCancel,
+  onEdit,
   onReply,
   onJump,
   flash = false,
@@ -1376,6 +1385,7 @@ function Bubble({
     closed: boolean,
   ) => void | Promise<void>;
   onCancel?: () => void;
+  onEdit?: (text: string, reply: ReplyTarget | null) => void;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
   flash?: boolean;
@@ -1435,13 +1445,37 @@ function Bubble({
             />
           </div>
         ) : null}
-        {queued ? <QueueWait onCancel={onCancel} /> : null}
+        {queued ? (
+          <QueueWait
+            onCancel={onCancel}
+            onEdit={
+              onEdit
+                ? () =>
+                    onEdit(
+                      body,
+                      reply && {
+                        id: reply.id,
+                        from: reply.from,
+                        who: quoteWho(reply.from, agents, t),
+                        text: reply.snippet,
+                      },
+                    )
+                : undefined
+            }
+          />
+        ) : null}
       </div>
     </div>
   );
 }
 
-function QueueWait({ onCancel }: { onCancel?: () => void }) {
+function QueueWait({
+  onCancel,
+  onEdit,
+}: {
+  onCancel?: () => void;
+  onEdit?: () => void;
+}) {
   const t = useT();
   return (
     <div className="queue-wait" aria-label={t("thread.queueing")}>
@@ -1451,6 +1485,11 @@ function QueueWait({ onCancel }: { onCancel?: () => void }) {
         <i />
         <i />
       </span>
+      {onEdit ? (
+        <button type="button" className="queue-cancel" onClick={onEdit}>
+          {t("thread.editQueued")}
+        </button>
+      ) : null}
       {onCancel ? (
         <button type="button" className="queue-cancel" onClick={onCancel}>
           {t("thread.cancelQueued")}

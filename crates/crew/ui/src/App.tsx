@@ -280,6 +280,11 @@ export function App() {
           onSelectAgent={crew.selectAgent}
           onApprove={(allow, id) => void crew.approveAgent(allow, id)}
           onCancelQueued={(id) => void crew.cancelQueued(id)}
+          onEditQueued={(id, text, reply) =>
+            void crew.cancelQueued(id).then((ok) => {
+              if (ok) composerRef.current?.restore(text, reply);
+            })
+          }
           onAnswerChoice={(agentId, messageId, answers, values, closed) =>
             crew.answerChoice(agentId, messageId, answers, values, closed)
           }

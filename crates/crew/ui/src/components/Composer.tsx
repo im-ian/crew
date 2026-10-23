@@ -15,6 +15,8 @@ export type ComposerHandle = {
   focus: () => void;
   attach: () => void;
   replyTo: (target: ReplyTarget) => void;
+  /** Put a message taken back from the queue in front of what is typed. */
+  restore: (text: string, reply: ReplyTarget | null) => void;
 };
 
 type Props = {
@@ -93,6 +95,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     },
     replyTo(target: ReplyTarget) {
       setReply(target);
+      queueMicrotask(focusEditor);
+    },
+    restore(text: string, target: ReplyTarget | null) {
+      const el = inputRef.current;
+      if (!el) return;
+      el.prepend(document.createTextNode(isEditorEmpty(el) ? text : text + "\n"));
+      if (target) setReply(target);
+      refreshEmpty();
+      fit();
       queueMicrotask(focusEditor);
     },
   }));
