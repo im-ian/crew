@@ -180,9 +180,9 @@ pub fn set_peer(agent: &str, peer: Option<String>) -> Option<String> {
 
 pub fn preview(agent: &str) -> Option<String> {
     let msgs = messages(agent);
-    // Newest sentence. A tool call is newer while it runs, and its text is the
+    // Newest balloon. A tool call is newer while it runs, and its text is the
     // arguments (`{ "command": ... }`), which was showing in the channel list.
-    // A row that still has nothing to quote is skipped, so the sentence before
+    // A row that still has nothing to quote is skipped, so the balloon before
     // it stays up.
     msgs.iter()
         .filter_map(|m| preview_line(m).map(|line| (m.ts, line)))
@@ -191,7 +191,8 @@ pub fn preview(agent: &str) -> Option<String> {
 }
 
 /// What the channel list can quote from one row. Tool arguments and a bare
-/// JSON dump are not a sentence. A question on that row still is.
+/// JSON dump are not a sentence. A question on that row still is. A reply is
+/// several balloons; the list quotes the last one.
 fn preview_line(msg: &ChatMessage) -> Option<String> {
     if msg.kind == Some(MessageKind::Tool) && msg.choice.is_none() && msg.approval.is_none() {
         return None;
@@ -199,10 +200,13 @@ fn preview_line(msg: &ChatMessage) -> Option<String> {
     if is_subagent_note(msg) {
         return None;
     }
-    let mut t: String = crate::rows::display_text(msg)
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let shown = crate::rows::display_text(msg);
+    // The user's own row is one balloon, so it still starts at the beginning.
+    let mut t = if msg.role == Role::User {
+        one_line(&shown)
+    } else {
+        quote_last_balloon(&shown)
+    };
     if t.is_empty() || (msg.role != Role::User && is_raw_payload(&t)) {
         t = msg
             .choice
@@ -220,6 +224,172 @@ fn preview_line(msg: &ChatMessage) -> Option<String> {
     } else {
         Some(clipped)
     }
+}
+
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The last balloon worth quoting. A JSON value may contain a blank line, so
+/// it is not one balloon; that value is still not a sentence.
+fn quote_last_balloon(text: &str) -> String {
+    if is_raw_payload(&one_line(text)) {
+        return String::new();
+    }
+    let parts = balloons(text);
+    let mut end = parts.len();
+    while end > 0 {
+        if let Some(start) = json_suffix(&parts[..end]) {
+            end = start;
+            continue;
+        }
+        let line = one_line(&parts[end - 1]);
+        if line.is_empty() {
+            end -= 1;
+            continue;
+        }
+        return line;
+    }
+    String::new()
+}
+
+/// Where a trailing JSON object or array starts. Blank lines split one value
+/// into several balloons, and the tail of that value is not itself JSON.
+fn json_suffix(parts: &[String]) -> Option<usize> {
+    let mut found = None;
+    for start in (0..parts.len()).rev() {
+        if is_raw_payload(&one_line(&parts[start..].join("\n\n"))) {
+            found = Some(start);
+        }
+    }
+    found
+}
+
+/// Balloons of one reply, matching `splitBubbles` in `ui/src/bubbles.ts`.
+/// A blank line starts a balloon. A fence stays with the line above it, and
+/// a balloon that is only a rule or link definitions is dropped.
+fn balloons(text: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut lines: Vec<&str> = Vec::new();
+    let mut fence: Option<(char, usize)> = None;
+    let mut gap = false;
+    for line in text.split('\n') {
+        if let Some(open) = fence {
+            if fence_closes(line, open) {
+                fence = None;
+            }
+        } else if line.trim().is_empty() {
+            gap = true;
+        } else {
+            let open = fence_opens(line);
+            if gap && open.is_none() {
+                push_balloon(&mut parts, &lines);
+                lines.clear();
+            }
+            gap = false;
+            if let Some(open) = open {
+                fence = Some(open);
+            }
+        }
+        lines.push(line);
+    }
+    push_balloon(&mut parts, &lines);
+    if parts.is_empty() {
+        let whole = text.trim();
+        if !whole.is_empty() {
+            parts.push(whole.to_string());
+        }
+    }
+    parts
+}
+
+fn push_balloon(parts: &mut Vec<String>, lines: &[&str]) {
+    let piece = lines.join("\n");
+    let piece = piece.trim();
+    if piece.is_empty() || is_rule(piece) || piece.split('\n').all(is_link_def) {
+        return;
+    }
+    parts.push(piece.to_string());
+}
+
+fn fence_opens(line: &str) -> Option<(char, usize)> {
+    let rest = line.trim_start_matches([' ', '\t']);
+    let (mark, n) = mark_run(rest)?;
+    // A ``` line with another backtick on it is inline code, not a fence.
+    if mark == '`' && rest[n..].contains('`') {
+        return None;
+    }
+    Some((mark, n))
+}
+
+fn fence_closes(line: &str, open: (char, usize)) -> bool {
+    let rest = line.trim_start_matches([' ', '\t']);
+    let Some((mark, n)) = mark_run(rest) else {
+        return false;
+    };
+    mark == open.0 && n >= open.1 && rest[n..].chars().all(char::is_whitespace)
+}
+
+fn mark_run(rest: &str) -> Option<(char, usize)> {
+    let mark = rest.chars().next()?;
+    if mark != '`' && mark != '~' {
+        return None;
+    }
+    let n = rest.chars().take_while(|c| *c == mark).count();
+    (n >= 3).then_some((mark, n))
+}
+
+fn is_rule(piece: &str) -> bool {
+    if piece.contains('\n') {
+        return false;
+    }
+    let b = piece.as_bytes();
+    let mut i = 0;
+    while i < b.len() && i < 3 && b[i] == b' ' {
+        i += 1;
+    }
+    if i >= b.len() {
+        return false;
+    }
+    let mark = b[i];
+    if !matches!(mark, b'-' | b'*' | b'_') {
+        return false;
+    }
+    let mut marks = 0;
+    while i < b.len() {
+        if b[i] == mark {
+            marks += 1;
+        } else if b[i] != b' ' && b[i] != b'\t' {
+            return false;
+        }
+        i += 1;
+    }
+    marks >= 3
+}
+
+fn is_link_def(line: &str) -> bool {
+    let b = line.as_bytes();
+    let mut i = 0;
+    while i < b.len() && i < 3 && b[i] == b' ' {
+        i += 1;
+    }
+    if i >= b.len() || b[i] != b'[' || b.get(i + 1) == Some(&b'^') {
+        return false;
+    }
+    let Some(rel) = line[i + 1..].find(']') else {
+        return false;
+    };
+    if rel == 0 {
+        return false;
+    }
+    let Some(after) = line[i + 1 + rel + 1..].strip_prefix(':') else {
+        return false;
+    };
+    after
+        .trim_start_matches([' ', '\t'])
+        .chars()
+        .next()
+        .is_some_and(|c| !c.is_whitespace())
 }
 
 fn is_raw_payload(text: &str) -> bool {
@@ -255,7 +425,11 @@ fn recap_of(msgs: &[ChatMessage]) -> Option<String> {
         if text.is_empty() {
             continue;
         }
-        let who = if msg.role == Role::Assistant { "assistant" } else { &msg.from };
+        let who = if msg.role == Role::Assistant {
+            "assistant"
+        } else {
+            &msg.from
+        };
         let line = format!("{who}: {text}");
         let len = line.chars().count();
         if used + len > RECAP_BUDGET {
@@ -1450,7 +1624,12 @@ mod tests {
             choice: None,
         };
         let msgs = vec![
-            row(Role::System, "user", "review this", Some(MessageKind::Received)),
+            row(
+                Role::System,
+                "user",
+                "review this",
+                Some(MessageKind::Received),
+            ),
             row(Role::Assistant, "bot", "", Some(MessageKind::Tool)),
             row(Role::Assistant, "bot", "looks fine", None),
         ];
@@ -1793,11 +1972,122 @@ mod tests {
             set_approval(&gated, &tool.id, ApprovalState::Pending);
             assert_eq!(preview(&gated).as_deref(), Some("이 명령을 실행할까?"));
 
+            // A blank line inside the payload is still JSON, not a sentence.
+            let gated_gap = format!("preview-gate-gap-{n}");
+            push_user(&gated_gap, "user", "이전 문장");
+            begin_turn(&gated_gap);
+            on_assistant_delta(&gated_gap, "이 명령을 실행할까?");
+            std::thread::sleep(Duration::from_millis(5));
+            let gapped = push_tool(
+                &gated_gap,
+                Some("call-4"),
+                "run_terminal_command",
+                "{\n  \"command\": \"rm\",\n\n  \"yes\": true\n}",
+            );
+            set_approval(&gated_gap, &gapped.id, ApprovalState::Pending);
+            assert_eq!(preview(&gated_gap).as_deref(), Some("이 명령을 실행할까?"));
+
             drop_agent(&agent);
             drop_agent(&only);
             drop_agent(&dumped);
             drop_agent(&ask);
             drop_agent(&gated);
+            drop_agent(&gated_gap);
+        });
+    }
+
+    /// A turn is one row split into balloons. The list was quoting the first.
+    #[test]
+    fn the_channel_preview_quotes_the_last_balloon() {
+        crate::paths::testing::with_home("preview-balloon", || {
+            let n = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let agent = format!("preview-balloon-{n}");
+            push_user(&agent, "user", "올려줘");
+            begin_turn(&agent);
+            on_assistant_delta(
+                &agent,
+                "각 변경을 나눠 PR로 올리겠습니다.\n\n리뷰 두 건이 끝났습니다.",
+            );
+            assert_eq!(preview(&agent).as_deref(), Some("리뷰 두 건이 끝났습니다."));
+
+            let ruled = format!("preview-rule-{n}");
+            push_user(&ruled, "user", "나눠줘");
+            begin_turn(&ruled);
+            on_assistant_delta(&ruled, "위\n\n---\n\n아래\n\n* * *");
+            assert_eq!(preview(&ruled).as_deref(), Some("아래"));
+
+            let fenced = format!("preview-fence-{n}");
+            push_user(&fenced, "user", "보여줘");
+            begin_turn(&fenced);
+            on_assistant_delta(&fenced, "이거 봐.\n\n```\nout\n```\n\n끝났어요.");
+            assert_eq!(preview(&fenced).as_deref(), Some("끝났어요."));
+
+            let glued = format!("preview-glued-{n}");
+            push_user(&glued, "user", "실행해줘");
+            begin_turn(&glued);
+            on_assistant_delta(&glued, "먼저 볼게요.\n\n`echo hi`\n\n```\nhi\n```");
+            assert_eq!(preview(&glued).as_deref(), Some("`echo hi` ``` hi ```"));
+
+            let inline = format!("preview-inline-{n}");
+            push_user(&inline, "user", "감싸줘");
+            begin_turn(&inline);
+            on_assistant_delta(&inline, "```a``` 는 코드\n\n끝");
+            assert_eq!(preview(&inline).as_deref(), Some("끝"));
+
+            let long = format!("preview-long-{n}");
+            push_user(&long, "user", "길게");
+            begin_turn(&long);
+            let tail = "가".repeat(50);
+            on_assistant_delta(&long, &format!("앞선 말풍선입니다.\n\n{tail}"));
+            let clipped: String = tail.chars().take(48).collect();
+            assert_eq!(
+                preview(&long).as_deref(),
+                Some(format!("{clipped}…").as_str())
+            );
+
+            // One paragraph stays one balloon, sentences included.
+            let whole = format!("preview-whole-{n}");
+            push_user(&whole, "user", "상태");
+            begin_turn(&whole);
+            on_assistant_delta(&whole, "확인했어요.\n이제 고칠게요.");
+            assert_eq!(
+                preview(&whole).as_deref(),
+                Some("확인했어요. 이제 고칠게요.")
+            );
+
+            // A blank line is legal inside JSON, so the tail is not a balloon.
+            let dumped = format!("preview-json-gap-{n}");
+            push_user(&dumped, "user", "상태 알려줘");
+            begin_turn(&dumped);
+            on_assistant_delta(&dumped, "{\n  \"a\": 1,\n\n  \"b\": 2\n}");
+            assert_eq!(preview(&dumped).as_deref(), Some("상태 알려줘"));
+            let empty = format!("preview-json-empty-{n}");
+            push_user(&empty, "user", "비어 있어");
+            begin_turn(&empty);
+            on_assistant_delta(&empty, "{\n\n}");
+            assert_eq!(preview(&empty).as_deref(), Some("비어 있어"));
+            let mixed = format!("preview-json-mix-{n}");
+            push_user(&mixed, "user", "고쳐줘");
+            begin_turn(&mixed);
+            on_assistant_delta(
+                &mixed,
+                "고쳐 보겠습니다.\n\n{\n  \"a\": 1,\n\n  \"b\": 2\n}",
+            );
+            assert_eq!(preview(&mixed).as_deref(), Some("고쳐 보겠습니다."));
+
+            drop_agent(&agent);
+            drop_agent(&ruled);
+            drop_agent(&fenced);
+            drop_agent(&glued);
+            drop_agent(&inline);
+            drop_agent(&long);
+            drop_agent(&whole);
+            drop_agent(&dumped);
+            drop_agent(&empty);
+            drop_agent(&mixed);
         });
     }
 
