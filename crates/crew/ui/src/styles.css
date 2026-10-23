@@ -2199,8 +2199,14 @@ button.choice-option:disabled {
   max-width: 100%;
 }
 .md img {
-  max-width: 100%;
+  /* A tall screenshot used to fill the thread at full bubble width. */
+  max-width: min(100%, 420px);
+  max-height: 280px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
   border-radius: var(--radius-md);
+  vertical-align: top;
 }
 /* A wide table scrolls inside the bubble instead of widening it. */
 .md .md-table {
