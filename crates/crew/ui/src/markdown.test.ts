@@ -70,6 +70,36 @@ describe("renderMarkdown", () => {
       "<p><code>![a](/Users/a/Application Support/x)</code></p>",
     );
   });
+
+  it("keeps a spaced Windows path as written", () => {
+    const path = "C:/Program Files/a.txt";
+    expect(html(`[a](${path})`)).toBe(`<p><a href="${path}">a</a></p>`);
+    expect(html(`[a](<${path}>)`)).toBe(`<p><a href="${path}">a</a></p>`);
+    const img = "C:/Program Files/a.png";
+    expect(html(`![a](${img})`)).toBe(`<p><img src="${img}" alt="a"></p>`);
+  });
+
+  it("does not nest a link inside a spaced file link", () => {
+    const path = "/Users/me/Application Support/file.txt";
+    expect(html(`[see [docs](https://example.com) here](${path})`)).toBe(
+      `<p>[see <a href="https://example.com">docs</a> here](${path})</p>`,
+    );
+  });
+
+  it("keeps a quote that is part of a spaced file name", () => {
+    const path = "/Users/me/Application Support/My &quot;photo&quot;.png";
+    expect(html('![a](/Users/me/Application Support/My "photo".png)')).toBe(
+      `<p><img src="${path}" alt="a"></p>`,
+    );
+  });
+
+  it("leaves a spaced phrase that is not a path as text", () => {
+    expect(html("[eta](~ 2 hours left)")).toBe("<p>[eta](~ 2 hours left)</p>");
+    expect(html("[a](file: not a path)")).toBe("<p>[a](file: not a path)</p>");
+    expect(html("![a](FILE:///tmp/My File.png)")).toBe(
+      '<p><img src="FILE:///tmp/My File.png" alt="a"></p>',
+    );
+  });
 });
 
 // Everything a bot listed when asked to show markdown.

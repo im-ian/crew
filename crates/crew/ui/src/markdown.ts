@@ -13,7 +13,9 @@ md.validateLink = (url) => /^file:/i.test(url.trim()) || validateLink(url);
 // A path stays as written, so `resolveLocalPath` gets the file's real name.
 const normalizeLink = md.normalizeLink.bind(md);
 md.normalizeLink = (url) =>
-  /^[a-z][a-z0-9+.-]*:/i.test(url) && !/^file:/i.test(url) ? normalizeLink(url) : url;
+  /^[a-z][a-z0-9+.-]*:/i.test(url) && !/^file:/i.test(url) && !/^[A-Za-z]:[\\/]/.test(url)
+    ? normalizeLink(url)
+    : url;
 
 // The bubble's copy button and empty-output check read the block's text, so it
 // carries no trailing newline. `md-out` comes from the command rule below.
@@ -203,8 +205,8 @@ md.inline.ruler.before("link", "footnote_ref", footnoteRef);
 function isFileDest(dest: string): boolean {
   return (
     dest.startsWith("/") ||
-    dest.startsWith("~") ||
-    dest.startsWith("file:") ||
+    /^~[^/\s]*[\\/]/.test(dest) ||
+    (/^file:/i.test(dest) && /[\\/]/.test(dest)) ||
     /^[A-Za-z]:[\\/]/.test(dest)
   );
 }
@@ -218,7 +220,8 @@ function spacedDest(state: StateInline, silent: boolean): boolean {
     if (src.charCodeAt(pos + 1) !== 0x5b) return false;
   } else if (src.charCodeAt(pos) !== 0x5b) return false;
   const labelStart = pos + (bang ? 2 : 1);
-  const labelEnd = state.md.helpers.parseLinkLabel(state, pos + (bang ? 1 : 0), false);
+  // Image alt text may contain a link. A link label may not.
+  const labelEnd = state.md.helpers.parseLinkLabel(state, pos + (bang ? 1 : 0), !bang);
   if (labelEnd < 0) return false;
   pos = labelEnd + 1;
   if (pos >= max || src.charCodeAt(pos) !== 0x28) return false;
@@ -240,9 +243,15 @@ function spacedDest(state: StateInline, silent: boolean): boolean {
     }
   }
   if (!sawSpace || level !== 0 || pos >= max || src.charCodeAt(pos) !== 0x29) return false;
-  const dest = src.slice(destStart, pos).trim();
-  // `![a](/tmp/a.png "title")` belongs to the stock rule.
-  if (!dest || /\s+["']/.test(dest) || !isFileDest(dest)) return false;
+  let dest = src.slice(destStart, pos).trim();
+  // A title after a path with no space belongs to the stock rule.
+  // A quote inside a path that already has a space is part of the name.
+  const titled = dest.match(/^(.*\S)\s+(["'])(?:(?!\2).)*\2\s*$/);
+  if (titled) {
+    if (!/\s/.test(titled[1])) return false;
+    dest = titled[1];
+  }
+  if (!dest || !isFileDest(dest)) return false;
   const href = state.md.normalizeLink(dest);
   if (!state.md.validateLink(href)) return false;
   if (!silent) {
