@@ -2628,6 +2628,63 @@ button.who-btn:focus-visible {
   gap: var(--space-8);
   min-width: 0;
 }
+.attach-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+}
+.attach-photo {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+}
+.attach-photo-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg);
+}
+.attach-photos.is-one .attach-photo {
+  width: auto;
+  height: auto;
+  max-width: min(220px, 100%);
+  min-width: 28px;
+  min-height: 28px;
+}
+.attach-photos.is-one .attach-photo-frame {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  min-width: 28px;
+  min-height: 28px;
+}
+.attach-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.attach-photos.is-one .attach-photo img {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 160px;
+  object-fit: contain;
+}
+.attach-photo .attach-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+}
+.attach-photo .attach-remove:hover {
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+}
 .attach-row {
   display: flex;
   flex-wrap: wrap;
@@ -2641,13 +2698,6 @@ button.who-btn:focus-visible {
   background: var(--active);
   border-radius: var(--radius-md);
   padding: 3px var(--space-6) 3px 3px;
-}
-.attach-chip img {
-  width: 32px;
-  height: 32px;
-  object-fit: cover;
-  border-radius: 6px;
-  flex-shrink: 0;
 }
 .attach-file {
   width: 32px;

@@ -274,6 +274,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
 
   const mentionOpen = !!mention && matches.length > 0;
   const slashOpen = !!slash && skillMatches.length > 0;
+  const photos = attaches.filter((a) => a.image && a.preview);
+  const files = attaches.filter((a) => !a.image || !a.preview);
 
   return (
     <form
@@ -399,15 +401,31 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
             </button>
           </div>
         ) : null}
-        {attaches.length ? (
-          <div className="attach-row">
-            {attaches.map((a) => (
-              <div key={a.id} className="attach-chip">
-                {a.image && a.preview ? (
+        {photos.length ? (
+          <div className={"attach-photos" + (photos.length === 1 ? " is-one" : "")}>
+            {photos.map((a) => (
+              <div key={a.id} className="attach-photo">
+                <span className="attach-photo-frame">
                   <img src={a.preview} alt="" />
-                ) : (
-                  <span className="attach-file">{fileExt(a.name)}</span>
-                )}
+                </span>
+                <button
+                  type="button"
+                  className="attach-remove"
+                  title={t("composer.detach")}
+                  aria-label={t("composer.detachNamed", { name: a.name })}
+                  onClick={() => removeAttach(a.id)}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {files.length ? (
+          <div className="attach-row">
+            {files.map((a) => (
+              <div key={a.id} className="attach-chip">
+                <span className="attach-file">{fileExt(a.name)}</span>
                 <span className="attach-name">{a.name}</span>
                 <button
                   type="button"
