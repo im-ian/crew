@@ -19,6 +19,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "info", combo: "Meta+I", group: "chat" },
   { id: "routines", combo: "Meta+Shift+R", group: "chat" },
   { id: "stop", combo: "Meta+.", group: "chat" },
+  { id: "steer", combo: "Meta+Shift+Enter", group: "chat" },
   { id: "attach", combo: "Meta+U", group: "chat" },
   { id: "approve", combo: "Meta+Enter", group: "chat" },
   { id: "deny", combo: "Meta+Backspace", group: "chat" },
@@ -137,6 +138,7 @@ function selfCheck() {
     [{ key: "?", shiftKey: true }, false, "help"],
     [{ key: "?", shiftKey: true }, true, null],
     [{ key: "Enter", metaKey: true }, false, "approve"],
+    [{ key: "Enter", metaKey: true, shiftKey: true }, true, "steer"],
     [{ key: "ArrowDown", metaKey: true, altKey: true }, false, "next-chat"],
     [{ key: "ArrowDown", metaKey: true, shiftKey: true }, false, "bottom"],
   ];

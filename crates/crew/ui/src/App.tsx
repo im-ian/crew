@@ -142,7 +142,8 @@ export function App() {
         return;
       }
       const id = shortcutId(e, typing);
-      if (!id) return;
+      // The composer sends with ⌘⇧↩. Anywhere else the key keeps its own use.
+      if (!id || id === "steer") return;
       if (helpOpen && id !== "help") return;
       e.preventDefault();
       if (id === "help") {
@@ -304,6 +305,7 @@ export function App() {
             crew.currentAgent?.status === "working" ||
             crew.currentAgent?.status === "blocked"
           }
+          canSteer={crew.currentAgent?.status === "working"}
           onStop={() => {
             void crew.stopAgent();
           }}

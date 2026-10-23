@@ -8,7 +8,7 @@ import { mentionIds, resolveMention, trimMentionPunct } from "../mentions";
 import { oneLine, wrapReply, type ReplyTarget } from "../reply";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
-import { ArrowUp, CircleDot, Paperclip, Plus, StopSquare, X } from "../icons";
+import { ArrowUp, CircleDot, Paperclip, Plus, StopSquare, X, Zap } from "../icons";
 
 export type ComposerHandle = {
   focus: () => void;
@@ -21,8 +21,10 @@ type Props = {
   selected: string | null;
   selectedKind: Kind;
   placeholder: string;
-  onSend: (raw: string) => Promise<void>;
+  onSend: (raw: string, steer: boolean) => Promise<void>;
   busy?: boolean;
+  /** The bot is mid-turn, so a message can stop it and go now instead of waiting. */
+  canSteer?: boolean;
   onStop?: () => void;
   onOpenSkills?: () => void;
   onJump?: (id: string) => void;
@@ -47,6 +49,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   placeholder,
   onSend,
   busy = false,
+  canSteer = false,
   onStop,
   onOpenSkills,
   onJump,
@@ -66,6 +69,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   const [reply, setReply] = useState<ReplyTarget | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const plusRef = useRef<HTMLDivElement>(null);
+  const steerRef = useRef<HTMLButtonElement>(null);
 
   function focusEditor() {
     const el = inputRef.current;
@@ -291,6 +295,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         e.preventDefault();
         const el = inputRef.current;
         if (!el) return;
+        const by = (e.nativeEvent as SubmitEvent).submitter;
+        const steer = !!by && by === steerRef.current;
         const text = mentionIds(serializeEditor(el).trim(), agents);
         const files = attaches.map(attachMarkdown).filter(Boolean);
         let raw = [text, files.join("\n")].filter(Boolean).join("\n\n");
@@ -309,7 +315,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         setReply(null);
         setEmpty(true);
         fit();
-        await onSend(raw);
+        await onSend(raw, steer);
       }}
     >
       <div
@@ -597,6 +603,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
               setReply(null);
               return;
             }
+            if (e.key === "Enter" && e.shiftKey && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              (e.currentTarget.closest("form") as HTMLFormElement | null)?.requestSubmit(
+                steerRef.current ?? undefined,
+              );
+              return;
+            }
             if (e.key === "Enter" && e.shiftKey) {
               e.preventDefault();
               document.execCommand("insertLineBreak");
@@ -632,6 +645,18 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
             onClick={onStop}
           >
             <StopSquare size={12} />
+          </button>
+        ) : null}
+        {canSteer ? (
+          <button
+            ref={steerRef}
+            type="submit"
+            className="steer-btn"
+            title={t("composer.steerTitle")}
+            aria-label={t("composer.steer")}
+            disabled={!selected || (empty && !attaches.length)}
+          >
+            <Zap size={15} />
           </button>
         ) : null}
         <button

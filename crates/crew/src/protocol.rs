@@ -11,6 +11,9 @@ pub enum Request {
     Send {
         agent: String,
         text: String,
+        /// Stop the turn under way and start this one now, instead of queuing.
+        #[serde(default)]
+        steer: bool,
     },
     Tell {
         from: String,
