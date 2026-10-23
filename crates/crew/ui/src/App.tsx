@@ -40,11 +40,13 @@ export function App() {
   const [theme, setTheme] = useState<ThemePref>(loadThemePref);
   const [showTools, setShowTools] = useState(loadShowTools);
   const [jumpSeq, setJumpSeq] = useState(0);
-  // `focus` is the run that was clicked, so the panel opens on it rather than
-  // at the bottom of everything the two bots ever said.
-  const [peek, setPeek] = useState<{ peer: string; focus: string[] } | null>(
-    null,
-  );
+  // `focus` is the run that was clicked, flashed where it sits; the panel
+  // opens at the bottom. A search hit is opened on instead (`openAtFocus`).
+  const [peek, setPeek] = useState<{
+    peer: string;
+    focus: string[];
+    openAtFocus?: boolean;
+  } | null>(null);
   const updater = useUpdater();
   const renamingId = crew.pendingRenameId || renameId;
   const searchRef = useRef<HTMLInputElement>(null);
@@ -87,7 +89,7 @@ export function App() {
     autoFor.current = sel;
     hitFor.current = hit;
     const peer = sideOnlyPeer(crew.messages, crew.agents, hit);
-    if (peer) setPeek({ peer, focus: hit ? [hit] : [] });
+    if (peer) setPeek({ peer, focus: hit ? [hit] : [], openAtFocus: !!hit });
   }, [
     crew.selected,
     crew.messagesFor,
@@ -330,6 +332,7 @@ export function App() {
           <PeekRoom
             peerId={peek.peer}
             focus={peek.focus}
+            openAtFocus={peek.openAtFocus}
             self={crew.currentAgent}
             messages={crew.messages}
             agents={crew.agents}
