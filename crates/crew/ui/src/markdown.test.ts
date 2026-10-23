@@ -265,3 +265,21 @@ describe("command and output", () => {
     expect(html).not.toContain("md-cmd");
   });
 });
+
+describe("image albums", () => {
+  it("groups two or more pictures into an album and leaves one alone", () => {
+    const one = "![a](/tmp/a.png)";
+    const two = "![a](/tmp/a.png)\n![b](/tmp/b.png)";
+    const three = "![a](/tmp/a.png)\n\n![b](/tmp/b.png)\n\n![c](/tmp/c.png)";
+    expect(html(one)).toBe('<p><img src="/tmp/a.png" alt="a"></p>');
+    expect(html(two)).toBe(
+      '<div class="md-gallery is-pair" data-count="2"><img src="/tmp/a.png" alt="a"><img src="/tmp/b.png" alt="b"></div>',
+    );
+    expect(html(three)).toBe(
+      '<div class="md-gallery is-trio" data-count="3"><img src="/tmp/a.png" alt="a"><img src="/tmp/b.png" alt="b"><img src="/tmp/c.png" alt="c"></div>',
+    );
+    expect(html("see this\n\n![a](/tmp/a.png)\n![b](/tmp/b.png)")).toBe(
+      '<p>see this</p><div class="md-gallery is-pair" data-count="2"><img src="/tmp/a.png" alt="a"><img src="/tmp/b.png" alt="b"></div>',
+    );
+  });
+});

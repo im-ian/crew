@@ -2205,9 +2205,48 @@ button.choice-option:disabled {
   width: auto;
   height: auto;
   object-fit: contain;
-  border-radius: var(--radius-md);
+  border-radius: 18px;
   vertical-align: top;
 }
+/* A run of pictures is one album. Each cell keeps the picture's shape. */
+.md-gallery {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  width: 300px;
+  max-width: 100%;
+  margin: 0.35em 0;
+  border-radius: 18px;
+  overflow: hidden;
+}
+.md-gallery:first-child { margin-top: 0; }
+.md-gallery:last-child { margin-bottom: 0; }
+.md-gallery img {
+  width: 100%;
+  height: 148px;
+  max-width: none;
+  max-height: none;
+  object-fit: contain;
+  border-radius: 0;
+}
+.md-gallery.is-pair img { height: 156px; }
+.md-gallery.is-trio img:first-child {
+  grid-column: 1 / -1;
+  height: 168px;
+}
+.md-gallery.is-trio img { height: 112px; }
+.md-gallery.is-grid img { height: 120px; }
+.md-gallery.is-grid img:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+  height: 150px;
+}
+.row.me .bubble.md:has(> p:only-child > img:only-child),
+.row.me .bubble.md:has(> .md-gallery:only-child) {
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+}
+.row.me .bubble.md:has(> p:only-child > img:only-child) p { margin: 0; }
 /* A wide table scrolls inside the bubble instead of widening it. */
 .md .md-table {
   max-width: 100%;

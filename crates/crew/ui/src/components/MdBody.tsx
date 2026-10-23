@@ -169,6 +169,17 @@ function nodeToReact(
   }
   if (tag === "BR") return <br key={key} />;
   const kids = nodesToReact(el.childNodes, agents, key, onMention, baseDir);
+  if (el.classList.contains("md-gallery")) {
+    return (
+      <div
+        key={key}
+        className={el.getAttribute("class") || "md-gallery"}
+        data-count={el.getAttribute("data-count") || String(kids.length)}
+      >
+        {kids}
+      </div>
+    );
+  }
   if (!TAGS.has(tag)) return kids;
   if (tag === "PRE") {
     const isOut = el.classList.contains("md-out");
