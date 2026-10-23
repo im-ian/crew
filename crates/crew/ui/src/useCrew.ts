@@ -32,6 +32,7 @@ import type {
   CliKind,
   ConfirmKind,
   CtxKind,
+  EditResult,
   FocusTarget,
   Group,
   Kind,
@@ -419,18 +420,20 @@ export function useCrew() {
     }
   }
 
-  /** Whether the edit landed before the message went out. */
-  async function editQueued(messageId: string, raw: string): Promise<boolean> {
+  async function editQueued(messageId: string, raw: string): Promise<EditResult> {
     const { id } = selectedRef.current;
-    if (!id) return false;
+    if (!id) return "failed";
     try {
       await api.editQueued(id, messageId, raw);
     } catch (err) {
       showError(err);
-      return false;
+      // Only one that went out leaves the edit to send anew. One still waiting
+      // keeps the edit open, so it cannot go out twice.
+      const rows = await api.getMessages(id).catch(() => null);
+      return rows && !rows.find((m) => m.id === messageId)?.queued ? "gone" : "failed";
     }
     void refreshMessages().catch(showError);
-    return true;
+    return "saved";
   }
 
   async function approveAgent(allow: boolean, agentId?: string) {

@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import type { AgentInfo, Kind, Skill } from "../types";
+import type { AgentInfo, EditResult, Kind, Skill } from "../types";
 import { api } from "../api";
 import { useT } from "../LocaleContext";
 import { mediaKind } from "../markdown";
@@ -25,8 +25,7 @@ type Props = {
   selectedKind: Kind;
   placeholder: string;
   onSend: (raw: string, steer: boolean) => Promise<void>;
-  /** Whether the edit landed before the message went out. */
-  onEdit?: (messageId: string, raw: string) => Promise<boolean>;
+  onEdit?: (messageId: string, raw: string) => Promise<EditResult>;
   busy?: boolean;
   /** The bot is mid-turn, so a message can stop it and go now instead of waiting. */
   canSteer?: boolean;
@@ -117,6 +116,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
       setAttaches([]);
       setReply(target);
       setEditing({ id, text, was });
+      setMention(null);
+      setSlash(null);
       refreshEmpty();
       fit();
       queueMicrotask(focusEditor);
@@ -280,9 +281,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   function putBack(was: Draft) {
     const el = inputRef.current;
     if (el) el.innerHTML = was.html;
+    // Read before the next render by a chat switch.
+    attachRef.current = was.attaches;
+    replyRef.current = was.reply;
+    editingRef.current = null;
     setAttaches(was.attaches);
     setReply(was.reply);
     setEditing(null);
+    setMention(null);
+    setSlash(null);
     refreshEmpty();
     fit();
   }
@@ -303,15 +310,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     prevKey.current = chatKey;
     const el = inputRef.current;
     // Leaving the chat drops the edit, and the message stays as it was.
-    const ed = editingRef.current;
-    if (ed) {
-      for (const a of attachRef.current) revokePreview(a);
-      if (el) el.innerHTML = ed.was.html;
-      setEditing(null);
-    }
+    dropEdit();
     if (from && el) {
-      const held = ed ? ed.was.attaches : attachRef.current;
-      const heldReply = ed ? ed.was.reply : replyRef.current;
+      const held = attachRef.current;
+      const heldReply = replyRef.current;
       if (isEditorEmpty(el) && !held.length && !heldReply) drafts.current.delete(from);
       else drafts.current.set(from, { html: el.innerHTML, attaches: held, reply: heldReply });
     }
@@ -378,19 +380,22 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         }
         if (editing) {
           const { id, was } = editing;
-          if (await onEdit?.(id, raw)) {
-            for (const a of attaches) revokePreview(a);
+          const result = await onEdit?.(id, raw);
+          // Dropped, or another edit opened, while this one saved.
+          if (editingRef.current !== editing) return;
+          if (result === "saved") {
+            for (const a of attachRef.current) revokePreview(a);
             putBack(was);
-            return;
+          } else if (result === "gone") {
+            // It went out first. The edit stays to send as a new message, with
+            // what was typed before it after it.
+            if (was.html) el.insertAdjacentHTML("beforeend", `<div>${was.html}</div>`);
+            setAttaches([...attachRef.current, ...was.attaches]);
+            setReply(replyRef.current ?? was.reply);
+            setEditing(null);
+            refreshEmpty();
+            fit();
           }
-          // It went out first. The edit stays to send as a new message, with
-          // what was typed before it after it.
-          if (was.html) el.insertAdjacentHTML("beforeend", `<div>${was.html}</div>`);
-          setAttaches([...attaches, ...was.attaches]);
-          setReply(reply ?? was.reply);
-          setEditing(null);
-          refreshEmpty();
-          fit();
           return;
         }
         el.innerHTML = "";
