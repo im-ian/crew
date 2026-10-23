@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isLocalHref, messageDefinitions, renderMarkdown, resolveLocalPath } from "./markdown";
+import { isLocalHref, mediaKind, messageDefinitions, renderMarkdown, resolveLocalPath } from "./markdown";
 
 /** The rendered html without the newlines markdown-it puts after tags. */
 const html = (text: string, source?: string) =>
@@ -327,6 +327,40 @@ describe("image albums", () => {
     );
     expect(html("see this\n\n![a](/tmp/a.png)\n![b](/tmp/b.png)")).toBe(
       '<p>see this</p><div class="md-gallery is-pair" data-count="2"><img src="/tmp/a.png" alt="a"><img src="/tmp/b.png" alt="b"></div>',
+    );
+  });
+
+  it("leaves a video or a sound file out of an album", () => {
+    expect(html("![a](/tmp/a.mp4)\n\n![b](/tmp/b.mp4)")).toBe(
+      '<p><img src="/tmp/a.mp4" alt="a"></p><p><img src="/tmp/b.mp4" alt="b"></p>',
+    );
+    expect(html("![a](/tmp/a.png)\n\n![b](/tmp/b.mp3)")).toBe(
+      '<p><img src="/tmp/a.png" alt="a"></p><p><img src="/tmp/b.mp3" alt="b"></p>',
+    );
+  });
+});
+
+describe("mediaKind", () => {
+  it("trusts a mime type over the file name", () => {
+    expect(mediaKind("clipmp4", "video/mp4")).toBe("video");
+    expect(mediaKind("song", "audio/mpeg")).toBe("audio");
+    expect(mediaKind("clip.mp4", "image/png")).toBeNull();
+  });
+
+  it("reads an extension and ignores a query or a fragment", () => {
+    expect(mediaKind("https://cdn.example/a.mp4?x=1#t=0.1")).toBe("video");
+    expect(mediaKind("/tmp/a.MP3")).toBe("audio");
+    expect(mediaKind("/tmp/notes.txt")).toBeNull();
+    expect(mediaKind("/tmp/clipmp4")).toBeNull();
+  });
+
+  it("keeps a media kind on an upload path that has no extension", () => {
+    const path = "/Users/jthefloor/Library/Application Support/crew/uploads/1-clipmp4";
+    expect(html(`[clip.mp4](<${path}> "video")`)).toBe(
+      `<p><a href="${path}" title="video">clip.mp4</a></p>`,
+    );
+    expect(html(`[song.mp3](/tmp/1-songmp3 "audio")`)).toBe(
+      '<p><a href="/tmp/1-songmp3" title="audio">song.mp3</a></p>',
     );
   });
 });

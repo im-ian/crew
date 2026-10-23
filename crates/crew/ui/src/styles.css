@@ -2233,20 +2233,27 @@ button.choice-option:disabled {
 }
 .md img {
   /* A tall screenshot used to fill the thread at full bubble width. */
-  max-width: min(100%, 420px);
-  max-height: 280px;
+  max-width: min(100%, 320px);
+  max-height: 210px;
   width: auto;
   height: auto;
   object-fit: contain;
   border-radius: 18px;
   vertical-align: top;
 }
+.md img[role="button"] {
+  cursor: zoom-in;
+}
+.md img[role="button"]:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
 /* A run of pictures is one album. Each cell keeps the picture's shape. */
 .md-gallery {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 2px;
-  width: 300px;
+  width: 240px;
   max-width: 100%;
   margin: 0.35em 0;
   border-radius: 18px;
@@ -2256,30 +2263,183 @@ button.choice-option:disabled {
 .md-gallery:last-child { margin-bottom: 0; }
 .md-gallery img {
   width: 100%;
-  height: 148px;
+  height: 118px;
   max-width: none;
   max-height: none;
   object-fit: contain;
   border-radius: 0;
 }
-.md-gallery.is-pair img { height: 156px; }
+.md-gallery img[role="button"]:focus-visible {
+  outline-offset: -2px;
+}
+.md-gallery.is-pair img { height: 124px; }
 .md-gallery.is-trio img:first-child {
   grid-column: 1 / -1;
-  height: 168px;
+  height: 134px;
 }
-.md-gallery.is-trio img { height: 112px; }
-.md-gallery.is-grid img { height: 120px; }
+.md-gallery.is-trio img { height: 90px; }
+.md-gallery.is-grid img { height: 96px; }
 .md-gallery.is-grid img:last-child:nth-child(odd) {
   grid-column: 1 / -1;
-  height: 150px;
+  height: 120px;
+}
+.img-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 64px 28px 28px;
+  background: rgba(0, 0, 0, 0.78);
+}
+.img-preview img {
+  max-width: min(1100px, calc(100vw - 56px));
+  max-height: calc(100vh - 96px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  cursor: default;
+}
+.img-preview-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.img-preview-close:hover,
+.img-preview-close:focus-visible {
+  background: rgba(255, 255, 255, 0.28);
+  outline: none;
+}
+.md-media {
+  appearance: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.md-media:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+.md-media-video {
+  position: relative;
+  display: block;
+  width: 320px;
+  max-width: 100%;
+  padding: 0;
+  background: #111;
+  border-radius: 18px;
+  overflow: hidden;
+  line-height: 0;
+}
+.md-media-video video,
+.md-media-fallback {
+  display: block;
+  width: 100%;
+  height: 180px;
+  object-fit: contain;
+  background: #111;
+  pointer-events: none;
+}
+.md-media-badge,
+.md-media-mark {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+}
+.md-media-badge {
+  position: absolute;
+  inset: 0;
+  width: 44px;
+  height: 44px;
+  margin: auto;
+  pointer-events: none;
+}
+.md-media-play { margin-left: 2px; }
+.md-media-audio {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(320px, 100%);
+  padding: 6px 12px 6px 6px;
+  border-radius: 999px;
+  background: var(--btn);
+}
+.md-media-mark {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+}
+.md-media-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.img-preview video,
+.img-preview audio {
+  max-width: min(1100px, calc(100vw - 56px));
+  border-radius: 12px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+}
+.img-preview video {
+  max-height: calc(100vh - 96px);
+  background: #000;
+}
+.img-preview audio {
+  width: min(480px, calc(100vw - 56px));
+}
+.img-preview-fail {
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+  max-width: 360px;
+  color: #fff;
+  text-align: center;
+}
+.img-preview-fail p { margin: 0; }
+.img-preview-fail button {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.img-preview-fail button:hover,
+.img-preview-fail button:focus-visible {
+  background: rgba(255, 255, 255, 0.28);
+  outline: none;
 }
 .row.me .bubble.md:has(> p:only-child > img:only-child),
+.row.me .bubble.md:has(> p:only-child > .md-media-video:only-child),
 .row.me .bubble.md:has(> .md-gallery:only-child) {
   padding: 0;
   background: transparent;
   overflow: hidden;
 }
-.row.me .bubble.md:has(> p:only-child > img:only-child) p { margin: 0; }
+.row.me .bubble.md:has(> p:only-child > .md-media-audio:only-child) {
+  padding: 0;
+  background: transparent;
+}
+.row.me .bubble.md:has(> p:only-child > img:only-child) p,
+.row.me .bubble.md:has(> p:only-child > .md-media:only-child) p { margin: 0; }
 /* A wide table scrolls inside the bubble instead of widening it. */
 .md .md-table {
   max-width: 100%;
@@ -2660,6 +2820,7 @@ button.who-btn:focus-visible {
   flex-shrink: 0;
 }
 .attach-photo-frame {
+  position: relative;
   display: block;
   width: 100%;
   height: 100%;
@@ -2681,13 +2842,31 @@ button.who-btn:focus-visible {
   min-width: 28px;
   min-height: 28px;
 }
-.attach-photo img {
+.attach-photo img,
+.attach-photo video {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
-.attach-photos.is-one .attach-photo img {
+.attach-photo video { pointer-events: none; }
+.attach-play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  pointer-events: none;
+}
+.attach-photos.is-one .attach-photo img,
+.attach-photos.is-one .attach-photo video {
   width: auto;
   height: auto;
   max-width: 100%;

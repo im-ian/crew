@@ -293,7 +293,12 @@ function imagesOnly(token: Token): Token[] | null {
   if (token.type !== "inline" || !token.children?.length) return null;
   const images: Token[] = [];
   for (const child of token.children) {
-    if (child.type === "image") images.push(child);
+    if (child.type === "image") {
+      // A video or sound file stays its own card, not an album cell.
+      const src = child.attrGet("src");
+      if (typeof src === "string" && mediaKind(src)) return null;
+      images.push(child);
+    }
     else if (child.type === "softbreak" || child.type === "hardbreak") continue;
     else if (child.type === "text" && child.content.trim() === "") continue;
     else return null;
@@ -410,4 +415,23 @@ export function mediaSrc(src: string, baseDir?: string): string {
 
 export function isLocalHref(href: string, baseDir?: string): boolean {
   return resolveLocalPath(href, baseDir) !== null;
+}
+
+const VIDEO_EXT = new Set(["mp4", "m4v", "mov", "webm", "ogv", "mkv"]);
+const AUDIO_EXT = new Set(["mp3", "m4a", "aac", "wav", "ogg", "oga", "flac", "aiff", "aif"]);
+
+export type MediaKind = "video" | "audio";
+
+/** A MIME type wins. Otherwise the name's extension, ignoring a query or fragment. */
+export function mediaKind(name: string, mime?: string): MediaKind | null {
+  const type = (mime || "").toLowerCase().split(";")[0].trim();
+  if (type.startsWith("video/")) return "video";
+  if (type.startsWith("audio/")) return "audio";
+  if (type.startsWith("image/")) return null;
+  const base = name.trim().split(/[?#]/)[0];
+  const m = base.match(/\.([a-z0-9]+)$/i);
+  const ext = m ? m[1].toLowerCase() : "";
+  if (VIDEO_EXT.has(ext)) return "video";
+  if (AUDIO_EXT.has(ext)) return "audio";
+  return null;
 }

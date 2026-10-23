@@ -4,11 +4,12 @@ import { flushSync } from "react-dom";
 import type { AgentInfo, Kind, Skill } from "../types";
 import { api } from "../api";
 import { useT } from "../LocaleContext";
+import { mediaKind } from "../markdown";
 import { mentionIds, resolveMention, trimMentionPunct } from "../mentions";
 import { oneLine, wrapReply, type ReplyTarget } from "../reply";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
-import { ArrowUp, CircleDot, Paperclip, Plus, StopSquare, X, Zap } from "../icons";
+import { ArrowUp, CircleDot, Paperclip, Play, Plus, StopSquare, X, Zap } from "../icons";
 
 export type ComposerHandle = {
   focus: () => void;
@@ -39,6 +40,7 @@ type Attach = {
   name: string;
   path: string;
   image: boolean;
+  media?: "video" | "audio";
   preview?: string;
 };
 
@@ -207,17 +209,24 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
 
   async function attachFiles(files: FileList | File[]) {
     const next: Attach[] = [];
-    for (const file of Array.from(files)) {
-      const data = await readFileData(file);
-      const path = await api.saveUpload(file.name, data);
-      const image = file.type.startsWith("image/");
-      next.push({
-        id: `${Date.now()}-${next.length}-${file.name}`,
-        name: file.name,
-        path,
-        image,
-        preview: image ? data : undefined,
-      });
+    try {
+      for (const file of Array.from(files)) {
+        const data = await readFileData(file);
+        const path = await api.saveUpload(file.name, data);
+        const media = mediaKind(file.name, file.type) ?? undefined;
+        const image = file.type.startsWith("image/") && !media;
+        next.push({
+          id: `${Date.now()}-${next.length}-${file.name}`,
+          name: file.name,
+          path,
+          image,
+          media,
+          preview: image ? data : media === "video" ? URL.createObjectURL(file) : undefined,
+        });
+      }
+    } catch (err) {
+      for (const a of next) revokePreview(a);
+      throw err;
     }
     if (next.length) setAttaches((prev) => [...prev, ...next]);
     refreshEmpty();
@@ -225,7 +234,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   }
 
   function removeAttach(id: string) {
-    setAttaches((prev) => prev.filter((a) => a.id !== id));
+    setAttaches((prev) => {
+      revokePreview(prev.find((a) => a.id === id));
+      return prev.filter((a) => a.id !== id);
+    });
   }
 
   // One editor serves every chat, so its text has to move aside when the chat does.
@@ -274,8 +286,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
 
   const mentionOpen = !!mention && matches.length > 0;
   const slashOpen = !!slash && skillMatches.length > 0;
-  const photos = attaches.filter((a) => a.image && a.preview);
-  const files = attaches.filter((a) => !a.image || !a.preview);
+  const photos = attaches.filter((a) => a.preview && (a.image || a.media === "video"));
+  const files = attaches.filter((a) => !a.preview || (!a.image && a.media !== "video"));
 
   return (
     <form
@@ -313,6 +325,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         el.innerHTML = "";
         drafts.current.delete(chatKey);
         setMention(null);
+        for (const a of attaches) revokePreview(a);
         setAttaches([]);
         setReply(null);
         setEmpty(true);
@@ -406,7 +419,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
             {photos.map((a) => (
               <div key={a.id} className="attach-photo">
                 <span className="attach-photo-frame">
-                  <img src={a.preview} alt="" />
+                  {a.media === "video" ? (
+                    <>
+                      <video src={`${a.preview}#t=0.1`} muted playsInline preload="metadata" />
+                      <span className="attach-play">
+                        <Play size={12} className="md-media-play" />
+                      </span>
+                    </>
+                  ) : (
+                    <img src={a.preview} alt="" />
+                  )}
                 </span>
                 <button
                   type="button"
@@ -694,7 +716,14 @@ function attachMarkdown(a: Attach): string {
   const alt = a.name.replace(/[\[\]\\]/g, " ");
   // Spaces and parentheses end a bare destination.
   const dest = /[\s()]/.test(a.path) ? `<${a.path.replaceAll("<", "%3C").replaceAll(">", "%3E")}>` : a.path;
-  return a.image ? `![${alt}](${dest})` : `[${alt}](${dest})`;
+  if (a.image) return `![${alt}](${dest})`;
+  // The saved file has no extension, so the title is what the bubble plays.
+  if (a.media) return `[${alt}](${dest} "${a.media}")`;
+  return `[${alt}](${dest})`;
+}
+
+function revokePreview(a: Attach | undefined) {
+  if (a?.preview?.startsWith("blob:")) URL.revokeObjectURL(a.preview);
 }
 
 function fileExt(name: string): string {
