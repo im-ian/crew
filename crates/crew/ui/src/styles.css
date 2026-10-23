@@ -1548,9 +1548,9 @@ button.channel-who:hover {
 .me-msg .msg-actions::before {
   left: 100%;
 }
-/* The chip hangs outside the box that owns the hover. This strip is that
-   whole side, tall as the message, so the pointer can reach the chip. */
-.bubble-stack::after,
+/* The chip hangs outside the balloon it belongs to. This strip is that
+   whole side, tall as the balloon, so the pointer can reach the chip. */
+.bubble-row.has-actions::after,
 .xfer-chip::after,
 .xfer::after,
 .me-msg::after {
@@ -1561,7 +1561,7 @@ button.channel-who:hover {
   width: 16rem;
   z-index: 1;
 }
-.bubble-stack::after,
+.bubble-row.has-actions::after,
 .xfer-chip::after,
 .xfer::after {
   left: 100%;
@@ -1599,7 +1599,8 @@ button.channel-who:hover {
   opacity: 1;
   flex: none;
 }
-.channel-msg:hover .msg-actions,
+.bubble-row.has-actions:hover > .msg-actions,
+.bubble-row.has-actions:focus-within > .msg-actions,
 .me-msg:hover .msg-actions,
 .xfer:hover .msg-actions,
 .msg-actions:focus-within,

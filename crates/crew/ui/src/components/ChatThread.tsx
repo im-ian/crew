@@ -821,6 +821,7 @@ function Incoming({
                     : " stack-mid"
                 : "";
             const closing = dots.leaving && last;
+            const copy = part.trim();
             const bubble = (
               <MdBody
                 className={
@@ -839,7 +840,11 @@ function Incoming({
             return (
               <div
                 key={m.id + "-" + i}
-                className={"bubble-row" + (closing ? " dots-leave" : "")}
+                className={
+                  "bubble-row" +
+                  (copy ? " has-actions" : "") +
+                  (closing ? " dots-leave" : "")
+                }
                 onAnimationEnd={
                   closing
                     ? (e) => {
@@ -855,18 +860,20 @@ function Incoming({
                 }
               >
                 {closing ? <div className="dots-clip">{bubble}</div> : bubble}
+                {copy ? (
+                  <MsgActions
+                    copy={copy}
+                    ts={m.ts}
+                    onReply={
+                      onReply
+                        ? () => onReply(makeReply({ ...m, text: copy }, agents, t))
+                        : undefined
+                    }
+                  />
+                ) : null}
               </div>
             );
           })}
-          <MsgActions
-            copy={body.trim()}
-            ts={m.ts}
-            onReply={
-              onReply && body.trim()
-                ? () => onReply(makeReply({ ...m, text: body.trim() }, agents, t))
-                : undefined
-            }
-          />
         </div>
         {queued ? <QueueWait /> : null}
         {m.choice ? (
