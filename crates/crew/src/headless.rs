@@ -715,6 +715,13 @@ struct ParseState {
     last_codex_item: Option<String>,
     last_codex_text: Option<String>,
     tool_after_text: bool,
+    /// Auto-compact starts this turn's stream over and sends the same message
+    /// again. The next text is a replay until it says something new.
+    compact_replay: bool,
+    /// Assistant text this turn already showed. Chunks are joined as the CLI
+    /// sent them, without the blank line added after a tool.
+    spoken: String,
+    last_said: String,
     /// `spawn_subagent` calls that have not finished. The child's reply is
     /// `text` on this same stream, with no field that marks it as the child's.
     open_subagents: HashSet<String>,
@@ -759,6 +766,14 @@ fn ingest_line(cli: CliKind, line: &str, state: &mut ParseState) -> Option<Strin
 
 fn grok_text(v: &Value, state: &mut ParseState) -> Option<String> {
     note_subagent_call(v, state);
+    let (_, kind) = grok_event(v);
+    if matches!(
+        kind,
+        "auto_compact_started" | "auto_compact_completed" | "compaction_checkpoint"
+    ) {
+        state.compact_replay = true;
+        return None;
+    }
     if let Some(chunk) = acp_message_chunk(v) {
         return grok_reply(chunk, state);
     }
@@ -785,8 +800,41 @@ fn grok_reply(chunk: String, state: &mut ParseState) -> Option<String> {
     if !state.open_subagents.is_empty() {
         return None;
     }
+    let Some(chunk) = fresh_after_compact(state, chunk) else {
+        return None;
+    };
     state.used_deltas = true;
     state.got_text = true;
+    state.last_said.clone_from(&chunk);
+    state.spoken.push_str(&chunk);
+    Some(chunk)
+}
+
+/// A compact resumes the stream from the top. Drop text the user already has,
+/// and keep only the tail when the replay grew.
+fn fresh_after_compact(state: &mut ParseState, chunk: String) -> Option<String> {
+    if !state.compact_replay {
+        return Some(chunk);
+    }
+    let shown = state.spoken.trim();
+    let trimmed = chunk.trim();
+    let repeats = trimmed.is_empty()
+        || trimmed == shown
+        || (!state.last_said.trim().is_empty() && trimmed == state.last_said.trim());
+    if repeats {
+        return None;
+    }
+    if !shown.is_empty() {
+        if let Some(extra) = trimmed.strip_prefix(shown) {
+            let extra = extra.trim_start_matches(['\n', ' ', '\t']);
+            if extra.is_empty() {
+                return None;
+            }
+            state.compact_replay = false;
+            return Some(extra.to_string());
+        }
+    }
+    state.compact_replay = false;
     Some(chunk)
 }
 
@@ -1250,6 +1298,68 @@ mod tests {
             grok_line(r#"{"type":"end","sessionId":"abc-123","stopReason":"end_turn"}"#);
         assert!(chunk.is_none());
         assert_eq!(st.session_id.as_deref(), Some("abc-123"));
+    }
+
+    fn grok_message(text: &str) -> String {
+        format!(
+            r#"{{"method":"session/update","params":{{"update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{text}"}}}}}}}}"#
+        )
+    }
+
+    #[test]
+    fn grok_compact_does_not_repeat_the_message_on_screen() {
+        let mut st = ParseState::default();
+        let said = "남은 두 건을 이어서 보겠습니다.";
+        let first = ingest_line(CliKind::Grok, &grok_message(said), &mut st);
+        assert_eq!(first.as_deref(), Some(said));
+        ingest_line(
+            CliKind::Grok,
+            r#"{"type":"tool_call","toolCallId":"1","toolName":"grep"}"#,
+            &mut st,
+        );
+        assert!(ingest_line(
+            CliKind::Grok,
+            r#"{"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"auto_compact_completed"}}}"#,
+            &mut st,
+        )
+        .is_none());
+        assert!(ingest_line(CliKind::Grok, &grok_message(said), &mut st).is_none());
+        let next = ingest_line(CliKind::Grok, &grok_message("원인을 찾았습니다."), &mut st);
+        assert_eq!(next.as_deref(), Some("\n\n원인을 찾았습니다."));
+    }
+
+    #[test]
+    fn grok_compact_keeps_only_the_new_tail() {
+        let mut st = ParseState::default();
+        let said = "남은 두 건을 이어서 보겠습니다.";
+        ingest_line(CliKind::Grok, &grok_message(said), &mut st);
+        ingest_line(
+            CliKind::Grok,
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"auto_compact_started"}}}"#,
+            &mut st,
+        );
+        let grown = format!("{said} 코드에서 찾았습니다.");
+        let next = ingest_line(CliKind::Grok, &grok_message(&grown), &mut st);
+        assert_eq!(next.as_deref(), Some("코드에서 찾았습니다."));
+    }
+
+    #[test]
+    fn grok_keeps_a_repeated_sentence_when_nothing_compacted() {
+        let mut st = ParseState::default();
+        let said = "다시 말합니다.";
+        assert_eq!(
+            ingest_line(CliKind::Grok, &grok_message(said), &mut st).as_deref(),
+            Some(said)
+        );
+        ingest_line(
+            CliKind::Grok,
+            r#"{"type":"tool_call","toolCallId":"1","toolName":"grep"}"#,
+            &mut st,
+        );
+        assert_eq!(
+            ingest_line(CliKind::Grok, &grok_message(said), &mut st).as_deref(),
+            Some("\n\n다시 말합니다.")
+        );
     }
 
     #[test]
