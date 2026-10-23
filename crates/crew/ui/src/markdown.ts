@@ -198,6 +198,80 @@ function footnoteRef(state: StateInline, silent: boolean) {
 }
 md.inline.ruler.before("link", "footnote_ref", footnoteRef);
 
+// An upload lives under "Application Support", so the path contains spaces.
+// A bare destination ends at the first space and the picture stays as text.
+function isFileDest(dest: string): boolean {
+  return (
+    dest.startsWith("/") ||
+    dest.startsWith("~") ||
+    dest.startsWith("file:") ||
+    /^[A-Za-z]:[\\/]/.test(dest)
+  );
+}
+
+function spacedDest(state: StateInline, silent: boolean): boolean {
+  const src = state.src;
+  const max = state.posMax;
+  let pos = state.pos;
+  const bang = src.charCodeAt(pos) === 0x21; /* ! */
+  if (bang) {
+    if (src.charCodeAt(pos + 1) !== 0x5b) return false;
+  } else if (src.charCodeAt(pos) !== 0x5b) return false;
+  const labelStart = pos + (bang ? 2 : 1);
+  const labelEnd = state.md.helpers.parseLinkLabel(state, pos + (bang ? 1 : 0), false);
+  if (labelEnd < 0) return false;
+  pos = labelEnd + 1;
+  if (pos >= max || src.charCodeAt(pos) !== 0x28) return false;
+  pos += 1;
+  while (pos < max && (src.charCodeAt(pos) === 32 || src.charCodeAt(pos) === 10)) pos += 1;
+  // Angle brackets are already a destination the stock rule accepts.
+  if (pos >= max || src.charCodeAt(pos) === 0x3c) return false;
+  const destStart = pos;
+  let level = 0;
+  let sawSpace = false;
+  for (; pos < max; pos++) {
+    const code = src.charCodeAt(pos);
+    if (code === 10) return false;
+    if (code === 32) sawSpace = true;
+    else if (code === 0x28) level += 1;
+    else if (code === 0x29) {
+      if (level === 0) break;
+      level -= 1;
+    }
+  }
+  if (!sawSpace || level !== 0 || pos >= max || src.charCodeAt(pos) !== 0x29) return false;
+  const dest = src.slice(destStart, pos).trim();
+  // `![a](/tmp/a.png "title")` belongs to the stock rule.
+  if (!dest || /\s+["']/.test(dest) || !isFileDest(dest)) return false;
+  const href = state.md.normalizeLink(dest);
+  if (!state.md.validateLink(href)) return false;
+  if (!silent) {
+    const content = src.slice(labelStart, labelEnd);
+    if (bang) {
+      const kids: Token[] = [];
+      state.md.inline.parse(content, state.md, state.env, kids);
+      const token = state.push("image", "img", 0);
+      token.attrs = [["src", href], ["alt", ""]];
+      token.children = kids;
+      token.content = content;
+    } else {
+      const oldMax = state.posMax;
+      state.pos = labelStart;
+      state.posMax = labelEnd;
+      const open = state.push("link_open", "a", 1);
+      open.attrs = [["href", href]];
+      state.linkLevel++;
+      state.md.inline.tokenize(state);
+      state.linkLevel--;
+      state.push("link_close", "a", -1);
+      state.posMax = oldMax;
+    }
+  }
+  state.pos = pos + 1;
+  return true;
+}
+md.inline.ruler.before("link", "spaced_dest", spacedDest);
+
 md.renderer.rules.footnote_ref = (tokens, i, _o, env) =>
   '<sup class="md-fnref">' + noteNum(env, tokens[i]) + "</sup>";
 md.renderer.rules.footnote_open = (tokens, i, _o, env) =>

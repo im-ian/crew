@@ -648,7 +648,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
 });
 
 function attachMarkdown(a: Attach): string {
-  return a.image ? `![${a.name}](${a.path})` : `[${a.name}](${a.path})`;
+  const alt = a.name.replace(/[\[\]\\]/g, " ");
+  // Spaces and parentheses end a bare destination.
+  const dest = /[\s()]/.test(a.path) ? `<${a.path.replaceAll("<", "%3C").replaceAll(">", "%3E")}>` : a.path;
+  return a.image ? `![${alt}](${dest})` : `[${alt}](${dest})`;
 }
 
 function fileExt(name: string): string {
