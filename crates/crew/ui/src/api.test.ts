@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { api, newestOnly } from "./api";
+import { api, newestOnly, oneAtATime } from "./api";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -86,5 +86,35 @@ describe("newestOnly", () => {
     expect(await older).toBe("old");
     pending[1]("new");
     expect(await newer).toBe("new");
+  });
+});
+
+describe("oneAtATime", () => {
+  it("skips a turn while the last one is still out", async () => {
+    const poll = oneAtATime();
+    let release = () => {};
+    const work = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const first = poll(work);
+    await poll(work);
+    expect(work).toHaveBeenCalledTimes(1);
+    release();
+    await first;
+    void poll(work);
+    expect(work).toHaveBeenCalledTimes(2);
+  });
+
+  it("frees the next turn after one that failed", async () => {
+    const poll = oneAtATime();
+    await expect(poll(() => Promise.reject(new Error("down")))).rejects.toThrow(
+      "down",
+    );
+    const work = vi.fn(() => Promise.resolve());
+    await poll(work);
+    expect(work).toHaveBeenCalledTimes(1);
   });
 });
