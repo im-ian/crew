@@ -91,6 +91,7 @@ export function useCrew() {
   const listAgents = useRef(newestOnly(api.listAgents)).current;
   const getMessages = useRef(newestOnly(api.getMessages)).current;
   const pollMessages = useRef(oneAtATime()).current;
+  const pollPing = useRef(oneAtATime()).current;
   const pollList = useRef(oneAtATime()).current;
   const groupsRef = useRef<RailLayout>({ groups, ungrouped });
   groupsRef.current = { groups, ungrouped };
@@ -770,19 +771,25 @@ export function useCrew() {
         console.error("refreshMessages", err);
       }
     }
+    function lost(err: unknown) {
+      if (!cancelled) {
+        setConnected(false);
+        setConnDetail(errMsg(err));
+      }
+    }
     async function tickList() {
       try {
         await api.daemonPing();
-        if (cancelled) return;
-        setConnected(true);
-        setConnDetail(t("conn.ok"));
-        await refreshList();
       } catch (err) {
-        if (!cancelled) {
-          setConnected(false);
-          setConnDetail(errMsg(err));
-        }
+        lost(err);
+        return;
       }
+      if (cancelled) return;
+      setConnected(true);
+      setConnDetail(t("conn.ok"));
+      // Not awaited: a list stuck on a daemon that stopped answering must not
+      // hold the ping, which is what notices and brings a dead daemon back.
+      void pollList(refreshList).catch(lost);
     }
     void tickList();
     void tickMessages();
@@ -797,13 +804,14 @@ export function useCrew() {
     const msgMs = hot ? 200 : 2000;
     // Status ends the wait dots, so it must not lag the messages while hot.
     const listMs = hot ? 200 : 2000;
-    // Only the interval waits its turn. The tick above runs on a switch, and
-    // must not sit behind a poll for the bot the user just left.
+    // Only the interval waits its turn. The ticks above run when the status,
+    // the last role, or the view changes — when the window has to catch up
+    // now — and a daemon that stops answering changes none of those.
     const msgId = window.setInterval(
       () => void pollMessages(tickMessages),
       msgMs,
     );
-    const listId = window.setInterval(() => void pollList(tickList), listMs);
+    const listId = window.setInterval(() => void pollPing(tickList), listMs);
     return () => {
       cancelled = true;
       window.clearInterval(msgId);
