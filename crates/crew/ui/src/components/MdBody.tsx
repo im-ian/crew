@@ -447,7 +447,15 @@ function MediaPreview({ shot, onClose }: { shot: Shot; onClose: () => void }) {
     (shot.kind === "video" ? t("media.video") : shot.kind === "audio" ? t("media.audio") : t("image.preview"));
   const keep = (e: { stopPropagation: () => void }) => e.stopPropagation();
   return createPortal(
-    <div className="img-preview" role="dialog" aria-modal="true" aria-label={label} onMouseDown={onClose}>
+    <div
+      className="img-preview"
+      role="dialog"
+      aria-modal="true"
+      aria-label={label}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <button
         ref={closeRef}
         type="button"

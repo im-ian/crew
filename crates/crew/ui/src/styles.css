@@ -2379,6 +2379,11 @@ button.choice-option:disabled {
   padding: 6px 12px 6px 6px;
   border-radius: 999px;
   background: var(--btn);
+  color: var(--on-ink);
+}
+.md-media-audio:hover,
+.md-media-audio:focus-visible {
+  background: var(--btn-hover);
 }
 .md-media-mark {
   width: 28px;
@@ -2440,6 +2445,10 @@ button.choice-option:disabled {
 }
 .row.me .bubble.md:has(> p:only-child > img:only-child) p,
 .row.me .bubble.md:has(> p:only-child > .md-media:only-child) p { margin: 0; }
+.row.me .bubble.md:has(> p:only-child > img:only-child) img[role="button"]:focus-visible,
+.row.me .bubble.md:has(> p:only-child > .md-media-video:only-child) .md-media:focus-visible {
+  outline-offset: -2px;
+}
 /* A wide table scrolls inside the bubble instead of widening it. */
 .md .md-table {
   max-width: 100%;
