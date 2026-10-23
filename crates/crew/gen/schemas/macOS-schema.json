@@ -225,6 +225,12 @@
           "markdownDescription": "Enables the daemon_ping command without any pre-configured scope."
         },
         {
+          "description": "Enables the edit_queued command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-edit-queued",
+          "markdownDescription": "Enables the edit_queued command without any pre-configured scope."
+        },
+        {
           "description": "Enables the edit_routine command without any pre-configured scope.",
           "type": "string",
           "const": "allow-edit-routine",
@@ -475,6 +481,12 @@
           "type": "string",
           "const": "deny-daemon-ping",
           "markdownDescription": "Denies the daemon_ping command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the edit_queued command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-edit-queued",
+          "markdownDescription": "Denies the edit_queued command without any pre-configured scope."
         },
         {
           "description": "Denies the edit_routine command without any pre-configured scope.",

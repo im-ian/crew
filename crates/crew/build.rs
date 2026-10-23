@@ -10,6 +10,7 @@ fn main() {
             "send_message",
             "stop_agent",
             "cancel_queued",
+            "edit_queued",
             "approve_agent",
             "answer_choice",
             "tell_message",

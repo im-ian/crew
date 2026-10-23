@@ -146,6 +146,12 @@ pub enum Request {
         agent: String,
         message_id: String,
     },
+    /// Rewrite a message still waiting for the bot, keeping its place in line.
+    EditQueued {
+        agent: String,
+        message_id: String,
+        text: String,
+    },
     /// Allow-once or deny a pending judgment card.
     Approve {
         agent: String,

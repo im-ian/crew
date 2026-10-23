@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import type { AgentInfo, Kind, Skill } from "../types";
+import type { AgentInfo, EditResult, Kind, Skill } from "../types";
 import { api } from "../api";
 import { useT } from "../LocaleContext";
 import { mediaKind } from "../markdown";
@@ -15,6 +15,8 @@ export type ComposerHandle = {
   focus: () => void;
   attach: () => void;
   replyTo: (target: ReplyTarget) => void;
+  /** Change a message still waiting for the bot. */
+  edit: (messageId: string, text: string, reply: ReplyTarget | null) => void;
 };
 
 type Props = {
@@ -23,6 +25,7 @@ type Props = {
   selectedKind: Kind;
   placeholder: string;
   onSend: (raw: string, steer: boolean) => Promise<void>;
+  onEdit?: (messageId: string, raw: string) => Promise<EditResult>;
   busy?: boolean;
   /** The bot is mid-turn, so a message can stop it and go now instead of waiting. */
   canSteer?: boolean;
@@ -34,6 +37,9 @@ type Props = {
 type Mention = { start: number; query: string };
 
 type Draft = { html: string; attaches: Attach[]; reply: ReplyTarget | null };
+
+/** A waiting message open in the editor, and what was typed before it. */
+type Editing = { id: string; text: string; was: Draft };
 
 type Attach = {
   id: string;
@@ -50,6 +56,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   selectedKind,
   placeholder,
   onSend,
+  onEdit,
   busy = false,
   canSteer = false,
   onStop,
@@ -69,6 +76,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   const [plusOpen, setPlusOpen] = useState(false);
   const [plusSkills, setPlusSkills] = useState(false);
   const [reply, setReply] = useState<ReplyTarget | null>(null);
+  const [editing, setEditing] = useState<Editing | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const plusRef = useRef<HTMLDivElement>(null);
   const steerRef = useRef<HTMLButtonElement>(null);
@@ -93,6 +101,25 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     },
     replyTo(target: ReplyTarget) {
       setReply(target);
+      queueMicrotask(focusEditor);
+    },
+    edit(id: string, text: string, target: ReplyTarget | null) {
+      const el = inputRef.current;
+      if (!el) return;
+      if (editingRef.current) for (const a of attachRef.current) revokePreview(a);
+      const was = editingRef.current?.was ?? {
+        html: isEditorEmpty(el) ? "" : el.innerHTML,
+        attaches: attachRef.current,
+        reply: replyRef.current,
+      };
+      el.textContent = text;
+      setAttaches([]);
+      setReply(target);
+      setEditing({ id, text, was });
+      setMention(null);
+      setSlash(null);
+      refreshEmpty();
+      fit();
       queueMicrotask(focusEditor);
     },
   }));
@@ -247,6 +274,33 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   attachRef.current = attaches;
   const replyRef = useRef(reply);
   replyRef.current = reply;
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
+
+  /** Back to what was typed before the edit. */
+  function putBack(was: Draft) {
+    const el = inputRef.current;
+    if (el) el.innerHTML = was.html;
+    // Read before the next render by a chat switch.
+    attachRef.current = was.attaches;
+    replyRef.current = was.reply;
+    editingRef.current = null;
+    setAttaches(was.attaches);
+    setReply(was.reply);
+    setEditing(null);
+    setMention(null);
+    setSlash(null);
+    refreshEmpty();
+    fit();
+  }
+
+  /** Leave the edit; the message stays as it was. */
+  function dropEdit() {
+    const ed = editingRef.current;
+    if (!ed) return;
+    for (const a of attachRef.current) revokePreview(a);
+    putBack(ed.was);
+  }
   const chatKey = selected ? `${selectedKind}:${selected}` : "";
   const prevKey = useRef(chatKey);
 
@@ -255,6 +309,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     const from = prevKey.current;
     prevKey.current = chatKey;
     const el = inputRef.current;
+    // Leaving the chat drops the edit, and the message stays as it was.
+    dropEdit();
     if (from && el) {
       const held = attachRef.current;
       const heldReply = replyRef.current;
@@ -322,6 +378,26 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
             snippet: reply.text,
           });
         }
+        if (editing) {
+          const { id, was } = editing;
+          const result = await onEdit?.(id, raw);
+          // Dropped, or another edit opened, while this one saved.
+          if (editingRef.current !== editing) return;
+          if (result === "saved") {
+            for (const a of attachRef.current) revokePreview(a);
+            putBack(was);
+          } else if (result === "gone") {
+            // It went out first. The edit stays to send as a new message, with
+            // what was typed before it after it.
+            if (was.html) el.insertAdjacentHTML("beforeend", `<div>${was.html}</div>`);
+            setAttaches([...attachRef.current, ...was.attaches]);
+            setReply(replyRef.current ?? was.reply);
+            setEditing(null);
+            refreshEmpty();
+            fit();
+          }
+          return;
+        }
         el.innerHTML = "";
         drafts.current.delete(chatKey);
         setMention(null);
@@ -337,7 +413,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         className={
           "composer-box" +
           (attaches.length ? " has-attach" : "") +
-          (reply ? " has-reply" : "")
+          (reply || editing ? " has-reply" : "")
         }
       >
         {slashOpen ? (
@@ -389,6 +465,27 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
                 ) : null}
               </button>
             ))}
+          </div>
+        ) : null}
+        {editing ? (
+          <div className="reply-bar">
+            <button
+              type="button"
+              className="reply-bar-main"
+              onClick={() => onJump?.(editing.id)}
+            >
+              <span className="reply-bar-who">{t("composer.editing")}</span>
+              <span className="reply-bar-snippet">{oneLine(editing.text)}</span>
+            </button>
+            <button
+              type="button"
+              className="reply-bar-close"
+              title={t("composer.editCancel")}
+              aria-label={t("composer.editCancel")}
+              onClick={dropEdit}
+            >
+              <X size={14} />
+            </button>
           </div>
         ) : null}
         {reply ? (
@@ -638,6 +735,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
                 return;
               }
             }
+            if (e.key === "Escape" && editing) {
+              e.preventDefault();
+              dropEdit();
+              return;
+            }
             if (e.key === "Escape" && reply) {
               e.preventDefault();
               setReply(null);
@@ -687,7 +789,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
             <StopSquare size={12} />
           </button>
         ) : null}
-        {canSteer ? (
+        {canSteer && !editing ? (
           <button
             ref={steerRef}
             type="submit"
@@ -701,7 +803,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         ) : null}
         <button
           type="submit"
-          aria-label={t("composer.send")}
+          aria-label={t(editing ? "composer.editSave" : "composer.send")}
           disabled={!selected || (empty && !attaches.length)}
         >
           <ArrowUp size={16} />

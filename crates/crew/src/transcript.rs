@@ -517,6 +517,32 @@ pub fn remove_row(agent: &str, id: &str) {
     persist(agent, chat);
 }
 
+pub fn text_of(agent: &str, id: &str) -> Option<String> {
+    let map = chats().lock().ok()?;
+    let m = map.get(agent)?.messages.iter().rev().find(|m| m.id == id)?;
+    Some(m.text.clone())
+}
+
+/// `id`'s new text, persisted and pushed to the window.
+pub fn set_text(agent: &str, id: &str, text: &str) {
+    let msg = {
+        let Ok(mut map) = chats().lock() else {
+            return;
+        };
+        let Some(chat) = map.get_mut(agent) else {
+            return;
+        };
+        let Some(m) = chat.messages.iter_mut().rev().find(|m| m.id == id) else {
+            return;
+        };
+        m.text = text.to_string();
+        let msg = m.clone();
+        persist(agent, chat);
+        msg
+    };
+    emit(agent, msg);
+}
+
 /// One row per tool call. `call_id` is the CLI's id for the call: later events
 /// for the same id fill the same card in instead of stacking another row.
 pub fn push_tool(agent: &str, call_id: Option<&str>, name: &str, detail: &str) -> ChatMessage {
