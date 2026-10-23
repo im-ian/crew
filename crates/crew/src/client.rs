@@ -2,6 +2,7 @@ use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -66,6 +67,65 @@ fn answer_timeout(req: &Request) -> Option<Duration> {
 pub fn rpc(req: Request) -> anyhow::Result<Event> {
     let answer = answer_timeout(&req);
     rpc_within(req, answer)
+}
+
+/// Like `rpc`, but a dead socket is brought back first and the request is
+/// tried once more. The window polls this from `daemon_ping`. Message fetches
+/// stay on `rpc`: they run on the UI thread several times a second, and
+/// waiting out a daemon start there would freeze the window.
+///
+/// One extra try, not a loop. A daemon that cannot stay up has to surface on
+/// the banner instead of being spawned again inside the same call.
+pub fn rpc_connected(req: Request) -> anyhow::Result<Event> {
+    rpc_recovering(req, !running_as_agent(), ensure_daemon)
+}
+
+fn rpc_recovering(
+    req: Request,
+    allow_restart: bool,
+    bring_up: impl FnOnce() -> anyhow::Result<()>,
+) -> anyhow::Result<Event> {
+    let answer = answer_timeout(&req);
+    match rpc_within(req.clone(), answer) {
+        Ok(ev) => Ok(ev),
+        Err(err) if allow_restart && wants_reconnect(&req) && connection_lost(&err) => {
+            // A daemon that accepted and then dropped this one socket is still
+            // there. Starting another would unlink it (issue #25).
+            if !paths::is_socket_live() {
+                bring_up()?;
+            }
+            rpc_within(req, answer)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn wants_reconnect(req: &Request) -> bool {
+    // `stop_daemon` reaches `Shutdown` while it may already be inside
+    // `ensure_daemon`. Restarting from that failure would put the daemon back
+    // and then deadlock on the spawn lock.
+    !matches!(req, Request::Shutdown)
+}
+
+/// The socket never connected, or the daemon went away on it. A timeout is
+/// not this: the daemon accepted, and killing it would drop the turn it is in.
+fn connection_lost(err: &anyhow::Error) -> bool {
+    let top = err.to_string();
+    if top.contains("cannot connect to daemon") || top.contains("daemon closed the connection") {
+        return true;
+    }
+    err.chain().any(|cause| {
+        cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
+            matches!(
+                io.kind(),
+                std::io::ErrorKind::ConnectionRefused
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::NotConnected
+                    | std::io::ErrorKind::BrokenPipe
+            )
+        })
+    })
 }
 
 fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
@@ -196,18 +256,44 @@ fn running_as_agent() -> bool {
         .is_some()
 }
 
+/// One start at a time. The window's ping can overlap itself, and two spawns
+/// would each unlink the other's socket (issue #25).
+static SPAWN: Mutex<()> = Mutex::new(());
+
+/// A start that just failed. Pings already in flight would otherwise each
+/// spawn again, and a hot poll is five times a second.
+static SPAWN_FAILURE: Mutex<Option<(Instant, String)>> = Mutex::new(None);
+
+const SPAWN_BACKOFF: Duration = Duration::from_secs(2);
+
+fn daemon_usable() -> bool {
+    paths::is_socket_live()
+        && (paths::daemon_version_matches(env!("CARGO_PKG_VERSION")) || running_as_agent())
+}
+
+fn lock_spawn_failure() -> std::sync::MutexGuard<'static, Option<(Instant, String)>> {
+    SPAWN_FAILURE.lock().unwrap_or_else(|err| err.into_inner())
+}
+
+fn clear_spawn_failure() {
+    *lock_spawn_failure() = None;
+}
+
+fn remember_spawn_failure(message: String) {
+    *lock_spawn_failure() = Some((Instant::now(), message));
+}
+
+fn recent_spawn_failure() -> Option<anyhow::Error> {
+    match lock_spawn_failure().as_ref() {
+        Some((at, message)) if at.elapsed() < SPAWN_BACKOFF => Some(anyhow::anyhow!("{message}")),
+        _ => None,
+    }
+}
+
 pub fn ensure_daemon() -> anyhow::Result<()> {
-    if paths::is_socket_live() {
-        if paths::daemon_version_matches(env!("CARGO_PKG_VERSION")) {
-            return Ok(());
-        }
-        // A packaged update replaces Crew.app in place. Agent children must
-        // keep talking to the still-running daemon; the desktop/CLI process
-        // restarts it so the new binary takes over.
-        if running_as_agent() {
-            return Ok(());
-        }
-        let _ = stop_daemon();
+    if daemon_usable() {
+        clear_spawn_failure();
+        return Ok(());
     }
     if running_as_agent() {
         bail!(
@@ -215,6 +301,28 @@ pub fn ensure_daemon() -> anyhow::Result<()> {
             paths::socket_path().display()
         );
     }
+    let _guard = SPAWN.lock().unwrap_or_else(|err| err.into_inner());
+    if paths::is_socket_live() {
+        if paths::daemon_version_matches(env!("CARGO_PKG_VERSION")) {
+            clear_spawn_failure();
+            return Ok(());
+        }
+        // A packaged update replaces Crew.app in place. The desktop process
+        // restarts the daemon so the new binary takes over. Agents never
+        // reach this: `daemon_usable` already returned for them.
+        let _ = stop_daemon();
+    } else if let Some(err) = recent_spawn_failure() {
+        return Err(err);
+    }
+    if let Err(err) = start_daemon() {
+        remember_spawn_failure(err.to_string());
+        return Err(err);
+    }
+    clear_spawn_failure();
+    Ok(())
+}
+
+fn start_daemon() -> anyhow::Result<()> {
     paths::ensure_home()?;
     if paths::socket_path().exists() {
         paths::remove_stale_socket();
@@ -447,6 +555,8 @@ pub fn print_routines_from_config(
 
 #[cfg(test)]
 mod tests {
+    use std::io::{BufRead, Write};
+
     use super::*;
     use crate::config::Routine;
 
@@ -510,6 +620,113 @@ mod tests {
             PING_TIMEOUT < Duration::from_secs(1),
             "the window polls it every second"
         );
+    }
+
+    fn answer_pong(listener: std::os::unix::net::UnixListener) {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let mut line = String::new();
+        let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+        reader.read_line(&mut line).expect("read");
+        let pong = Event::Pong.to_line().expect("pong");
+        writeln!(stream, "{pong}").expect("write");
+    }
+
+    #[test]
+    fn a_dead_daemon_is_brought_back_for_the_same_ping() {
+        paths::testing::with_home("reconn", || {
+            paths::ensure_home().expect("home");
+            let mut started = false;
+            let ev = rpc_recovering(Request::Ping, true, || {
+                started = true;
+                let listener =
+                    std::os::unix::net::UnixListener::bind(paths::socket_path()).expect("bind");
+                thread::spawn(move || answer_pong(listener));
+                Ok(())
+            })
+            .expect("ping after restart");
+            assert!(started, "nothing was listening");
+            assert!(matches!(ev, Event::Pong), "{ev:?}");
+        });
+    }
+
+    #[test]
+    fn a_daemon_that_drops_one_socket_is_not_replaced() {
+        paths::testing::with_home("reconn-drop", || {
+            paths::ensure_home().expect("home");
+            let listener =
+                std::os::unix::net::UnixListener::bind(paths::socket_path()).expect("bind");
+            thread::spawn(move || {
+                // The failed call, then the liveness probe, then the retry.
+                for _ in 0..2 {
+                    let (stream, _) = listener.accept().expect("accept");
+                    drop(stream);
+                }
+                answer_pong(listener);
+            });
+            let mut started = false;
+            let ev = rpc_recovering(Request::Ping, true, || {
+                started = true;
+                Ok(())
+            })
+            .expect("retry on the same daemon");
+            assert!(!started, "a live socket must not be unlinked");
+            assert!(matches!(ev, Event::Pong), "{ev:?}");
+        });
+    }
+
+    #[test]
+    fn a_quiet_daemon_is_left_alone() {
+        paths::testing::with_home("reconn-quiet", || {
+            paths::ensure_home().expect("home");
+            let listener =
+                std::os::unix::net::UnixListener::bind(paths::socket_path()).expect("bind");
+            let quiet = thread::spawn(move || listener.accept().map(|(s, _)| s));
+            let mut started = false;
+            let err = rpc_recovering(Request::Ping, true, || {
+                started = true;
+                Ok(())
+            })
+            .expect_err("silence is not a dead socket");
+            assert!(!started);
+            assert!(format!("{err:#}").contains("did not answer"), "{err:#}");
+            drop(quiet.join().expect("accept"));
+        });
+    }
+
+    #[test]
+    fn stopping_does_not_start_another_daemon() {
+        paths::testing::with_home("reconn-stop", || {
+            paths::ensure_home().expect("home");
+            let mut started = false;
+            let err = rpc_recovering(Request::Shutdown, true, || {
+                started = true;
+                Ok(())
+            })
+            .expect_err("nothing is listening");
+            assert!(!started);
+            assert!(format!("{err:#}").contains("cannot connect"), "{err:#}");
+        });
+    }
+
+    #[test]
+    fn a_timeout_is_not_a_lost_connection() {
+        let hung = anyhow::anyhow!("daemon took the connection but did not answer (/tmp/x)");
+        assert!(!connection_lost(&hung));
+        let timed = anyhow::Error::from(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "timed out",
+        ));
+        assert!(!connection_lost(&timed));
+        assert!(connection_lost(&anyhow::anyhow!(
+            "cannot connect to daemon at /tmp/x"
+        )));
+        assert!(connection_lost(&anyhow::anyhow!(
+            "daemon closed the connection"
+        )));
+        assert!(connection_lost(&anyhow::Error::from(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "pipe",
+        ))));
     }
 
     fn routine(name: &str) -> Routine {
