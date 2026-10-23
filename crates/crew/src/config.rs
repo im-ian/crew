@@ -288,11 +288,14 @@ pub fn split_cmd(input: &str) -> anyhow::Result<Vec<String>> {
     while let Some(c) = chars.next() {
         match quote {
             Some(q) if c == q => quote = None,
+            // Single quotes keep a backslash. A typed path like 'C:\tools\ai' must survive.
+            Some('\'') => {
+                in_arg = true;
+                cur.push(c);
+            }
             Some(_) if c == '\\' => {
                 in_arg = true;
-                if let Some(next) = chars.next() {
-                    cur.push(next);
-                }
+                cur.push(chars.next().unwrap_or('\\'));
             }
             Some(_) => {
                 in_arg = true;
@@ -300,9 +303,7 @@ pub fn split_cmd(input: &str) -> anyhow::Result<Vec<String>> {
             }
             None if c == '\\' => {
                 in_arg = true;
-                if let Some(next) = chars.next() {
-                    cur.push(next);
-                }
+                cur.push(chars.next().unwrap_or('\\'));
             }
             None if c == '"' || c == '\'' => {
                 in_arg = true;
@@ -1741,6 +1742,15 @@ mod tests {
         );
         assert!(split_cmd("   ").is_err());
         assert!(split_cmd("\"open").is_err());
+        assert_eq!(
+            split_cmd(r"'C:\tools\ai'").unwrap(),
+            vec![r"C:\tools\ai".to_string()]
+        );
+        assert_eq!(
+            split_cmd(r#""C:\\tools\\ai""#).unwrap(),
+            vec![r"C:\tools\ai".to_string()]
+        );
+        assert_eq!(split_cmd(r"my-ai foo\").unwrap(), vec!["my-ai", r"foo\"]);
         assert!(!headless_cmd(true, &["grok".into()]));
         assert!(headless_cmd(true, &["my-ai".into()]));
         assert!(!headless_cmd(false, &["my-ai".into()]));

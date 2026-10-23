@@ -80,7 +80,7 @@ export function formatCmd(cmd?: string[] | null): string {
 }
 
 function quoteArg(arg: string): string {
-  if (arg === "" || /[\s"']/.test(arg)) {
+  if (arg === "" || /[\s"'\\]/.test(arg)) {
     return `"${arg.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
   }
   return arg;

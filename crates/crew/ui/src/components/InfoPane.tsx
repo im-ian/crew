@@ -137,6 +137,14 @@ export function InfoPane({
                 setCommand("");
                 return;
               }
+              // Reselecting the bot's CLI cancels a Command draft. set_cli
+              // would succeed without changing anything, and the empty model
+              // would then be saved over the real one.
+              if (next === fromAgent) {
+                setDraftCli(null);
+                setCommand(formatCmd(agent?.cmd));
+                return;
+              }
               if (switching.current) return;
               switching.current = true;
               try {
@@ -153,7 +161,11 @@ export function InfoPane({
             onCommand={setCommand}
             onCommandCommit={async (raw) => {
               const trimmed = raw.trim();
-              if (!trimmed || trimmed === formatCmd(agent?.cmd).trim()) return;
+              if (!trimmed || trimmed === formatCmd(agent?.cmd).trim()) {
+                setDraftCli(null);
+                setCommand(formatCmd(agent?.cmd));
+                return;
+              }
               if (switching.current) return;
               switching.current = true;
               try {

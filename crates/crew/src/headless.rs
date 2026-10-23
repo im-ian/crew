@@ -269,6 +269,7 @@ pub fn kick(
     cfg: AgentConfig,
     roster: Vec<AgentConfig>,
     prompt: String,
+    skip_rows: Vec<String>,
 ) -> anyhow::Result<()> {
     let generation = {
         let mut inner = session.inner.lock().expect("headless inner");
@@ -285,7 +286,7 @@ pub fn kick(
     let thread_session = session.clone();
     if let Err(err) = std::thread::Builder::new()
         .name(format!("crew-turn-{}", session.id))
-        .spawn(move || run_turn(thread_session, cfg, roster, prompt, generation))
+        .spawn(move || run_turn(thread_session, cfg, roster, prompt, generation, skip_rows))
     {
         if let Ok(mut inner) = session.inner.lock() {
             if inner.generation == generation {
@@ -306,6 +307,7 @@ fn run_turn(
     roster: Vec<AgentConfig>,
     prompt: String,
     generation: u64,
+    skip_rows: Vec<String>,
 ) {
     {
         let inner = match session.inner.lock() {
@@ -377,7 +379,7 @@ fn run_turn(
         None => prompt,
     };
     let prompt = if cfg.prompt_mode() {
-        match crate::transcript::prior_recap(&session.id) {
+        match crate::transcript::prior_recap_excluding(&session.id, &skip_rows) {
             Some(prior) => with_prior(&prior, &prompt),
             None => prompt,
         }
@@ -579,29 +581,34 @@ fn spawn_and_stream(
             continue;
         }
         let mut turn_end = false;
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
-            for card in crate::tool_card::from_events(&v) {
-                if cli == CliKind::Claude && is_subagent_call(&v, &card.name) {
-                    continue;
-                }
-                crate::transcript::push_tool(
-                    &session.id,
-                    card.id.as_deref(),
-                    &card.name,
-                    &card.detail,
-                );
-            }
-            if cli == CliKind::Claude {
-                for note in claude_subagent_notes(&v, &mut state) {
-                    crate::transcript::push_subagent(
+        // grok/claude/codex stream every reply as JSON, so a bare line there is
+        // CLI chatter and must never become the answer. A text CLI's stdout is
+        // the reply, so a line that starts with `{` or `[` stays.
+        if cli != CliKind::Other {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+                for card in crate::tool_card::from_events(&v) {
+                    if cli == CliKind::Claude && is_subagent_call(&v, &card.name) {
+                        continue;
+                    }
+                    crate::transcript::push_tool(
                         &session.id,
-                        &note.key,
-                        &note.from,
-                        &note.text,
+                        card.id.as_deref(),
+                        &card.name,
+                        &card.detail,
                     );
                 }
+                if cli == CliKind::Claude {
+                    for note in claude_subagent_notes(&v, &mut state) {
+                        crate::transcript::push_subagent(
+                            &session.id,
+                            &note.key,
+                            &note.from,
+                            &note.text,
+                        );
+                    }
+                }
+                turn_end = is_turn_end(cli, &v);
             }
-            turn_end = is_turn_end(cli, &v);
         }
         if let Some(chunk) = ingest_line(cli, &line, &mut state) {
             feed_text(cli, session, &chunk);
@@ -609,13 +616,11 @@ fn spawn_and_stream(
                 inner.last_output = Instant::now();
                 inner.seq += 1;
             }
-        } else if cli == CliKind::Other && !line.trim().is_empty() && !looks_json(&line) {
-            // grok/claude/codex stream every reply as JSON, so a bare line there is
-            // CLI chatter (MCP warnings, banners) and must never become the answer.
+        } else if let Some(line) = other_reply_line(cli, &line) {
             if !plain.is_empty() {
                 plain.push('\n');
             }
-            plain.push_str(&line);
+            plain.push_str(line);
         }
         if let Some(id) = state.session_id.as_ref() {
             if let Ok(mut inner) = session.inner.lock() {
@@ -757,9 +762,22 @@ struct ParseState {
     claude_subagents: HashMap<String, String>,
 }
 
+fn other_reply_line(cli: CliKind, line: &str) -> Option<&str> {
+    if cli != CliKind::Other || line.trim().is_empty() {
+        None
+    } else {
+        Some(line)
+    }
+}
+
 fn ingest_line(cli: CliKind, line: &str, state: &mut ParseState) -> Option<String> {
     let line = line.trim();
     if line.is_empty() {
+        return None;
+    }
+    // A text CLI's stdout is the answer, not a protocol, so a JSON line must
+    // not become a session id.
+    if cli == CliKind::Other {
         return None;
     }
     let v: Value = serde_json::from_str(line).ok()?;
@@ -1186,11 +1204,6 @@ fn json_error(v: &Value) -> Option<String> {
     None
 }
 
-fn looks_json(line: &str) -> bool {
-    let t = line.trim_start();
-    t.starts_with('{') || t.starts_with('[')
-}
-
 pub fn strip_tui_noise(input: &str) -> String {
     let mut out = String::new();
     for line in input.replace('\r', "\n").lines() {
@@ -1291,6 +1304,20 @@ mod tests {
         assert!(!end(CliKind::Codex, r#"{"type":"turn.failed"}"#));
         assert!(!end(CliKind::Claude, r#"{"type":"assistant"}"#));
         assert!(!end(CliKind::Other, r#"{"type":"end"}"#));
+    }
+
+    #[test]
+    fn other_keeps_lines_that_look_like_json() {
+        assert_eq!(other_reply_line(CliKind::Other, "[see](url)"), Some("[see](url)"));
+        assert_eq!(
+            other_reply_line(CliKind::Other, r#"{"a":1}"#),
+            Some(r#"{"a":1}"#)
+        );
+        assert_eq!(other_reply_line(CliKind::Other, "  "), None);
+        assert_eq!(other_reply_line(CliKind::Grok, "hello"), None);
+        let mut state = ParseState::default();
+        assert!(ingest_line(CliKind::Other, r#"{"session_id":"abc"}"#, &mut state).is_none());
+        assert!(state.session_id.is_none());
     }
 
     #[test]

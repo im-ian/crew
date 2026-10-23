@@ -661,6 +661,7 @@ fn start_delivery(
     newline: bool,
     origin: TurnOrigin,
     msg_id: Option<&str>,
+    joined_ids: &[String],
     then: &mut VecDeque<SerialJob>,
 ) -> anyhow::Result<()> {
     let id = start.0.clone();
@@ -687,11 +688,30 @@ fn start_delivery(
     } else {
         crate::protocol::attach_after_marker(text, &render_handoffs(&pending))
     };
+    // These rows are already the prompt. A prompt-mode CLI also reads the
+    // live chat, and they must not be in both.
+    let mut skip_rows: Vec<String> = joined_ids
+        .iter()
+        .filter(|id| !id.is_empty())
+        .cloned()
+        .collect();
+    if let Some(id) = msg_id {
+        if !id.is_empty() && !skip_rows.iter().any(|row| row == id) {
+            skip_rows.push(id.to_string());
+        }
+    }
+    for handoff in &pending {
+        if let Some(row) = &handoff.row {
+            if !skip_rows.iter().any(|id| id == row) {
+                skip_rows.push(row.clone());
+            }
+        }
+    }
     let prev_peer = crate::transcript::set_peer(id, asked_by(&origin, id));
     let prev_origin = get_origin(id);
     set_origin(id, origin);
     let epoch = serial_epoch(id);
-    let started = deliver(id, &text, newline);
+    let started = deliver(id, &text, newline, &skip_rows);
     match &started {
         Ok(()) => follow_turn(id, epoch, std::mem::take(then)),
         Err(_) => {
@@ -771,6 +791,7 @@ fn submit_delivery_then(
                 newline,
                 origin.clone(),
                 msg_id.as_deref(),
+                &[],
                 then,
             ) {
                 Err(err) if is_busy_err(&err) => {}
@@ -797,7 +818,15 @@ fn steer_delivery(
 ) -> anyhow::Result<()> {
     if !agent_busy(id)? {
         if let Some(start) = claim_start(id) {
-            match start_delivery(start, text, true, TurnOrigin::user(), Some(&msg_id), then) {
+            match start_delivery(
+                start,
+                text,
+                true,
+                TurnOrigin::user(),
+                Some(&msg_id),
+                &[],
+                then,
+            ) {
                 Err(err) if is_busy_err(&err) => {}
                 started => return started,
             }
@@ -879,12 +908,21 @@ fn pump_inbox_inner(id: &str) {
         .collect::<Vec<_>>()
         .join("\n\n");
     let (newline, origin, msg_id) = (first.newline, first.origin.clone(), first.msg_id.clone());
+    let joined_ids: Vec<String> = run.iter().filter_map(|item| item.msg_id.clone()).collect();
     let named: Vec<usize> = run.iter().map(|item| item.then.len()).collect();
     let mut then: VecDeque<SerialJob> = run
         .iter_mut()
         .flat_map(|item| std::mem::take(&mut item.then))
         .collect();
-    match start_delivery(start, &text, newline, origin, msg_id.as_deref(), &mut then) {
+    match start_delivery(
+        start,
+        &text,
+        newline,
+        origin,
+        msg_id.as_deref(),
+        &joined_ids,
+        &mut then,
+    ) {
         Ok(()) => {
             for item in &run {
                 unmark(id, item);
@@ -2473,7 +2511,7 @@ fn tell_agent_origin(
     Ok(())
 }
 
-fn deliver(id: &str, text: &str, newline: bool) -> anyhow::Result<()> {
+fn deliver(id: &str, text: &str, newline: bool, skip_rows: &[String]) -> anyhow::Result<()> {
     let live = {
         let map = agents().lock().expect("agents mutex");
         map.get(id)
@@ -2491,7 +2529,7 @@ fn deliver(id: &str, text: &str, newline: bool) -> anyhow::Result<()> {
         LiveAgent::Headless(session) => {
             let cfg = clone_agent_cfg(id)?;
             let roster = roster_vec();
-            headless::kick(session, cfg, roster, text.to_string())
+            headless::kick(session, cfg, roster, text.to_string(), skip_rows.to_vec())
         }
     }
 }
@@ -3435,6 +3473,7 @@ mod daemon_tests {
                 true,
                 TurnOrigin::user(),
                 Some(&tell),
+                &[],
                 &mut VecDeque::new()
             )
             .is_err());
@@ -4633,6 +4672,7 @@ exec sleep 1"#,
             true,
             TurnOrigin::user(),
             None,
+            &[],
             &mut VecDeque::new()
         )
         .is_err());

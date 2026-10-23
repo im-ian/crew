@@ -74,6 +74,7 @@ describe("cliFromCmd", () => {
     expect(cliFromCmd(["cat"])).toBeNull();
     expect(cliFromCmd(["my-ai"], true)).toBe("custom");
     expect(formatCmd(["my-ai", "say hi"])).toBe('my-ai "say hi"');
+    expect(formatCmd(["my-ai", "C:\\tools\\ai"])).toBe('my-ai "C:\\\\tools\\\\ai"');
   });
 });
 
