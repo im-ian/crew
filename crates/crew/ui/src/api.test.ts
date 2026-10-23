@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "./api";
+import { api, newestOnly } from "./api";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -58,5 +58,33 @@ describe("api.listModels", () => {
     await api.listModels("grok");
     await api.listModels("grok");
     expect(mocks.invoke).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("newestOnly", () => {
+  it("drops an answer that lands after a later call's", async () => {
+    const pending: Array<(v: string) => void> = [];
+    const fetch = newestOnly(
+      () => new Promise<string>((resolve) => pending.push(resolve)),
+    );
+    const older = fetch();
+    const newer = fetch();
+    pending[1]("new");
+    expect(await newer).toBe("new");
+    pending[0]("old");
+    expect(await older).toBeNull();
+  });
+
+  it("keeps an older answer that lands first", async () => {
+    const pending: Array<(v: string) => void> = [];
+    const fetch = newestOnly(
+      () => new Promise<string>((resolve) => pending.push(resolve)),
+    );
+    const older = fetch();
+    const newer = fetch();
+    pending[0]("old");
+    expect(await older).toBe("old");
+    pending[1]("new");
+    expect(await newer).toBe("new");
   });
 });
