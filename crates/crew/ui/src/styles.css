@@ -300,6 +300,19 @@ html.rail-resizing * {
   overscroll-behavior: contain;
   padding: var(--rail-pad);
   min-height: 0;
+  /* WebKit still selects the text inside a `user-select: none` button,
+     so every descendant has to opt out. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+.rail-lists * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+.rail-lists input,
+.rail-lists textarea {
+  -webkit-user-select: text;
+  user-select: text;
 }
 .rail-foot {
   flex-shrink: 0;
@@ -513,6 +526,7 @@ button.linkish {
 html.rail-dragging,
 html.rail-dragging * {
   cursor: grabbing !important;
+  -webkit-user-select: none !important;
   user-select: none !important;
 }
 html.rail-dragging {
@@ -2176,6 +2190,12 @@ button.choice-option:disabled {
   padding: 0 var(--space-8) var(--space-8);
   max-height: 220px;
   overflow: auto;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.search-hits * {
+  -webkit-user-select: none;
+  user-select: none;
 }
 .search-hit {
   display: flex;
