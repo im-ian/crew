@@ -218,18 +218,23 @@ function PeekBubble({
                     ? " stack-last"
                     : " stack-mid"
                 : "";
+            const copy = part.trim();
             return (
-              <MdBody
+              <div
                 key={m.id + "-" + i}
-                className={"bubble md incoming" + stack}
-                text={part}
-                defs={defs}
-                agents={agents}
-                baseDir={agent?.cwd || undefined}
-              />
+                className={"bubble-row" + (copy ? " has-actions" : "")}
+              >
+                <MdBody
+                  className={"bubble md incoming" + stack}
+                  text={part}
+                  defs={defs}
+                  agents={agents}
+                  baseDir={agent?.cwd || undefined}
+                />
+                {copy ? <MsgActions copy={copy} ts={m.ts} /> : null}
+              </div>
             );
           })}
-          <MsgActions copy={m.text.trim()} ts={m.ts} />
         </div>
       </div>
     </div>
