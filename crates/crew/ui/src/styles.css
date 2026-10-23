@@ -1548,6 +1548,27 @@ button.channel-who:hover {
 .me-msg .msg-actions::before {
   left: 100%;
 }
+/* The chip hangs outside the box that owns the hover. This strip is that
+   whole side, tall as the message, so the pointer can reach the chip. */
+.bubble-stack::after,
+.xfer-chip::after,
+.xfer::after,
+.me-msg::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 16rem;
+  z-index: 1;
+}
+.bubble-stack::after,
+.xfer-chip::after,
+.xfer::after {
+  left: 100%;
+}
+.me-msg::after {
+  right: 100%;
+}
 .msg-time {
   display: inline-flex;
   align-items: center;
