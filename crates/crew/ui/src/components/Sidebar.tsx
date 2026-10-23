@@ -534,7 +534,9 @@ export function Sidebar({
     locate: (x: number, y: number) => RailDrop | null,
   ) {
     if (e.button !== 0 || searching) return;
-    if ((e.target as HTMLElement).closest("input, textarea, a")) return;
+    // A press on the label hits the text node, which has no closest().
+    const hit = e.target instanceof Element ? e.target : e.currentTarget;
+    if (hit.closest("input, textarea, a")) return;
     const rowEl = e.currentTarget;
     const originX = e.clientX;
     const originY = e.clientY;
