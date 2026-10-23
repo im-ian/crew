@@ -112,6 +112,9 @@ export const KO = {
   "composer.placeholder.generic": "메시지",
   "composer.replyTo": "{who}에게 답장",
   "composer.replyCancel": "답장 취소",
+  "composer.editing": "메시지 수정 중",
+  "composer.editCancel": "수정 취소",
+  "composer.editSave": "수정 저장",
 
   "thread.jumpBottom": "맨 아래로",
   "thread.startChat": "메시지를 보내 대화를 시작하세요",
@@ -376,6 +379,9 @@ export const EN: { [K in MessageKey]: string } = {
   "composer.placeholder.generic": "Message",
   "composer.replyTo": "Replying to {who}",
   "composer.replyCancel": "Cancel reply",
+  "composer.editing": "Editing message",
+  "composer.editCancel": "Cancel edit",
+  "composer.editSave": "Save edit",
 
   "thread.jumpBottom": "Jump to bottom",
   "thread.startChat": "Send a message to start the chat",

@@ -80,7 +80,7 @@ type Props = {
   onApprove?: (allow: boolean, agentId?: string) => void;
   /** Take back the user's own message while it waits for the bot. */
   onCancelQueued?: (messageId: string) => void;
-  /** Take it back into the composer to be changed and sent again. */
+  /** Change it in the composer; it keeps its place in line. */
   onEditQueued?: (messageId: string, text: string, reply: ReplyTarget | null) => void;
   onAnswerChoice?: (
     agentId: string,

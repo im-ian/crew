@@ -27,6 +27,8 @@ export const api = {
   stopAgent: (agent: string) => invoke<void>("stop_agent", { agent }),
   cancelQueued: (agent: string, messageId: string) =>
     invoke<void>("cancel_queued", { agent, messageId }),
+  editQueued: (agent: string, messageId: string, text: string) =>
+    invoke<void>("edit_queued", { agent, messageId, text }),
   approveAgent: (agent: string, allow: boolean) =>
     invoke<void>("approve_agent", { agent, allow }),
   answerChoice: (args: {

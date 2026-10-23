@@ -280,6 +280,9 @@ export function App() {
           onSelectAgent={crew.selectAgent}
           onApprove={(allow, id) => void crew.approveAgent(allow, id)}
           onCancelQueued={(id) => void crew.cancelQueued(id)}
+          onEditQueued={(id, text, reply) =>
+            composerRef.current?.edit(id, text, reply)
+          }
           onAnswerChoice={(agentId, messageId, answers, values, closed) =>
             crew.answerChoice(agentId, messageId, answers, values, closed)
           }
@@ -299,6 +302,7 @@ export function App() {
           selectedKind={crew.selectedKind}
           placeholder={crew.placeholder}
           onSend={crew.onSend}
+          onEdit={crew.editQueued}
           onJump={crew.highlightMessage}
           busy={
             crew.currentAgent?.status === "working" ||

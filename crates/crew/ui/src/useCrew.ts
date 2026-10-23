@@ -419,6 +419,20 @@ export function useCrew() {
     }
   }
 
+  /** Whether the edit landed before the message went out. */
+  async function editQueued(messageId: string, raw: string): Promise<boolean> {
+    const { id } = selectedRef.current;
+    if (!id) return false;
+    try {
+      await api.editQueued(id, messageId, raw);
+    } catch (err) {
+      showError(err);
+      return false;
+    }
+    void refreshMessages().catch(showError);
+    return true;
+  }
+
   async function approveAgent(allow: boolean, agentId?: string) {
     const id =
       agentId ||
@@ -944,6 +958,7 @@ export function useCrew() {
     onSend,
     stopAgent,
     cancelQueued,
+    editQueued,
     approveAgent,
     answerChoice,
     saveAgentInfo,
