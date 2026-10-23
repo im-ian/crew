@@ -304,6 +304,7 @@ export function App() {
             crew.currentAgent?.status === "working" ||
             crew.currentAgent?.status === "blocked"
           }
+          canSteer={crew.currentAgent?.status === "working"}
           onStop={() => {
             void crew.stopAgent();
           }}

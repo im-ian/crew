@@ -22,8 +22,8 @@ export function errMsg(err: unknown): string {
 
 export const api = {
   listAgents: () => invoke<AgentInfo[]>("list_agents"),
-  sendMessage: (agent: string, text: string) =>
-    invoke<void>("send_message", { agent, text }),
+  sendMessage: (agent: string, text: string, steer = false) =>
+    invoke<void>("send_message", { agent, text, steer }),
   stopAgent: (agent: string) => invoke<void>("stop_agent", { agent }),
   approveAgent: (agent: string, allow: boolean) =>
     invoke<void>("approve_agent", { agent, allow }),

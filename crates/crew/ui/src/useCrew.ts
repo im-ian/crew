@@ -374,11 +374,11 @@ export function useCrew() {
     setMessagesFor(id);
   }, []);
 
-  async function onSend(raw: string) {
+  async function onSend(raw: string, steer = false) {
     const { id: sel } = selectedRef.current;
     if (!sel) return;
     try {
-      await api.sendMessage(sel, raw);
+      await api.sendMessage(sel, raw, steer);
       await refreshMessages();
     } catch (err) {
       showError(err);

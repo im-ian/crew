@@ -461,6 +461,13 @@ fn set_live_status(id: &str, status: AgentStatus) {
 }
 
 fn interrupt_turn(id: &str) -> anyhow::Result<()> {
+    halt_turn(id)?;
+    pump_inbox(id);
+    Ok(())
+}
+
+/// `interrupt_turn` without starting what waits, for a steer that goes first.
+fn halt_turn(id: &str) -> anyhow::Result<()> {
     // A stop ends the chain. The members still waiting must not answer it, and
     // the bot that asked is not woken with what was said before the stop.
     clear_serial_after(id);
@@ -480,7 +487,6 @@ fn interrupt_turn(id: &str) -> anyhow::Result<()> {
     fail_asks(&closed, "interrupted");
     crate::transcript::drop_pending_approval(id);
     emit_agent_frame(id);
-    pump_inbox(id);
     Ok(())
 }
 
@@ -619,7 +625,12 @@ fn answer_choice(
         if closed {
             return Ok(());
         }
-        return send_agent_shown(agent, &crate::choice::format_answer_masked(&updated), &text);
+        return send_agent_shown(
+            agent,
+            &crate::choice::format_answer_masked(&updated),
+            &text,
+            false,
+        );
     }
     if closed {
         return Ok(());
@@ -629,7 +640,12 @@ fn answer_choice(
         anyhow::bail!("nothing selected");
     }
     // The picker is for the human. Continue only the bot that asked.
-    send_agent_shown(agent, &crate::choice::format_answer_masked(&updated), &text)
+    send_agent_shown(
+        agent,
+        &crate::choice::format_answer_masked(&updated),
+        &text,
+        false,
+    )
 }
 
 /// `/compact`, `/context`: a CLI command, which reads as one only when the
@@ -1771,12 +1787,14 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             }
             out
         }
-        Request::Send { agent, text } => match send_agent(&agent, &text) {
-            Ok(()) => vec![Event::Ok],
-            Err(err) => vec![Event::Error {
-                message: err.to_string(),
-            }],
-        },
+        Request::Send { agent, text, steer } => {
+            match send_agent_shown(&agent, &text, &text, steer) {
+                Ok(()) => vec![Event::Ok],
+                Err(err) => vec![Event::Error {
+                    message: err.to_string(),
+                }],
+            }
+        }
         Request::Interrupt { agent } => match interrupt_turn(&agent) {
             Ok(()) => vec![Event::Ok],
             Err(err) => vec![Event::Error {
@@ -2058,15 +2076,15 @@ fn messages_agent(id: &str) -> anyhow::Result<Event> {
     })
 }
 
-fn apply_user_interrupt(id: &str, text: &str) -> anyhow::Result<bool> {
+fn apply_user_interrupt(id: &str, text: &str, steer: bool) -> anyhow::Result<bool> {
     let status = live_status(id)?;
-    match crate::interrupt::member_turn_action(true, status, text) {
+    match crate::interrupt::member_turn_action(true, status, text, steer) {
         crate::interrupt::UserSendAction::Stop => {
             interrupt_turn(id)?;
             Ok(false)
         }
         crate::interrupt::UserSendAction::Redirect => {
-            interrupt_turn(id)?;
+            halt_turn(id)?;
             Ok(true)
         }
         crate::interrupt::UserSendAction::Start => Ok(true),
@@ -2074,11 +2092,13 @@ fn apply_user_interrupt(id: &str, text: &str) -> anyhow::Result<bool> {
 }
 
 fn send_agent(id: &str, text: &str) -> anyhow::Result<()> {
-    send_agent_shown(id, text, text)
+    send_agent_shown(id, text, text, false)
 }
 
-fn send_agent_shown(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
-    let proceed = apply_user_interrupt(id, text)?;
+/// `steer` stops a turn under way and starts this message in its place, ahead
+/// of what was waiting. Without it, the message waits its turn.
+fn send_agent_shown(id: &str, shown: &str, text: &str, steer: bool) -> anyhow::Result<()> {
+    let proceed = apply_user_interrupt(id, text, steer)?;
     if !proceed {
         crate::transcript::push_user(id, "user", shown);
         return Ok(());
@@ -3685,6 +3705,38 @@ exec sleep 5"#,
                 asked.elapsed() < Duration::from_millis(500),
                 "the stopped turn held the bot"
             );
+            interrupt_turn(&bot).unwrap();
+            wait_idle(&bot);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A steer stops the turn under way and starts at once, ahead of a message
+    /// that was already waiting. That one keeps its place for after.
+    #[test]
+    fn a_steer_goes_ahead_of_the_queue() {
+        paths::testing::with_home("steer", || {
+            let bot = test_id("steer");
+            let prompt = paths::home_dir().join("prompt");
+            let asked = |word: &str| fs::read_to_string(&prompt).is_ok_and(|p| p.contains(word));
+            fake_bot_running(&bot, "exec sleep 5");
+            send_agent(&bot, "first-turn").unwrap();
+            eventually(
+                Duration::from_secs(5),
+                "the first turn never started",
+                || asked("first-turn"),
+            );
+            send_agent(&bot, "waiting-turn").unwrap();
+            send_agent_shown(&bot, "steered-turn", "steered-turn", true).unwrap();
+            eventually(Duration::from_secs(3), "the steer did not start", || {
+                asked("steered-turn")
+            });
+            let waiting = crate::transcript::messages(&bot)
+                .into_iter()
+                .find(|m| m.text == "waiting-turn")
+                .unwrap();
+            assert!(waiting.queued, "the waiting message lost its place");
+            clear_inbox(&bot);
             interrupt_turn(&bot).unwrap();
             wait_idle(&bot);
             remove_agent(&bot).unwrap();

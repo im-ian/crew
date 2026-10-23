@@ -268,7 +268,11 @@ fn run() -> anyhow::Result<()> {
         Some(Cmd::Send { agent, message }) => {
             client::ensure_daemon()?;
             let text = message.join(" ");
-            client::print_event(client::rpc(Request::Send { agent, text })?)
+            client::print_event(client::rpc(Request::Send {
+                agent,
+                text,
+                steer: false,
+            })?)
         }
         Some(Cmd::Tell { to, from, message }) => run_tell(to, from, message),
         Some(Cmd::Ask {

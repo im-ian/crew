@@ -5,7 +5,8 @@ use crate::protocol::AgentStatus;
 pub enum UserSendAction {
     /// Agent is idle (or blocked waiting on us): start a new turn.
     Start,
-    /// Agent is working: kill the in-flight turn, then start this prompt.
+    /// Agent is working and the user steered: kill the in-flight turn, then
+    /// start this prompt ahead of what was waiting.
     Redirect,
     /// Explicit stop: end the in-flight turn, do not start a new one.
     Stop,
@@ -32,19 +33,29 @@ pub fn is_stop_command(text: &str) -> bool {
     )
 }
 
-pub fn user_send_action(_status: AgentStatus, text: &str) -> UserSendAction {
+pub fn user_send_action(status: AgentStatus, text: &str, steer: bool) -> UserSendAction {
     if is_stop_command(text) {
         return UserSendAction::Stop;
     }
-    // A follow-up while working is queued by submit_delivery, not a redirect.
-    UserSendAction::Start
+    // A follow-up while working is queued by submit_delivery, unless steered.
+    if steer && status == AgentStatus::Working {
+        UserSendAction::Redirect
+    } else {
+        UserSendAction::Start
+    }
 }
 
-/// A user follow-up queues if the bot is busy. A bot-originated post also
-/// enqueues. Explicit stop phrases end the in-flight turn.
-pub fn member_turn_action(from_user: bool, status: AgentStatus, text: &str) -> UserSendAction {
+/// A user follow-up queues if the bot is busy, or cuts in when steered. A
+/// bot-originated post always enqueues. Explicit stop phrases end the
+/// in-flight turn.
+pub fn member_turn_action(
+    from_user: bool,
+    status: AgentStatus,
+    text: &str,
+    steer: bool,
+) -> UserSendAction {
     if from_user {
-        user_send_action(status, text)
+        user_send_action(status, text, steer)
     } else {
         UserSendAction::Start
     }
@@ -90,51 +101,75 @@ mod tests {
     #[test]
     fn stop_vs_queue_vs_redirect() {
         assert_eq!(
-            user_send_action(AgentStatus::Working, "hello"),
+            user_send_action(AgentStatus::Working, "hello", false),
             UserSendAction::Start
         );
         assert_eq!(
-            user_send_action(AgentStatus::Idle, "hello"),
+            user_send_action(AgentStatus::Idle, "hello", false),
             UserSendAction::Start
         );
         assert_eq!(
-            user_send_action(AgentStatus::Blocked, "continue"),
+            user_send_action(AgentStatus::Blocked, "continue", false),
             UserSendAction::Start
         );
         assert_eq!(
-            user_send_action(AgentStatus::Working, "stop now"),
+            user_send_action(AgentStatus::Working, "stop now", false),
             UserSendAction::Stop
         );
         assert_eq!(
-            user_send_action(AgentStatus::Idle, "멈춰"),
+            user_send_action(AgentStatus::Idle, "멈춰", false),
             UserSendAction::Stop
         );
         assert_eq!(
-            user_send_action(AgentStatus::Working, "don't stop"),
+            user_send_action(AgentStatus::Working, "don't stop", false),
             UserSendAction::Start
         );
         assert_eq!(
-            user_send_action(AgentStatus::Working, "Stop."),
+            user_send_action(AgentStatus::Working, "Stop.", false),
             UserSendAction::Stop
+        );
+    }
+
+    #[test]
+    fn a_steer_redirects_only_a_working_bot() {
+        assert_eq!(
+            user_send_action(AgentStatus::Working, "do this instead", true),
+            UserSendAction::Redirect
+        );
+        assert_eq!(
+            user_send_action(AgentStatus::Idle, "hello", true),
+            UserSendAction::Start
+        );
+        assert_eq!(
+            user_send_action(AgentStatus::Blocked, "continue", true),
+            UserSendAction::Start
+        );
+        assert_eq!(
+            user_send_action(AgentStatus::Working, "멈춰", true),
+            UserSendAction::Stop
+        );
+        assert_eq!(
+            member_turn_action(false, AgentStatus::Working, "follow up", true),
+            UserSendAction::Start
         );
     }
 
     #[test]
     fn user_send_queues_working_member() {
         assert_eq!(
-            member_turn_action(true, AgentStatus::Working, "follow up"),
+            member_turn_action(true, AgentStatus::Working, "follow up", false),
             UserSendAction::Start
         );
         assert_eq!(
-            member_turn_action(true, AgentStatus::Working, "stop now"),
+            member_turn_action(true, AgentStatus::Working, "stop now", false),
             UserSendAction::Stop
         );
         assert_eq!(
-            member_turn_action(false, AgentStatus::Working, "follow up"),
+            member_turn_action(false, AgentStatus::Working, "follow up", false),
             UserSendAction::Start
         );
         assert_eq!(
-            member_turn_action(true, AgentStatus::Idle, "hello"),
+            member_turn_action(true, AgentStatus::Idle, "hello", false),
             UserSendAction::Start
         );
     }
