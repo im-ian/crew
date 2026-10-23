@@ -518,7 +518,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           role="textbox"
           aria-multiline="true"
           data-placeholder={
-            busy ? t("composer.busyQueue") : placeholder
+            busy ? t("composer.busy") : placeholder
           }
           onInput={() => {
             refreshEmpty();
