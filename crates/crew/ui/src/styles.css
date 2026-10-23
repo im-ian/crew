@@ -1571,6 +1571,19 @@ button.channel-who:hover {
 .row.me .queue-wait {
   margin-right: var(--space-4);
 }
+.queue-cancel {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.queue-cancel:hover,
+.queue-cancel:focus-visible {
+  color: var(--ink);
+  text-decoration: underline;
+}
 .queue-dots {
   display: inline-flex;
   align-items: center;

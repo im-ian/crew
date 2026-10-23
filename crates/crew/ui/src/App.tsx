@@ -281,6 +281,7 @@ export function App() {
           }
           onSelectAgent={crew.selectAgent}
           onApprove={(allow, id) => void crew.approveAgent(allow, id)}
+          onCancelQueued={(id) => void crew.cancelQueued(id)}
           onAnswerChoice={(agentId, messageId, answers, values, closed) =>
             crew.answerChoice(agentId, messageId, answers, values, closed)
           }

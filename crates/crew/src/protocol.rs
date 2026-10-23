@@ -141,6 +141,11 @@ pub enum Request {
     Interrupt {
         agent: String,
     },
+    /// Take back a message still waiting for the bot: it never goes out.
+    CancelQueued {
+        agent: String,
+        message_id: String,
+    },
     /// Allow-once or deny a pending judgment card.
     Approve {
         agent: String,

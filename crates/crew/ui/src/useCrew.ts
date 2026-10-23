@@ -91,6 +91,7 @@ export function useCrew() {
   groupsRef.current = { groups, ungrouped };
   const groupsLoaded = useRef(false);
   const toastTimer = useRef<number | null>(null);
+  const cancelling = useRef(new Set<string>());
 
   const currentAgent = useMemo(() => {
     if (selectedKind !== "agent" || !selected) return null;
@@ -393,6 +394,21 @@ export function useCrew() {
       await refreshMessages();
     } catch (err) {
       showError(err);
+    }
+  }
+
+  async function cancelQueued(messageId: string) {
+    const { id } = selectedRef.current;
+    // A double click would otherwise report the first cancel's row as gone.
+    if (!id || cancelling.current.has(messageId)) return;
+    cancelling.current.add(messageId);
+    try {
+      await api.cancelQueued(id, messageId);
+      await refreshMessages();
+    } catch (err) {
+      showError(err);
+    } finally {
+      cancelling.current.delete(messageId);
     }
   }
 
@@ -919,6 +935,7 @@ export function useCrew() {
     itemGroupId,
     onSend,
     stopAgent,
+    cancelQueued,
     approveAgent,
     answerChoice,
     saveAgentInfo,

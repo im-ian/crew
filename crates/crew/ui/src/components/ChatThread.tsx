@@ -78,6 +78,8 @@ type Props = {
   streaming?: boolean;
   onSelectAgent?: (id: string) => void;
   onApprove?: (allow: boolean, agentId?: string) => void;
+  /** Take back the user's own message while it waits for the bot. */
+  onCancelQueued?: (messageId: string) => void;
   onAnswerChoice?: (
     agentId: string,
     messageId: string,
@@ -107,6 +109,7 @@ export function ChatThread({
   streaming = false,
   onSelectAgent,
   onApprove,
+  onCancelQueued,
   onAnswerChoice,
   highlightId = null,
   onHighlightDone,
@@ -342,6 +345,9 @@ export function ChatThread({
                       ? (answers, values, closed) =>
                           onAnswerChoice(m.from, m.id, answers, values, closed)
                       : undefined
+                  }
+                  onCancel={
+                    onCancelQueued ? () => onCancelQueued(m.id) : undefined
                   }
                   onReply={onReply}
                   onJump={onJump}
@@ -1319,6 +1325,7 @@ function Bubble({
   onSelectAgent,
   onApprove,
   onAnswerChoice,
+  onCancel,
   onReply,
   onJump,
   flash = false,
@@ -1336,6 +1343,7 @@ function Bubble({
     values: string[][],
     closed: boolean,
   ) => void | Promise<void>;
+  onCancel?: () => void;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
   flash?: boolean;
@@ -1394,13 +1402,13 @@ function Bubble({
             />
           </div>
         ) : null}
-        {queued ? <QueueWait /> : null}
+        {queued ? <QueueWait onCancel={onCancel} /> : null}
       </div>
     </div>
   );
 }
 
-function QueueWait() {
+function QueueWait({ onCancel }: { onCancel?: () => void }) {
   const t = useT();
   return (
     <div className="queue-wait" aria-label={t("thread.queueing")}>
@@ -1410,6 +1418,11 @@ function QueueWait() {
         <i />
         <i />
       </span>
+      {onCancel ? (
+        <button type="button" className="queue-cancel" onClick={onCancel}>
+          {t("thread.cancelQueued")}
+        </button>
+      ) : null}
     </div>
   );
 }

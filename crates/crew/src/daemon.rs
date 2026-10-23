@@ -890,6 +890,25 @@ fn pump_inbox_inner(id: &str) {
     }
 }
 
+/// Take back `msg_id` while it waits in `id`'s inbox, row and all. The
+/// teammates it named go with it. Another chat's chain riding on it goes on
+/// without this bot, and a reply it held is the answer again.
+fn cancel_queued(id: &str, msg_id: &str) -> anyhow::Result<()> {
+    let item = inbox().lock().ok().and_then(|mut map| {
+        let q = map.get_mut(id)?;
+        let at = q.iter().position(|d| d.msg_id.as_deref() == Some(msg_id))?;
+        q.remove(at)
+    });
+    let Some(mut item) = item else {
+        anyhow::bail!("that message is no longer waiting");
+    };
+    settle_handoff(id, msg_id, false);
+    crate::transcript::remove_row(id, msg_id);
+    item.then.retain(|job| !job.named_in(id));
+    release(item.then);
+    Ok(())
+}
+
 #[cfg(test)]
 fn inbox_is_empty(id: &str) -> bool {
     inbox()
@@ -1819,6 +1838,12 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             }],
         },
         Request::Interrupt { agent } => match interrupt_turn(&agent) {
+            Ok(()) => vec![Event::Ok],
+            Err(err) => vec![Event::Error {
+                message: err.to_string(),
+            }],
+        },
+        Request::CancelQueued { agent, message_id } => match cancel_queued(&agent, &message_id) {
             Ok(()) => vec![Event::Ok],
             Err(err) => vec![Event::Error {
                 message: err.to_string(),
@@ -3865,6 +3890,48 @@ exec sleep 5"#,
             session.inner.lock().unwrap().status = AgentStatus::Idle;
             clear_inbox(&bot);
             for id in [&bot, &b, &c] {
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// "@B 리뷰해줘" waits while the bot is busy, and the user takes it back:
+    /// the row goes, nothing waits in the inbox, and B is not told.
+    #[test]
+    fn a_cancelled_message_never_goes_out() {
+        paths::testing::with_home("cancel-queued", || {
+            paths::write_notifications_enabled(false);
+            let [bot, b] = ["cancel-bot", "cancel-b"].map(test_id);
+            for id in [&bot, &b] {
+                insert_spawned_agent(AgentConfig::new(
+                    id.clone(),
+                    id.clone(),
+                    AgentCli::Claude.default_cmd(),
+                    None,
+                ))
+                .unwrap();
+            }
+            let set_status = |id: &str, to: AgentStatus| match agents().lock().unwrap().get(id) {
+                Some(LiveAgent::Headless(s)) => s.inner.lock().unwrap().status = to,
+                _ => panic!("claude runs headless"),
+            };
+            // Busy, so the message waits, and a tell to B would wait in B's inbox.
+            set_status(&bot, AgentStatus::Working);
+            set_status(&b, AgentStatus::Working);
+            send_agent(&bot, &format!("@{b} 리뷰해줘")).unwrap();
+            let row = crate::transcript::messages(&bot).last().unwrap().clone();
+            assert!(row.queued);
+
+            cancel_queued(&bot, &row.id).unwrap();
+            assert!(inbox_is_empty(&bot));
+            assert!(inbox_is_empty(&b), "B was named only by the cancelled message");
+            assert!(!crate::transcript::messages(&bot)
+                .iter()
+                .any(|m| m.id == row.id));
+            assert!(cancel_queued(&bot, &row.id).is_err(), "nothing left to cancel");
+
+            for id in [&bot, &b] {
+                set_status(id, AgentStatus::Idle);
                 remove_agent(id).unwrap();
             }
         });

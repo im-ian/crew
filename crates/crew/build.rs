@@ -9,6 +9,7 @@ fn main() {
             "list_agents",
             "send_message",
             "stop_agent",
+            "cancel_queued",
             "approve_agent",
             "answer_choice",
             "tell_message",

@@ -15,6 +15,7 @@
     "allow-list-agents",
     "allow-send-message",
     "allow-stop-agent",
+    "allow-cancel-queued",
     "allow-approve-agent",
     "allow-answer-choice",
     "allow-tell-message",
