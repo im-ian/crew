@@ -2982,7 +2982,7 @@ button.mention-chip:active {
   top: calc(100% + 10px);
   left: 50%;
   translate: -50% 0;
-  width: min(300px, calc(100vw - 72px));
+  width: min(360px, calc(100vw - 72px));
   background: var(--menu);
   border: 1px solid var(--line);
   border-radius: var(--radius-xl);
@@ -2992,6 +2992,24 @@ button.mention-chip:active {
   gap: var(--space-14);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
   z-index: 5;
+}
+/* Shape and color sit side by side, the way CLI and model do, so the card
+   stays on screen instead of making the sheet scroll down to the swatches. */
+.face-pick-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 124px;
+  grid-template-rows: auto var(--face-list-h);
+  column-gap: calc(var(--space-10) * 2);
+  row-gap: var(--space-6);
+  /* The shape list sets the row. The rule on its right edge is that tall. */
+  --face-list-h: 188px;
+}
+.color-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+  min-height: 0;
 }
 /* Sits at the foot of its dialog, so the card opens upward over the fields:
    downward it would spill past the scrolling dialog's edge. */
@@ -3117,11 +3135,18 @@ button.mention-chip:active {
 .new-avatar.has-face { background: transparent; }
 .shape-picker {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
-  gap: var(--space-6);
-  max-height: 248px;
+  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  gap: var(--space-4);
+  /* Same cap as a model column: the list scrolls here, not the sheet. */
+  height: var(--face-list-h);
+  min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
-  padding: 1px;
+  overscroll-behavior: contain;
+  padding: 1px 0 1px 1px;
+  /* Pull the rule into the middle of the column gap. */
+  margin-right: calc(var(--space-10) * -1);
+  border-right: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
 }
 .shape-pick {
   aspect-ratio: 1;
@@ -3138,19 +3163,17 @@ button.mention-chip:active {
   border-color: #4a4a4c;
   background: var(--active);
 }
-.color-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-10);
-}
 .color-swatches {
+  display: grid;
+  grid-template-columns: repeat(4, 22px);
+  gap: var(--space-6);
+  justify-content: start;
+}
+.color-custom {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-10);
+  gap: var(--space-6);
   min-width: 0;
-  flex: 1;
 }
 .color-swatch {
   width: 22px;
@@ -3182,11 +3205,13 @@ button.mention-chip:active {
   border: none;
   border-radius: 50%;
 }
-.color-hex {
-  width: 108px;
-  flex: 0 0 108px;
+.textin.color-hex {
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
   font-variant-numeric: tabular-nums;
-  padding: var(--space-8) var(--space-10);
+  font-size: var(--text-md);
+  padding: var(--space-6) var(--space-8);
 }
 .sheet h3, .dialog h3 {
   margin: 0;
