@@ -204,6 +204,72 @@ md.renderer.rules.footnote_open = (tokens, i, _o, env) =>
   '<p class="md-footnote"><sup>' + noteNum(env, tokens[i]) + "</sup> ";
 md.renderer.rules.footnote_close = () => "</p>\n";
 
+// Several pictures in a row are one album. A single picture stays in its
+// paragraph so it keeps its own shape.
+function imagesOnly(token: Token): Token[] | null {
+  if (token.type !== "inline" || !token.children?.length) return null;
+  const images: Token[] = [];
+  for (const child of token.children) {
+    if (child.type === "image") images.push(child);
+    else if (child.type === "softbreak" || child.type === "hardbreak") continue;
+    else if (child.type === "text" && child.content.trim() === "") continue;
+    else return null;
+  }
+  return images.length ? images : null;
+}
+
+function paragraphImages(tokens: Token[], index: number): { images: Token[]; next: number } | null {
+  if (tokens[index]?.type !== "paragraph_open") return null;
+  if (tokens[index + 1]?.type !== "inline") return null;
+  if (tokens[index + 2]?.type !== "paragraph_close") return null;
+  const images = imagesOnly(tokens[index + 1]);
+  if (!images) return null;
+  return { images, next: index + 3 };
+}
+
+md.core.ruler.after("inline", "image_gallery", (state) => {
+  const src = state.tokens;
+  const out: Token[] = [];
+  for (let i = 0; i < src.length; ) {
+    const first = paragraphImages(src, i);
+    if (!first) {
+      out.push(src[i]);
+      i += 1;
+      continue;
+    }
+    let run = first.images;
+    let next = first.next;
+    for (;;) {
+      const more = paragraphImages(src, next);
+      if (!more) break;
+      run = run.concat(more.images);
+      next = more.next;
+    }
+    if (run.length < 2) {
+      out.push(src[i]);
+      i += 1;
+      continue;
+    }
+    const layout = run.length === 2 ? "pair" : run.length === 3 ? "trio" : "grid";
+    const open = new state.Token("image_gallery_open", "div", 1);
+    open.block = true;
+    open.attrSet("class", `md-gallery is-${layout}`);
+    open.attrSet("data-count", String(run.length));
+    out.push(open);
+    for (const image of run) out.push(image);
+    const close = new state.Token("image_gallery_close", "div", -1);
+    close.block = true;
+    out.push(close);
+    i = next;
+  }
+  state.tokens = out;
+});
+
+md.renderer.rules.image_gallery_open = (tokens, idx, options, _env, self) =>
+  self.renderToken(tokens, idx, options);
+md.renderer.rules.image_gallery_close = (tokens, idx, options, _env, self) =>
+  self.renderToken(tokens, idx, options);
+
 const DEFINITION = /^ {0,3}\[[^\]]+\]:/m;
 
 /**
