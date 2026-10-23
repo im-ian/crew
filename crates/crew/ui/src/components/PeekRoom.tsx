@@ -12,8 +12,10 @@ import { WhoButton, whoColor } from "./WhoButton";
 
 type Props = {
   peerId: string;
-  /** The run that was clicked: scrolled to and flashed. */
+  /** The run that was clicked: flashed. */
   focus?: string[];
+  /** Open on `focus` instead of the bottom: a search hit. */
+  openAtFocus?: boolean;
   self: AgentInfo;
   messages: ChatMessage[];
   agents: AgentInfo[];
@@ -23,6 +25,7 @@ type Props = {
 export function PeekRoom({
   peerId,
   focus = [],
+  openAtFocus = false,
   self,
   messages,
   agents,
@@ -42,12 +45,6 @@ export function PeekRoom({
   const peer = agents.find((a) => a.id === peerId) ?? null;
   const selfName = self.name || self.id;
   const peerName = displayWho(peerId, peer, t);
-  const tail =
-    rows.length +
-    ":" +
-    (rows[rows.length - 1]?.id || "") +
-    ":" +
-    (rows[rows.length - 1]?.text || "");
 
   // Beside the thread the reader may be partway up an old run when a new
   // note lands; only follow the tail if they were already at it.
@@ -58,19 +55,29 @@ export function PeekRoom({
     roomRef.current?.focus();
   }, [peerId]);
 
+  // Every poll, not only a new note: an image grows its row when it loads,
+  // after the scroll, and that moves no scroll position to report it.
   useEffect(() => {
     const el = threadRef.current;
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
-  }, [tail]);
+  }, [rows]);
 
+  // Each open starts at the bottom, where the next note lands. Opening on the
+  // clicked run left the reader above the tail, so new notes landed out of
+  // sight. A search hit is the one exception: the panel opens on it.
   useEffect(() => {
     const el = threadRef.current;
-    const first = focus[0];
-    if (!el || !first) return;
-    el.querySelector(`[data-msg-id="${CSS.escape(first)}"]`)?.scrollIntoView({
-      block: "start",
-    });
-  }, [peerId, focusKey]);
+    if (!el) return;
+    const first = openAtFocus ? focus[0] : null;
+    const at = first
+      ? el.querySelector(`[data-msg-id="${CSS.escape(first)}"]`)
+      : null;
+    if (at) at.scrollIntoView({ block: "start" });
+    else el.scrollTop = el.scrollHeight;
+    // A switch keeps this panel mounted, and a scroll that moves nothing
+    // fires no event, so the last bot's position would carry over.
+    atBottom.current = nearBottom(el);
+  }, [peerId, focusKey, openAtFocus]);
 
   // The flash ring is a static style under its animation, so it has to come
   // off on the same clock the thread uses or the run stays outlined.
@@ -122,9 +129,7 @@ export function PeekRoom({
         className="thread peek-thread"
         ref={threadRef}
         onScroll={(e) => {
-          const el = e.currentTarget;
-          atBottom.current =
-            el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+          atBottom.current = nearBottom(e.currentTarget);
         }}
       >
         {rows.map((m) => {
@@ -153,6 +158,10 @@ export function PeekRoom({
       </div>
     </div>
   );
+}
+
+function nearBottom(el: HTMLElement): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 24;
 }
 
 function PeekBubble({
