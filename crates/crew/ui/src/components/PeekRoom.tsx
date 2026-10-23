@@ -4,7 +4,7 @@ import { splitBubbles } from "../bubbles";
 import { useT } from "../LocaleContext";
 import { messageDefinitions } from "../markdown";
 import { Lock, X } from "../icons";
-import { displayWho, peekMessages, subagentType } from "../peek";
+import { displayWho, peekMessages, subagentFace } from "../peek";
 import type { AgentInfo, ChatMessage } from "../types";
 import { Avatar } from "./Avatar";
 import { JumpBottom, useStick } from "./ChatThread";
@@ -43,12 +43,8 @@ export function PeekRoom({
     () => peekMessages(messages, peerId, self.id, agentIds),
     [messages, peerId, self.id, agentIds],
   );
-  // A subagent is on no roster, but its id still gives it a face of its own.
   const peer =
-    agents.find((a) => a.id === peerId) ??
-    (subagentType(peerId)
-      ? ({ id: peerId, name: displayWho(peerId, null, t) } as AgentInfo)
-      : null);
+    agents.find((a) => a.id === peerId) ?? subagentFace(peerId, t);
   const selfName = self.name || self.id;
   const peerName = displayWho(peerId, peer, t);
 

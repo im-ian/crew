@@ -40,7 +40,10 @@ describe("displayWho", () => {
   });
 
   it("names a subagent by its type", () => {
-    expect(displayWho("sub:Explore", null, t)).toBe("Explore subagent");
+    expect(displayWho("sub:toolu_1:Explore", null, t)).toBe("Explore subagent");
+    expect(displayWho("sub:toolu_2:codex:rescue", null, t)).toBe(
+      "codex:rescue subagent",
+    );
   });
 });
 
@@ -77,19 +80,24 @@ describe("peekMessages", () => {
   it("reads a subagent's prompt and report as a side chat", () => {
     const rows = peekMessages(
       [
-        msg("system", "to:sub:Explore", "where is the parser?", {
+        msg("system", "to:sub:toolu_1:Explore", "where is the parser?", {
           kind: "sent",
         }),
-        msg("system", "sub:Explore", "in headless.rs", { kind: "received" }),
+        msg("system", "sub:toolu_1:Explore", "in headless.rs", {
+          kind: "received",
+        }),
+        msg("system", "to:sub:toolu_2:Explore", "and the tests?", {
+          kind: "sent",
+        }),
         msg("assistant", "alpha", "Found it."),
       ],
-      "sub:Explore",
+      "sub:toolu_1:Explore",
       "alpha",
       AGENTS,
     );
     expect(rows.map((m) => [m.from, m.text])).toEqual([
       ["alpha", "where is the parser?"],
-      ["sub:Explore", "in headless.rs"],
+      ["sub:toolu_1:Explore", "in headless.rs"],
     ]);
   });
 
