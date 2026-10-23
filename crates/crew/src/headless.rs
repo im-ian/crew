@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read};
 use std::os::unix::process::CommandExt;
@@ -701,6 +702,9 @@ struct ParseState {
     last_codex_item: Option<String>,
     last_codex_text: Option<String>,
     tool_after_text: bool,
+    /// `spawn_subagent` calls that have not finished. The child's reply is
+    /// `text` on this same stream, with no field that marks it as the child's.
+    open_subagents: HashSet<String>,
 }
 
 fn ingest_line(cli: CliKind, line: &str, state: &mut ParseState) -> Option<String> {
@@ -738,10 +742,9 @@ fn ingest_line(cli: CliKind, line: &str, state: &mut ParseState) -> Option<Strin
 }
 
 fn grok_text(v: &Value, state: &mut ParseState) -> Option<String> {
+    note_subagent_call(v, state);
     if let Some(chunk) = acp_message_chunk(v) {
-        state.used_deltas = true;
-        state.got_text = true;
-        return Some(chunk);
+        return grok_reply(chunk, state);
     }
     let ty = v.get("type").and_then(Value::as_str).unwrap_or("");
     match ty {
@@ -752,14 +755,64 @@ fn grok_text(v: &Value, state: &mut ParseState) -> Option<String> {
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty())?
                 .to_string();
-            state.used_deltas = true;
-            state.got_text = true;
-            Some(chunk)
+            grok_reply(chunk, state)
         }
         "thought" | "tool_call" | "tool_call_update" | "usage" | "plan" | "available_commands"
         | "end" => None,
         _ => None,
     }
+}
+
+/// The child's reply sits between the spawn and that call's terminal update.
+/// The parent's own reply is what arrives after the tool finishes.
+fn grok_reply(chunk: String, state: &mut ParseState) -> Option<String> {
+    if !state.open_subagents.is_empty() {
+        return None;
+    }
+    state.used_deltas = true;
+    state.got_text = true;
+    Some(chunk)
+}
+
+fn note_subagent_call(v: &Value, state: &mut ParseState) {
+    let (event, kind) = grok_event(v);
+    let Some(id) = event
+        .get("toolCallId")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    else {
+        return;
+    };
+    match kind {
+        "tool_call" => {
+            if event.get("toolName").and_then(Value::as_str) == Some("spawn_subagent") {
+                state.open_subagents.insert(id.to_string());
+            }
+        }
+        "tool_call_update" if state.open_subagents.contains(id) => {
+            let status = event.get("status").and_then(Value::as_str).unwrap_or("");
+            if matches!(
+                status,
+                "completed" | "failed" | "cancelled" | "canceled" | "error"
+            ) {
+                state.open_subagents.remove(id);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Streaming-json tags the event with `type`. ACP puts the same names on
+/// `sessionUpdate` under `params.update`.
+fn grok_event(v: &Value) -> (&Value, &str) {
+    if let Some(update) = v.pointer("/params/update") {
+        let kind = update
+            .get("sessionUpdate")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        return (update, kind);
+    }
+    (v, v.get("type").and_then(Value::as_str).unwrap_or(""))
 }
 
 fn claude_text(v: &Value, state: &mut ParseState) -> Option<String> {
@@ -1085,6 +1138,110 @@ mod tests {
         assert!(chunk.is_none());
         let (chunk, _) = grok_line(r#"{"type":"available_commands","commands":["help"]}"#);
         assert!(chunk.is_none());
+    }
+
+    #[test]
+    fn subagent_reply_stays_out_of_the_chat() {
+        let mut st = ParseState::default();
+        let d = ingest_line(
+            CliKind::Grok,
+            r#"{"type":"text","data":"I'll start the review."}"#,
+            &mut st,
+        );
+        assert_eq!(d.as_deref(), Some("I'll start the review."));
+        ingest_line(
+            CliKind::Grok,
+            r#"{"type":"tool_call","toolCallId":"call-1","toolName":"spawn_subagent","status":"pending"}"#,
+            &mut st,
+        );
+        // An in-progress update has no status. It must not open the chat again.
+        ingest_line(
+            CliKind::Grok,
+            r#"{"type":"tool_call_update","toolCallId":"call-1","status":null}"#,
+            &mut st,
+        );
+        assert!(ingest_line(
+            CliKind::Grok,
+            r#"{"type":"thought","data":"checking the diff"}"#,
+            &mut st
+        )
+        .is_none());
+        assert!(ingest_line(
+            CliKind::Grok,
+            r#"{"type":"text","data":"I'll review the diff."}"#,
+            &mut st
+        )
+        .is_none());
+        assert!(ingest_line(
+            CliKind::Grok,
+            r#"{"type":"text","data":"Review notes are at /tmp/x.md."}"#,
+            &mut st
+        )
+        .is_none());
+        ingest_line(
+            CliKind::Grok,
+            r#"{"type":"tool_call_update","toolCallId":"call-1","status":"completed"}"#,
+            &mut st,
+        );
+        let d = ingest_line(
+            CliKind::Grok,
+            r#"{"type":"text","data":"리뷰가 끝났습니다."}"#,
+            &mut st,
+        );
+        assert_eq!(d.as_deref(), Some("\n\n리뷰가 끝났습니다."));
+    }
+
+    #[test]
+    fn parallel_subagents_hide_text_until_the_last_finishes() {
+        let mut st = ParseState::default();
+        ingest_line(
+            CliKind::Grok,
+            r#"{"type":"tool_call","toolCallId":"a","toolName":"spawn_subagent"}"#,
+            &mut st,
+        );
+        ingest_line(
+            CliKind::Grok,
+            r#"{"type":"tool_call","toolCallId":"b","toolName":"spawn_subagent"}"#,
+            &mut st,
+        );
+        ingest_line(
+            CliKind::Grok,
+            r#"{"type":"tool_call_update","toolCallId":"a","status":"completed"}"#,
+            &mut st,
+        );
+        assert!(ingest_line(
+            CliKind::Grok,
+            r#"{"type":"text","data":"still reviewing"}"#,
+            &mut st
+        )
+        .is_none());
+        ingest_line(
+            CliKind::Grok,
+            r#"{"type":"tool_call_update","toolCallId":"b","status":"failed"}"#,
+            &mut st,
+        );
+        let d = ingest_line(
+            CliKind::Grok,
+            r#"{"type":"text","data":"둘 다 끝났습니다."}"#,
+            &mut st,
+        );
+        assert_eq!(d.as_deref(), Some("둘 다 끝났습니다."));
+    }
+
+    #[test]
+    fn a_different_tool_still_shows_the_reply() {
+        let mut st = ParseState::default();
+        ingest_line(
+            CliKind::Grok,
+            r#"{"type":"tool_call","toolCallId":"1","toolName":"read_file"}"#,
+            &mut st,
+        );
+        let d = ingest_line(
+            CliKind::Grok,
+            r#"{"type":"text","data":"읽었습니다."}"#,
+            &mut st,
+        );
+        assert_eq!(d.as_deref(), Some("읽었습니다."));
     }
 
     #[test]
