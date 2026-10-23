@@ -399,7 +399,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           <div className={"attach-photos" + (photos.length === 1 ? " is-one" : "")}>
             {photos.map((a) => (
               <div key={a.id} className="attach-photo">
-                <img src={a.preview} alt="" />
+                <span className="attach-photo-frame">
+                  <img src={a.preview} alt="" />
+                </span>
                 <button
                   type="button"
                   className="attach-remove"

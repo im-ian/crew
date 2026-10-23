@@ -2585,6 +2585,12 @@ button.who-btn:focus-visible {
   position: relative;
   width: 72px;
   height: 72px;
+  flex-shrink: 0;
+}
+.attach-photo-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
   border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--bg);
@@ -2592,7 +2598,16 @@ button.who-btn:focus-visible {
 .attach-photos.is-one .attach-photo {
   width: auto;
   height: auto;
-  max-width: 220px;
+  max-width: min(220px, 100%);
+  min-width: 28px;
+  min-height: 28px;
+}
+.attach-photos.is-one .attach-photo-frame {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  min-width: 28px;
+  min-height: 28px;
 }
 .attach-photo img {
   width: 100%;
@@ -2603,7 +2618,7 @@ button.who-btn:focus-visible {
 .attach-photos.is-one .attach-photo img {
   width: auto;
   height: auto;
-  max-width: 220px;
+  max-width: 100%;
   max-height: 160px;
   object-fit: contain;
 }
