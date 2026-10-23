@@ -142,7 +142,7 @@ describe("threadRows note runs", () => {
 
   it("keeps a lone note in a run so a reply does not remount it", () => {
     // The row type has to stay put when the second note lands, or React
-    // unmounts the note the reader had open. NoteGroup draws no head for one.
+    // unmounts the note the reader had open. The head is the same chip either way.
     const rows = threadRows([note("a", "jordy", "received")], roster);
     expect(rows.map((r) => r.kind)).toEqual(["notes"]);
     expect(rows[0].kind === "notes" && rows[0].msgs.length).toBe(1);

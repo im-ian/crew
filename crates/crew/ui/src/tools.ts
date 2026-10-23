@@ -33,8 +33,8 @@ export type ThreadRow =
  *
  * A note run is emitted even when it holds one note, so a row does not change
  * element type the moment a reply arrives — React would unmount the note the
- * reader had open and remount it inside a closed fold. `NoteGroup` draws the
- * fold head only once there is more than one.
+ * reader had open and remount it inside a closed fold. The fold head is the
+ * same chip for one note and for many.
  */
 export function threadRows(
   list: ChatMessage[],
