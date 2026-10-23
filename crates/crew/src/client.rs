@@ -55,6 +55,7 @@ fn answer_timeout(req: &Request) -> Option<Duration> {
         | Request::EditRoutine { .. }
         | Request::RoutineRuns { .. }
         | Request::Interrupt { .. }
+        | Request::CancelQueued { .. }
         | Request::Approve { .. }
         | Request::AnswerChoice { .. }
         | Request::Search { .. }
@@ -123,6 +124,7 @@ fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
             | (Request::EditRoutine { .. }, Event::Ok | Event::Agents { .. })
             | (Request::RoutineRuns { .. }, Event::RoutineRuns { .. })
             | (Request::Interrupt { .. }, Event::Ok)
+            | (Request::CancelQueued { .. }, Event::Ok)
             | (Request::Approve { .. }, Event::Ok)
             | (Request::Ask { .. }, Event::Answered { .. } | Event::Error { .. })
             | (Request::AnswerChoice { .. }, Event::Ok)

@@ -73,6 +73,16 @@ fn stop_agent(agent: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn cancel_queued(agent: String, message_id: String) -> Result<(), String> {
+    match client::rpc(Request::CancelQueued { agent, message_id }) {
+        Ok(Event::Ok) => Ok(()),
+        Ok(Event::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected daemon response".into()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+#[tauri::command]
 fn approve_agent(agent: String, allow: bool) -> Result<(), String> {
     match client::rpc(Request::Approve { agent, allow }) {
         Ok(Event::Ok) => Ok(()),
@@ -710,6 +720,7 @@ pub fn run() -> anyhow::Result<()> {
             list_agents,
             send_message,
             stop_agent,
+            cancel_queued,
             approve_agent,
             answer_choice,
             tell_message,

@@ -399,6 +399,17 @@ export function useCrew() {
     }
   }
 
+  async function cancelQueued(messageId: string) {
+    const { id } = selectedRef.current;
+    if (!id) return;
+    try {
+      await api.cancelQueued(id, messageId);
+      await refreshMessages();
+    } catch (err) {
+      showError(err);
+    }
+  }
+
   async function approveAgent(allow: boolean, agentId?: string) {
     const id =
       agentId ||
@@ -922,6 +933,7 @@ export function useCrew() {
     itemGroupId,
     onSend,
     stopAgent,
+    cancelQueued,
     approveAgent,
     answerChoice,
     saveAgentInfo,
