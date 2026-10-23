@@ -14,7 +14,7 @@ import type {
 import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { messageDefinitions } from "../markdown";
-import { displayWho, noteRef, sentTarget } from "../peek";
+import { displayWho, noteRef, sentTarget, subagentFace } from "../peek";
 import {
   dotsAfter,
   momentStamp,
@@ -609,7 +609,7 @@ function TransferNote({
             <span className="xfer-label">{label}</span>
           )}
           <WhoButton
-            agent={agent}
+            agent={agent ?? subagentFace(otherId, t)}
             who={who}
             fallbackId={otherId}
             onClick={open}
@@ -916,7 +916,7 @@ function NoteGroup({
           {t("thread.noteRun", { n: items.length })}
         </button>
         <WhoButton
-          agent={agent}
+          agent={agent ?? subagentFace(peerId, t)}
           who={who}
           fallbackId={peerId}
           onClick={

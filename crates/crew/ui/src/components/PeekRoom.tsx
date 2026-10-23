@@ -4,7 +4,7 @@ import { splitBubbles } from "../bubbles";
 import { useT } from "../LocaleContext";
 import { messageDefinitions } from "../markdown";
 import { Lock, X } from "../icons";
-import { displayWho, peekMessages } from "../peek";
+import { displayWho, peekMessages, subagentFace } from "../peek";
 import type { AgentInfo, ChatMessage } from "../types";
 import { Avatar } from "./Avatar";
 import { JumpBottom, useStick } from "./ChatThread";
@@ -43,7 +43,8 @@ export function PeekRoom({
     () => peekMessages(messages, peerId, self.id, agentIds),
     [messages, peerId, self.id, agentIds],
   );
-  const peer = agents.find((a) => a.id === peerId) ?? null;
+  const peer =
+    agents.find((a) => a.id === peerId) ?? subagentFace(peerId, t);
   const selfName = self.name || self.id;
   const peerName = displayWho(peerId, peer, t);
 
@@ -135,7 +136,7 @@ export function PeekRoom({
           {rows.map((m) => {
             const agent =
               agents.find((a) => a.id === m.from) ??
-              (m.from === self.id ? self : null);
+              (m.from === self.id ? self : m.from === peerId ? peer : null);
             const who =
               m.from === "user" ? t("thread.you") : displayWho(m.from, agent, t);
             return (

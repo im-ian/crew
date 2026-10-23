@@ -196,6 +196,9 @@ fn preview_line(msg: &ChatMessage) -> Option<String> {
     if msg.kind == Some(MessageKind::Tool) && msg.choice.is_none() && msg.approval.is_none() {
         return None;
     }
+    if is_subagent_note(msg) {
+        return None;
+    }
     let mut t: String = crate::rows::display_text(msg)
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -234,8 +237,8 @@ fn is_raw_payload(text: &str) -> bool {
 const RECAP_BUDGET: usize = 12_000;
 
 /// The chat so far as `who: text` lines, oldest first, for a bot that moved
-/// to another CLI. Tool rows are left out, and the newest messages win when it
-/// runs long. None when there is nothing to read.
+/// to another CLI. Tool rows and subagent notes are left out, and the newest
+/// messages win when it runs long. None when there is nothing to read.
 pub fn recap(agent: &str) -> Option<String> {
     recap_of(&messages(agent))
 }
@@ -245,7 +248,7 @@ fn recap_of(msgs: &[ChatMessage]) -> Option<String> {
     let mut used = 0;
     let mut cut = false;
     for msg in msgs.iter().rev() {
-        if msg.queued || msg.kind == Some(MessageKind::Tool) {
+        if msg.queued || msg.kind == Some(MessageKind::Tool) || is_subagent_note(msg) {
             continue;
         }
         let text = crate::rows::display_text(msg);
@@ -369,15 +372,46 @@ pub fn push_tool(agent: &str, call_id: Option<&str>, name: &str, detail: &str) -
             return attach_choice(agent, call_id, card);
         }
     }
+    push_in_turn(agent, call_id, name, detail, MessageKind::Tool)
+}
+
+/// A note between a bot and its subagent: the prompt (`to:sub:…`) or the
+/// report (`sub:…`). A later report under the same `key` replaces the first.
+pub fn push_subagent(agent: &str, key: &str, from: &str, text: &str) -> ChatMessage {
+    let kind = if from.starts_with("to:") {
+        MessageKind::Sent
+    } else {
+        MessageKind::Received
+    };
+    push_in_turn(agent, Some(key), from, text, kind)
+}
+
+/// A bot's talk with its own subagent. Like a tool call, it is how the bot
+/// did its work, not something said to the user.
+fn is_subagent_note(msg: &ChatMessage) -> bool {
+    let from = msg.from.strip_prefix("to:").unwrap_or(&msg.from);
+    from.starts_with("sub:")
+}
+
+/// A row from inside a turn, above the reply still being written, which stays
+/// one bubble for the whole turn. Later events for the same `call_id` fill the
+/// same row in instead of stacking another.
+fn push_in_turn(
+    agent: &str,
+    call_id: Option<&str>,
+    from: &str,
+    text: &str,
+    kind: MessageKind,
+) -> ChatMessage {
     let mut msg = ChatMessage {
         id: new_id(),
         role: Role::System,
-        from: name.to_string(),
-        text: detail.to_string(),
+        from: from.to_string(),
+        text: text.to_string(),
         ts: now_ms(),
         queued: false,
         peer: None,
-        kind: Some(MessageKind::Tool),
+        kind: Some(kind),
         approval: None,
         choice: None,
     };
@@ -391,14 +425,13 @@ pub fn push_tool(agent: &str, call_id: Option<&str>, name: &str, detail: &str) -
             .and_then(|mid| chat.messages.iter().position(|m| m.id == mid));
         if let Some(idx) = known {
             let row = &mut chat.messages[idx];
-            if !name.is_empty() {
-                row.from = name.to_string();
+            if !from.is_empty() {
+                row.from = from.to_string();
             }
-            if !detail.is_empty() {
-                row.text = detail.to_string();
+            if !text.is_empty() {
+                row.text = text.to_string();
             }
             msg = row.clone();
-            persist(agent, chat);
         } else {
             msg.peer = chat.peer.clone();
             if let Some(id) = call_id {
@@ -410,8 +443,8 @@ pub fn push_tool(agent: &str, call_id: Option<&str>, name: &str, detail: &str) -
             } else {
                 chat.messages.push(msg.clone());
             }
-            persist(agent, chat);
         }
+        persist(agent, chat);
     }
     emit(agent, msg.clone());
     msg
@@ -1535,6 +1568,42 @@ mod tests {
                 .count(),
             3
         );
+        drop_agent(&agent);
+    }
+
+    #[test]
+    fn subagent_notes_sit_above_the_reply_they_came_in() {
+        let agent = format!(
+            "sub-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        begin_turn(&agent);
+        on_assistant_delta(&agent, "I'll ask.");
+        let peer = "sub:toolu_1:Explore";
+        let sent = push_subagent(&agent, "toolu_1", &format!("to:{peer}"), "find the parser");
+        let got = push_subagent(&agent, "toolu_1/report", peer, "It is in headless.rs.");
+        assert_eq!(
+            preview(&agent).as_deref(),
+            Some("I'll ask."),
+            "not news to the user"
+        );
+        on_assistant_delta(&agent, " Found it.");
+        // A later report for the same call takes the first one's place.
+        let again = push_subagent(&agent, "toolu_1/report", peer, "It moved to parse.rs.");
+        assert_eq!(again.id, got.id);
+        let rows = messages(&agent);
+        assert_eq!(rows.len(), 3, "the reply stays one bubble");
+        assert_eq!(rows[0].id, sent.id);
+        assert_eq!(rows[0].kind, Some(MessageKind::Sent));
+        assert_eq!(rows[1].id, got.id);
+        assert_eq!(rows[1].kind, Some(MessageKind::Received));
+        assert_eq!(rows[1].text, "It moved to parse.rs.");
+        assert_eq!(rows[2].role, Role::Assistant);
+        assert_eq!(rows[2].text, "I'll ask. Found it.");
         drop_agent(&agent);
     }
 

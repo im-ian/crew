@@ -13,7 +13,26 @@ export function displayWho(
   t: TFn,
 ): string {
   if (agent) return agent.name || agent.id;
+  const sub = subagentType(id);
+  if (sub) return t("thread.subagent", { name: sub });
   return id.startsWith("#") ? id : t("thread.deletedBot");
+}
+
+/** A bot's Claude subagent talks in notes as `sub:<call id>:<type>`. */
+export function subagentType(id: string): string | null {
+  if (!id.startsWith("sub:")) return null;
+  const rest = id.slice(4);
+  return rest.slice(rest.indexOf(":") + 1);
+}
+
+/**
+ * A subagent is on no roster, but its id still gives it a face of its own.
+ * Only for drawing: there is no chat to open for it.
+ */
+export function subagentFace(id: string, t: TFn): AgentInfo | null {
+  return subagentType(id)
+    ? ({ id, name: displayWho(id, null, t) } as AgentInfo)
+    : null;
 }
 
 /** The other bot on a sent/received/handoff row. Channels are not a peek. */
