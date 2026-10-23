@@ -14,6 +14,7 @@ import {
   groupIdOf,
   itemKey,
   layoutChanged,
+  moveGroup,
   moveItem,
   newGroupId,
   normalizeGroups,
@@ -296,6 +297,12 @@ export function useCrew() {
       agentsRef.current,
     );
     persistLayout(moveItem(current, itemKey(kind, id), groupId, beforeKey, visual));
+  }
+
+  function reorderGroup(id: string, beforeId: string | null) {
+    const next = moveGroup(groupsRef.current, id, beforeId);
+    if (next === groupsRef.current) return;
+    persistLayout(next);
   }
 
   function toggleGroup(id: string) {
@@ -931,6 +938,7 @@ export function useCrew() {
     renameGroup,
     removeGroup,
     moveToGroup,
+    reorderGroup,
     toggleGroup,
     itemGroupId,
     onSend,

@@ -11,7 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useLocale, useT } from "../LocaleContext";
-import { itemKey, parseItemKey } from "../groups";
+import { groupOrderChanges, itemKey, parseItemKey } from "../groups";
 import type { AgentInfo, Group, Kind, SearchHit } from "../types";
 import { listStamp } from "../clock";
 import { mentionRuns, mentionText } from "../mentions";
@@ -65,16 +65,23 @@ type RailItem = {
   agent?: AgentInfo;
 };
 
-type RailDrop = {
-  groupId: string | null;
-  beforeKey: string | null;
-  into: boolean;
-  line: { left: number; top: number; width: number } | null;
-};
+type DropLine = { left: number; top: number; width: number };
 
-type RailDrag = {
-  key: string;
-  item: RailItem;
+type RailDrop =
+  | {
+      kind: "item";
+      groupId: string | null;
+      beforeKey: string | null;
+      into: boolean;
+      line: DropLine | null;
+    }
+  | {
+      kind: "group";
+      beforeId: string | null;
+      line: DropLine | null;
+    };
+
+type DragGeom = {
   x: number;
   y: number;
   grabX: number;
@@ -82,6 +89,12 @@ type RailDrag = {
   width: number;
   armed: boolean;
 };
+
+type RailDrag = DragGeom &
+  (
+    | { kind: "item"; key: string; item: RailItem }
+    | { kind: "group"; key: string; groupName: string; collapsed: boolean }
+  );
 
 const DRAG_THRESHOLD = 6;
 
@@ -122,7 +135,13 @@ function hitRailTarget(x: number, y: number, dragKey: string): RailDrop | null {
     const inset = 8;
     const before = y < rect.top + rect.height * 0.5;
     if (before) {
-      return { groupId, beforeKey: key, into: false, line: lineAt(rect, true, inset) };
+      return {
+        kind: "item",
+        groupId,
+        beforeKey: key,
+        into: false,
+        line: lineAt(rect, true, inset),
+      };
     }
     const next = nextRailRow(row);
     let insertBefore = next?.dataset.railRow || null;
@@ -130,6 +149,7 @@ function hitRailTarget(x: number, y: number, dragKey: string): RailDrop | null {
       insertBefore = nextRailRow(next)?.dataset.railRow || null;
     }
     return {
+      kind: "item",
       groupId,
       beforeKey: insertBefore,
       into: false,
@@ -140,6 +160,7 @@ function hitRailTarget(x: number, y: number, dragKey: string): RailDrop | null {
   const head = pickClosest(stack, "[data-rail-group-head]");
   if (head) {
     return {
+      kind: "item",
       groupId: head.dataset.railGroupHead || null,
       beforeKey: null,
       into: true,
@@ -152,12 +173,13 @@ function hitRailTarget(x: number, y: number, dragKey: string): RailDrop | null {
     const groupEl = empty.closest("[data-rail-group]");
     const groupId =
       groupEl instanceof HTMLElement ? groupEl.dataset.railGroup || null : null;
-    return { groupId, beforeKey: null, into: true, line: null };
+    return { kind: "item", groupId, beforeKey: null, into: true, line: null };
   }
 
   const group = pickClosest(stack, "[data-rail-group]");
   if (group) {
     return {
+      kind: "item",
       groupId: group.dataset.railGroup || null,
       beforeKey: null,
       into: true,
@@ -167,10 +189,45 @@ function hitRailTarget(x: number, y: number, dragKey: string): RailDrop | null {
 
   const ungrouped = pickClosest(stack, "[data-rail-ungrouped]");
   if (ungrouped) {
-    return { groupId: null, beforeKey: null, into: true, line: null };
+    return { kind: "item", groupId: null, beforeKey: null, into: true, line: null };
   }
 
   return null;
+}
+
+/** Folder reorder. The dragged folder stays above loose bots; only folders move. */
+function hitGroupTarget(y: number, dragId: string, order: string[]): RailDrop {
+  const sections = [...document.querySelectorAll<HTMLElement>("[data-rail-group]")].filter(
+    (el) => el.dataset.railGroup && el.dataset.railGroup !== dragId,
+  );
+  let beforeId: string | null = null;
+  let anchor: HTMLElement | null = null;
+  let before = true;
+  for (const section of sections) {
+    const head = section.querySelector<HTMLElement>("[data-rail-group-head]");
+    const headRect = (head ?? section).getBoundingClientRect();
+    if (y < headRect.top + headRect.height * 0.5) {
+      beforeId = section.dataset.railGroup || null;
+      anchor = section;
+      break;
+    }
+  }
+  if (!anchor) {
+    const ungrouped = document.querySelector<HTMLElement>("[data-rail-ungrouped]");
+    if (ungrouped) {
+      anchor = ungrouped;
+    } else {
+      const all = document.querySelectorAll<HTMLElement>("[data-rail-group]");
+      anchor = all[all.length - 1] ?? null;
+      before = false;
+    }
+  }
+  const changes = groupOrderChanges(order, dragId, beforeId);
+  return {
+    kind: "group",
+    beforeId,
+    line: changes && anchor ? lineAt(anchor.getBoundingClientRect(), before, 8) : null,
+  };
 }
 
 function autoScrollLists(y: number) {
@@ -204,6 +261,7 @@ type Props = {
   onRenameGroup: (id: string, name: string) => void;
   onRenameDone: () => void;
   onMove: (kind: Kind, id: string, groupId: string | null, beforeKey?: string | null) => void;
+  onReorderGroup: (id: string, beforeId: string | null) => void;
   unread?: string[];
   searchRef?: Ref<HTMLInputElement>;
   onOpenSettings?: () => void;
@@ -265,6 +323,7 @@ export function Sidebar({
   onRenameGroup,
   onRenameDone,
   onMove,
+  onReorderGroup,
   unread = [],
   searchRef,
   onOpenSettings,
@@ -393,8 +452,10 @@ export function Sidebar({
   const expandTimer = useRef<number | null>(null);
   const expandFor = useRef<string | null>(null);
   const onMoveRef = useRef(onMove);
+  const onReorderGroupRef = useRef(onReorderGroup);
   const onToggleGroupRef = useRef(onToggleGroup);
   onMoveRef.current = onMove;
+  onReorderGroupRef.current = onReorderGroup;
   onToggleGroupRef.current = onToggleGroup;
 
   useEffect(() => {
@@ -450,7 +511,12 @@ export function Sidebar({
     setDrop(null);
     if (!apply) didDrag.current = false;
     if (!apply || !d || !t) return;
-    if (t.beforeKey === d.key) return;
+    if (d.kind === "group") {
+      if (t.kind !== "group") return;
+      onReorderGroupRef.current(d.key, t.beforeId);
+      return;
+    }
+    if (t.kind !== "item" || t.beforeKey === d.key) return;
     const parsed = parseItemKey(d.key);
     if (!parsed) return;
     onMoveRef.current(parsed.kind, parsed.id, t.groupId, t.beforeKey);
@@ -462,23 +528,18 @@ export function Sidebar({
     }
   }
 
-  function onRowPointerDown(e: ReactPointerEvent<HTMLButtonElement>, item: RailItem) {
+  function beginDrag(
+    e: ReactPointerEvent<HTMLElement>,
+    pending: RailDrag,
+    locate: (x: number, y: number) => RailDrop | null,
+  ) {
     if (e.button !== 0 || searching) return;
-    if ((e.target as HTMLElement).closest("input, textarea, a")) return;
+    // A press on the label hits the text node, which has no closest().
+    const hit = e.target instanceof Element ? e.target : e.currentTarget;
+    if (hit.closest("input, textarea, a")) return;
     const rowEl = e.currentTarget;
-    const rect = rowEl.getBoundingClientRect();
     const originX = e.clientX;
     const originY = e.clientY;
-    const pending: RailDrag = {
-      key: item.key,
-      item,
-      x: e.clientX,
-      y: e.clientY,
-      grabX: e.clientX - rect.left,
-      grabY: e.clientY - rect.top,
-      width: rect.width,
-      armed: false,
-    };
     dragRef.current = pending;
     didDrag.current = false;
 
@@ -508,10 +569,14 @@ export function Sidebar({
       dragRef.current = next;
       setDrag(next);
       autoScrollLists(ev.clientY);
-      const target = hitRailTarget(ev.clientX, ev.clientY, cur.key);
+      const target = locate(ev.clientX, ev.clientY);
       dropRef.current = target;
       setDrop(target);
-      queueExpand(target?.groupId ?? null, !!target?.into);
+      if (cur.kind === "item" && target?.kind === "item") {
+        queueExpand(target.groupId, target.into);
+      } else {
+        clearExpandTimer();
+      }
     };
     const onUp = (ev: PointerEvent) => {
       if (ev.pointerId !== e.pointerId) return;
@@ -537,6 +602,46 @@ export function Sidebar({
       window.removeEventListener("pointercancel", onUp);
       window.removeEventListener("keydown", onKey);
     };
+  }
+
+  function onRowPointerDown(e: ReactPointerEvent<HTMLButtonElement>, item: RailItem) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    beginDrag(
+      e,
+      {
+        kind: "item",
+        key: item.key,
+        item,
+        x: e.clientX,
+        y: e.clientY,
+        grabX: e.clientX - rect.left,
+        grabY: e.clientY - rect.top,
+        width: rect.width,
+        armed: false,
+      },
+      (x, y) => hitRailTarget(x, y, item.key),
+    );
+  }
+
+  function onGroupPointerDown(e: ReactPointerEvent<HTMLDivElement>, group: Group) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const order = groups.map((g) => g.id);
+    beginDrag(
+      e,
+      {
+        kind: "group",
+        key: group.id,
+        groupName: group.name,
+        collapsed: group.collapsed,
+        x: e.clientX,
+        y: e.clientY,
+        grabX: e.clientX - rect.left,
+        grabY: e.clientY - rect.top,
+        width: rect.width,
+        armed: false,
+      },
+      (_x, y) => hitGroupTarget(y, group.id, order),
+    );
   }
 
   return (
@@ -602,7 +707,12 @@ export function Sidebar({
                   key={group.id}
                   className={
                     "rail-section grouped" +
-                    (drop?.groupId === group.id && drop.into ? " drop-into" : "")
+                    (drop?.kind === "item" && drop.groupId === group.id && drop.into
+                      ? " drop-into"
+                      : "") +
+                    (drag?.kind === "group" && drag.key === group.id && drag.armed
+                      ? " dragging"
+                      : "")
                   }
                   data-rail-group={group.id}
                 >
@@ -610,8 +720,18 @@ export function Sidebar({
                     group={group}
                     renaming={renamingId === group.id}
                     searching={searching}
-                    dropInto={drop?.groupId === group.id && drop.into}
-                    onToggle={() => onToggleGroup(group.id)}
+                    dropInto={
+                      drop?.kind === "item" && drop.groupId === group.id && drop.into
+                    }
+                    onToggle={() => {
+                      if (didDrag.current) return;
+                      onToggleGroup(group.id);
+                    }}
+                    onPointerDown={
+                      searching || renamingId === group.id
+                        ? undefined
+                        : (e) => onGroupPointerDown(e, group)
+                    }
                     onRename={(name) => {
                       onRenameGroup(group.id, name);
                       onRenameDone();
@@ -631,7 +751,7 @@ export function Sidebar({
                         agents={agents}
                         active={selectedKind === item.kind && selected === item.id}
                         unread={unread.includes(item.key)}
-                        dragging={drag?.key === item.key && drag.armed}
+                        dragging={drag?.kind === "item" && drag.key === item.key && drag.armed}
                         onSelect={() => {
                           if (didDrag.current) return;
                           select(item);
@@ -646,11 +766,13 @@ export function Sidebar({
                 </section>
               );
             })}
-            {ungroupedItems.length || drag?.armed ? (
+            {ungroupedItems.length || (drag?.kind === "item" && drag.armed) ? (
               <section
                 className={
                   "rail-section" +
-                  (drop && drop.groupId === null && drop.into ? " drop-into" : "")
+                  (drop?.kind === "item" && drop.groupId === null && drop.into
+                    ? " drop-into"
+                    : "")
                 }
                 data-rail-ungrouped="1"
               >
@@ -661,7 +783,7 @@ export function Sidebar({
                     agents={agents}
                     active={selectedKind === item.kind && selected === item.id}
                     unread={unread.includes(item.key)}
-                    dragging={drag?.key === item.key && drag.armed}
+                    dragging={drag?.kind === "item" && drag.key === item.key && drag.armed}
                     onSelect={() => {
                       if (didDrag.current) return;
                       select(item);
@@ -672,7 +794,7 @@ export function Sidebar({
                     }
                   />
                 ))}
-                {!ungroupedItems.length && drag?.armed ? (
+                {!ungroupedItems.length && drag?.kind === "item" && drag.armed ? (
                   <div className="empty-rail" data-rail-empty="1">
                     {t("sidebar.ungroupDrop")}
                   </div>
@@ -714,7 +836,8 @@ export function Sidebar({
       {drag?.armed
         ? createPortal(
             <>
-              {drop?.line && drop.beforeKey !== drag.key ? (
+              {drop?.line &&
+              (drop.kind === "group" || drop.beforeKey !== drag.key) ? (
                 <div
                   className="rail-drop-line"
                   style={{
@@ -734,7 +857,18 @@ export function Sidebar({
                   ["--ghost-oy" as string]: `${drag.grabY}px`,
                 }}
               >
-                <ItemRow item={drag.item} agents={agents} ghost />
+                {drag.kind === "group" ? (
+                  <div
+                    className={"group-head" + (drag.collapsed ? " collapsed" : "")}
+                  >
+                    <span className="group-toggle" aria-hidden>
+                      <ChevronDown className="group-chevron" size={14} />
+                    </span>
+                    <span className="group-name">{drag.groupName}</span>
+                  </div>
+                ) : (
+                  <ItemRow item={drag.item} agents={agents} ghost />
+                )}
               </div>
             </>,
             document.body,
@@ -753,6 +887,7 @@ function GroupHead({
   onRename,
   onCancelRename,
   onContextMenu,
+  onPointerDown,
 }: {
   group: Group;
   renaming: boolean;
@@ -762,6 +897,7 @@ function GroupHead({
   onRename: (name: string) => void;
   onCancelRename: () => void;
   onContextMenu: (e: MouseEvent) => void;
+  onPointerDown?: (e: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
   const t = useT();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -794,6 +930,7 @@ function GroupHead({
         (dropInto ? " drop-into" : "")
       }
       data-rail-group-head={group.id}
+      onPointerDown={onPointerDown}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();

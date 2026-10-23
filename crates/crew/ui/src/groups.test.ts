@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   UNGROUPED_ID,
   groupIdOf,
+  groupOrderChanges,
+  moveGroup,
   moveItem,
   normalizeGroups,
   parseItemKey,
@@ -100,6 +102,36 @@ describe("moveItem", () => {
     expect(moveItem(layout, "channel:room", "g1", null, [])).toBe(layout);
     expect(moveItem(layout, "agent:a1", "g1", "agent:a1", [])).toBe(layout);
     expect(moveItem(layout, "agent:a1", "missing", null, [])).toBe(layout);
+  });
+});
+
+describe("moveGroup", () => {
+  const layout = {
+    groups: [group("g1", ["agent:a1"]), group("g2", []), group("g3", ["agent:a2"])],
+    ungrouped: ["agent:a3"],
+  };
+
+  it("inserts a group before another and keeps its chats", () => {
+    const next = moveGroup(layout, "g3", "g1");
+    expect(next.groups.map((g) => g.id)).toEqual(["g3", "g1", "g2"]);
+    expect(next.groups[0].items).toEqual(["agent:a2"]);
+    expect(next.ungrouped).toEqual(["agent:a3"]);
+  });
+
+  it("moves a group to the end when it is dropped below the folders", () => {
+    const next = moveGroup(layout, "g1", null);
+    expect(next.groups.map((g) => g.id)).toEqual(["g2", "g3", "g1"]);
+    expect(next.groups[2].items).toEqual(["agent:a1"]);
+  });
+
+  it("leaves the layout alone when the drop would not move it", () => {
+    expect(moveGroup(layout, "g1", "g2")).toBe(layout);
+    expect(moveGroup(layout, "g3", null)).toBe(layout);
+    expect(moveGroup(layout, "g2", "g2")).toBe(layout);
+    expect(moveGroup(layout, "missing", "g1")).toBe(layout);
+    expect(moveGroup(layout, "g1", "missing")).toBe(layout);
+    expect(groupOrderChanges(["g1", "g2"], "g1", "g2")).toBe(false);
+    expect(groupOrderChanges(["g1", "g2"], "g2", "g1")).toBe(true);
   });
 });
 

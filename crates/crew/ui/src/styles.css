@@ -569,7 +569,15 @@ html.rail-dragging {
   background: var(--working);
   pointer-events: none;
 }
-.rail-row.dragging { opacity: 0.38; }
+.rail-row.dragging,
+.rail-section.dragging { opacity: 0.38; }
+.rail-ghost .group-head {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--group);
+  border-radius: var(--radius-xl);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
 .rail-row img,
 .rail-row svg {
   pointer-events: none;
