@@ -772,6 +772,10 @@ struct ParseState {
     last_codex_item: Option<String>,
     last_codex_text: Option<String>,
     tool_after_text: bool,
+    /// The CLI closed this reply (`turn_completed`) and then kept talking.
+    /// The next text is another reply and needs the blank line a new balloon
+    /// starts with. The process is still this turn, so the row stays open.
+    reply_break: bool,
     /// Auto-compact starts this turn's stream over. Text after it is held
     /// while it still matches what the user already saw.
     compact_replay: bool,
@@ -821,7 +825,12 @@ fn ingest_line(cli: CliKind, line: &str, state: &mut ParseState) -> Option<Strin
     // Text before and after a tool call arrives as one stream; without a break
     // "I'll check." and the answer run together into one sentence.
     let chunk = chunk.map(|c| {
-        if std::mem::take(&mut state.tool_after_text) {
+        let tool = std::mem::take(&mut state.tool_after_text);
+        let turned = std::mem::take(&mut state.reply_break);
+        // A tool and a finished reply both end a sentence. One blank line
+        // starts the next balloon. A chunk that already begins on a new line
+        // keeps that break.
+        if tool || (turned && !c.starts_with('\n')) {
             format!("\n\n{c}")
         } else {
             c
@@ -851,6 +860,13 @@ fn grok_text(v: &Value, state: &mut ParseState) -> Option<String> {
     if matches!(kind, "auto_compact_failed" | "auto_compact_cancelled") {
         state.compact_replay = false;
         state.replay_buf.clear();
+        return None;
+    }
+    // One grok process answers a finished turn and then the notices that
+    // arrive after it. Those are new replies. Sealing the row here would drop
+    // them, because the process has not exited.
+    if kind == "turn_completed" && state.got_text {
+        state.reply_break = true;
         return None;
     }
     if let Some(chunk) = acp_message_chunk(v) {
@@ -1480,6 +1496,52 @@ mod tests {
         assert_eq!(
             grok_tokens(&mut st, &["남은", " 일을", " 합니다."]),
             "남은 일을 합니다."
+        );
+    }
+
+    /// A background notice is another reply in the same process. Without a
+    /// blank line it runs into the period of the reply that just finished.
+    #[test]
+    fn grok_reply_after_turn_completed_starts_a_new_balloon() {
+        let mut st = ParseState::default();
+        let said = "라이너 상태와 커밋은 그대로 두었습니다.";
+        assert_eq!(
+            ingest_line(CliKind::Grok, &grok_message(said), &mut st).as_deref(),
+            Some(said)
+        );
+        assert!(ingest_line(
+            CliKind::Grok,
+            r#"{"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"turn_completed"}}}"#,
+            &mut st,
+        )
+        .is_none());
+        let next = ingest_line(
+            CliKind::Grok,
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"앞에서 실패한 첫 서버 기동이 뒤늦게 종료 알림으로 도착한 것입니다.\n실측 숫자는 바로 위 결과 그대로입니다."}}}}"#,
+            &mut st,
+        );
+        assert_eq!(
+            next.as_deref(),
+            Some(
+                "\n\n앞에서 실패한 첫 서버 기동이 뒤늦게 종료 알림으로 도착한 것입니다.\n실측 숫자는 바로 위 결과 그대로입니다."
+            )
+        );
+        // The rest of that reply stays on the balloon the break opened.
+        assert_eq!(
+            ingest_line(CliKind::Grok, &grok_message(" 이어서."), &mut st).as_deref(),
+            Some(" 이어서.")
+        );
+
+        let mut fresh = ParseState::default();
+        assert!(ingest_line(
+            CliKind::Grok,
+            r#"{"type":"turn_completed"}"#,
+            &mut fresh,
+        )
+        .is_none());
+        assert_eq!(
+            ingest_line(CliKind::Grok, &grok_message("첫 문장."), &mut fresh).as_deref(),
+            Some("첫 문장.")
         );
     }
 
