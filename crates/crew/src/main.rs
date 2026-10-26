@@ -100,6 +100,9 @@ enum Cmd {
     /// Persistent per-agent notes (`$CREW_HOME/memory/AGENT.md`)
     #[command(subcommand)]
     Memory(MemoryCmd),
+    /// Shared notes (`$CREW_HOME/shared.md`). Crew adds the live teammate list when showing them.
+    #[command(subcommand)]
+    Share(ShareCmd),
 }
 
 #[derive(Subcommand)]
@@ -249,6 +252,22 @@ impl RoutineRef {
             None => Ok((require_agent_id(None, what)?, self.first)),
         }
     }
+}
+
+#[derive(Subcommand)]
+enum ShareCmd {
+    /// Print the live teammate list and the shared notes
+    Show,
+    /// Replace the shared notes. The teammate list stays live. Text from args, or stdin.
+    Set {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        text: Vec<String>,
+    },
+    /// Append a shared note.
+    Append {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        text: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -577,6 +596,40 @@ fn run() -> anyhow::Result<()> {
         Some(Cmd::Group(GroupCmd::Add { name, bots })) => add_group_cmd(name, bots),
         Some(Cmd::Routine(sub)) => run_routine(sub),
         Some(Cmd::Memory(sub)) => run_memory(sub),
+        Some(Cmd::Share(sub)) => run_share(sub),
+    }
+}
+
+fn run_share(cmd: ShareCmd) -> anyhow::Result<()> {
+    match cmd {
+        ShareCmd::Show => {
+            let cfg = Config::load()?;
+            let id = session_agent_id();
+            let agent = id
+                .as_ref()
+                .and_then(|id| cfg.agents.iter().find(|a| &a.id == id));
+            print!(
+                "{}",
+                crate::config::shared_memory_body(agent, &cfg.agents, &crate::memory::read_shared())
+            );
+            Ok(())
+        }
+        ShareCmd::Set { text } => {
+            let body = memory_body(text)?;
+            if body.trim().is_empty() {
+                anyhow::bail!("share set needs text; it replaces the shared notes");
+            }
+            crate::memory::write_shared(&body)?;
+            Ok(())
+        }
+        ShareCmd::Append { text } => {
+            let body = memory_body(text)?;
+            if body.trim().is_empty() {
+                anyhow::bail!("share append needs text");
+            }
+            crate::memory::append_shared(&body)?;
+            Ok(())
+        }
     }
 }
 

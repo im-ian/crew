@@ -607,6 +607,25 @@ export function useCrew() {
     }
   }
 
+  async function loadShared() {
+    try {
+      return await api.getSharedMemory();
+    } catch (err) {
+      showError(err);
+      return "";
+    }
+  }
+
+  async function saveShared(text: string, base: string): Promise<boolean> {
+    try {
+      if (await api.setSharedMemory(text, base)) return true;
+      showToast(t("memory.sharedChanged"));
+    } catch (err) {
+      showError(err);
+    }
+    return false;
+  }
+
   async function saveMemory(text: string, base: string): Promise<boolean> {
     const id = selectedRef.current.id;
     if (!id || selectedRef.current.kind !== "agent") return false;
@@ -1018,6 +1037,8 @@ export function useCrew() {
     runRoutine,
     loadMemory,
     saveMemory,
+    loadShared,
+    saveShared,
     showError,
   };
 }

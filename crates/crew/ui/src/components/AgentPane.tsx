@@ -32,6 +32,9 @@ type Props = {
   onRunRoutine: (r: Routine) => Promise<void>;
   onLoadMemory: (id: string) => Promise<string>;
   onSaveMemory: (text: string, base: string) => Promise<boolean>;
+  agents: AgentInfo[];
+  onLoadShared: () => Promise<string>;
+  onSaveShared: (text: string, base: string) => Promise<boolean>;
 };
 
 export function AgentPane({
@@ -49,6 +52,9 @@ export function AgentPane({
   onRunRoutine,
   onLoadMemory,
   onSaveMemory,
+  agents,
+  onLoadShared,
+  onSaveShared,
 }: Props) {
   const t = useT();
   return (
@@ -109,8 +115,11 @@ export function AgentPane({
             <MemoryTab
               open={open}
               agent={agent}
+              agents={agents}
               onLoad={onLoadMemory}
               onSave={onSaveMemory}
+              onLoadShared={onLoadShared}
+              onSaveShared={onSaveShared}
             />
           </div>
         </div>
@@ -122,13 +131,19 @@ export function AgentPane({
 function MemoryTab({
   open,
   agent,
+  agents,
   onLoad,
   onSave,
+  onLoadShared,
+  onSaveShared,
 }: {
   open: boolean;
   agent: AgentInfo | null;
+  agents: AgentInfo[];
   onLoad: (id: string) => Promise<string>;
   onSave: (text: string, base: string) => Promise<boolean>;
+  onLoadShared: () => Promise<string>;
+  onSaveShared: (text: string, base: string) => Promise<boolean>;
 }) {
   const t = useT();
   const [memory, setMemory] = useState("");
@@ -136,6 +151,15 @@ function MemoryTab({
   const edited = useRef(false);
   // The text as loaded. Save only goes through if the file still matches it.
   const base = useRef("");
+  const [shared, setShared] = useState("");
+  const [sharedSaved, setSharedSaved] = useState(false);
+  const sharedEdited = useRef(false);
+  const sharedBase = useRef("");
+  const team = agents
+    .slice()
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((a) => `${a.name} (${a.id})`)
+    .join(", ");
 
   useEffect(() => {
     if (!open || !agent) return;
@@ -147,17 +171,35 @@ function MemoryTab({
       setMemory(text);
       setSaved(false);
     });
+    setShared("");
+    setSharedSaved(false);
+    sharedEdited.current = false;
+    void onLoadShared().then((text) => {
+      if (sharedEdited.current) return;
+      sharedBase.current = text;
+      setShared(text);
+      setSharedSaved(false);
+    });
   }, [open, agent?.id]);
 
   // The bot keeps its own memory, so a finished turn may have changed it.
   // Show that unless the user is mid-edit.
   useEffect(() => {
-    if (!open || !agent || agent.status === "working" || edited.current) return;
-    void onLoad(agent.id).then((text) => {
-      if (edited.current) return;
-      base.current = text;
-      setMemory(text);
-    });
+    if (!open || !agent || agent.status === "working") return;
+    if (!edited.current) {
+      void onLoad(agent.id).then((text) => {
+        if (edited.current) return;
+        base.current = text;
+        setMemory(text);
+      });
+    }
+    if (!sharedEdited.current) {
+      void onLoadShared().then((text) => {
+        if (sharedEdited.current) return;
+        sharedBase.current = text;
+        setShared(text);
+      });
+    }
   }, [agent?.status]);
 
   return (
@@ -186,6 +228,36 @@ function MemoryTab({
             base.current = memory;
             setSaved(true);
             edited.current = false;
+          }}
+        >
+          {t("common.save")}
+        </button>
+      </div>
+      <p className="apply-note">{t("memory.sharedNote")}</p>
+      {team ? <p className="apply-note">{t("memory.sharedTeam", { team })}</p> : null}
+      <Field label={t("memory.sharedLabel")} htmlFor="pane-shared">
+        <textarea
+          id="pane-shared"
+          className="textin memory"
+          placeholder={t("memory.sharedPlaceholder")}
+          value={shared}
+          onChange={(e) => {
+            setShared(e.target.value);
+            setSharedSaved(false);
+            sharedEdited.current = true;
+          }}
+        />
+      </Field>
+      <div className="actions">
+        {sharedSaved ? <span className="apply-note">{t("memory.saved")}</span> : null}
+        <button
+          type="button"
+          className="primary wide"
+          onClick={async () => {
+            if (!(await onSaveShared(shared, sharedBase.current))) return;
+            sharedBase.current = shared;
+            setSharedSaved(true);
+            sharedEdited.current = false;
           }}
         >
           {t("common.save")}

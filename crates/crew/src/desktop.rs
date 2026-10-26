@@ -209,6 +209,17 @@ fn set_memory(agent: String, text: String, base: String) -> Result<bool, String>
     crate::memory::write_if_unchanged(agent, &base, &text).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn get_shared_memory() -> Result<String, String> {
+    Ok(crate::memory::read_shared())
+}
+
+/// `base` is the notes the tab loaded. False means they changed since.
+#[tauri::command]
+fn set_shared_memory(text: String, base: String) -> Result<bool, String> {
+    crate::memory::write_shared_if_unchanged(&base, &text).map_err(|e| e.to_string())
+}
+
 #[tauri::command(async)]
 fn get_messages(agent: String) -> Result<Vec<ChatMessage>, String> {
     match client::rpc(Request::Messages { agent }) {
@@ -788,6 +799,8 @@ pub fn run() -> anyhow::Result<()> {
             list_routine_runs,
             get_memory,
             set_memory,
+            get_shared_memory,
+            set_shared_memory,
             list_groups,
             set_groups,
             list_models,

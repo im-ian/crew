@@ -341,6 +341,12 @@ pub fn roster_path() -> PathBuf {
     home_dir().join("roster.md")
 }
 
+/// Team notes. The live teammate list is not stored here; it is written in
+/// when the prompt or `crew share show` is built.
+pub fn shared_memory_path() -> PathBuf {
+    home_dir().join("shared.md")
+}
+
 pub fn memory_dir() -> PathBuf {
     home_dir().join("memory")
 }

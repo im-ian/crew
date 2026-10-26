@@ -178,6 +178,11 @@ export const KO = {
   "memory.placeholder": "이름, 취향, 자주 하는 일처럼 오래 남을 메모",
   "memory.saved": "저장됨",
   "memory.changed": "그사이 메모리가 바뀌어 저장하지 않았습니다. 고친 내용을 복사해 두고 탭을 다시 여세요.",
+  "memory.sharedNote": "모든 봇이 함께 보는 메모입니다. 봇 목록은 Crew가 매 턴 이 메모와 함께 최신으로 보냅니다.",
+  "memory.sharedLabel": "공유 메모리",
+  "memory.sharedPlaceholder": "팀 전체가 기억할 결정, 경로, 규칙",
+  "memory.sharedTeam": "지금 봇 목록: {team}",
+  "memory.sharedChanged": "그사이 공유 메모리가 바뀌어 저장하지 않았습니다. 고친 내용을 복사해 두고 탭을 다시 여세요.",
 
   "field.name": "이름",
   "field.cwd": "작업 폴더",
@@ -443,6 +448,11 @@ export const EN: { [K in MessageKey]: string } = {
   "memory.placeholder": "Names, tastes, recurring work — things that should last",
   "memory.saved": "Saved",
   "memory.changed": "The memory changed meanwhile, so this wasn’t saved. Copy your edit, then reopen the tab.",
+  "memory.sharedNote": "Notes every bot sees. Crew sends the current bot list with this memory on every turn.",
+  "memory.sharedLabel": "Shared memory",
+  "memory.sharedPlaceholder": "Decisions, paths, and rules the whole team should keep",
+  "memory.sharedTeam": "Bots now: {team}",
+  "memory.sharedChanged": "Shared memory changed meanwhile, so this wasn’t saved. Copy your edit, then reopen the tab.",
 
   "field.name": "Name",
   "field.cwd": "Working folder",

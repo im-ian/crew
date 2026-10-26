@@ -647,7 +647,7 @@ fn answer_choice(
 
 /// `/compact`, `/context`: a CLI command, which reads as one only when the
 /// prompt starts with it. A path is not one.
-fn is_slash_command(text: &str) -> bool {
+pub(crate) fn is_slash_command(text: &str) -> bool {
     text.strip_prefix('/')
         .and_then(|rest| rest.split(char::is_whitespace).next())
         .is_some_and(|name| !name.is_empty() && !name.contains('/'))
@@ -2827,10 +2827,12 @@ fn set_agent(
     if let Some(color) = color {
         cfg.avatar_color = Some(parse_hex_color(&color)?);
     }
+    let mut renamed = false;
     if let Some(name) = name {
         let name = name.trim();
-        if !name.is_empty() {
+        if !name.is_empty() && name != cfg.name {
             cfg.name = name.to_string();
+            renamed = true;
         }
     }
     if unset_cwd {
@@ -2840,6 +2842,9 @@ fn set_agent(
     }
     crate::avatar::apply(&mut cfg, avatar, unset_avatar)?;
     persist_config(&cfg)?;
+    if renamed {
+        inject_roster_update(None);
+    }
     Ok(())
 }
 
@@ -3881,9 +3886,17 @@ mod daemon_tests {
                 fs::read_to_string(&log).is_ok_and(|s| s.ends_with("/compact|"))
             });
             wait_idle(&bot);
+            let cfg = Config::load().unwrap();
+            let agent = cfg.agents.iter().find(|a| a.id == bot).expect("bot");
+            let body = "고쳐줘\n\n[crew reply:1-2 from:bot]\n그 이미지\n\nPR은 따로";
+            let joined = format!(
+                "{}\n\n{body}",
+                crate::config::shared_memory_note(agent, &cfg.agents, "")
+            );
+            // A slash command still goes out alone, so /compact is not wrapped.
             assert_eq!(
                 fs::read_to_string(&log).unwrap(),
-                "고쳐줘\n\n[crew reply:1-2 from:bot]\n그 이미지\n\nPR은 따로|/compact|"
+                format!("{joined}|/compact|")
             );
             assert_eq!(waiting(), 0);
             remove_agent(&bot).unwrap();

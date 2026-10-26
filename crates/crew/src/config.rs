@@ -936,22 +936,17 @@ pub fn new_bot_ask(english: bool) -> String {
     )
 }
 
-/// Short spawn-time prompt: identity, teammates, and how to `crew tell`.
-pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
+/// Short spawn-time prompt: identity, where the live team list lives, and how to `crew tell`.
+pub fn team_rules(agent: &AgentConfig, _roster: &[AgentConfig]) -> String {
     let mut s = String::new();
     s.push_str(&format!(
         "You are Crew agent `{}` ({}).\n",
         agent.id,
         agent.display_name()
     ));
-    let mut others: Vec<&AgentConfig> = roster.iter().filter(|a| a.id != agent.id).collect();
-    others.sort_by(|a, b| a.id.cmp(&b.id));
-    if !others.is_empty() {
-        s.push_str("Teammates:\n");
-        for a in others {
-            s.push_str(&format!("- {} — {}\n", a.id, a.display_name()));
-        }
-    }
+    s.push_str(
+        "Shared memory is current on every turn. A `[crew system]` note that starts with `Shared memory` holds the live teammate list and your live name, plus the notes every bot shares. That note replaces any teammate list in these instructions, including after a compact. Use the note. To read it, run `crew share show`. To add a note for every bot, run `crew share append <<'EOF'` with one short line, then `EOF`. To replace the shared notes, run `crew share show`, then `crew share set <<'EOF'` with the notes only, then `EOF`. Crew writes the teammate list, so `crew share set` does not change it. Do not copy the teammate list into your own memory. Do not save secrets there.\n",
+    );
     s.push_str(
         "A teammate is written `@<id>`, and Crew shows it as their name. To name a teammate in your reply, write `@<id>` too; that only shows their name and sends nothing. When the user writes one, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, so after `crew tell`, end your turn. Do not wait, sleep, or check for the reply.\n",
     );
@@ -974,31 +969,85 @@ pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
         "To ask the human user in this chat to pick, actually run `crew ask --question \"어느 쪽을 고를래?\" --option A --option B --option C`. To ask them to type a value, run `crew ask --question \"로그인\" --input 아이디 --input 비밀번호`. Crew shows a card and prints their answer. Never send this to a teammate. Do not crew tell the options. Do not ask the user to type the letter. This is not a substitute for `crew tell`, `crew agent set`, or `crew routine add`.\n",
     );
     s.push_str(&format!(
-        "Your memory survives chat resets. It is under `{MEMORY_HEADING}` at the end of these instructions (absent while empty); if it changes between turns, a `[crew system]` note gives you the new one, and `crew memory show` prints it now. It is your only memory: keep notes there, not in other memory files or tools. Keep it yourself: when you learn something later chats need (the user's name, preferences, a decision) or the user asks you to remember it, actually run `crew memory append <<'EOF'` with one short line, then `EOF`. To correct or forget something, run `crew memory show`, then `crew memory set <<'EOF'` with the whole new memory; it replaces everything. Always pass the text in a quoted heredoc like this, so the shell leaves `$` and backticks alone. A schedule is a routine, not a memory. Do not save what is already there, one-off chatter, or passwords, tokens and other secrets. Do not only claim you remembered.\n",
+        "Your memory survives chat resets. It is under `{MEMORY_HEADING}` at the end of these instructions (absent while empty); if it changes between turns, a `[crew system]` note gives you the new one, and `crew memory show` prints it now. It is your own memory: keep your notes there, not in other memory files or tools. The teammate list and notes every bot shares belong in shared memory. Keep it yourself: when you learn something later chats need (the user's name, preferences, a decision) or the user asks you to remember it, actually run `crew memory append <<'EOF'` with one short line, then `EOF`. To correct or forget something, run `crew memory show`, then `crew memory set <<'EOF'` with the whole new memory; it replaces everything. Always pass the text in a quoted heredoc like this, so the shell leaves `$` and backticks alone. A schedule is a routine, not a memory. Do not save what is already there, one-off chatter, or passwords, tokens and other secrets. Do not only claim you remembered.\n",
     ));
     s
 }
 
 const MEMORY_HEADING: &str = "# Your memory";
 
-/// Short `[crew system]` note for running PTYs when the roster changes.
-pub fn roster_update_text(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
+/// `id — name` list, in id order. `(none)` when this bot is alone.
+fn teammates_sentence(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
     let mut others: Vec<&AgentConfig> = roster.iter().filter(|a| a.id != agent.id).collect();
     others.sort_by(|a, b| a.id.cmp(&b.id));
-    let mut body = String::new();
     if others.is_empty() {
-        body.push_str("Teammates: (none).");
-    } else {
-        body.push_str("Teammates: ");
-        let parts: Vec<String> = others
-            .into_iter()
-            .map(|a| format!("{} — {}", a.id, a.display_name()))
-            .collect();
-        body.push_str(&parts.join("; "));
-        body.push('.');
+        return "Teammates: (none).".to_string();
     }
-    body.push_str(" A teammate is written `@<id>`, and Crew shows it as their name; write them that way in your reply too. When the user writes one they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>`. Do not ask the user to switch chats. Do not pretend.");
-    body
+    let parts: Vec<String> = others
+        .into_iter()
+        .map(|a| format!("{} — {}", a.id, a.display_name()))
+        .collect();
+    format!("Teammates: {}.", parts.join("; "))
+}
+
+/// Short `[crew system]` note for running PTYs when the roster changes.
+pub fn roster_update_text(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
+    format!(
+        "You are `{}` ({}). {} A teammate is written `@<id>`, and Crew shows it as their name; write them that way in your reply too. When the user writes one they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>`. Do not ask the user to switch chats. Do not pretend.",
+        agent.id,
+        agent.display_name(),
+        teammates_sentence(agent, roster)
+    )
+}
+
+fn all_teammates_sentence(roster: &[AgentConfig]) -> String {
+    if roster.is_empty() {
+        return "Teammates: (none).".to_string();
+    }
+    let mut list: Vec<&AgentConfig> = roster.iter().collect();
+    list.sort_by(|a, b| a.id.cmp(&b.id));
+    let parts: Vec<String> = list
+        .into_iter()
+        .map(|a| format!("{} — {}", a.id, a.display_name()))
+        .collect();
+    format!("Teammates: {}.", parts.join("; "))
+}
+
+/// What `crew share show` prints, and the body of the per-turn note. The
+/// teammate list is built from the live roster, not from the notes file.
+pub fn shared_memory_body(agent: Option<&AgentConfig>, roster: &[AgentConfig], notes: &str) -> String {
+    let mut s = String::new();
+    if let Some(agent) = agent {
+        s.push_str(&format!(
+            "You are `{}` ({}). ",
+            agent.id,
+            agent.display_name()
+        ));
+        s.push_str(&teammates_sentence(agent, roster));
+    } else {
+        s.push_str(&all_teammates_sentence(roster));
+    }
+    s.push_str("\n# Notes\n");
+    let notes = notes.trim();
+    if notes.is_empty() {
+        s.push_str("(none)\n");
+    } else {
+        s.push_str(notes);
+        if !s.ends_with('\n') {
+            s.push('\n');
+        }
+    }
+    s
+}
+
+/// Live team list and shared notes. grok, claude, and codex keep the
+/// instructions from the turn the session started, so this note is the copy
+/// that is actually current.
+pub fn shared_memory_note(agent: &AgentConfig, roster: &[AgentConfig], notes: &str) -> String {
+    format!(
+        "[crew system] Shared memory. This is current and replaces the teammate list and your name in your instructions. Do not answer this note.\n{}",
+        shared_memory_body(Some(agent), roster, notes)
+    )
 }
 
 /// `@id` tokens in `text` that name a teammate (not `self_id`).
@@ -1857,7 +1906,7 @@ mod tests {
     }
 
     #[test]
-    fn grok_team_rules_list_teammates_and_append_existing() {
+    fn grok_team_rules_keep_existing_text_and_skip_the_roster() {
         let mut alpha = AgentConfig::new(
             "alpha".into(),
             "Alpha".into(),
@@ -1877,7 +1926,9 @@ mod tests {
         assert!(rules.contains("keep this"));
         assert!(rules.contains("You are Crew agent `alpha` (Alpha)."));
         assert!(!rules.contains("PM"));
-        assert!(rules.contains("- beta — Beta\n"));
+        // The live list is composed each turn, so the spawn prompt must not snapshot it.
+        assert!(!rules.contains("- beta — Beta\n"));
+        assert!(rules.contains("starts with `Shared memory`"));
         assert!(!rules.contains("reviewer"));
         assert!(!rules.contains("alpha — Alpha"));
         assert!(rules.contains("crew tell"));
@@ -2135,7 +2186,8 @@ mod tests {
         alpha.role = Some("PM".into());
         let mut beta = AgentConfig::new("beta".into(), "Beta".into(), vec!["cat".into()], None);
         beta.role = Some("reviewer".into());
-        let text = roster_update_text(&alpha, &[alpha.clone(), beta]);
+        let text = roster_update_text(&alpha, &[alpha.clone(), beta.clone()]);
+        assert!(text.contains("You are `alpha` (Alpha)."));
         assert!(text.contains("beta — Beta"));
         assert!(!text.contains("reviewer"));
         assert!(!text.contains("alpha — Alpha"));
@@ -2143,6 +2195,21 @@ mod tests {
         assert!(text.contains("@<id>"));
         let solo = roster_update_text(&alpha, &[alpha.clone()]);
         assert!(solo.contains("Teammates: (none)"));
+        let note = shared_memory_note(&alpha, &[alpha.clone(), beta.clone()], "harbor is closed");
+        assert!(note.starts_with("[crew system] Shared memory."));
+        assert!(note.contains("You are `alpha` (Alpha)."));
+        assert!(note.contains("Teammates: beta — Beta."));
+        assert!(note.contains("# Notes\nharbor is closed\n"));
+        assert!(note.contains("Do not answer this note."));
+        assert!(!note.contains("crew tell"));
+        assert!(!note.contains("reviewer"));
+        assert!(!note.contains("alpha — Alpha"));
+        let empty = shared_memory_note(&alpha, &[alpha.clone()], "");
+        assert!(empty.contains("# Notes\n(none)\n"));
+        let user = shared_memory_body(None, &[alpha.clone(), beta], "");
+        assert!(user.contains("alpha — Alpha"));
+        assert!(user.contains("beta — Beta"));
+        assert!(!user.contains("You are"));
     }
 
     #[test]
@@ -2239,7 +2306,14 @@ mod tests {
         assert!(rules.contains("run `crew memory show`, then `crew memory set <<'EOF'`"));
         assert!(rules.contains("`# Your memory`"));
         assert!(rules.contains("if it changes between turns, a `[crew system]` note"));
-        assert!(rules.contains("your only memory"));
+        assert!(rules.contains("starts with `Shared memory`"));
+        assert!(rules.contains("including after a compact"));
+        assert!(rules.contains("crew share show"));
+        assert!(rules.contains("crew share append <<'EOF'"));
+        assert!(rules.contains("crew share set <<'EOF'"));
+        assert!(rules.contains("`crew share set` does not change it"));
+        assert!(rules.contains("your own memory"));
+        assert!(!rules.contains("Teammates:\n"));
         assert!(rules.contains("A schedule is a routine, not a memory"));
         assert!(rules.contains("secrets"));
     }
