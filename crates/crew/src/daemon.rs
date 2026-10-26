@@ -166,11 +166,15 @@ static EVENTS: OnceLock<broadcast::Sender<Event>> = OnceLock::new();
 static AGENTS: OnceLock<Mutex<HashMap<String, LiveAgent>>> = OnceLock::new();
 static CONFIGS: OnceLock<Mutex<HashMap<String, AgentConfig>>> = OnceLock::new();
 static INBOX: OnceLock<Mutex<HashMap<String, VecDeque<PendingDelivery>>>> = OnceLock::new();
+/// The inbox rows a headless turn took, so a stop before any stdout can put
+/// each one back. Dropped when the turn finishes or the rows are put back.
+static PROMPTS: OnceLock<Mutex<HashMap<String, Vec<PendingDelivery>>>> = OnceLock::new();
 static ORIGINS: OnceLock<Mutex<HashMap<String, TurnOrigin>>> = OnceLock::new();
 static PENDING_HANDOFFS: OnceLock<Mutex<HashMap<String, Vec<PendingHandoff>>>> = OnceLock::new();
 /// Jobs that wait on a bot's turn in progress, then run one at a time in order.
 static SERIAL: OnceLock<Mutex<SerialBoard>> = OnceLock::new();
 
+#[derive(Clone)]
 struct PendingDelivery {
     text: String,
     newline: bool,
@@ -183,6 +187,10 @@ struct PendingDelivery {
     /// bot when the delivery starts: until then a stop or a newer message for
     /// that bot is about the work ahead of it, not this.
     then: VecDeque<SerialJob>,
+    /// The CLI never wrote a line for this, so a stop put it back. It waits
+    /// for the next line the user types, or for them to send it on purpose.
+    /// Starting it on its own would walk into the same silence.
+    parked: bool,
 }
 
 struct PendingHandoff {
@@ -389,6 +397,135 @@ fn clear_inbox(id: &str) {
     }
 }
 
+fn prompts() -> &'static Mutex<HashMap<String, Vec<PendingDelivery>>> {
+    PROMPTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn one_prompt(
+    text: &str,
+    newline: bool,
+    msg_id: Option<&str>,
+    joins: bool,
+    origin: &TurnOrigin,
+    then: &VecDeque<SerialJob>,
+) -> Vec<PendingDelivery> {
+    vec![PendingDelivery {
+        text: text.to_string(),
+        newline,
+        msg_id: msg_id.map(str::to_string),
+        joins,
+        origin: origin.clone(),
+        then: then.clone(),
+        parked: false,
+    }]
+}
+
+/// `true` when `prompt` is what a later silent stop should put back.
+fn remember_prompt(id: &str, prompt: Vec<PendingDelivery>) -> bool {
+    if prompt.is_empty() {
+        return false;
+    }
+    let Some(session) = headless_of(id) else {
+        return false;
+    };
+    let text = prompt
+        .iter()
+        .map(|item| item.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let msg_ids = prompt
+        .iter()
+        .filter_map(|item| item.msg_id.clone())
+        .collect();
+    if let Ok(mut map) = prompts().lock() {
+        map.insert(id.to_string(), prompt);
+    }
+    headless::remember_inflight(
+        &session,
+        headless::InFlight {
+            text,
+            msg_ids,
+            got_output: false,
+        },
+    );
+    true
+}
+
+pub(crate) fn forget_prompt(id: &str) {
+    if let Ok(mut map) = prompts().lock() {
+        map.remove(id);
+    }
+    if let Some(session) = headless_of(id) {
+        headless::forget_inflight(&session);
+    }
+}
+
+fn headless_of(id: &str) -> Option<Arc<HeadlessSession>> {
+    match agents().lock().ok()?.get(id)? {
+        LiveAgent::Headless(session) => Some(Arc::clone(session)),
+        LiveAgent::Pty(_) => None,
+    }
+}
+
+/// Put the prompt the CLI never answered at the front of the inbox, waiting.
+pub(crate) fn requeue_unanswered(id: &str, flight: headless::InFlight) {
+    let stored = prompts().lock().ok().and_then(|mut map| map.remove(id));
+    let head = flight.text;
+    let ids = flight.msg_ids;
+    let prompt = match stored {
+        Some(prompt) if !prompt.is_empty() => prompt,
+        _ => vec![PendingDelivery {
+            text: head,
+            newline: true,
+            msg_id: ids.first().cloned(),
+            joins: true,
+            origin: TurnOrigin::user(),
+            then: VecDeque::new(),
+            parked: false,
+        }],
+    };
+    // `set_queued` takes the chat lock. The inbox is already held here, which
+    // is the same order `enqueue_delivery` uses.
+    if let Ok(mut map) = inbox().lock() {
+        let q = map.entry(id.to_string()).or_default();
+        for mid in &ids {
+            crate::transcript::set_queued(id, mid, true);
+        }
+        for item in &prompt {
+            if let Some(mid) = &item.msg_id {
+                crate::transcript::set_queued(id, mid, true);
+            }
+        }
+        for mut item in prompt.into_iter().rev() {
+            item.parked = true;
+            q.push_front(item);
+        }
+    }
+}
+
+fn inbox_front_parked(id: &str) -> bool {
+    inbox()
+        .lock()
+        .ok()
+        .and_then(|map| map.get(id).and_then(|q| q.front().map(|item| item.parked)))
+        .unwrap_or(false)
+}
+
+fn unpark_prefix(id: &str) {
+    let Ok(mut map) = inbox().lock() else {
+        return;
+    };
+    let Some(q) = map.get_mut(id) else {
+        return;
+    };
+    for item in q.iter_mut() {
+        if !item.parked {
+            break;
+        }
+        item.parked = false;
+    }
+}
+
 fn enqueue_delivery(
     id: &str,
     text: &str,
@@ -415,6 +552,7 @@ fn enqueue_delivery(
         joins,
         origin,
         then: std::mem::take(then),
+        parked: false,
     });
     Ok(())
 }
@@ -476,6 +614,8 @@ fn interrupt_turn(id: &str) -> anyhow::Result<()> {
 fn halt_turn(id: &str) -> anyhow::Result<()> {
     // A stop ends the chain. The members still waiting must not answer it, and
     // the bot that asked is not woken with what was said before the stop.
+    // Cleared before the prompt is put back, so the copy on those lines is
+    // the one that runs when they eventually go out.
     clear_serial_after(id);
     take_wake(id);
     let live = {
@@ -488,12 +628,31 @@ fn halt_turn(id: &str) -> anyhow::Result<()> {
         LiveAgent::Headless(session) => headless::interrupt(&session),
         LiveAgent::Pty(_) => {}
     }
+    finish_halted_turn(id);
+    Ok(())
+}
+
+fn finish_halted_turn(id: &str) {
     crate::transcript::end_turn(id);
     let closed = crate::transcript::close_pending_choices(id);
     fail_asks(&closed, "interrupted");
     crate::transcript::drop_pending_approval(id);
     emit_agent_frame(id);
-    Ok(())
+}
+
+/// The first-output watch. The turn never spoke, so it ends like a stop and
+/// the chat says why. The prompt stays parked.
+pub(crate) fn halt_unheard(id: &str, flight: headless::InFlight) {
+    clear_serial_after(id);
+    take_wake(id);
+    requeue_unanswered(id, flight);
+    finish_halted_turn(id);
+    let line = if crate::paths::locale() == "en" {
+        "The CLI is not responding."
+    } else {
+        "CLI가 응답하지 않습니다"
+    };
+    crate::transcript::push_system(id, "crew", line, None);
 }
 
 fn approve_agent(id: &str, allow: bool) -> anyhow::Result<()> {
@@ -670,6 +829,7 @@ fn start_delivery(
     msg_id: Option<&str>,
     joined_ids: &[String],
     then: &mut VecDeque<SerialJob>,
+    prompt: Vec<PendingDelivery>,
 ) -> anyhow::Result<()> {
     let id = start.0.clone();
     let id = id.as_str();
@@ -718,10 +878,16 @@ fn start_delivery(
     let prev_origin = get_origin(id);
     set_origin(id, origin);
     let epoch = serial_epoch(id);
+    // Before the CLI can print. A line that arrives first has to land on this
+    // record, or a stop would treat an answered prompt as unheard.
+    let armed = remember_prompt(id, prompt);
     let started = deliver(id, &text, newline, &skip_rows);
     match &started {
         Ok(()) => follow_turn(id, epoch, std::mem::take(then)),
         Err(_) => {
+            if armed {
+                forget_prompt(id);
+            }
             restore_handoffs(id, pending);
             crate::transcript::cancel_expect(id);
             // A busy agent is still in the turn these belong to.
@@ -790,6 +956,14 @@ fn submit_delivery_then(
             targeting::MAX_RELAY_HOPS
         );
     }
+    // Lines the CLI never answered sit parked at the front. The next line the
+    // user types takes them along, instead of leaving them there.
+    if joins && inbox_front_parked(id) {
+        enqueue_delivery(id, text, newline, msg_id, joins, origin, then)?;
+        unpark_prefix(id);
+        pump_inbox_inner(id);
+        return Ok(());
+    }
     if !agent_busy(id)? {
         if let Some(start) = claim_start(id) {
             match start_delivery(
@@ -800,6 +974,7 @@ fn submit_delivery_then(
                 msg_id.as_deref(),
                 &[],
                 then,
+                one_prompt(text, newline, msg_id.as_deref(), joins, &origin, then),
             ) {
                 Err(err) if is_busy_err(&err) => {}
                 started => return started,
@@ -833,6 +1008,14 @@ fn steer_delivery(
                 Some(&msg_id),
                 &[],
                 then,
+                one_prompt(
+                    text,
+                    true,
+                    Some(&msg_id),
+                    !is_slash_command(text),
+                    &TurnOrigin::user(),
+                    then,
+                ),
             ) {
                 Err(err) if is_busy_err(&err) => {}
                 started => return started,
@@ -851,6 +1034,7 @@ fn steer_delivery(
                 joins: false,
                 origin: TurnOrigin::user(),
                 then: std::mem::take(then),
+                parked: false,
             });
     }
     pump_inbox_inner(id);
@@ -916,6 +1100,9 @@ fn pump_inbox_inner(id: &str) {
         .join("\n\n");
     let (newline, origin, msg_id) = (first.newline, first.origin.clone(), first.msg_id.clone());
     let joined_ids: Vec<String> = run.iter().filter_map(|item| item.msg_id.clone()).collect();
+    // Cloned before `then` is taken, so a silent stop can put each line back
+    // with the teammates it named.
+    let prompt = run.clone();
     let named: Vec<usize> = run.iter().map(|item| item.then.len()).collect();
     let mut then: VecDeque<SerialJob> = run
         .iter_mut()
@@ -929,6 +1116,7 @@ fn pump_inbox_inner(id: &str) {
         msg_id.as_deref(),
         &joined_ids,
         &mut then,
+        prompt,
     ) {
         Ok(()) => {
             for item in &run {
@@ -970,13 +1158,21 @@ fn next_run(id: &str) -> Vec<PendingDelivery> {
     let Some(q) = map.get_mut(id) else {
         return run;
     };
+    let Some(first) = q.front() else {
+        return run;
+    };
+    // Put back because the CLI never answered. Leave it until the user sends
+    // another line or asks to send it now.
+    if first.parked {
+        return run;
+    }
     let Some(first) = q.pop_front() else {
         return run;
     };
     let joins = first.joins;
     run.push(first);
     if joins {
-        while let Some(more) = q.pop_front_if(|next| next.joins) {
+        while let Some(more) = q.pop_front_if(|next| next.joins && !next.parked) {
             run.push(more);
         }
     }
@@ -2731,6 +2927,8 @@ fn remove_agent(id: &str) -> anyhow::Result<()> {
     crate::headless::clear_session(id);
     crate::headless::clear_recap(id);
     clear_inbox(id);
+    // Before the kill, which would otherwise put a silent prompt back.
+    forget_prompt(id);
     clear_agent_context(id);
     session.kill();
     // After the kill: an in-flight headless turn persists through `push_tool`
@@ -3486,7 +3684,8 @@ mod daemon_tests {
                 TurnOrigin::user(),
                 Some(&tell),
                 &[],
-                &mut VecDeque::new()
+                &mut VecDeque::new(),
+                Vec::new()
             )
             .is_err());
             assert_eq!(handoff_rows(&term), 1);
@@ -3906,6 +4105,170 @@ mod daemon_tests {
                 format!("{joined}|/compact|")
             );
             assert_eq!(waiting(), 0);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    fn set_output_wait(id: &str, wait: Duration) {
+        match agents().lock().unwrap().get(id) {
+            Some(LiveAgent::Headless(session)) => headless::set_first_output_timeout(session, wait),
+            _ => panic!("runs headless"),
+        }
+    }
+
+    fn queued_text(id: &str) -> Vec<String> {
+        crate::transcript::messages(id)
+            .into_iter()
+            .filter(|m| m.queued)
+            .map(|m| m.text)
+            .collect()
+    }
+
+    /// Sleeps only when `needle` is in the prompt, so the new-bot question
+    /// that runs first can finish. Appends each prompt to `log`.
+    fn hold_when(log: &std::path::Path, needle: &str) -> String {
+        format!(
+            "printf '%s|' \"$last\" >> '{}'\ncase \"$last\" in *{needle}*) exec sleep 30 ;; esac",
+            log.display()
+        )
+    }
+
+    /// Four lines already joined into one prompt, and the CLI has written
+    /// nothing. Stop puts each line back, still waiting, and does not start
+    /// them again. The next line the user types leaves with them.
+    #[test]
+    fn a_stop_before_any_output_puts_the_lines_back() {
+        paths::testing::with_home("silent-stop", || {
+            let bot = test_id("silent");
+            let log = paths::home_dir().join("prompts");
+            fake_bot_running(&bot, &hold_when(&log, "하나"));
+            wait_idle(&bot);
+            headless_status(&bot, AgentStatus::Working);
+            for line in ["하나", "둘", "셋", "넷"] {
+                send_agent(&bot, line).unwrap();
+            }
+            assert_eq!(queued_text(&bot), ["하나", "둘", "셋", "넷"]);
+            headless_status(&bot, AgentStatus::Idle);
+            pump_inbox(&bot);
+            eventually(
+                Duration::from_secs(5),
+                "the joined prompt never started",
+                || fs::read_to_string(&log).is_ok_and(|s| s.contains("넷")),
+            );
+            let started = fs::read_to_string(&log).unwrap().matches("하나").count();
+            assert_eq!(started, 1);
+
+            interrupt_turn(&bot).unwrap();
+            assert_eq!(queued_text(&bot), ["하나", "둘", "셋", "넷"]);
+            assert!(!agent_busy(&bot).unwrap(), "the stop left the bot working");
+            std::thread::sleep(Duration::from_millis(300));
+            assert_eq!(
+                fs::read_to_string(&log).unwrap().matches("하나").count(),
+                1,
+                "the silent prompt started again"
+            );
+
+            send_agent(&bot, "다섯").unwrap();
+            eventually(
+                Duration::from_secs(5),
+                "the next line did not take them",
+                || {
+                    fs::read_to_string(&log)
+                        .is_ok_and(|s| s.matches("하나").count() == 2 && s.contains("다섯"))
+                },
+            );
+            let sent = fs::read_to_string(&log).unwrap();
+            let joined = sent
+                .split('|')
+                .find(|part| part.contains("다섯"))
+                .unwrap_or("");
+            for line in ["하나", "둘", "셋", "넷", "다섯"] {
+                assert!(joined.contains(line), "missing {line} in {joined}");
+            }
+            interrupt_turn(&bot).unwrap();
+            wait_idle(&bot);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// No stdout for the watch's limit: the turn ends, the line is waiting
+    /// again, and the chat says the CLI did not answer. It does not restart.
+    #[test]
+    fn no_first_output_within_the_limit_puts_the_line_back() {
+        paths::testing::with_home("silent-limit", || {
+            let bot = test_id("limit");
+            let log = paths::home_dir().join("prompts");
+            fake_bot_running(&bot, &hold_when(&log, "하나"));
+            wait_idle(&bot);
+            set_output_wait(&bot, Duration::from_millis(400));
+            send_agent(&bot, "하나").unwrap();
+            eventually(Duration::from_secs(5), "the stall was not reported", || {
+                crate::transcript::messages(&bot)
+                    .iter()
+                    .any(|m| m.role == Role::System && m.text == "CLI가 응답하지 않습니다")
+            });
+            assert_eq!(queued_text(&bot), ["하나"]);
+            assert!(!agent_busy(&bot).unwrap(), "the stall left the bot working");
+            std::thread::sleep(Duration::from_millis(300));
+            assert_eq!(
+                fs::read_to_string(&log).unwrap().matches("하나").count(),
+                1,
+                "the silent prompt started again"
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A line already arrived. Stopping keeps the prompt sent.
+    #[test]
+    fn a_stop_after_the_first_line_keeps_what_was_sent() {
+        paths::testing::with_home("heard-stop", || {
+            let bot = test_id("heard");
+            fake_bot_running(
+                &bot,
+                r#"case "$last" in *살았*) printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"alive"}]}}'; exec sleep 30 ;; esac"#,
+            );
+            wait_idle(&bot);
+            send_agent(&bot, "살았니").unwrap();
+            eventually(Duration::from_secs(5), "the line never arrived", || {
+                told(&bot, "alive")
+            });
+            interrupt_turn(&bot).unwrap();
+            assert!(queued_text(&bot).is_empty(), "an answered prompt came back");
+            assert!(!crate::transcript::messages(&bot)
+                .iter()
+                .any(|m| m.text == "CLI가 응답하지 않습니다"));
+            wait_idle(&bot);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// Quiet after the first line is a tool running, not a stuck CLI.
+    #[test]
+    fn silence_after_the_first_line_is_not_a_stall() {
+        paths::testing::with_home("heard-quiet", || {
+            let bot = test_id("quiet");
+            fake_bot_running(
+                &bot,
+                r#"case "$last" in *살았*) printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"alive"}]}}'; exec sleep 30 ;; esac"#,
+            );
+            wait_idle(&bot);
+            set_output_wait(&bot, Duration::from_millis(400));
+            send_agent(&bot, "살았니").unwrap();
+            eventually(Duration::from_secs(5), "the line never arrived", || {
+                told(&bot, "alive")
+            });
+            std::thread::sleep(Duration::from_millis(700));
+            assert!(
+                agent_busy(&bot).unwrap(),
+                "silence after a line stopped the turn"
+            );
+            assert!(queued_text(&bot).is_empty());
+            assert!(!crate::transcript::messages(&bot)
+                .iter()
+                .any(|m| m.text == "CLI가 응답하지 않습니다"));
+            interrupt_turn(&bot).unwrap();
+            wait_idle(&bot);
             remove_agent(&bot).unwrap();
         });
     }
@@ -4693,7 +5056,8 @@ exec sleep 1"#,
             TurnOrigin::user(),
             None,
             &[],
-            &mut VecDeque::new()
+            &mut VecDeque::new(),
+            Vec::new()
         )
         .is_err());
         assert_eq!(get_origin(&id), Some(running));

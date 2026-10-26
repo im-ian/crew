@@ -5,7 +5,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,22 @@ pub struct HeadlessInner {
     pub child: Option<std::process::Child>,
     pub generation: u64,
     pub interrupted: bool,
+    /// Prompt the CLI has been given and has not finished with.
+    pub in_flight: Option<InFlight>,
+    /// How long a turn may run with no stdout before it is given back.
+    pub first_output_timeout: Duration,
+}
+
+/// How long a turn may sit before its first stdout line. Later silence is a
+/// tool call, which is normal, so only the first line counts.
+pub const FIRST_OUTPUT_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// The prompt a turn handed to the CLI.
+pub struct InFlight {
+    pub text: String,
+    pub msg_ids: Vec<String>,
+    /// Set on the first stdout line. A stop before that puts the prompt back.
+    pub got_output: bool,
 }
 
 pub fn open(
@@ -66,6 +82,8 @@ pub fn open(
             child: None,
             generation: 0,
             interrupted: false,
+            in_flight: None,
+            first_output_timeout: FIRST_OUTPUT_TIMEOUT,
         }),
     }))
 }
@@ -235,26 +253,112 @@ pub fn kill(session: &HeadlessSession) {
 }
 
 /// Stop the in-flight child. Keeps the CLI session so a later turn can resume.
-/// Does not undo already-sealed assistant text.
+/// Does not undo already-sealed assistant text. A prompt the CLI never wrote
+/// a line for goes back to the inbox; the caller cleared the chain first.
 pub fn interrupt(session: &HeadlessSession) {
-    let child = {
-        let mut inner = match session.inner.lock() {
-            Ok(g) => g,
-            Err(_) => return,
-        };
-        inner.generation = inner.generation.wrapping_add(1);
-        inner.interrupted = true;
-        inner.child.take()
+    let Some(pulled) = pull_turn(session, None, false) else {
+        return;
     };
-    if let Some(mut child) = child {
+    // Before the kill. A wait that does not return would leave the lines gone.
+    if let Some(flight) = pulled.unheard {
+        crate::daemon::requeue_unanswered(&session.id, flight);
+    }
+    if let Some(mut child) = pulled.child {
         kill_all(&mut child);
     }
+}
+
+/// Record `flight` as the prompt the CLI is about to read.
+pub fn remember_inflight(session: &HeadlessSession, flight: InFlight) {
     if let Ok(mut inner) = session.inner.lock() {
-        if inner.status != AgentStatus::Exited {
-            inner.status = AgentStatus::Idle;
+        inner.in_flight = Some(flight);
+    }
+}
+
+/// This turn is over, and the prompt is not coming back.
+pub fn forget_inflight(session: &HeadlessSession) {
+    if let Ok(mut inner) = session.inner.lock() {
+        inner.in_flight = None;
+    }
+}
+
+pub fn set_first_output_timeout(session: &HeadlessSession, wait: Duration) {
+    if let Ok(mut inner) = session.inner.lock() {
+        inner.first_output_timeout = wait;
+    }
+}
+
+struct PulledTurn {
+    child: Option<Child>,
+    /// The prompt, when the CLI had not written a line yet.
+    unheard: Option<InFlight>,
+}
+
+/// `only_unheard` claims the turn only when it is still running and no stdout
+/// line has arrived. Anything else leaves the turn alone.
+fn pull_turn(
+    session: &HeadlessSession,
+    generation: Option<u64>,
+    only_unheard: bool,
+) -> Option<PulledTurn> {
+    let mut inner = session.inner.lock().ok()?;
+    if let Some(generation) = generation {
+        if inner.generation != generation {
+            return None;
         }
-        inner.seq += 1;
-        inner.child = None;
+    }
+    if only_unheard {
+        let unheard = inner.child.is_some()
+            && inner
+                .in_flight
+                .as_ref()
+                .is_some_and(|flight| !flight.got_output);
+        if !unheard {
+            return None;
+        }
+    }
+    inner.generation = inner.generation.wrapping_add(1);
+    inner.interrupted = true;
+    if inner.status != AgentStatus::Exited {
+        inner.status = AgentStatus::Idle;
+    }
+    inner.seq += 1;
+    let flight = inner.in_flight.take();
+    let unheard = flight.filter(|flight| !flight.got_output);
+    let child = inner.child.take();
+    Some(PulledTurn { child, unheard })
+}
+
+fn arm_first_output_watch(session: Arc<HeadlessSession>, generation: u64) {
+    let wait = session
+        .inner
+        .lock()
+        .map(|inner| inner.first_output_timeout)
+        .unwrap_or(FIRST_OUTPUT_TIMEOUT);
+    let id = session.id.clone();
+    if std::thread::Builder::new()
+        .name(format!("crew-silent-{id}"))
+        .spawn(move || {
+            std::thread::sleep(wait);
+            give_back_if_unheard(session, generation);
+        })
+        .is_err()
+    {
+        eprintln!("[crew] {id}: could not arm the first-output watch");
+    }
+}
+
+/// 90s with no stdout: the CLI is stuck, not thinking. A line already arrived
+/// and the process is quiet because a tool is running, so that turn stays.
+fn give_back_if_unheard(session: Arc<HeadlessSession>, generation: u64) {
+    let Some(pulled) = pull_turn(&session, Some(generation), true) else {
+        return;
+    };
+    if let Some(flight) = pulled.unheard {
+        crate::daemon::halt_unheard(&session.id, flight);
+    }
+    if let Some(mut child) = pulled.child {
+        kill_all(&mut child);
     }
 }
 
@@ -488,8 +592,17 @@ fn run_turn(
     }
 
     crate::transcript::end_turn_gen(&session.id, Some(turn));
+    // A stop or the silence watch claimed this turn while the outcome was
+    // being recorded. Pumping here would start the prompt just put back.
+    if is_stale(&session, generation) {
+        return;
+    }
+    crate::daemon::forget_prompt(&session.id);
     if let Ok(mut inner) = session.inner.lock() {
         inner.child = None;
+        if inner.generation == generation {
+            inner.in_flight = None;
+        }
         if inner.status != AgentStatus::Exited && inner.status != AgentStatus::Blocked {
             inner.status = AgentStatus::Idle;
         }
@@ -500,6 +613,21 @@ fn run_turn(
     // Before the inbox: the next turn replaces this origin.
     crate::daemon::turn_ended(&session.id);
     crate::daemon::pump_inbox(&session.id);
+}
+
+/// True when this turn was stopped. The first line that still belongs to it
+/// marks the prompt heard, so a later stop leaves it sent.
+fn note_stdout(session: &HeadlessSession, generation: u64) -> bool {
+    let Ok(mut inner) = session.inner.lock() else {
+        return true;
+    };
+    if inner.generation != generation {
+        return true;
+    }
+    if let Some(flight) = inner.in_flight.as_mut() {
+        flight.got_output = true;
+    }
+    false
 }
 
 /// The turn was stopped (or its bot reset or removed) since it began.
@@ -537,7 +665,7 @@ struct TurnOutcome {
 }
 
 fn spawn_and_stream(
-    session: &HeadlessSession,
+    session: &Arc<HeadlessSession>,
     argv: &[String],
     generation: u64,
     turn: u64,
@@ -579,6 +707,7 @@ fn spawn_and_stream(
         }
         inner.child = Some(child);
     }
+    arm_first_output_watch(Arc::clone(session), generation);
 
     let stderr_handle = stderr.map(|err| {
         std::thread::spawn(move || {
@@ -613,8 +742,9 @@ fn spawn_and_stream(
         };
         // Keep draining so the CLI never blocks on a full pipe while it exits.
         // A stopped CLI's last lines are still in the pipe: read now, they land
-        // under the user's stop or in the next turn's reply.
-        if sealed || is_stale(session, generation) {
+        // under the user's stop or in the next turn's reply. The first line
+        // that still belongs to this turn marks the prompt heard.
+        if sealed || note_stdout(session, generation) {
             continue;
         }
         let mut turn_end = false;
@@ -2899,6 +3029,8 @@ mod tests {
                 child: None,
                 generation: 0,
                 interrupted: false,
+                in_flight: None,
+                first_output_timeout: FIRST_OUTPUT_TIMEOUT,
             }),
         }
     }
