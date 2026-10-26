@@ -568,6 +568,9 @@ fn start_ask(
     if !known_agent(agent) {
         anyhow::bail!("unknown agent {agent}");
     }
+    if crate::transcript::has_pending_question(agent, question) {
+        anyhow::bail!("this question is already waiting for an answer");
+    }
     let card = crate::choice::card_from_cli(question, &options, &inputs, hint.as_deref())?;
     let msg = crate::transcript::attach_choice(agent, None, card);
     let Some(choice) = msg.choice.clone() else {
@@ -575,10 +578,14 @@ fn start_ask(
     };
     let (tx, rx) = oneshot::channel();
     let id = choice.id.clone();
-    ask_waiters()
-        .lock()
-        .expect("ask waiters")
-        .insert(id.clone(), tx);
+    let mut waiters = ask_waiters().lock().expect("ask waiters");
+    // Two asks can pass the check above and then share one card. The first
+    // waiter stays; this call reports that the question is already open.
+    if let Some(previous) = waiters.insert(id.clone(), tx) {
+        waiters.insert(id, previous);
+        anyhow::bail!("this question is already waiting for an answer");
+    }
+    drop(waiters);
     Ok((id, rx))
 }
 
