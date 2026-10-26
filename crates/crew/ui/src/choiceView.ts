@@ -13,8 +13,7 @@ export function optionView(o: ChoiceOption, i: number, short: boolean) {
   return { badge, title, sub };
 }
 
-// `picked` is the saved subset. Its own index is 0 for one answer, so the
-// letter has to come from the full list, which is also the stored option id.
+// The answered row is not rendered at its place in the question, so the badge uses that place.
 export function answeredOptionView(options: ChoiceOption[], option: ChoiceOption) {
   const i = options.findIndex((item) => item.id === option.id);
   return optionView(option, i < 0 ? 0 : i, shortLabels(options));
