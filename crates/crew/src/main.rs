@@ -1166,6 +1166,37 @@ mod tests {
     }
 
     #[test]
+    fn a_custom_bot_keeps_the_name_when_cmd_comes_last() {
+        match parse_ok(&[
+            "crew",
+            "agent",
+            "add",
+            "--headless",
+            "--name",
+            "내 봇",
+            "--cmd",
+            "my-ai",
+            "--print",
+        ])
+        .cmd
+        {
+            Some(Cmd::Agent(AgentCmd::Add {
+                id,
+                name,
+                cmd,
+                headless,
+                ..
+            })) => {
+                assert!(id.is_none());
+                assert_eq!(name.as_deref(), Some("내 봇"));
+                assert_eq!(cmd, vec!["my-ai".to_string(), "--print".into()]);
+                assert!(headless);
+            }
+            _ => panic!("expected agent add"),
+        }
+    }
+
+    #[test]
     fn group_add_flags() {
         match parse_ok(&[
             "crew", "group", "add", "--name", "리뷰", "--bot", "review", "--bot", "impl",
