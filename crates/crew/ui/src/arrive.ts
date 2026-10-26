@@ -9,6 +9,12 @@ const EMPTY_BURST = 2;
 /** Shared by the entrance, the scroll pin, and the dots row closing. */
 export const ARRIVE_MS = 280;
 
+/**
+ * Slack for a row the daemon stamped just before the chat opened and the
+ * window got a moment later. Anything older was already there.
+ */
+export const OPEN_SLACK_MS = 1500;
+
 /** The typing row. It is not part of the thread, so a reply that replaces it still arrives. */
 function isTypingRow(id: string): boolean {
   return id.startsWith("working-");
@@ -19,10 +25,13 @@ function isTypingRow(id: string): boolean {
  * A loaded history or a switched chat shares no message with the previous
  * list, so those rows stay still. An empty chat has no previous message,
  * and the next one or two are the line that just landed.
+ * `isNew` drops a row that was written before the chat was opened: tool cards
+ * shown again, older history, a chat whose rows load a moment late.
  */
 export function arrivingIds(
   prev: readonly string[],
   next: readonly string[],
+  isNew: (id: string) => boolean = () => true,
 ): string[] {
   const prevRows = prev.filter((id) => !isTypingRow(id));
   const seen = new Set(prevRows);
@@ -37,7 +46,7 @@ export function arrivingIds(
       rows = freshRows;
     }
   }
-  return [...rows, ...freshTyping];
+  return [...rows.filter(isNew), ...freshTyping];
 }
 
 /**
@@ -51,8 +60,9 @@ export function arriveStart(
   next: readonly string[],
   id: string,
   typingHeight: number,
+  isNew: (id: string) => boolean = () => true,
 ): number | null {
-  const fresh = arrivingIds(prev, next);
+  const fresh = arrivingIds(prev, next, isNew);
   if (!fresh.includes(id)) return null;
   const typingLeft = prev.some((row) => isTypingRow(row) && !next.includes(row));
   if (!typingLeft || isTypingRow(id)) return 0;
@@ -68,6 +78,7 @@ export function arriveStart(
 export function useArriving(
   ids: readonly string[],
   typingHeight: () => number,
+  isNew: (id: string) => boolean = () => true,
 ): Map<string, number> {
   const track = useRef<{
     ids: string[];
@@ -86,8 +97,8 @@ export function useArriving(
   } else if (!same) {
     const height = typingHeight();
     const arrive = new Map(track.current.arrive);
-    for (const id of arrivingIds(prev, ids)) {
-      const start = arriveStart(prev, ids, id, height);
+    for (const id of arrivingIds(prev, ids, isNew)) {
+      const start = arriveStart(prev, ids, id, height, isNew);
       if (start !== null && !arrive.has(id)) arrive.set(id, start);
     }
     for (const id of [...arrive.keys()]) {
@@ -99,62 +110,24 @@ export function useArriving(
 }
 
 /**
- * Open the slot from `fromHeight` up to whatever height its text has now,
- * and fade that text up inside the clip. Each frame retargets, so tokens
- * that land mid-way are not clipped and then snapped. Cancelling clears
- * the clip and the flex overrides.
- * A column flex item will not shrink below its text unless min-height is
- * cleared and flex-shrink is off for the duration.
+ * Fade the row in where it already sits. The slot is not clipped or grown,
+ * so the text is never cut while it arrives.
+ * The reply that takes the typing row's place (`fromHeight` above zero) was
+ * already on screen as that row, so it does not fade in again.
  */
 export function playArrive(slot: HTMLElement, fromHeight: number): () => void {
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
     return () => {};
   }
+  if (fromHeight > 0) return () => {};
   const grow = slot.firstElementChild;
   if (!(grow instanceof HTMLElement)) return () => {};
   const ease =
     getComputedStyle(slot).getPropertyValue("--ease-out").trim() ||
     "cubic-bezier(0.16, 1, 0.3, 1)";
-  const slide = grow.animate(
-    [
-      { opacity: 0, transform: "translateY(8px)" },
-      { opacity: 1, transform: "translateY(0px)" },
-    ],
-    { duration: ARRIVE_MS, easing: ease },
-  );
-  let raf = 0;
-  let stopped = false;
-  const clear = () => {
-    slot.style.height = "";
-    slot.style.minHeight = "";
-    slot.style.flexGrow = "";
-    slot.style.flexShrink = "";
-    slot.style.overflow = "";
-  };
-  slot.style.overflow = "hidden";
-  slot.style.minHeight = "0";
-  slot.style.flexGrow = "0";
-  slot.style.flexShrink = "0";
-  slot.style.height = `${fromHeight}px`;
-  const started = performance.now();
-  const step = (now: number) => {
-    if (stopped) return;
-    const t = Math.min(1, (now - started) / ARRIVE_MS);
-    // The locked height would otherwise report itself as the content size.
-    slot.style.height = "auto";
-    const content = slot.offsetHeight;
-    if (t >= 1) {
-      clear();
-      return;
-    }
-    slot.style.height = `${fromHeight + (content - fromHeight) * t}px`;
-    raf = requestAnimationFrame(step);
-  };
-  raf = requestAnimationFrame(step);
-  return () => {
-    stopped = true;
-    cancelAnimationFrame(raf);
-    slide.cancel();
-    clear();
-  };
+  const fade = grow.animate([{ opacity: 0 }, { opacity: 1 }], {
+    duration: ARRIVE_MS,
+    easing: ease,
+  });
+  return () => fade.cancel();
 }

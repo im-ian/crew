@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { ARRIVE_MS, playArrive, useArriving } from "../arrive";
+import { ARRIVE_MS, OPEN_SLACK_MS, playArrive, useArriving } from "../arrive";
 import { useLocale, useT } from "../LocaleContext";
 import type { TFn } from "../i18n";
 import type { ReplyTarget } from "../reply";
@@ -17,6 +17,7 @@ import { displayWho, noteRef, sentTarget, subagentFace } from "../peek";
 import {
   dotsAfter,
   momentStamp,
+  rowTs,
   runPeer,
   threadRows,
   toolArgs,
@@ -261,6 +262,14 @@ export function ChatThread({
   // An approval card means it is waiting on the reader here, and "start a
   // chat" would contradict it.
   const empty = !direct && !blocked.length && placeholders.length === 0;
+  // Only what is written after the chat opens plays the entrance. The thread
+  // is not remounted per chat, so the moment is kept per chat key.
+  const chatKey = `${selectedKind}:${selected ?? ""}`;
+  const openedAt = useRef({ key: chatKey, at: Date.now() });
+  if (openedAt.current.key !== chatKey) {
+    openedAt.current = { key: chatKey, at: Date.now() };
+  }
+  const writtenAt = new Map(rows.map((row) => [rowKey(row), rowTs(row)]));
   const arrive = useArriving(
     [
       ...rows.map(rowKey),
@@ -271,6 +280,12 @@ export function ChatThread({
       // sees, including a typing row that has only partly opened.
       const live = ref.current?.querySelector("[data-typing-slot]");
       return live instanceof HTMLElement ? live.getBoundingClientRect().height : 0;
+    },
+    (id) => {
+      const ts = writtenAt.get(id);
+      // No stamp: nothing says it is old, so it moves as before.
+      if (!ts) return true;
+      return ts >= openedAt.current.at - OPEN_SLACK_MS;
     },
   );
 
