@@ -272,6 +272,11 @@ describe("resolveLocalPath", () => {
     expect(resolveLocalPath("file:///tmp/a%20b.png")).toBe("/tmp/a b.png");
   });
 
+  it("keeps a file url whose percent sign is not an escape", () => {
+    expect(resolveLocalPath("file:///tmp/progress-100%.md")).toBe("/tmp/progress-100%.md");
+    expect(isLocalHref("file:///tmp/50%.png")).toBe(true);
+  });
+
   it("resolves a relative path against the bot's folder", () => {
     expect(resolveLocalPath("./out/a.png", "/work/app/")).toBe("/work/app/out/a.png");
     expect(resolveLocalPath("out/a.png", "/work/app")).toBe("/work/app/out/a.png");
