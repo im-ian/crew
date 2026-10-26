@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { ChevronDown } from "../icons";
 import { useT } from "../LocaleContext";
+import { clippingAncestor, clipContentTop, modelCardMaxPx } from "../modelPick";
 import { CLIS, cliLabel, effortOptions, modelRows } from "../options";
 import type { CliKind, ModelList } from "../types";
 import { usePopover } from "../usePopover";
@@ -69,6 +70,28 @@ export function ModelPicker({
     const next = CLIS.find((c) => c.value !== "custom" && lists[c.value]?.installed);
     if (next) onCli(next.value);
   }, [lists, cli, pickInstalled]);
+
+  // The card hangs above the field. Keep its top inside the scroller that
+  // would otherwise clip the first rows out of reach.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const root = rootRef.current;
+    if (!root) return;
+    const clip = clippingAncestor(root);
+    const fit = () => {
+      const anchorTop = root.getBoundingClientRect().top;
+      const clipTop = clip ? clipContentTop(clip) : 8;
+      root.style.setProperty("--model-card-max", `${modelCardMaxPx(anchorTop, clipTop)}px`);
+    };
+    fit();
+    clip?.addEventListener("scroll", fit, { passive: true });
+    window.addEventListener("resize", fit);
+    return () => {
+      clip?.removeEventListener("scroll", fit);
+      window.removeEventListener("resize", fit);
+      root.style.removeProperty("--model-card-max");
+    };
+  }, [open, rootRef]);
 
   const list = lists[cli];
   const spec = CLIS.find((c) => c.value === cli);

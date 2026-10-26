@@ -3584,21 +3584,37 @@ button.mention-chip:active {
   gap: var(--space-12);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
   z-index: 5;
+  /* Set from the field's position so the card stays inside the scroller. */
+  max-height: var(--model-card-max, calc(100vh - 48px));
+  overflow: hidden;
 }
 .model-pick-cols {
   display: grid;
   grid-template-columns: 168px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: var(--space-8);
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .model-pick-col {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
-  /* The CLI list scrolls rather than leaving the dialog. */
-  max-height: 188px;
+  min-height: 0;
+  /* A long CLI or model list scrolls here. The bar stays visible: an overlay
+     bar hides the fact that more rows sit below the fold. */
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--btn-hover) transparent;
 }
+.model-pick-col::-webkit-scrollbar { width: 8px; }
+.model-pick-col::-webkit-scrollbar-thumb {
+  background: var(--btn-hover);
+  border-radius: 8px;
+}
+.model-pick-card > .field-block { flex-shrink: 0; }
 .model-pick-col + .model-pick-col {
   border-left: 1px solid var(--line);
   padding-left: var(--space-8);
@@ -3606,6 +3622,7 @@ button.mention-chip:active {
 .model-pick-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-8);
   min-width: 0;
   background: transparent;
@@ -3626,9 +3643,20 @@ button.mention-chip:active {
   color: var(--btn-disabled-ink);
   cursor: default;
 }
+/* A one-pixel squeeze turns "기본값" into "기…". Keep the name whole and
+   let the hint, which is the long id, take the ellipsis. */
+.model-pick-row > .model-pick-label {
+  flex: 0 0 auto;
+  min-width: auto;
+  max-width: 100%;
+}
 .model-pick-hint {
-  margin-left: auto;
-  flex-shrink: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
   color: var(--faint);
   font-size: var(--text-sm);
   font-weight: 400;
@@ -3766,6 +3794,12 @@ button.mention-chip:active {
 .dialog > .form-stack,
 .sheet > .form-stack {
   margin-top: var(--space-16);
+}
+/* The card opens upward and must stay inside this scroller. The extra room
+   is covered by the card, so a long list can scroll instead of being clipped. */
+.dialog:has(.model-pick.open) > .form-stack,
+.sheet-body > div:not([hidden]):has(.model-pick.open) > .form-stack {
+  margin-top: 120px;
 }
 .settings-groups {
   display: flex;
