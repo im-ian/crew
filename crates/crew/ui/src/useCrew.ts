@@ -100,6 +100,7 @@ export function useCrew() {
   const groupsLoaded = useRef(false);
   const toastTimer = useRef<number | null>(null);
   const cancelling = useRef(new Set<string>());
+  const sendingQueued = useRef(new Set<string>());
 
   const currentAgent = useMemo(() => {
     if (selectedKind !== "agent" || !selected) return null;
@@ -436,6 +437,20 @@ export function useCrew() {
       showError(err);
     } finally {
       cancelling.current.delete(messageId);
+    }
+  }
+
+  async function sendQueued(messageId: string) {
+    const { id } = selectedRef.current;
+    if (!id || sendingQueued.current.has(messageId)) return;
+    sendingQueued.current.add(messageId);
+    try {
+      await api.sendQueued(id, messageId);
+      await refreshMessages();
+    } catch (err) {
+      showError(err);
+    } finally {
+      sendingQueued.current.delete(messageId);
     }
   }
 
@@ -1033,6 +1048,7 @@ export function useCrew() {
     stopAgent,
     cancelQueued,
     editQueued,
+    sendQueued,
     approveAgent,
     answerChoice,
     saveAgentInfo,

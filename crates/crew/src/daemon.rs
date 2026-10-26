@@ -1251,6 +1251,85 @@ fn edit_queued(id: &str, msg_id: &str, text: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Send `msg_id` now. It leaves on its own, ahead of whatever else is waiting.
+/// A turn that is already running keeps going; this line is first when it ends.
+fn send_queued_now(id: &str, msg_id: &str) -> anyhow::Result<()> {
+    let mut item = {
+        let mut map = inbox().lock().expect("inbox mutex");
+        let Some(q) = map.get_mut(id) else {
+            anyhow::bail!("that message is no longer waiting");
+        };
+        let Some(at) = q.iter().position(|d| d.msg_id.as_deref() == Some(msg_id)) else {
+            anyhow::bail!("that message is no longer waiting");
+        };
+        let Some(mut item) = q.remove(at) else {
+            anyhow::bail!("that message is no longer waiting");
+        };
+        // A tell or a note the daemon wrote is not a line the user can send on.
+        if item.origin != TurnOrigin::user() {
+            q.insert(at, item);
+            anyhow::bail!("that message can't be sent now");
+        }
+        item.parked = false;
+        item
+    };
+    match agent_busy(id) {
+        Ok(false) => {
+            if let Some(start) = claim_start(id) {
+                let text = item.text.clone();
+                let newline = item.newline;
+                let origin = item.origin.clone();
+                let mid = item.msg_id.clone();
+                let joins = item.joins;
+                let mut then = std::mem::take(&mut item.then);
+                let prompt = one_prompt(&text, newline, mid.as_deref(), joins, &origin, &then);
+                match start_delivery(
+                    start,
+                    &text,
+                    newline,
+                    origin,
+                    mid.as_deref(),
+                    &[],
+                    &mut then,
+                    prompt,
+                ) {
+                    Ok(()) => {
+                        if let Some(mid) = mid.as_deref() {
+                            crate::transcript::set_queued(id, mid, false);
+                        }
+                        return Ok(());
+                    }
+                    Err(err) if is_busy_err(&err) => {
+                        item.then = then;
+                    }
+                    Err(err) => {
+                        item.then = then;
+                        put_queued_front(id, item);
+                        return Err(err);
+                    }
+                }
+            }
+        }
+        Ok(true) => {}
+        Err(err) => {
+            put_queued_front(id, item);
+            return Err(err);
+        }
+    }
+    put_queued_front(id, item);
+    pump_inbox_inner(id);
+    Ok(())
+}
+
+fn put_queued_front(id: &str, item: PendingDelivery) {
+    if let Some(mid) = item.msg_id.as_deref() {
+        crate::transcript::set_queued(id, mid, true);
+    }
+    if let Ok(mut map) = inbox().lock() {
+        map.entry(id.to_string()).or_default().push_front(item);
+    }
+}
+
 #[cfg(test)]
 fn inbox_is_empty(id: &str) -> bool {
     inbox()
@@ -2202,6 +2281,12 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             message_id,
             text,
         } => match edit_queued(&agent, &message_id, &text) {
+            Ok(()) => vec![Event::Ok],
+            Err(err) => vec![Event::Error {
+                message: err.to_string(),
+            }],
+        },
+        Request::SendQueued { agent, message_id } => match send_queued_now(&agent, &message_id) {
             Ok(()) => vec![Event::Ok],
             Err(err) => vec![Event::Error {
                 message: err.to_string(),
@@ -4268,6 +4353,98 @@ mod daemon_tests {
                 .iter()
                 .any(|m| m.text == "CLI가 응답하지 않습니다"));
             interrupt_turn(&bot).unwrap();
+            wait_idle(&bot);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// The line the user asks for leaves on its own. The ones still parked stay
+    /// parked, and nothing starts them.
+    #[test]
+    fn a_waiting_line_goes_out_on_its_own() {
+        paths::testing::with_home("send-queued", || {
+            let bot = test_id("sendq");
+            let log = paths::home_dir().join("prompts");
+            fake_bot_running(&bot, &hold_when(&log, "하나"));
+            wait_idle(&bot);
+            headless_status(&bot, AgentStatus::Working);
+            for line in ["하나", "둘", "셋", "넷"] {
+                send_agent(&bot, line).unwrap();
+            }
+            headless_status(&bot, AgentStatus::Idle);
+            pump_inbox(&bot);
+            eventually(
+                Duration::from_secs(5),
+                "the joined prompt never started",
+                || fs::read_to_string(&log).is_ok_and(|s| s.contains("넷")),
+            );
+            interrupt_turn(&bot).unwrap();
+            assert_eq!(queued_text(&bot), ["하나", "둘", "셋", "넷"]);
+            assert!(send_queued_now(&bot, "missing").is_err());
+
+            let mid = crate::transcript::messages(&bot)
+                .into_iter()
+                .find(|m| m.text == "셋")
+                .expect("셋")
+                .id;
+            send_queued_now(&bot, &mid).unwrap();
+            assert_eq!(queued_text(&bot), ["하나", "둘", "넷"]);
+            eventually(Duration::from_secs(5), "셋 never left", || {
+                fs::read_to_string(&log).is_ok_and(|s| s.matches("셋").count() == 2)
+            });
+            let sent = fs::read_to_string(&log).unwrap();
+            let alone = sent
+                .split('|')
+                .filter(|part| part.contains("셋"))
+                .last()
+                .unwrap_or("");
+            for line in ["하나", "둘", "넷"] {
+                assert!(!alone.contains(line), "{line} rode along in {alone}");
+            }
+            std::thread::sleep(Duration::from_millis(300));
+            assert_eq!(queued_text(&bot), ["하나", "둘", "넷"]);
+            interrupt_turn(&bot).unwrap();
+            wait_idle(&bot);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// Sending a waiting line does not stop the turn that is already answering.
+    #[test]
+    fn sending_a_waiting_line_leaves_the_running_turn() {
+        paths::testing::with_home("send-queued-busy", || {
+            let bot = test_id("sendb");
+            let log = paths::home_dir().join("prompts");
+            let script = format!(
+                "printf '%s|' \"$last\" >> '{}'\n{}",
+                log.display(),
+                r#"case "$last" in *살았*) printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"alive"}]}}'; exec sleep 30 ;; esac"#
+            );
+            fake_bot_running(&bot, &script);
+            wait_idle(&bot);
+            send_agent(&bot, "살았니").unwrap();
+            eventually(Duration::from_secs(5), "the line never arrived", || {
+                told(&bot, "alive")
+            });
+            send_agent(&bot, "나중").unwrap();
+            assert_eq!(queued_text(&bot), ["나중"]);
+            let mid = crate::transcript::messages(&bot)
+                .into_iter()
+                .find(|m| m.text == "나중")
+                .expect("나중")
+                .id;
+            send_queued_now(&bot, &mid).unwrap();
+            assert!(agent_busy(&bot).unwrap(), "the running turn was stopped");
+            assert!(told(&bot, "alive"));
+            assert_eq!(queued_text(&bot), ["나중"]);
+            assert!(
+                !fs::read_to_string(&log).unwrap().contains("나중"),
+                "the waiting line started under the running turn"
+            );
+            interrupt_turn(&bot).unwrap();
+            eventually(Duration::from_secs(5), "나중 did not go next", || {
+                fs::read_to_string(&log).is_ok_and(|s| s.contains("나중"))
+            });
             wait_idle(&bot);
             remove_agent(&bot).unwrap();
         });

@@ -66,6 +66,8 @@ export const api = {
     invoke<void>("cancel_queued", { agent, messageId }),
   editQueued: (agent: string, messageId: string, text: string) =>
     invoke<void>("edit_queued", { agent, messageId, text }),
+  sendQueued: (agent: string, messageId: string) =>
+    invoke<void>("send_queued", { agent, messageId }),
   approveAgent: (agent: string, allow: boolean) =>
     invoke<void>("approve_agent", { agent, allow }),
   answerChoice: (args: {

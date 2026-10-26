@@ -97,6 +97,16 @@ fn cancel_queued(agent: String, message_id: String) -> Result<(), String> {
 }
 
 #[tauri::command(async)]
+fn send_queued(agent: String, message_id: String) -> Result<(), String> {
+    match client::rpc(Request::SendQueued { agent, message_id }) {
+        Ok(Event::Ok) => Ok(()),
+        Ok(Event::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected daemon response".into()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+#[tauri::command(async)]
 fn edit_queued(agent: String, message_id: String, text: String) -> Result<(), String> {
     match client::rpc(Request::EditQueued {
         agent,
@@ -777,6 +787,7 @@ pub fn run() -> anyhow::Result<()> {
             stop_agent,
             cancel_queued,
             edit_queued,
+            send_queued,
             approve_agent,
             answer_choice,
             tell_message,

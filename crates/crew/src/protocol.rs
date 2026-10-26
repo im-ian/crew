@@ -158,6 +158,12 @@ pub enum Request {
         message_id: String,
         text: String,
     },
+    /// Send one waiting message without another line in front of it. A turn
+    /// already running is left alone; this one is next.
+    SendQueued {
+        agent: String,
+        message_id: String,
+    },
     /// Allow-once or deny a pending judgment card.
     Approve {
         agent: String,
