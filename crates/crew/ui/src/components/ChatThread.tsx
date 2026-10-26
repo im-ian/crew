@@ -11,7 +11,7 @@ import type {
   Kind,
 } from "../types";
 import { resolveFace } from "../avatar";
-import { splitBubbles } from "../bubbles";
+import { isMediaBlock, splitBubbles } from "../bubbles";
 import { messageDefinitions } from "../markdown";
 import { displayWho, noteRef, sentTarget, subagentFace } from "../peek";
 import {
@@ -43,11 +43,13 @@ function MsgSlot({
   id,
   start,
   typing = false,
+  className,
   children,
 }: {
   id: string;
   start: number | null;
   typing?: boolean;
+  className?: string;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -58,7 +60,7 @@ function MsgSlot({
   }, [id, start]);
   return (
     <div
-      className="msg-slot"
+      className={"msg-slot" + (className ? " " + className : "")}
       data-typing-slot={typing ? "" : undefined}
       ref={ref}
     >
@@ -98,6 +100,8 @@ type Props = {
   peekFocus?: string | null;
   onPeek?: (peerId: string, focus?: string[]) => void;
   showTools?: boolean;
+  /** A routine run opens the routines pane instead of quoting its prompt. */
+  onOpenRoutines?: () => void;
 };
 
 export function ChatThread({
@@ -122,6 +126,7 @@ export function ChatThread({
   peekFocus = null,
   onPeek,
   showTools = false,
+  onOpenRoutines,
 }: Props) {
   const { locale } = useLocale();
   const ref = useRef<HTMLDivElement>(null);
@@ -314,6 +319,7 @@ export function ChatThread({
                   peekFocus={peekFocus}
                   onPeek={onPeek}
                   flash={flash}
+                  onOpenRoutines={onOpenRoutines}
                 />
               ) : (
                 <Bubble
@@ -352,10 +358,12 @@ export function ChatThread({
           }
           const time = clocks.get(id);
           const start = arrive.get(id);
+          const pin = row.kind === "msg" && row.msg.queued;
           return (
             <MsgSlot
               key={id}
               id={id}
+              className={pin ? "pin-bottom" : undefined}
               start={start === undefined ? null : start}
             >
               {time ? <ThreadTime ts={time.ts} label={time.label} /> : null}
@@ -486,6 +494,7 @@ function SystemOrIncoming({
   onPeek,
   flash = false,
   showChip = true,
+  onOpenRoutines,
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
@@ -498,6 +507,7 @@ function SystemOrIncoming({
   flash?: boolean;
   /** A lone note's run already names it, so a second chip would repeat it. */
   showChip?: boolean;
+  onOpenRoutines?: () => void;
 }) {
   const t = useT();
   if (m.from === "user") {
@@ -547,8 +557,14 @@ function SystemOrIncoming({
       className={"sys" + (m.queued ? " queued" : "") + (flash ? " flash" : "")}
       data-msg-id={m.id}
     >
-      <div className="sys-from">{t("thread.routineFrom", { from: m.from || "" })}</div>
-      <div className="sys-text">{displayText(m)}</div>
+      <button
+        type="button"
+        className="sys-routine"
+        title={t("thread.routineOpen")}
+        onClick={() => onOpenRoutines?.()}
+      >
+        {t("thread.routineFrom", { from: m.from || "" })}
+      </button>
       {m.queued ? <QueueWait /> : null}
     </div>
   );
@@ -768,7 +784,9 @@ function Incoming({
   // Closing that bubble keeps it mounted for the shrink, so the thread does
   // not jump when the turn ends.
   const dots = useDotsLeave(caret);
-  const parts = dots.show ? [...splitBubbles(body), ""] : splitBubbles(body);
+  const raw = dots.show ? [...splitBubbles(body), ""] : splitBubbles(body);
+  const media = raw.filter((part) => isMediaBlock(part));
+  const parts = raw.filter((part) => !isMediaBlock(part));
   return (
     <div
       className={
@@ -809,7 +827,23 @@ function Incoming({
           </div>
         )}
         {reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
-        <div className="bubble-stack">
+        {media.length ? (
+          <div className="msg-media">
+            {media.map((part, i) => (
+              <MdBody
+                key={m.id + "-media-" + i}
+                className="md"
+                text={part}
+                defs={defs}
+                agents={agents}
+                onMention={onSelectAgent}
+                baseDir={agent?.cwd || undefined}
+              />
+            ))}
+          </div>
+        ) : null}
+        {parts.length ? (
+          <div className="bubble-stack">
           {parts.map((part, i) => {
             const last = i === parts.length - 1;
             const stack =
@@ -874,7 +908,8 @@ function Incoming({
               </div>
             );
           })}
-        </div>
+          </div>
+        ) : null}
         {queued ? <QueueWait /> : null}
         {m.choice ? (
           <ChoiceCard
@@ -1414,6 +1449,9 @@ function Bubble({
   }
   const queued = !!m.queued;
   const { reply, body } = splitReply(text);
+  const parts = splitBubbles(body);
+  const media = parts.filter((part) => isMediaBlock(part));
+  const prose = parts.filter((part) => !isMediaBlock(part)).join("\n\n");
   const cls =
     "bubble md" + (caret ? " streaming" : "") + (queued ? " queued" : "");
   return (
@@ -1423,21 +1461,35 @@ function Bubble({
     >
       <div className="me-msg">
         {reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
-        {body.trim() ? (
+        {media.length ? (
+          <div className="msg-media">
+            {media.map((part, i) => (
+              <MdBody
+                key={m.id + "-media-" + i}
+                className="md"
+                text={part}
+                agents={agents}
+                onMention={onSelectAgent}
+                baseDir={currentAgent?.cwd || undefined}
+              />
+            ))}
+          </div>
+        ) : null}
+        {prose.trim() ? (
           <div className="bubble-row">
             <MdBody
               className={cls}
-              text={body}
+              text={prose}
               agents={agents}
               onMention={onSelectAgent}
               baseDir={currentAgent?.cwd || undefined}
             />
             <MsgActions
-              copy={body.trim()}
+              copy={prose.trim()}
               ts={m.ts}
               onReply={
                 onReply
-                  ? () => onReply(makeReply({ ...m, text: body }, agents, t))
+                  ? () => onReply(makeReply({ ...m, text: prose }, agents, t))
                   : undefined
               }
             />

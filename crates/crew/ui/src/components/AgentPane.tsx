@@ -147,12 +147,10 @@ function MemoryTab({
 }) {
   const t = useT();
   const [memory, setMemory] = useState("");
-  const [saved, setSaved] = useState(false);
   const edited = useRef(false);
   // The text as loaded. Save only goes through if the file still matches it.
   const base = useRef("");
   const [shared, setShared] = useState("");
-  const [sharedSaved, setSharedSaved] = useState(false);
   const sharedEdited = useRef(false);
   const sharedBase = useRef("");
   const team = agents
@@ -164,21 +162,17 @@ function MemoryTab({
   useEffect(() => {
     if (!open || !agent) return;
     setMemory("");
-    setSaved(false);
     edited.current = false;
     void onLoad(agent.id).then((text) => {
       base.current = text;
       setMemory(text);
-      setSaved(false);
     });
     setShared("");
-    setSharedSaved(false);
     sharedEdited.current = false;
     void onLoadShared().then((text) => {
       if (sharedEdited.current) return;
       sharedBase.current = text;
       setShared(text);
-      setSharedSaved(false);
     });
   }, [open, agent?.id]);
 
@@ -213,20 +207,17 @@ function MemoryTab({
           value={memory}
           onChange={(e) => {
             setMemory(e.target.value);
-            setSaved(false);
             edited.current = true;
           }}
         />
       </Field>
       <div className="actions">
-        {saved ? <span className="apply-note">{t("memory.saved")}</span> : null}
         <button
           type="button"
           className="primary wide"
           onClick={async () => {
             if (!(await onSave(memory, base.current))) return;
             base.current = memory;
-            setSaved(true);
             edited.current = false;
           }}
         >
@@ -243,20 +234,17 @@ function MemoryTab({
           value={shared}
           onChange={(e) => {
             setShared(e.target.value);
-            setSharedSaved(false);
             sharedEdited.current = true;
           }}
         />
       </Field>
       <div className="actions">
-        {sharedSaved ? <span className="apply-note">{t("memory.saved")}</span> : null}
         <button
           type="button"
           className="primary wide"
           onClick={async () => {
             if (!(await onSaveShared(shared, sharedBase.current))) return;
             sharedBase.current = shared;
-            setSharedSaved(true);
             sharedEdited.current = false;
           }}
         >

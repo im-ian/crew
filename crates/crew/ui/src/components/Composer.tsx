@@ -9,7 +9,7 @@ import { mentionIds, resolveMention, trimMentionPunct } from "../mentions";
 import { oneLine, wrapReply, type ReplyTarget } from "../reply";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
-import { ArrowUp, CircleDot, Paperclip, Play, Plus, StopSquare, X, Zap } from "../icons";
+import { ArrowUp, CircleDot, Paperclip, Play, Plus, StopSquare, X } from "../icons";
 
 export type ComposerHandle = {
   focus: () => void;
@@ -82,7 +82,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   const [editing, setEditing] = useState<Editing | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const plusRef = useRef<HTMLDivElement>(null);
-  const steerRef = useRef<HTMLButtonElement>(null);
+  const pendingSteer = useRef(false);
   const onDraftsRef = useRef(onDrafts);
   onDraftsRef.current = onDrafts;
 
@@ -394,8 +394,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         e.preventDefault();
         const el = inputRef.current;
         if (!el) return;
-        const by = (e.nativeEvent as SubmitEvent).submitter;
-        const steer = !!by && by === steerRef.current;
+        const steer = pendingSteer.current && canSteer;
+        pendingSteer.current = false;
         const text = mentionIds(serializeEditor(el).trim(), agents);
         const files = attaches.map(attachMarkdown).filter(Boolean);
         let raw = [text, files.join("\n")].filter(Boolean).join("\n\n");
@@ -776,9 +776,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
             }
             if (e.key === "Enter" && e.shiftKey && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
-              (e.currentTarget.closest("form") as HTMLFormElement | null)?.requestSubmit(
-                steerRef.current ?? undefined,
-              );
+              if (canSteer) pendingSteer.current = true;
+              (e.currentTarget.closest("form") as HTMLFormElement | null)?.requestSubmit();
               return;
             }
             if (e.key === "Enter" && e.shiftKey) {
@@ -816,18 +815,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
             onClick={onStop}
           >
             <StopSquare size={12} />
-          </button>
-        ) : null}
-        {canSteer && !editing ? (
-          <button
-            ref={steerRef}
-            type="submit"
-            className="steer-btn"
-            title={t("composer.steerTitle")}
-            aria-label={t("composer.steer")}
-            disabled={!selected || (empty && !attaches.length)}
-          >
-            <Zap size={15} />
           </button>
         ) : null}
         <button

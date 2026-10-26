@@ -296,6 +296,9 @@ export function App() {
           peekFocus={peekOpen ? peek?.focus[0] ?? null : null}
           onPeek={togglePeek}
           showTools={showTools}
+          onOpenRoutines={() => {
+            if (crew.selected) crew.openRoutines(crew.selected);
+          }}
         />
         <Composer
           ref={composerRef}
