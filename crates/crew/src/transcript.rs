@@ -686,22 +686,31 @@ fn push_in_turn(
     msg
 }
 
-fn choice_title(q: &crate::protocol::ChoiceQuestion) -> &str {
-    let header = q.header.as_deref().unwrap_or("").trim();
-    if header.is_empty() {
-        q.question.trim()
-    } else {
-        header
-    }
+fn choice_question(q: &crate::protocol::ChoiceQuestion) -> &str {
+    q.question.trim()
 }
 
-/// True when every title on `next` is already an open question on `open`.
-fn same_pending_question(open: &crate::protocol::ChoiceCard, next: &crate::protocol::ChoiceCard) -> bool {
+/// True when every question on `next` is already pending on `open`.
+/// The short header chip is not the question.
+fn same_pending_question(
+    open: &crate::protocol::ChoiceCard,
+    next: &crate::protocol::ChoiceCard,
+) -> bool {
     if open.state != ChoiceState::Pending {
         return false;
     }
-    let have: Vec<&str> = open.questions.iter().map(choice_title).filter(|t| !t.is_empty()).collect();
-    let want: Vec<&str> = next.questions.iter().map(choice_title).filter(|t| !t.is_empty()).collect();
+    let have: Vec<&str> = open
+        .questions
+        .iter()
+        .map(choice_question)
+        .filter(|t| !t.is_empty())
+        .collect();
+    let want: Vec<&str> = next
+        .questions
+        .iter()
+        .map(choice_question)
+        .filter(|t| !t.is_empty())
+        .collect();
     !want.is_empty() && want.iter().all(|t| have.iter().any(|h| h == t))
 }
 
@@ -720,7 +729,7 @@ pub fn has_pending_question(agent: &str, question: &str) -> bool {
     chat.messages.iter().any(|m| {
         m.choice.as_ref().is_some_and(|c| {
             c.state == ChoiceState::Pending
-                && c.questions.iter().any(|q| choice_title(q) == want)
+                && c.questions.iter().any(|q| choice_question(q) == want)
         })
     })
 }
@@ -835,14 +844,19 @@ pub fn attach_choice(agent: &str, call_id: Option<&str>, mut card: ChoiceCard) -
                 .unwrap_or(false)
         });
         let idx = known_free.or(pending);
-        // The same question is already on screen. A retry must not stack a
-        // second card the user has to answer again.
-        if idx.is_none() {
-            if let Some(open) = chat.messages.iter().rposition(|m| {
-                m.choice
-                    .as_ref()
-                    .is_some_and(|c| same_pending_question(c, &card))
-            }) {
+        // A later turn has a fresh assistant row. The open card is on the
+        // earlier message, so reuse that instead of painting a second one.
+        let open = chat.messages.iter().rposition(|m| {
+            m.choice
+                .as_ref()
+                .is_some_and(|c| same_pending_question(c, &card))
+        });
+        if let Some(open) = open {
+            if known_free != Some(open) {
+                if let Some(id) = call_id {
+                    let mid = chat.messages[open].id.clone();
+                    chat.tool_ids.insert(id.to_string(), mid);
+                }
                 return chat.messages[open].clone();
             }
         }
@@ -2679,6 +2693,91 @@ mod tests {
         assert_eq!(q.question, "어떻게 할까요?");
         assert_eq!(q.options[0].label, "지운다 (Recommended)");
         assert!(has_pending_question(&agent, "어떻게 할까요?"));
+        drop_agent(&agent);
+    }
+
+    #[test]
+    fn a_header_chip_does_not_decide_the_question() {
+        let agent = format!(
+            "ask-header-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        begin_turn(&agent);
+        push_tool(
+            &agent,
+            Some("call-1"),
+            "ask_user_question",
+            r#"{"questions":[{"header":"Pick","question":"어느 쪽을 고를래?","options":[{"label":"A"},{"label":"B"}]}]}"#,
+        );
+        push_tool(
+            &agent,
+            Some("call-2"),
+            "ask_user_question",
+            r#"{"questions":[{"header":"Pick","question":"이름을 뭐로 할까?","options":[{"label":"가"},{"label":"나"}]}]}"#,
+        );
+        let questions: Vec<_> = messages(&agent)
+            .into_iter()
+            .filter_map(|m| m.choice)
+            .map(|c| c.questions[0].question.clone())
+            .collect();
+        assert_eq!(
+            questions,
+            vec!["어느 쪽을 고를래?".to_string(), "이름을 뭐로 할까?".to_string()]
+        );
+        push_tool(
+            &agent,
+            Some("call-3"),
+            "ask_user_question",
+            r#"{"questions":[{"header":"Other","question":"어느 쪽을 고를래?","options":[{"label":"C"},{"label":"D"}]}]}"#,
+        );
+        let n = messages(&agent)
+            .into_iter()
+            .filter(|m| m.choice.is_some())
+            .count();
+        assert_eq!(n, 2);
+        drop_agent(&agent);
+    }
+
+    #[test]
+    fn a_later_turn_reuses_the_open_question() {
+        let agent = format!(
+            "ask-later-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        begin_turn(&agent);
+        on_assistant_delta(&agent, "진행해도 되는지 알려 주세요.");
+        push_tool(
+            &agent,
+            Some("call-1"),
+            "ask_user_question",
+            r#"{"question":"어떻게 할까요?","options":[{"label":"지운다"},{"label":"그대로 둔다"}]}"#,
+        );
+        end_turn(&agent);
+        begin_turn(&agent);
+        on_assistant_delta(&agent, "다시 물어볼게요.");
+        push_tool(
+            &agent,
+            Some("call-2"),
+            "ask_user_question",
+            r#"{"question":"어떻게 할까요?","options":[{"label":"다른 답"},{"label":"그대로 둔다"}]}"#,
+        );
+        let cards: Vec<_> = messages(&agent)
+            .into_iter()
+            .filter(|m| m.choice.is_some())
+            .collect();
+        assert_eq!(cards.len(), 1);
+        assert_eq!(
+            cards[0].choice.as_ref().unwrap().questions[0].options[0].label,
+            "지운다"
+        );
         drop_agent(&agent);
     }
 
