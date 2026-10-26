@@ -387,7 +387,14 @@ export function resolveLocalPath(src: string, baseDir?: string): string | null {
   }
   let path = s;
   if (path.startsWith("file://")) {
-    path = decodeURIComponent(path.slice("file://".length).replace(/^localhost/i, ""));
+    const rest = path.slice("file://".length).replace(/^localhost/i, "");
+    // A stray `%` (progress-100%.md) is not an escape. Throwing here runs
+    // during render and takes the whole window down with the bubble.
+    try {
+      path = decodeURIComponent(rest);
+    } catch {
+      path = rest;
+    }
   }
   if (path.startsWith("~")) {
     return path;
