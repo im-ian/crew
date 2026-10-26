@@ -3,16 +3,16 @@ const KEY = "crew.delivery";
 /** How a message leaves the composer while a bot is working. */
 export type Delivery = "queue" | "interrupt";
 
-/** Missing or unknown values stay on the queue. Interrupt is opt-in. */
+/** Missing or unknown values interrupt. Queue is opt-in. */
 export function deliveryFrom(stored: string | null): Delivery {
-  return stored === "interrupt" ? "interrupt" : "queue";
+  return stored === "queue" ? "queue" : "interrupt";
 }
 
 export function loadDelivery(): Delivery {
   try {
     return deliveryFrom(localStorage.getItem(KEY));
   } catch {
-    return "queue";
+    return "interrupt";
   }
 }
 
