@@ -6,6 +6,7 @@ import { api } from "../api";
 import { useT } from "../LocaleContext";
 import { mediaKind } from "../markdown";
 import { mentionIds, resolveMention, trimMentionPunct } from "../mentions";
+import { sendSteers, type Delivery } from "../deliveryPref";
 import { stepQueuePick } from "../queuePick";
 import { oneLine, wrapReply, type ReplyTarget } from "../reply";
 import { Avatar } from "./Avatar";
@@ -37,6 +38,8 @@ type Props = {
   busy?: boolean;
   /** The bot is mid-turn, so a message can stop it and go now instead of waiting. */
   canSteer?: boolean;
+  /** Queue waits behind a working bot. Interrupt cuts in on a normal send. */
+  delivery?: Delivery;
   onStop?: () => void;
   onOpenSkills?: () => void;
   onJump?: (id: string) => void;
@@ -73,6 +76,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   onEditWaiting,
   busy = false,
   canSteer = false,
+  delivery = "queue",
   onStop,
   onOpenSkills,
   onJump,
@@ -406,7 +410,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         e.preventDefault();
         const el = inputRef.current;
         if (!el) return;
-        const steer = pendingSteer.current && canSteer;
+        const steer = sendSteers(pendingSteer.current, delivery, canSteer);
         pendingSteer.current = false;
         const text = mentionIds(serializeEditor(el).trim(), agents);
         const files = attaches.map(attachMarkdown).filter(Boolean);
