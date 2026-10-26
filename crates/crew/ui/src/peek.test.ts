@@ -44,6 +44,9 @@ describe("displayWho", () => {
     expect(displayWho("sub:toolu_2:codex:rescue", null, t)).toBe(
       "codex:rescue subagent",
     );
+    expect(displayWho("sub:call-1:[reviewer] pr #1297", null, t)).toBe(
+      "[reviewer] pr #1297 subagent",
+    );
   });
 });
 
