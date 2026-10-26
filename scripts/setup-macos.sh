@@ -26,17 +26,31 @@ if ! xcode-select -p >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ -f "$HOME/.cargo/env" ]]; then
-  # shellcheck disable=SC1091
-  source "$HOME/.cargo/env"
+cargo_env="${CARGO_HOME:-$HOME/.cargo}/env"
+if ! command -v cargo >/dev/null 2>&1 && [[ -f "$cargo_env" ]]; then
+  # shellcheck disable=SC1090
+  source "$cargo_env"
 fi
 if ! command -v cargo >/dev/null 2>&1; then
   echo "Installing Rust..."
-  curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+  if [[ ! -x /usr/bin/curl ]]; then
+    echo "error: /usr/bin/curl is required to install Rust" >&2
+    exit 1
+  fi
+  /usr/bin/curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
     --fail --show-error --silent --location \
+    --connect-timeout 15 --max-time 60 --max-filesize 2097152 \
     https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-  # shellcheck disable=SC1091
-  source "$HOME/.cargo/env"
+  if [[ ! -f "$cargo_env" ]]; then
+    echo "error: Rust installed but ${cargo_env} is missing" >&2
+    exit 1
+  fi
+  # shellcheck disable=SC1090
+  source "$cargo_env"
+fi
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "error: cargo is not on PATH" >&2
+  exit 1
 fi
 
 if ! command -v node >/dev/null 2>&1; then
@@ -63,10 +77,33 @@ fi
 
 echo "Building Crew..."
 cargo build --release --locked -p crew
-
-artifact="${CARGO_TARGET_DIR:-$root/target}/release/crew"
-if [[ ! -f "$artifact" ]]; then
-  echo "error: release binary not found at $artifact" >&2
+artifact="$(
+  cargo build --release --locked -p crew --message-format=json | node -e '
+let buf = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { buf += chunk; });
+process.stdin.on("end", () => {
+  let found = "";
+  for (const line of buf.split("\n")) {
+    if (!line) continue;
+    let msg;
+    try { msg = JSON.parse(line); } catch { continue; }
+    if (msg.reason !== "compiler-artifact") continue;
+    const target = msg.target || {};
+    const kinds = target.kind || [];
+    if (target.name !== "crew" || !kinds.includes("bin")) continue;
+    if (typeof msg.executable === "string" && msg.executable) found = msg.executable;
+  }
+  if (!found) {
+    console.error("error: cargo did not report a crew executable");
+    process.exit(1);
+  }
+  process.stdout.write(found);
+});
+'
+)"
+if [[ -z "$artifact" || ! -f "$artifact" ]]; then
+  echo "error: release binary not found at ${artifact:-unknown path}" >&2
   exit 1
 fi
 mkdir -p "$bin_dir"
@@ -76,6 +113,11 @@ fi
 install -m 755 "$artifact" "$bin_dir/crew"
 echo "Installed $bin_dir/crew"
 
+hash -r
+resolved="$(command -v crew 2>/dev/null || true)"
+if [[ -n "$resolved" && "$resolved" != "$bin_dir/crew" ]]; then
+  echo "note: \`crew\` on PATH is $resolved, not $bin_dir/crew"
+fi
 case ":$PATH:" in
   *":$bin_dir:"*) ;;
   *) echo "note: add $bin_dir to PATH, then open a new shell" ;;
