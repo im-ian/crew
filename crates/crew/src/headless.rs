@@ -49,6 +49,9 @@ pub struct InFlight {
     pub msg_ids: Vec<String>,
     /// Set on the first stdout line. A stop before that puts the prompt back.
     pub got_output: bool,
+    /// The turn resumed a saved CLI session. One that never answers is stuck
+    /// in that session, so the prompt goes once more on a new one.
+    pub resumed: bool,
 }
 
 pub fn open(
@@ -282,6 +285,15 @@ pub fn forget_inflight(session: &HeadlessSession) {
     }
 }
 
+/// The turn carrying `in_flight` resumes a saved session.
+fn mark_resumed(session: &HeadlessSession, resumed: bool) {
+    if let Ok(mut inner) = session.inner.lock() {
+        if let Some(flight) = inner.in_flight.as_mut() {
+            flight.resumed = resumed;
+        }
+    }
+}
+
 pub fn set_first_output_timeout(session: &HeadlessSession, wait: Duration) {
     if let Ok(mut inner) = session.inner.lock() {
         inner.first_output_timeout = wait;
@@ -350,15 +362,46 @@ fn arm_first_output_watch(session: Arc<HeadlessSession>, generation: u64) {
 
 /// 90s with no stdout: the CLI is stuck, not thinking. A line already arrived
 /// and the process is quiet because a tool is running, so that turn stays.
+///
+/// A resumed session can be what hangs (grok waits forever on a background
+/// task its last process left behind), and every later resume hangs the same
+/// way. That session is dropped and the prompt goes again, once, on a new one
+/// that reads the chat as a recap. A new session that hangs too is parked.
 fn give_back_if_unheard(session: Arc<HeadlessSession>, generation: u64) {
     let Some(pulled) = pull_turn(&session, Some(generation), true) else {
         return;
     };
+    let mut retry = false;
     if let Some(flight) = pulled.unheard {
-        crate::daemon::halt_unheard(&session.id, flight);
+        if flight.resumed {
+            drop_stuck_session(&session, &flight.msg_ids);
+            crate::daemon::retry_unheard(&session.id, flight);
+            retry = true;
+        } else {
+            crate::daemon::halt_unheard(&session.id, flight);
+        }
     }
     if let Some(mut child) = pulled.child {
         kill_all(&mut child);
+    }
+    // After the kill, so the stuck CLI is gone before the new one starts.
+    if retry {
+        crate::daemon::resend_unheard(&session.id);
+    }
+}
+
+/// Forget the session a resumed turn hung in. The next turn starts a new one
+/// and reads the chat before the prompt it is about to send again.
+fn drop_stuck_session(session: &HeadlessSession, msg_ids: &[String]) {
+    if let Ok(mut inner) = session.inner.lock() {
+        inner.session_id = None;
+    }
+    clear_session(&session.id);
+    clear_recap(&session.id);
+    if let Some(recap) = crate::transcript::prior_recap_excluding(&session.id, msg_ids) {
+        if let Err(err) = save_recap(&session.id, &recap) {
+            eprintln!("[crew] {}: recap for the new session: {err:#}", session.id);
+        }
     }
 }
 
@@ -491,6 +534,7 @@ fn run_turn(
         None => prompt,
     };
     let resume = turn_session.as_ref().is_some_and(|s| s.resume);
+    mark_resumed(&session, resume);
     let memory_now = crate::memory::read(&session.id);
     let (memory_seen, memory_note) = memory_for_turn(
         resume,
