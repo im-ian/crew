@@ -236,7 +236,9 @@ html.rail-resizing .rail-resize::after {
   outline: none;
 }
 html.rail-resizing,
-html.rail-resizing * {
+html.rail-resizing *,
+html.peek-resizing,
+html.peek-resizing * {
   cursor: col-resize !important;
   user-select: none !important;
 }
@@ -2858,6 +2860,35 @@ button.who-btn:focus-visible {
   min-width: 0;
 }
 .peek-room:focus {
+  outline: none;
+}
+.peek-resize {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 6;
+  touch-action: none;
+}
+.peek-resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: transparent;
+  transition: background 0.12s ease, width 0.12s ease;
+}
+.peek-resize:hover::after,
+.peek-resize:focus-visible::after,
+html.peek-resizing .peek-resize::after {
+  width: 2px;
+  background: var(--resize);
+}
+.peek-resize:focus-visible {
   outline: none;
 }
 .peek-head {
