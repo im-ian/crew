@@ -100,7 +100,7 @@ enum Cmd {
     /// Persistent per-agent notes (`$CREW_HOME/memory/AGENT.md`)
     #[command(subcommand)]
     Memory(MemoryCmd),
-    /// Team notes and the live teammate list (`$CREW_HOME/shared.md`)
+    /// Shared notes (`$CREW_HOME/shared.md`). Crew adds the live teammate list when showing them.
     #[command(subcommand)]
     Share(ShareCmd),
 }

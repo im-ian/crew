@@ -936,7 +936,7 @@ pub fn new_bot_ask(english: bool) -> String {
     )
 }
 
-/// Short spawn-time prompt: identity, teammates, and how to `crew tell`.
+/// Short spawn-time prompt: identity, where the live team list lives, and how to `crew tell`.
 pub fn team_rules(agent: &AgentConfig, _roster: &[AgentConfig]) -> String {
     let mut s = String::new();
     s.push_str(&format!(
@@ -976,7 +976,7 @@ pub fn team_rules(agent: &AgentConfig, _roster: &[AgentConfig]) -> String {
 
 const MEMORY_HEADING: &str = "# Your memory";
 
-/// `id — name` list, oldest id first. `(none)` when this bot is alone.
+/// `id — name` list, in id order. `(none)` when this bot is alone.
 fn teammates_sentence(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
     let mut others: Vec<&AgentConfig> = roster.iter().filter(|a| a.id != agent.id).collect();
     others.sort_by(|a, b| a.id.cmp(&b.id));
@@ -1906,7 +1906,7 @@ mod tests {
     }
 
     #[test]
-    fn grok_team_rules_list_teammates_and_append_existing() {
+    fn grok_team_rules_keep_existing_text_and_skip_the_roster() {
         let mut alpha = AgentConfig::new(
             "alpha".into(),
             "Alpha".into(),
@@ -1926,7 +1926,9 @@ mod tests {
         assert!(rules.contains("keep this"));
         assert!(rules.contains("You are Crew agent `alpha` (Alpha)."));
         assert!(!rules.contains("PM"));
-        assert!(rules.contains("- beta — Beta\n"));
+        // The live list is composed each turn, so the spawn prompt must not snapshot it.
+        assert!(!rules.contains("- beta — Beta\n"));
+        assert!(rules.contains("starts with `Shared memory`"));
         assert!(!rules.contains("reviewer"));
         assert!(!rules.contains("alpha — Alpha"));
         assert!(rules.contains("crew tell"));

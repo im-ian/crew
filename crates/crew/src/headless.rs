@@ -198,13 +198,13 @@ fn memory_note(memory: &str) -> String {
 /// The system prompt keeps the instructions a session started with. Shared
 /// memory, including the live teammate list, rides in the prompt on every
 /// turn so a compact cannot leave an old copy as the only one. A slash
-/// command has to stay the first line.
+/// command has to stay the first line. A path is not a command.
 fn shared_note_for_turn(
     prompt: &str,
     agent: &AgentConfig,
     roster: &[AgentConfig],
 ) -> Option<String> {
-    if prompt.starts_with('/') {
+    if crate::daemon::is_slash_command(prompt) {
         return None;
     }
     Some(crate::config::shared_memory_note(
@@ -1903,6 +1903,10 @@ mod tests {
             assert!(note.contains("You are `alpha` (Alpha)."));
             assert!(note.contains("harbor is closed"));
             assert!(shared_note_for_turn("/compact", &alpha, &roster).is_none());
+            assert!(shared_note_for_turn("/compact keep the API notes", &alpha, &roster).is_none());
+            let path = shared_note_for_turn("/Users/me/shot.png 이거 봐줘", &alpha, &roster)
+                .expect("a path still gets the live list");
+            assert!(path.contains("beta — Beta"));
         });
     }
 

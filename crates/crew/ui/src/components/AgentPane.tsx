@@ -175,6 +175,7 @@ function MemoryTab({
     setSharedSaved(false);
     sharedEdited.current = false;
     void onLoadShared().then((text) => {
+      if (sharedEdited.current) return;
       sharedBase.current = text;
       setShared(text);
       setSharedSaved(false);
