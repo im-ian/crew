@@ -1141,6 +1141,17 @@ header .who-name {
 }
 /* A queued follow-up stays under the reply and the typing row. */
 .thread > .msg-slot.pin-bottom { order: 1; }
+/* A long thread mounts only the rows in view. Their y is the measured offset. */
+.thread-window {
+  position: relative;
+  width: 100%;
+  flex: none;
+}
+.thread-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
 .msg-grow {
   display: flex;
   flex-direction: column;

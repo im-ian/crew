@@ -27,6 +27,19 @@ import {
 import { answeredOptionView, optionView, shortLabels } from "../choiceView";
 import { routineSwitchName } from "../routineNote";
 import { clockLabels, messageClockParts } from "../clock";
+import {
+  acceptHeight,
+  anchorIndex,
+  anchorShift,
+  extraIndexes,
+  flowWindow,
+  mountedIndexes,
+  ROW_ESTIMATE,
+  ROW_GAP,
+  rowOffsets,
+  scrollForIndex,
+  VIRTUAL_THRESHOLD,
+} from "../virtualThread";
 import { ChevronDown, Reply, X } from "../icons";
 import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
@@ -38,6 +51,21 @@ const STICK_PX = 24;
 function rowKey(row: ThreadRow): string {
   if (row.kind === "msg") return row.msg.id;
   return row.msgs[0].id;
+}
+
+function rowHas(row: ThreadRow, id: string): boolean {
+  if (row.kind === "msg") return row.msg.id === id;
+  return row.msgs.some((m) => m.id === id);
+}
+
+function indexOfRow(list: readonly ThreadRow[], id: string | null | undefined): number {
+  if (!id) return -1;
+  return list.findIndex((row) => rowHas(row, id));
+}
+
+/** A waiting user line is pulled under the reply. It is not part of the scrolled history. */
+function isPinned(row: ThreadRow): boolean {
+  return row.kind === "msg" && !!row.msg.queued;
 }
 
 function MsgSlot({
@@ -66,6 +94,45 @@ function MsgSlot({
       ref={ref}
     >
       <div className="msg-grow">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * One mounted row in a virtual thread. The start height is chosen once per
+ * mount: a row that scrolls back into view does not play the entrance again,
+ * and a strict-mode remount a moment later still does.
+ */
+function VirtualRow({
+  id,
+  top,
+  pick,
+  onHeight,
+  children,
+}: {
+  id: string;
+  top: number;
+  pick: RefObject<(id: string) => number | null>;
+  onHeight: RefObject<(id: string, height: number) => void>;
+  children: (start: number | null) => ReactNode;
+}) {
+  const held = useRef<{ id: string; start: number | null } | null>(null);
+  if (!held.current || held.current.id !== id) {
+    held.current = { id, start: pick.current(id) };
+  }
+  const box = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const report = () => onHeight.current(id, el.offsetHeight);
+    report();
+    const ro = new ResizeObserver(report);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [id, onHeight]);
+  return (
+    <div ref={box} className="thread-row" style={{ top }}>
+      {children(held.current.start)}
     </div>
   );
 }
@@ -207,6 +274,129 @@ export function ChatThread({
     },
   );
 
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewport, setViewport] = useState(0);
+  const [unpinned, setUnpinned] = useState(false);
+  const [heightRev, setHeightRev] = useState(0);
+  const [gap, setGap] = useState(ROW_GAP);
+  const heightsRef = useRef(new Map<string, number>());
+  const heightRaf = useRef(0);
+  const prevOffsets = useRef<number[] | null>(null);
+  const born = useRef(new Map<string, number>());
+  const opened = useRef(new Map<string, number>());
+  const unpinnedRef = useRef(false);
+  const stickRef = useRef(stick);
+  const offsetsRef = useRef<number[]>([]);
+  const flowLenRef = useRef(0);
+  const rowsLenRef = useRef(0);
+  const rangeRef = useRef({ start: 0, end: 0 });
+  const viewportRef = useRef(0);
+  const followRef = useRef(true);
+  const pickRef = useRef<(id: string) => number | null>(() => null);
+  const onHeightRef = useRef<(id: string, height: number) => void>(() => {});
+  stickRef.current = stick;
+  unpinnedRef.current = unpinned;
+
+  for (const id of arrive.keys()) {
+    if (!born.current.has(id)) born.current.set(id, performance.now());
+  }
+
+  // Past the threshold, waiting lines stay mounted at the bottom (the flex
+  // order that pins them) and the rest of the history is a measured window.
+  const virtual = rows.length > VIRTUAL_THRESHOLD;
+  const flow = virtual ? rows.filter((row) => !isPinned(row)) : rows;
+  const pinned = virtual ? rows.filter(isPinned) : [];
+  const offsets = virtual
+    ? rowOffsets(
+        flow.length,
+        (i) => heightsRef.current.get(rowKey(flow[i])) ?? ROW_ESTIMATE,
+        gap,
+      )
+    : [];
+  offsetsRef.current = offsets;
+  flowLenRef.current = flow.length;
+  rowsLenRef.current = rows.length;
+  const followBottom = stick && !unpinned && !highlightId;
+  const focusIndex = virtual ? indexOfRow(flow, highlightId) : -1;
+  const flowTotal = offsets[flow.length] ?? 0;
+  const win = virtual
+    ? flowWindow({
+        count: flow.length,
+        scrollTop,
+        viewport,
+        offsets,
+        stick: followBottom,
+      })
+    : { start: 0, end: rows.length, virtual: false };
+  rangeRef.current = { start: win.start, end: win.end };
+  viewportRef.current = viewport;
+  followRef.current = followBottom;
+  const wanted: number[] = [];
+  if (virtual) {
+    if (focusIndex >= 0) wanted.push(focusIndex);
+    const picked = indexOfRow(flow, queuePick);
+    if (picked >= 0) wanted.push(picked);
+  }
+  const mounted = virtual
+    ? mountedIndexes(
+        win.start,
+        win.end,
+        extraIndexes(flow.length, win.start, win.end, wanted),
+      )
+    : [];
+  const offsetsKey = `${heightRev}:${flow.length}:${flowTotal}:${gap}`;
+
+  // A row plays its entrance the first time it mounts. Scrolling back to it
+  // later must not play it again. A remount in the same instant (strict mode)
+  // still does.
+  pickRef.current = (id: string) => {
+    const fresh = arrive.get(id);
+    if (fresh === undefined) return null;
+    const now = performance.now();
+    const bornAt = born.current.get(id) ?? now;
+    const seen = opened.current.get(id);
+    if (seen !== undefined && now - seen > 50) return null;
+    opened.current.set(id, now);
+    if (now - bornAt > ARRIVE_MS) return null;
+    return fresh;
+  };
+  onHeightRef.current = (id: string, height: number) => {
+    if (!acceptHeight(heightsRef.current.get(id), height)) return;
+    heightsRef.current.set(id, height);
+    if (heightRaf.current) return;
+    heightRaf.current = requestAnimationFrame(() => {
+      heightRaf.current = 0;
+      setHeightRev((n) => n + 1);
+    });
+  };
+
+  useEffect(
+    () => () => {
+      if (heightRaf.current) cancelAnimationFrame(heightRaf.current);
+    },
+    [],
+  );
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const apply = () => {
+      const next = el.clientHeight;
+      setViewport((v) => (Math.abs(v - next) < 1 ? v : next));
+      const n = parseFloat(getComputedStyle(el).getPropertyValue("--space-14"));
+      if (Number.isFinite(n) && n > 0) setGap((g) => (g === n ? g : n));
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [selected, selectedKind]);
+
+  useEffect(() => {
+    unpinnedRef.current = false;
+    setUnpinned(false);
+  }, [selected, selectedKind]);
+
   useEffect(() => {
     const el = ref.current;
     if (el && stick && !highlightId) el.scrollTop = el.scrollHeight;
@@ -219,6 +409,7 @@ export function ChatThread({
     streaming,
     highlightId,
     showTools,
+    heightRev,
   ]);
 
   // The entrance grows the row after this commit. Follow it to the bottom
@@ -245,10 +436,50 @@ export function ChatThread({
     return () => cancelAnimationFrame(raf);
   }, [arrive, stick, highlightId]);
 
+  // A measured row above the viewport would shove what the reader is looking
+  // at. Move scrollTop by the same amount before paint. Stuck to the bottom,
+  // follow the new height instead.
+  useLayoutEffect(() => {
+    if (!virtual) {
+      prevOffsets.current = null;
+      return;
+    }
+    const el = ref.current;
+    const before = prevOffsets.current;
+    if (el && followBottom) {
+      const next = el.scrollHeight;
+      if (Math.abs(el.scrollTop - next) > 1) el.scrollTop = next;
+    } else if (el && before && before.length === offsets.length) {
+      const anchor = anchorIndex(before, el.scrollTop, flow.length);
+      const shift = anchorShift(before, offsets, anchor);
+      if (shift) el.scrollTop += shift;
+    }
+    prevOffsets.current = offsets;
+  }, [virtual, offsetsKey, followBottom, flow.length]);
+
   useEffect(() => {
     if (!jumpSeq) return;
     jumpBottom();
   }, [jumpSeq]);
+
+  // Put the window on the hit before paint, so the rows around it mount.
+  // `focusReady` flips when the row appears; a later token must not scroll
+  // the reader back.
+  const focusReady = focusIndex >= 0;
+  useLayoutEffect(() => {
+    if (!virtual || !highlightId || focusIndex < 0) return;
+    const el = ref.current;
+    if (!el) return;
+    const top = scrollForIndex(
+      offsets,
+      focusIndex,
+      el.clientHeight,
+      offsets[flow.length] ?? 0,
+    );
+    if (Math.abs(el.scrollTop - top) > 1) el.scrollTop = top;
+    setScrollTop(top);
+    if (el.clientHeight > 0) setViewport(el.clientHeight);
+  }, [highlightId, focusReady, virtual]);
 
   // Bring the hit on screen. `messages` is a dependency because the row may
   // not be mounted yet when the id arrives.
@@ -284,112 +515,164 @@ export function ChatThread({
     el?.scrollIntoView({ block: "nearest" });
   }, [queuePick]);
 
+  function startOf(row: ThreadRow): number | null {
+    const start = arrive.get(rowKey(row));
+    return start === undefined ? null : start;
+  }
+
+  function oneRow(row: ThreadRow, start: number | null) {
+    const id = rowKey(row);
+    let node: ReactNode;
+    if (row.kind === "tools") {
+      node = <ToolGroup items={row.msgs} highlightId={highlightId} />;
+    } else if (row.kind === "notes") {
+      node = (
+        <NoteGroup
+          peerId={row.peerId}
+          items={row.msgs}
+          agents={agents}
+          selectedKind={selectedKind}
+          onSelectAgent={openAgent}
+          onReply={onReply}
+          onJump={onJump}
+          peekFocus={peekFocus}
+          onPeek={onPeek}
+          highlightId={highlightId}
+        />
+      );
+    } else {
+      const m = row.msg;
+      // Dots sit under the reply that is arriving, from the first
+      // tokens until the turn ends.
+      const caret =
+        streaming && m.role === "assistant" && m.id === lastVisible?.id;
+      const flash = highlightId === m.id;
+      node =
+        m.role === "system" && m.from !== "user" ? (
+          <SystemOrIncoming
+            message={m}
+            agents={agents}
+            selectedKind={selectedKind}
+            onSelectAgent={openAgent}
+            onReply={onReply}
+            onJump={onJump}
+            peekFocus={peekFocus}
+            onPeek={onPeek}
+            flash={flash}
+            onOpenRoutines={onOpenRoutines}
+          />
+        ) : (
+          <Bubble
+            message={m}
+            agents={agents}
+            selected={selected}
+            selectedKind={selectedKind}
+            currentAgent={currentAgent}
+            caret={caret}
+            onSelectAgent={openAgent}
+            onApprove={
+              onApprove ? (allow) => onApprove(allow, m.from) : undefined
+            }
+            onAnswerChoice={
+              onAnswerChoice
+                ? (answers, values, closed) =>
+                    onAnswerChoice(m.from, m.id, answers, values, closed)
+                : undefined
+            }
+            onCancel={onCancelQueued ? () => onCancelQueued(m.id) : undefined}
+            onEdit={
+              onEditQueued
+                ? (text, reply) => onEditQueued(m.id, text, reply)
+                : undefined
+            }
+            onSend={onSendQueued ? () => onSendQueued(m.id) : undefined}
+            picked={queuePick === m.id}
+            onReply={onReply}
+            onJump={onJump}
+            flash={flash}
+          />
+        );
+    }
+    const time = clocks.get(id);
+    const pin = row.kind === "msg" && row.msg.queued;
+    return (
+      <MsgSlot
+        key={id}
+        id={id}
+        className={pin ? "pin-bottom" : undefined}
+        start={start}
+      >
+        {time ? <ThreadTime ts={time.ts} label={time.label} /> : null}
+        {node}
+      </MsgSlot>
+    );
+  }
+
+  function onThreadScroll() {
+    syncStick();
+    const el = ref.current;
+    if (!el || rowsLenRef.current <= VIRTUAL_THRESHOLD) return;
+    const nextTop = el.scrollTop;
+    const nextView = el.clientHeight;
+    const gapPx = el.scrollHeight - nextTop - nextView;
+    const atBottom = gapPx < STICK_PX;
+    if (atBottom) {
+      if (unpinnedRef.current) {
+        unpinnedRef.current = false;
+        setUnpinned(false);
+      }
+    } else if (stickRef.current && !unpinnedRef.current) {
+      unpinnedRef.current = true;
+      setUnpinned(true);
+    }
+    const follow = atBottom && stickRef.current && !highlightId;
+    const next = flowWindow({
+      count: flowLenRef.current,
+      scrollTop: nextTop,
+      viewport: nextView,
+      offsets: offsetsRef.current,
+      stick: follow,
+    });
+    const changed =
+      next.start !== rangeRef.current.start ||
+      next.end !== rangeRef.current.end ||
+      Math.abs(nextView - viewportRef.current) > 1 ||
+      follow !== followRef.current;
+    if (!changed) return;
+    rangeRef.current = { start: next.start, end: next.end };
+    viewportRef.current = nextView;
+    followRef.current = follow;
+    setScrollTop(nextTop);
+    setViewport(nextView);
+  }
+
   return (
     <div className="thread-wrap">
-      <div className="thread" ref={ref} onScroll={syncStick}>
-        {rows.map((row) => {
-          const id = rowKey(row);
-          let node: ReactNode;
-          if (row.kind === "tools") {
-            node = (
-              <ToolGroup
-                key={id}
-                items={row.msgs}
-                highlightId={highlightId}
-              />
-            );
-          } else if (row.kind === "notes") {
-            node = (
-              <NoteGroup
-                key={id}
-                peerId={row.peerId}
-                items={row.msgs}
-                agents={agents}
-                selectedKind={selectedKind}
-                onSelectAgent={openAgent}
-                onReply={onReply}
-                onJump={onJump}
-                peekFocus={peekFocus}
-                onPeek={onPeek}
-                highlightId={highlightId}
-              />
-            );
-          } else {
-            const m = row.msg;
-            // Dots sit under the reply that is arriving, from the first
-            // tokens until the turn ends.
-            const caret =
-              streaming &&
-              m.role === "assistant" &&
-              m.id === lastVisible?.id;
-            const flash = highlightId === m.id;
-            node =
-              m.role === "system" && m.from !== "user" ? (
-                <SystemOrIncoming
-                  key={id}
-                  message={m}
-                  agents={agents}
-                  selectedKind={selectedKind}
-                  onSelectAgent={openAgent}
-                  onReply={onReply}
-                  onJump={onJump}
-                  peekFocus={peekFocus}
-                  onPeek={onPeek}
-                  flash={flash}
-                  onOpenRoutines={onOpenRoutines}
-                />
-              ) : (
-                <Bubble
-                  key={id}
-                  message={m}
-                  agents={agents}
-                  selected={selected}
-                  selectedKind={selectedKind}
-                  currentAgent={currentAgent}
-                  caret={caret}
-                  onSelectAgent={openAgent}
-                  onApprove={
-                    onApprove
-                      ? (allow) => onApprove(allow, m.from)
-                      : undefined
-                  }
-                  onAnswerChoice={
-                    onAnswerChoice
-                      ? (answers, values, closed) =>
-                          onAnswerChoice(m.from, m.id, answers, values, closed)
-                      : undefined
-                  }
-                  onCancel={
-                    onCancelQueued ? () => onCancelQueued(m.id) : undefined
-                  }
-                  onEdit={
-                    onEditQueued
-                      ? (text, reply) => onEditQueued(m.id, text, reply)
-                      : undefined
-                  }
-                  onSend={onSendQueued ? () => onSendQueued(m.id) : undefined}
-                  picked={queuePick === m.id}
-                  onReply={onReply}
-                  onJump={onJump}
-                  flash={flash}
-                />
-              );
-          }
-          const time = clocks.get(id);
-          const start = arrive.get(id);
-          const pin = row.kind === "msg" && row.msg.queued;
-          return (
-            <MsgSlot
-              key={id}
-              id={id}
-              className={pin ? "pin-bottom" : undefined}
-              start={start === undefined ? null : start}
-            >
-              {time ? <ThreadTime ts={time.ts} label={time.label} /> : null}
-              {node}
-            </MsgSlot>
-          );
-        })}
+      <div className="thread" ref={ref} onScroll={onThreadScroll}>
+        {virtual ? (
+          flow.length > 0 ? (
+            <div className="thread-window" style={{ height: flowTotal }}>
+              {mounted.map((i) => {
+                const row = flow[i];
+                const id = rowKey(row);
+                return (
+                  <VirtualRow
+                    key={id}
+                    id={id}
+                    top={offsets[i] ?? 0}
+                    pick={pickRef}
+                    onHeight={onHeightRef}
+                  >
+                    {(start) => oneRow(row, start)}
+                  </VirtualRow>
+                );
+              })}
+            </div>
+          ) : null
+        ) : (
+          rows.map((row) => oneRow(row, startOf(row)))
+        )}
+        {pinned.map((row) => oneRow(row, startOf(row)))}
         {empty ? <EmptyChat agent={currentAgent} /> : null}
         {placeholders.map((agent) => {
           const id = "working-" + agent.id;
