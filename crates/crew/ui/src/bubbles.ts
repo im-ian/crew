@@ -45,3 +45,15 @@ export function splitBubbles(text: string): string[] {
   // A message of nothing else still gets its balloon, to copy or reply to.
   return parts.length || !text.trim() ? parts : [text.trim()];
 }
+
+const IMAGE_LINE = /^!\[[^\]]*\]\((?:<[^>\n]+>|[^)\s]+)(?:\s+"[^"]*")?\)\s*$/;
+const AV_LINE = /^\[[^\]]*\]\((?:<[^>\n]+>|[^)\s]+)\s+"(?:video|audio)"\)\s*$/;
+
+/** A block the thread draws above the balloon: pictures, video, and audio. */
+export function isMediaBlock(text: string): boolean {
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.length > 0 && lines.every((line) => IMAGE_LINE.test(line) || AV_LINE.test(line));
+}

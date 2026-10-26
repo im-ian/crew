@@ -1429,6 +1429,17 @@ button.channel-who:hover {
   max-width: 72%;
   min-width: 0;
 }
+.msg-media {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 100%;
+}
+.row.me .msg-media { align-items: flex-end; }
+.msg-media + .bubble-row,
+.msg-media + .bubble-stack { margin-top: 6px; }
+.msg-media .md p { margin: 0; }
 .row.me .me-msg .bubble {
   max-width: 100%;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitBubbles } from "./bubbles";
+import { isMediaBlock, splitBubbles } from "./bubbles";
 
 describe("splitBubbles", () => {
   it("returns nothing for empty text", () => {
@@ -107,5 +107,18 @@ describe("splitBubbles", () => {
     expect(splitBubbles(table + "\n\n끝.다음")).toEqual([table, "끝.다음"]);
     const bare = "상태 | 메모\n--- | ---\n4861 | 완료.다음 단계";
     expect(splitBubbles(bare)).toEqual([bare]);
+  });
+});
+
+describe("isMediaBlock", () => {
+  it("is a picture, a run of pictures, or a video or audio link", () => {
+    expect(isMediaBlock("![shot](/tmp/a.png)")).toBe(true);
+    expect(isMediaBlock('![shot](/tmp/a.png "desk")')).toBe(true);
+    expect(isMediaBlock("![a](/tmp/a.png)\n![b](</tmp/my b.png>)")).toBe(true);
+    expect(isMediaBlock('[clip](/tmp/a.mp4 "video")')).toBe(true);
+    expect(isMediaBlock('[take](</tmp/my take.m4a> "audio")')).toBe(true);
+    expect(isMediaBlock("[note](/tmp/a.txt)")).toBe(false);
+    expect(isMediaBlock("see ![shot](/tmp/a.png)")).toBe(false);
+    expect(isMediaBlock("")).toBe(false);
   });
 });
