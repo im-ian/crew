@@ -1442,13 +1442,26 @@ button.channel-who:hover {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  align-self: flex-start;
   gap: 6px;
-  max-width: 100%;
+  /* The picture's file is wider than the 320px it is drawn at. Without a cap
+     that width becomes this box, and the picture sits in the middle of it. */
+  width: max-content;
+  max-width: min(100%, 320px);
+  min-width: 0;
 }
-.row.me .msg-media { align-items: flex-end; }
+.row.me .msg-media {
+  align-items: flex-end;
+  align-self: flex-end;
+}
 .msg-media + .bubble-row,
 .msg-media + .bubble-stack { margin-top: 6px; }
+.msg-media .md {
+  max-width: 100%;
+  min-width: 0;
+}
 .msg-media .md p { margin: 0; }
+.msg-media .md img { display: block; max-width: 100%; }
 .row.me .me-msg .bubble {
   max-width: 100%;
 }
