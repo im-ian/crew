@@ -82,8 +82,8 @@ export function SettingsPane({
             <Seg
               value={delivery}
               options={[
-                { value: "queue", label: t("settings.delivery.queue") },
                 { value: "interrupt", label: t("settings.delivery.interrupt") },
+                { value: "queue", label: t("settings.delivery.queue") },
               ]}
               onChange={onDelivery}
             />

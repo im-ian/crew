@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import { deliveryFrom, sendSteers } from "./deliveryPref";
 
 describe("deliveryFrom", () => {
-  it("stays on the queue unless interrupt was saved", () => {
-    expect(deliveryFrom(null)).toBe("queue");
-    expect(deliveryFrom("")).toBe("queue");
-    expect(deliveryFrom("queue")).toBe("queue");
-    expect(deliveryFrom("nope")).toBe("queue");
+  it("interrupts unless queue was saved", () => {
+    expect(deliveryFrom(null)).toBe("interrupt");
+    expect(deliveryFrom("")).toBe("interrupt");
     expect(deliveryFrom("interrupt")).toBe("interrupt");
+    expect(deliveryFrom("nope")).toBe("interrupt");
+    expect(deliveryFrom("queue")).toBe("queue");
   });
 });
 

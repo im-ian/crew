@@ -76,7 +76,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   onEditWaiting,
   busy = false,
   canSteer = false,
-  delivery = "queue",
+  delivery = "interrupt",
   onStop,
   onOpenSkills,
   onJump,
