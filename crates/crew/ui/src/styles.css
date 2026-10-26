@@ -1337,15 +1337,24 @@ textarea.textin.memory {
   font-size: var(--text-sm);
   line-height: 1.45;
 }
-.sys-from {
+button.sys-routine {
+  display: inline-block;
+  border: 0;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
   font-size: var(--text-xs);
   font-weight: 600;
-  margin-bottom: var(--space-2);
-  color: var(--muted);
+  line-height: 1.45;
+  cursor: pointer;
 }
-.sys-text {
-  white-space: pre-wrap;
-  word-break: break-word;
+button.sys-routine:hover,
+button.sys-routine:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
+  outline: none;
 }
 .channel-msg {
   position: relative;

@@ -98,6 +98,8 @@ type Props = {
   peekFocus?: string | null;
   onPeek?: (peerId: string, focus?: string[]) => void;
   showTools?: boolean;
+  /** A routine run opens the routines pane instead of quoting its prompt. */
+  onOpenRoutines?: () => void;
 };
 
 export function ChatThread({
@@ -122,6 +124,7 @@ export function ChatThread({
   peekFocus = null,
   onPeek,
   showTools = false,
+  onOpenRoutines,
 }: Props) {
   const { locale } = useLocale();
   const ref = useRef<HTMLDivElement>(null);
@@ -314,6 +317,7 @@ export function ChatThread({
                   peekFocus={peekFocus}
                   onPeek={onPeek}
                   flash={flash}
+                  onOpenRoutines={onOpenRoutines}
                 />
               ) : (
                 <Bubble
@@ -486,6 +490,7 @@ function SystemOrIncoming({
   onPeek,
   flash = false,
   showChip = true,
+  onOpenRoutines,
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
@@ -498,6 +503,7 @@ function SystemOrIncoming({
   flash?: boolean;
   /** A lone note's run already names it, so a second chip would repeat it. */
   showChip?: boolean;
+  onOpenRoutines?: () => void;
 }) {
   const t = useT();
   if (m.from === "user") {
@@ -547,8 +553,14 @@ function SystemOrIncoming({
       className={"sys" + (m.queued ? " queued" : "") + (flash ? " flash" : "")}
       data-msg-id={m.id}
     >
-      <div className="sys-from">{t("thread.routineFrom", { from: m.from || "" })}</div>
-      <div className="sys-text">{displayText(m)}</div>
+      <button
+        type="button"
+        className="sys-routine"
+        title={t("thread.routineOpen")}
+        onClick={() => onOpenRoutines?.()}
+      >
+        {t("thread.routineFrom", { from: m.from || "" })}
+      </button>
       {m.queued ? <QueueWait /> : null}
     </div>
   );
