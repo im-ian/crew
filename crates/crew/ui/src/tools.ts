@@ -25,6 +25,11 @@ export type ThreadRow =
   | { kind: "tools"; msgs: ChatMessage[] }
   | { kind: "notes"; peerId: string; msgs: ChatMessage[] };
 
+/** When a row was written: its message, or the first one of a folded run. */
+export function rowTs(row: ThreadRow): number {
+  return row.kind === "msg" ? row.msg.ts : row.msgs[0].ts;
+}
+
 /**
  * Consecutive tool cards collapse into one row so a long run reads as one line,
  * and so does a back-and-forth with one bot: sent, received and handoff notes,

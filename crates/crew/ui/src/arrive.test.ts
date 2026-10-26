@@ -24,6 +24,21 @@ describe("arrivingIds", () => {
     expect(arrivingIds(["a", "b"], [])).toEqual([]);
   });
 
+  it("keeps a row written before the chat opened still", () => {
+    const old = new Set(["t1", "h0"]);
+    const isNew = (id: string) => !old.has(id);
+    // Tool cards shown again, or older history, sit among rows already there.
+    expect(arrivingIds(["a", "b"], ["a", "t1", "b"], isNew)).toEqual([]);
+    expect(arrivingIds(["a", "b"], ["h0", "a", "b"], isNew)).toEqual([]);
+    // A chat whose two rows load a moment after it opens.
+    expect(arrivingIds([], ["t1", "h0"], isNew)).toEqual([]);
+    // What is written now still moves, and the typing row is never old.
+    expect(arrivingIds(["a"], ["a", "t1", "c"], isNew)).toEqual(["c"]);
+    expect(arrivingIds(["a"], ["a", "working-jordy"], () => false)).toEqual([
+      "working-jordy",
+    ]);
+  });
+
   it("brings in the typing row, and the reply that takes its place", () => {
     expect(arrivingIds(["a"], ["a", "working-jordy"])).toEqual(["working-jordy"]);
     expect(arrivingIds(["working-jordy"], ["m"])).toEqual(["m"]);
@@ -42,6 +57,10 @@ describe("arriveStart", () => {
   it("starts the reply at the typing row it replaces", () => {
     expect(arriveStart(["a", "working-jordy"], ["a", "m"], "m", 48)).toBe(48);
     expect(arriveStart(["working-jordy"], ["m"], "m", 48)).toBe(48);
+  });
+
+  it("leaves an old row out", () => {
+    expect(arriveStart(["a"], ["a", "b"], "b", 40, () => false)).toBeNull();
   });
 
   it("does not borrow a typing height when the thread is replaced", () => {
