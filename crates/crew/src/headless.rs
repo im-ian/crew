@@ -195,6 +195,25 @@ fn memory_note(memory: &str) -> String {
     )
 }
 
+/// The system prompt keeps the instructions a session started with. Shared
+/// memory, including the live teammate list, rides in the prompt on every
+/// turn so a compact cannot leave an old copy as the only one. A slash
+/// command has to stay the first line.
+fn shared_note_for_turn(
+    prompt: &str,
+    agent: &AgentConfig,
+    roster: &[AgentConfig],
+) -> Option<String> {
+    if prompt.starts_with('/') {
+        return None;
+    }
+    Some(crate::config::shared_memory_note(
+        agent,
+        roster,
+        &crate::memory::read_shared(),
+    ))
+}
+
 /// Drop the CLI session so the next turn opens a new one. Refused mid-turn:
 /// that turn would save its session back when it ends.
 pub fn forget_session(session: &HeadlessSession) -> anyhow::Result<()> {
@@ -367,14 +386,21 @@ fn run_turn(
         Some(recap) => with_recap(recap, &prompt),
         None => prompt,
     };
+    let resume = turn_session.as_ref().is_some_and(|s| s.resume);
     let memory_now = crate::memory::read(&session.id);
-    let (memory_seen, note) = memory_for_turn(
-        turn_session.as_ref().is_some_and(|s| s.resume),
+    let (memory_seen, memory_note) = memory_for_turn(
+        resume,
         load_memory_seen(&session.id),
         memory_now.trim(),
         &prompt,
     );
-    let prompt = match note {
+    let shared_note = shared_note_for_turn(&prompt, &cfg, &roster);
+    let prompt = match memory_note {
+        Some(note) => format!("{note}\n\n{prompt}"),
+        None => prompt,
+    };
+    // Second, so the live shared memory sits above a personal-memory note.
+    let prompt = match shared_note {
         Some(note) => format!("{note}\n\n{prompt}"),
         None => prompt,
     };
@@ -1862,6 +1888,22 @@ mod tests {
         let (k, note) = memory_for_turn(true, None, "b", "/compact");
         assert!(note.is_none());
         assert!(turn(true, Some(k), "b").1.is_some());
+    }
+
+    #[test]
+    fn every_turn_opens_with_shared_memory() {
+        crate::paths::testing::with_home("shared-turn", || {
+            crate::memory::write_shared("harbor is closed").unwrap();
+            let alpha = AgentConfig::new("alpha".into(), "Alpha".into(), vec!["grok".into()], None);
+            let beta = AgentConfig::new("beta".into(), "Beta".into(), vec!["grok".into()], None);
+            let roster = [alpha.clone(), beta];
+            let note = shared_note_for_turn("hi", &alpha, &roster).unwrap();
+            assert!(note.contains("Shared memory"));
+            assert!(note.contains("beta — Beta"));
+            assert!(note.contains("You are `alpha` (Alpha)."));
+            assert!(note.contains("harbor is closed"));
+            assert!(shared_note_for_turn("/compact", &alpha, &roster).is_none());
+        });
     }
 
     #[test]

@@ -5,14 +5,41 @@ use std::path::Path;
 use crate::paths;
 
 pub fn read(agent_id: &str) -> String {
-    fs::read_to_string(paths::memory_path(agent_id)).unwrap_or_default()
+    read_path(&paths::memory_path(agent_id))
 }
 
 pub fn write(agent_id: &str, text: &str) -> anyhow::Result<()> {
-    let path = paths::memory_path(agent_id);
-    ensure_parent(&path)?;
+    write_path(&paths::memory_path(agent_id), text)
+}
+
+pub fn read_shared() -> String {
+    read_path(&paths::shared_memory_path())
+}
+
+pub fn write_shared(text: &str) -> anyhow::Result<()> {
+    write_path(&paths::shared_memory_path(), text)
+}
+
+pub fn write_shared_if_unchanged(base: &str, text: &str) -> anyhow::Result<bool> {
+    if read_shared() != base {
+        return Ok(false);
+    }
+    write_shared(text)?;
+    Ok(true)
+}
+
+pub fn append_shared(text: &str) -> anyhow::Result<()> {
+    append_path(&paths::shared_memory_path(), text)
+}
+
+fn read_path(path: &Path) -> String {
+    fs::read_to_string(path).unwrap_or_default()
+}
+
+fn write_path(path: &Path, text: &str) -> anyhow::Result<()> {
+    ensure_parent(path)?;
     // A bot's turn or `crew memory append` may read it mid-write.
-    paths::write_atomic(&path, text.as_bytes())?;
+    paths::write_atomic(path, text.as_bytes())?;
     Ok(())
 }
 
@@ -27,12 +54,15 @@ pub fn write_if_unchanged(agent_id: &str, base: &str, text: &str) -> anyhow::Res
 }
 
 pub fn append(agent_id: &str, text: &str) -> anyhow::Result<()> {
+    append_path(&paths::memory_path(agent_id), text)
+}
+
+fn append_path(path: &Path, text: &str) -> anyhow::Result<()> {
     let add = text.trim_end();
     if add.is_empty() {
         return Ok(());
     }
-    let path = paths::memory_path(agent_id);
-    ensure_parent(&path)?;
+    ensure_parent(path)?;
     // Append in place rather than read and rewrite: bots append on their own,
     // sometimes several at once, and a rewrite from a stale or failed read
     // dropped the other notes.
@@ -40,7 +70,7 @@ pub fn append(agent_id: &str, text: &str) -> anyhow::Result<()> {
         .read(true)
         .append(true)
         .create(true)
-        .open(&path)?;
+        .open(path)?;
     let mut line = String::new();
     if file.metadata()?.len() > 0 {
         let mut last = [0u8];
@@ -150,6 +180,22 @@ mod tests {
             write("weird/id", "x").unwrap();
             assert!(paths::memory_path("weird/id").ends_with("memory/weird_id.md"));
             assert_eq!(read("weird/id"), "x");
+        });
+    }
+
+    #[test]
+    fn shared_notes_are_not_a_bots_memory() {
+        with_home_dir(|| {
+            write("alpha", "mine").unwrap();
+            write_shared("team").unwrap();
+            append_shared("also").unwrap();
+            assert_eq!(read("alpha"), "mine");
+            assert_eq!(read_shared(), "team\nalso\n");
+            assert!(!write_shared_if_unchanged("team", "nope").unwrap());
+            assert!(write_shared_if_unchanged("team\nalso\n", "kept").unwrap());
+            assert_eq!(read_shared(), "kept");
+            remove("alpha");
+            assert_eq!(read_shared(), "kept");
         });
     }
 

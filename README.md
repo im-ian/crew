@@ -63,6 +63,7 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 > 이름을 바꿔 달라면 `crew agent set --name "새 이름"`을 실행해라. 반복 일을 맡기면 그 말을 cron으로 바꿔 `crew routine add`로 루틴을 만들고, 고치거나 지우라면 `crew routine edit` / `remove`를 실행해라.
 > 사람에게 고르라고 물으려면 `crew ask --question "..." --option A --option B`를 실행해라. 값을 적으라고 하려면 `--input 아이디`를 보태라. 다른 봇에게 묻지 마라.
 > 나중 대화에 필요한 걸 알게 되면 `crew memory append`로 적어라. 고치거나 잊으라면 `crew memory show`로 보고 `crew memory set`으로 다시 써라. 비밀은 적지 마라.
+> 팀 전체 메모와 지금 봇 목록은 공유 메모리에 있다. `crew share show`로 보고, 팀 메모는 `crew share append`로 더하고 `crew share set`으로 노트만 다시 쓴다. 봇 목록은 Crew가 매번 다시 쓴다.
 
 그래서 1:1 대화에서 `@리뷰어 이 패치 봐줘`라고 쓰면, 지금 대화 중인 봇이 먼저 일을 하고 필요할 때 리뷰어 봇에게 넘겨요. 이름을 여러 개 적으면 지금 봇이 답을 끝낸 뒤에, 적힌 순서대로 한 명씩 답해요. 봇 사이의 릴레이는 사용자 메시지 하나당 최대 4홉이에요. 이름 변경과 루틴 등록은 채팅에서 시키면 봇이 같은 식으로 `crew`를 실행해요. 사람에게 A / B / C를 고르라고 묻거나 값을 적으라고 할 때도 `crew ask`로 그 봇의 채팅에 카드가 떠요.
 
@@ -70,7 +71,9 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 
 대화 기록은 지우면 아카이브로 옮겨가지만, `$CREW_HOME/memory/<id>.md`는 그대로 남아요. 메모리 탭에서 직접 적을 수도 있고, 봇이 대화하다 오래 남길 만한 걸 알게 되면 스스로 `crew memory append`로 적어요. 고치거나 잊을 땐 `crew memory set`으로 통째로 다시 쓰고, 비밀번호나 토큰은 적지 않아요.
 
-새 세션을 열 때 Grok은 `--rules`로, Claude는 `--append-system-prompt`로, Codex는 `-c developer_instructions=`로 메모리를 넣어 줘요. Claude와 Codex는 이어지는 턴에 처음 시스템 프롬프트를 그대로 쓰고, Grok은 시스템 프롬프트가 바뀌면 프롬프트 캐시를 잃어요. 그래서 세션 도중에 메모리가 바뀌면 시스템 프롬프트는 그대로 두고, 다음 턴 앞에 `[crew system]` 메모로 새 내용을 한 번 알려 줘요. 봇을 복제하면 메모리도 함께 복사되고, 봇을 삭제하면 메모리 파일도 같이 지워져요.
+새 세션을 열 때 Grok은 `--rules`로, Claude는 `--append-system-prompt`로, Codex는 `-c developer_instructions=`로 그 봇의 메모리를 넣어 줘요. Claude와 Codex는 이어지는 턴에 처음 시스템 프롬프트를 그대로 쓰고, Grok은 시스템 프롬프트가 바뀌면 프롬프트 캐시를 잃어요. 그래서 세션 도중에 그 봇의 메모리가 바뀌면 시스템 프롬프트는 그대로 두고, 다음 턴 앞에 `[crew system]` 메모로 새 내용을 한 번 알려 줘요. 봇을 복제하면 그 메모리도 함께 복사되고, 봇을 삭제하면 그 파일도 같이 지워져요.
+
+공유 메모리는 `$CREW_HOME/shared.md` 하나예요. 모든 봇이 같은 노트를 보고, 메모리 탭에서도 고칠 수 있어요. 봇 목록은 이 파일에 적히지 않아요. 매 턴 프롬프트의 `Shared memory` 노트가 지금 명단과 공유 노트를 같이 넣어요. 대화가 압축돼도 다음 턴에 다시 붙어요. `crew share set`은 노트만 바꾸고, 명단은 Crew가 그 턴의 봇 목록으로 다시 만들어요.
 
 ---
 
@@ -339,6 +342,10 @@ crew memory show grok
 crew memory set grok 사용자는 한국어로 짧게 답하길 좋아한다
 crew memory append grok 이 레포는 워크스페이스 루트가 crew 다
 
+crew share show
+crew share append 배포는 develop에서 확인한다
+crew share set 팀 규칙만 남긴다
+
 crew messages grok
 crew reset grok
 crew reset grok --drop-routines
@@ -360,8 +367,9 @@ crew reset grok --drop-routines
 | `agents.json` | 봇·루틴 |
 | `groups.json` | 사이드바 그룹 |
 | `locale` | `ko` 또는 `en` (알림·CLI 라벨) |
-| `roster.md` | 봇에게 주입되는 최신 봇 명단 |
-| `memory/<id>.md` | 대화를 지워도 남는 기억 |
+| `roster.md` | 저장된 봇 명단 사본 |
+| `shared.md` | 공유 메모리 노트. 봇 목록은 매 턴 이 메모와 함께 최신으로 전달 |
+| `memory/<id>.md` | 대화를 지워도 남는 그 봇의 기억 |
 | `skills/<이름>.md` | `/이름` 스킬 |
 | `transcripts/<id>.jsonl` | 1:1 대화 |
 | `cli-sessions/<id>` | Grok/Claude/Codex 세션 id |
