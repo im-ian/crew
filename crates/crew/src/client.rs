@@ -131,6 +131,11 @@ fn connection_lost(err: &anyhow::Error) -> bool {
 
 fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
     let mut stream = connect()?;
+    // `connect` arms every socket with `ANSWER_TIMEOUT`. Ask waits on a
+    // person and Subscribe is a stream, so that default would cut them off.
+    if answer.is_none() {
+        stream.set_read_timeout(None).map_err(stalled)?;
+    }
     let line = req.to_line()?;
     writeln!(stream, "{line}").map_err(stalled)?;
     stream.flush().map_err(stalled)?;
@@ -557,7 +562,7 @@ pub fn print_routines_from_config(
 
 #[cfg(test)]
 mod tests {
-    use std::io::{BufRead, Write};
+    use std::io::{BufRead, BufReader, Write};
 
     use super::*;
     use crate::config::Routine;
@@ -609,6 +614,47 @@ mod tests {
                 .expect_err("a silent daemon is not an answer");
             assert!(err.contains("did not answer"), "{err}");
             drop(quiet.join().expect("accept"));
+        });
+    }
+
+    /// `connect` puts a fifteen-second read deadline on the socket. Ask's
+    /// budget is `None`, and leaving the socket deadline in place fails the
+    /// command while the person is still looking at the card.
+    #[test]
+    fn an_ask_waits_past_the_socket_deadline() {
+        paths::testing::with_home("ask-wait", || {
+            paths::ensure_home().expect("home");
+            let listener =
+                std::os::unix::net::UnixListener::bind(paths::socket_path()).expect("bind");
+            let slow = thread::spawn(move || {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let mut line = String::new();
+                let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+                reader.read_line(&mut line).expect("read");
+                thread::sleep(ANSWER_TIMEOUT + Duration::from_millis(300));
+                let answered = Event::Answered {
+                    text: "고름".into(),
+                }
+                .to_line()
+                .expect("line");
+                writeln!(stream, "{answered}").expect("write");
+            });
+            let ev = rpc_within(
+                Request::Ask {
+                    agent: "a".into(),
+                    question: "어느 쪽?".into(),
+                    options: vec!["고름".into()],
+                    inputs: Vec::new(),
+                    hint: None,
+                },
+                None,
+            )
+            .expect("ask outlives the socket deadline");
+            assert!(
+                matches!(ev, Event::Answered { ref text } if text == "고름"),
+                "{ev:?}"
+            );
+            slow.join().expect("listener");
         });
     }
 
