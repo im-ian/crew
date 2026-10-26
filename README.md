@@ -4,7 +4,7 @@
 
 # Crew
 
-이미 쓰고 있는 [Grok](https://grok.com) / [Claude Code](https://docs.anthropic.com/en/docs/claude-code) / [Codex](https://github.com/openai/codex) CLI를 하나의 창 안에 봇으로 모아 주는 맥 앱이에요. 모델 API를 새로 붙이는 대신, CLI를 헤드리스로 실행하고 그 답변만 말풍선으로 보여줘요.
+이미 쓰고 있는 [Grok](https://grok.com) / [Claude Code](https://docs.anthropic.com/en/docs/claude-code) / [Codex](https://github.com/openai/codex) / Antigravity / Gemini / Copilot / OpenCode CLI를 하나의 창 안에 봇으로 모아 주는 맥 앱이에요. 모델 API를 새로 붙이는 대신, CLI를 헤드리스로 실행하고 그 답변만 말풍선으로 보여줘요.
 
 설치 스크립트나 GitHub Releases의 `.dmg`로 설치할 수 있고, 설치된 앱은 새 버전이 나오면 직접 업데이트해요.
 
@@ -50,28 +50,34 @@ Grok의 봇 기능에서 영감을 받았어요. 성격과 역할을 지정한 �
 | Grok | `grok --always-approve` |
 | Claude | `claude --dangerously-skip-permissions` |
 | Codex | `codex --yolo` |
+| Antigravity | `agy --dangerously-skip-permissions` |
+| Gemini | `gemini --approval-mode yolo` |
+| Copilot | `copilot --allow-all --no-ask-user` |
+| OpenCode | `opencode run --auto` |
 
 Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`의 스트리밍 JSON만 읽기 때문에 배너나 스피너, 단축키 안내가 말풍선에 섞이지 않아요. CLI 세션 id는 봇별로 보관하니까 대화를 이어서 할 수 있고, 대화를 지우면 새 세션이 열려요.
 
-`cat` 같은 스텁은 예외로 긴 PTY 세션으로 유지해요. 테스트나 간단한 에코 봇에 쓰면 돼요.
+Antigravity / Gemini / Copilot / OpenCode도 턴 단위로 실행하지만 세션 id는 두지 않아요. 대신 매 턴 지금까지의 대화를 프롬프트에 같이 보내요.
+
+목록에 없는 명령도 봇으로 쓸 수 있어요. `--headless`로 만들면 메시지마다 그 명령을 실행하고, 메시지는 마지막 인자로 붙어요. `--headless`가 없으면 `cat` 같은 스텁처럼 긴 PTY 세션, 즉 터미널로 남아요. 테스트나 간단한 에코 봇에 쓰면 돼요.
 
 ### <img src="docs/readme/face-square.png" width="28" height="28" alt=""> 핸드오프
 
 세션마다 `CREW_AGENT_ID`와 확장된 `PATH`가 들어가요. 시스템 프롬프트는 대략 이렇게 알려 줘요.
 
 > 사용자가 `@id`를 쓰면 그건 **너에게** 다른 봇을 가리키는 것이다. 이 세션에 남아라. 필요하면 직접 `crew tell <id> <text>`를 실행해라.
-> 이름을 바꿔 달라면 `crew agent set --name "새 이름"`을 실행해라. 반복 일을 맡기면 그 말을 cron으로 바꿔 `crew routine add`로 루틴을 만들고, 고치거나 지우라면 `crew routine edit` / `remove`를 실행해라.
+> 이름을 바꿔 달라면 `crew agent set --name "새 이름"`을 실행해라. 봇을 만들라면 `crew agent add`를, 사이드바 그룹을 만들라면 `crew group add`를 실행해라. 반복 일을 맡기면 그 말을 cron으로 바꿔 `crew routine add`로 루틴을 만들고, 고치거나 지우라면 `crew routine edit` / `remove`를 실행해라.
 > 사람에게 고르라고 물으려면 `crew ask --question "..." --option A --option B`를 실행해라. 값을 적으라고 하려면 `--input 아이디`를 보태라. 다른 봇에게 묻지 마라.
 > 나중 대화에 필요한 걸 알게 되면 `crew memory append`로 적어라. 고치거나 잊으라면 `crew memory show`로 보고 `crew memory set`으로 다시 써라. 비밀은 적지 마라.
 > 팀 전체 메모와 지금 봇 목록은 공유 메모리에 있다. `crew share show`로 보고, 팀 메모는 `crew share append`로 더하고 `crew share set`으로 노트만 다시 쓴다. 봇 목록은 Crew가 매번 다시 쓴다.
 
-그래서 1:1 대화에서 `@리뷰어 이 패치 봐줘`라고 쓰면, 지금 대화 중인 봇이 먼저 일을 하고 필요할 때 리뷰어 봇에게 넘겨요. 이름을 여러 개 적으면 지금 봇이 답을 끝낸 뒤에, 적힌 순서대로 한 명씩 답해요. 봇 사이의 릴레이는 사용자 메시지 하나당 최대 4홉이에요. 이름 변경과 루틴 등록은 채팅에서 시키면 봇이 같은 식으로 `crew`를 실행해요. 사람에게 A / B / C를 고르라고 묻거나 값을 적으라고 할 때도 `crew ask`로 그 봇의 채팅에 카드가 떠요.
+그래서 1:1 대화에서 `@리뷰어 이 패치 봐줘`라고 쓰면, 지금 대화 중인 봇이 먼저 일을 하고 필요할 때 리뷰어 봇에게 넘겨요. 멘션은 `@id`로 저장되고 화면에는 봇 이름으로 보여요. 입력창에 이름을 적어도 보낼 때 id로 바뀌고, 봇도 답에 동료를 `@id`로 적어요. 이름을 여러 개 적으면 지금 봇이 답을 끝낸 뒤에, 적힌 순서대로 한 명씩 답해요. 봇 사이의 릴레이는 사용자 메시지 하나당 최대 4홉이에요. 이름 변경, 봇·그룹 만들기, 루틴 등록은 채팅에서 시키면 봇이 같은 식으로 `crew`를 실행해요. 사람에게 A / B / C를 고르라고 묻거나 값을 적으라고 할 때도 `crew ask`로 그 봇의 채팅에 카드가 떠요.
 
 ### <img src="docs/readme/face-teardrop.png" width="28" height="28" alt=""> 메모리
 
 대화 기록은 지우면 아카이브로 옮겨가지만, `$CREW_HOME/memory/<id>.md`는 그대로 남아요. 메모리 탭에서 직접 적을 수도 있고, 봇이 대화하다 오래 남길 만한 걸 알게 되면 스스로 `crew memory append`로 적어요. 고치거나 잊을 땐 `crew memory set`으로 통째로 다시 쓰고, 비밀번호나 토큰은 적지 않아요.
 
-새 세션을 열 때 Grok은 `--rules`로, Claude는 `--append-system-prompt`로, Codex는 `-c developer_instructions=`로 그 봇의 메모리를 넣어 줘요. Claude와 Codex는 이어지는 턴에 처음 시스템 프롬프트를 그대로 쓰고, Grok은 시스템 프롬프트가 바뀌면 프롬프트 캐시를 잃어요. 그래서 세션 도중에 그 봇의 메모리가 바뀌면 시스템 프롬프트는 그대로 두고, 다음 턴 앞에 `[crew system]` 메모로 새 내용을 한 번 알려 줘요. 봇을 복제하면 그 메모리도 함께 복사되고, 봇을 삭제하면 그 파일도 같이 지워져요.
+새 세션을 열 때 Grok은 `--rules`로, Claude는 `--append-system-prompt`로, Codex는 `-c developer_instructions=`로 그 봇의 메모리를 넣어 줘요. 이런 플래그가 없는 다른 CLI는 매 턴 프롬프트 앞에 넣어요. Claude와 Codex는 이어지는 턴에 처음 시스템 프롬프트를 그대로 쓰고, Grok은 시스템 프롬프트가 바뀌면 프롬프트 캐시를 잃어요. 그래서 세션 도중에 그 봇의 메모리가 바뀌면 시스템 프롬프트는 그대로 두고, 다음 턴 앞에 `[crew system]` 메모로 새 내용을 한 번 알려 줘요. 봇을 복제하면 그 메모리도 함께 복사되고, 봇을 삭제하면 그 파일도 같이 지워져요.
 
 공유 메모리는 `$CREW_HOME/shared.md` 하나예요. 모든 봇이 같은 노트를 보고, 메모리 탭에서도 고칠 수 있어요. 봇 목록은 이 파일에 적히지 않아요. 매 턴 프롬프트의 `Shared memory` 노트가 지금 명단과 공유 노트를 같이 넣어요. 대화가 압축돼도 다음 턴에 다시 붙어요. `crew share set`은 노트만 바꾸고, 명단은 Crew가 그 턴의 봇 목록으로 다시 만들어요.
 
@@ -81,19 +87,23 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 
 **채팅**
 
-- 봇 사이드바, 그룹, 드래그 앤 드롭, 검색 (`⌘K`)
-- 스트리밍 말풍선, 연속 답변 분리, 마크다운, 로컬 이미지·파일 경로
+- 봇 사이드바, 사이드바 그룹, 드래그 앤 드롭, 검색 (`⌘K`)
+- 스트리밍 말풍선, 연속 답변 분리, 로컬 이미지·파일 경로
+- 봇이 쓴 마크다운은 렌더링해서 보여 줘요. 표도 표로 나와요
+- 말풍선마다 옆에 복사·답장 버튼이 있어요
 - `@멘션` 칩, 파일 첨부, `/스킬` 문구 삽입
-- 봇이 작업 중일 때 보낸 메시지는 순서대로 대기해요. 봇당 최대 32개
+- 첨부한 이미지는 말풍선 위, 보낸 쪽에 붙어요
+- 봇이 작업 중일 때 보낸 메시지는 순서대로 대기해요. 봇당 최대 32개. 대기 중인 메시지는 그 자리에서 수정하거나 취소할 수 있어요
+- 봇이 작업 중일 때 `⌘⇧↩`로 보내면 지금 턴을 멈추고 그 메시지부터 시작해요
 - 중지 (`⌘.` 또는 `stop` / `중지` / `멈춰`). 확인이 필요할 땐 한 번 허용 / 거부
 - 봇이 사람에게 고르거나 값을 적으라고 물으면 (`crew ask`) 그 채팅에 카드가 떠요. 고른 답이나 적은 값이 봇에게 돌아와요. 다른 봇에게 묻지 않아요
-- 도구 호출은 접힌 카드로 보여 주고, 봇과 주고받은 메시지는 한 줄로 접혀요
-- Claude 봇이 서브 에이전트에게 일을 맡기면, 건넨 지시와 받은 보고도 한 줄로 접혀요. 누르면 사이드 채팅으로 열려요
+- 도구 호출은 설정에서 켜면 접힌 카드로 보여 주고, 봇과 주고받은 메시지는 한 줄로 접혀요
+- Claude나 Grok 봇이 서브 에이전트에게 일을 맡기면, 건넨 지시와 받은 보고도 한 줄로 접혀요. 누르면 부모 봇 옆에 사이드 채팅으로 열려요. 백그라운드로 돌린 서브 에이전트의 말도 그 사이드 채팅에 남아요
 - 읽지 않은 대화 표시, Dock 배지, 작업 완료·차단·루틴 실패 알림
 
 **봇**
 
-- Grok / Claude / Codex 중에서 선택. AI·모델·생각(effort)은 한 줄에서 고르고, 작업 폴더도 설정. 만들어지면 봇이 자기 일을 물어요
+- Grok / Claude / Codex / Antigravity / Gemini / Copilot / OpenCode 중에서 선택하거나, 직접 명령을 적어요. AI·모델·생각(effort)은 한 줄에서 고르고, 작업 폴더도 설정. 만들어지면 봇이 자기 일을 물어요
 - AI는 나중에 봇 정보에서 바꿔도 돼요. 새 AI가 지금까지의 대화를 한 번 읽고 이어가요
 - Grok Bot 스타일의 도형 아바타 (원, 물방울, 둥근 사각형, 육각형, 삼각형, 구름, 알약, 다이아몬드, 오각형, 별, 하트) + 색상. 사진으로 바꿀 수도 있어요
 - 작업 중에는 궤도 애니메이션, 확인을 기다릴 땐 회전 링
@@ -103,7 +113,7 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 
 - 채팅에서 봇에게 부탁하면 봇이 `crew routine`으로 추가·수정·삭제해요. 일정은 5필드 cron이에요
 - 루틴 패널은 목록만 보여 줘요. 켜기/끄기 스위치, 우클릭으로 지금 실행·삭제
-- 패널에서 스위치를 바꾸면 그 봇의 채팅에 남고, 봇이 알았다고 답해요
+- 패널에서 스위치를 바꾸면 그 봇의 채팅에 남고, 봇이 알았다고 답해요. 채팅에 남은 그 안내를 누르면 루틴 패널이 열려요
 - 실패한 실행도 그 분(minute)의 슬롯을 쓴 것으로 쳐요. 같은 분에 다시 실행되지 않도록요
 
 **스킬**
@@ -125,7 +135,7 @@ Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`�
 | 항목 | 내용 |
 | --- | --- |
 | OS | macOS (Unix 소켓, `~/Library/Application Support`, 트래픽 라이트 타이틀바) |
-| 에이전트 CLI | `grok`, `claude`, `codex` 중 쓸 것만. Crew는 모델을 내장하지 않아요 |
+| 에이전트 CLI | `grok`, `claude`, `codex`, `agy`, `gemini`, `copilot`, `opencode` 중 쓸 것만. Crew는 모델을 내장하지 않아요 |
 
 에이전트 CLI 바이너리는 아래 경로에서도 찾아요.
 
@@ -270,9 +280,9 @@ Grok이 PATH에 있다면 예시 `grok` 봇에게 바로 말을 걸 수 있어�
 ## 데스크톱 사용법
 
 1. `crew`를 실행해 창을 열어요.
-2. 사이드바에서 봇을 고르거나, **새 봇** (`⌘N`)으로 Grok / Claude / Codex 봇을 만들어요.
+2. 사이드바에서 봇을 고르거나, **새 봇** (`⌘N`)으로 봇을 만들어요. 만들어진 봇이 먼저 어떤 일을 맡을지 물어요.
 3. 메시지, `@멘션`, 파일 첨부 (`⌘U`), `/스킬`을 사용해요.
-4. `⌘I`로 봇 정보를 봐요 (모델, 메모리, 작업 폴더, 아바타).
+4. 헤더의 정보 버튼이나 `⌘I`로 봇 정보를 봐요 (모델, 메모리, 작업 폴더, 아바타).
 5. `⌘⇧R`로 루틴 목록을 봐요. 추가와 수정은 채팅에서 봇에게 부탁해요.
 
 ### 단축키
@@ -291,6 +301,7 @@ Grok이 PATH에 있다면 예시 `grok` 봇에게 바로 말을 걸 수 있어�
 | `⌘I` | 정보 |
 | `⌘⇧R` | 루틴 |
 | `⌘.` | 중지 |
+| `⌘⇧↩` | 바로 보내기 |
 | `⌘U` | 파일 첨부 |
 | `⌘↩` | 한 번 허용 |
 | `⌘⌫` | 거부 |
@@ -319,7 +330,7 @@ crew agent clone grok --name "Grok 복사본"
 crew agent remove shell
 crew agent add --cli grok --name "리뷰어"
 crew agent add --cli agy --name "안티그래비티"
-crew agent add --headless --cmd my-ai --print --name "내 봇"
+crew agent add --headless --name "내 봇" --cmd my-ai --print
 
 crew group list
 crew group add --name "작업"
@@ -351,7 +362,7 @@ crew reset grok
 crew reset grok --drop-routines
 ```
 
-`crew agent add`에는 `--cli grok|claude|codex|agy|gemini|copilot|opencode` 또는 `--cmd …`가 필요해요. `--cmd`를 주면 `--cli`는 무시돼요. 모르는 명령을 대화로 쓰려면 `--headless`를 같이 주세요. 메시지는 그 명령의 마지막 인자로 붙어요. `--headless`가 없으면 모르는 명령은 터미널로 남아요. id를 생략하고 `--name`을 주면 id를 만들어서 `ok <id>`로 출력해요. id를 직접 주면 그 id를 그대로 써요. 작업 폴더를 생략하면 `/tmp/crew-demo/<id>`가 돼요.
+`crew agent add`에는 `--cli grok|claude|codex|agy|gemini|copilot|opencode` 또는 `--cmd …`가 필요해요. `--cmd`를 주면 `--cli`는 무시돼요. `--cmd`는 꼭 맨 끝에 두세요. 그 뒤에 오는 건 `--name` 같은 플래그까지 모두 명령의 인자로 들어가요. 모르는 명령을 대화로 쓰려면 `--headless`를 같이 주세요. 메시지는 그 명령의 마지막 인자로 붙어요. `--headless`가 없으면 모르는 명령은 터미널로 남아요. id를 생략하고 `--name`을 주면 id를 만들어서 `ok <id>`로 출력해요. id를 직접 주면 그 id를 그대로 써요. 작업 폴더를 생략하면 `/tmp/crew-demo/<id>`가 돼요.
 
 `crew group add --name`은 사이드바 그룹을 만들어요. `--bot <id>`를 반복하면 그 봇을 다른 그룹에서 빼 새 그룹에 넣어요. 없는 봇 id는 거절해요. `crew group list`는 `id`, 이름, 봇 id를 탭으로 나눠 출력해요.
 
