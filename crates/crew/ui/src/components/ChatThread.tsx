@@ -8,7 +8,6 @@ import type {
   AgentInfo,
   ChatMessage,
   ChoiceCard as ChoiceCardData,
-  ChoiceOption,
   Kind,
 } from "../types";
 import { resolveFace } from "../avatar";
@@ -25,6 +24,7 @@ import {
   toolSummary,
   type ThreadRow,
 } from "../tools";
+import { answeredOptionView, optionView, shortLabels } from "../choiceView";
 import { clockLabels, messageClockParts } from "../clock";
 import { ChevronDown, Reply, X } from "../icons";
 import { Avatar } from "./Avatar";
@@ -1310,8 +1310,8 @@ function ChoiceCard({
               </div>
             ) : picked.length ? (
               <div className="choice-picked">
-                {picked.map((o, oi) => {
-                  const view = optionView(o, oi, short);
+                {picked.map((o) => {
+                  const view = answeredOptionView(q.options || [], o);
                   return (
                     <div className="choice-option is-on" key={o.id}>
                       <span className="choice-badge">{view.badge}</span>
@@ -1351,19 +1351,6 @@ function ChoiceCard({
       ) : null}
     </div>
   );
-}
-
-function shortLabels(options: ChoiceOption[]): boolean {
-  return options.every((o) => (o.label || "").trim().length <= 3);
-}
-
-function optionView(o: ChoiceOption, i: number, short: boolean) {
-  const label = (o.label || "").trim() || String.fromCharCode(65 + i);
-  const desc = (o.description || "").trim();
-  const badge = short ? label : String.fromCharCode(65 + (i % 26));
-  const title = short ? desc : label;
-  const sub = !short && desc && desc !== label ? desc : null;
-  return { badge, title, sub };
 }
 
 function Bubble({
