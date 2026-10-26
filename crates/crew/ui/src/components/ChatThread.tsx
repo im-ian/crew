@@ -85,6 +85,10 @@ type Props = {
   onCancelQueued?: (messageId: string) => void;
   /** Change it in the composer; it keeps its place in line. */
   onEditQueued?: (messageId: string, text: string, reply: ReplyTarget | null) => void;
+  /** Send this waiting line without typing another one in front of it. */
+  onSendQueued?: (messageId: string) => void;
+  /** Waiting line the empty composer is pointing at. */
+  queuePick?: string | null;
   onAnswerChoice?: (
     agentId: string,
     messageId: string,
@@ -118,6 +122,8 @@ export function ChatThread({
   onApprove,
   onCancelQueued,
   onEditQueued,
+  onSendQueued,
+  queuePick,
   onAnswerChoice,
   highlightId = null,
   onHighlightDone,
@@ -268,6 +274,16 @@ export function ChatThread({
     return () => window.clearTimeout(t);
   }, [highlightId]);
 
+  useEffect(() => {
+    if (!queuePick) return;
+    const root = ref.current;
+    if (!root) return;
+    const el = root.querySelector(
+      `[data-msg-id="${CSS.escape(queuePick)}"]`,
+    ) as HTMLElement | null;
+    el?.scrollIntoView({ block: "nearest" });
+  }, [queuePick]);
+
   return (
     <div className="thread-wrap">
       <div className="thread" ref={ref} onScroll={syncStick}>
@@ -351,6 +367,8 @@ export function ChatThread({
                       ? (text, reply) => onEditQueued(m.id, text, reply)
                       : undefined
                   }
+                  onSend={onSendQueued ? () => onSendQueued(m.id) : undefined}
+                  picked={queuePick === m.id}
                   onReply={onReply}
                   onJump={onJump}
                   flash={flash}
@@ -1416,6 +1434,8 @@ function Bubble({
   onAnswerChoice,
   onCancel,
   onEdit,
+  onSend,
+  picked = false,
   onReply,
   onJump,
   flash = false,
@@ -1435,6 +1455,8 @@ function Bubble({
   ) => void | Promise<void>;
   onCancel?: () => void;
   onEdit?: (text: string, reply: ReplyTarget | null) => void;
+  onSend?: () => void;
+  picked?: boolean;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
   flash?: boolean;
@@ -1472,7 +1494,13 @@ function Bubble({
     "bubble md" + (caret ? " streaming" : "") + (queued ? " queued" : "");
   return (
     <div
-      className={"row me" + (queued ? " queued" : "") + (flash ? " flash" : "")}
+      className={
+        "row me" +
+        (queued ? " queued" : "") +
+        (flash ? " flash" : "") +
+        (picked ? " queue-picked" : "")
+      }
+      aria-selected={picked || undefined}
       data-msg-id={m.id}
     >
       <div className="me-msg">
@@ -1514,6 +1542,7 @@ function Bubble({
         {queued ? (
           <QueueWait
             onCancel={onCancel}
+            onSend={onSend}
             onEdit={
               onEdit
                 ? () =>
@@ -1538,9 +1567,11 @@ function Bubble({
 function QueueWait({
   onCancel,
   onEdit,
+  onSend,
 }: {
   onCancel?: () => void;
   onEdit?: () => void;
+  onSend?: () => void;
 }) {
   const t = useT();
   return (
@@ -1551,6 +1582,11 @@ function QueueWait({
         <i />
         <i />
       </span>
+      {onSend ? (
+        <button type="button" className="queue-cancel" onClick={onSend}>
+          {t("thread.sendQueued")}
+        </button>
+      ) : null}
       {onEdit ? (
         <button type="button" className="queue-cancel" onClick={onEdit}>
           {t("thread.editQueued")}

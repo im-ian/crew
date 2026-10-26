@@ -6,6 +6,7 @@ import { api } from "../api";
 import { useT } from "../LocaleContext";
 import { mediaKind } from "../markdown";
 import { mentionIds, resolveMention, trimMentionPunct } from "../mentions";
+import { stepQueuePick } from "../queuePick";
 import { oneLine, wrapReply, type ReplyTarget } from "../reply";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
@@ -26,6 +27,13 @@ type Props = {
   placeholder: string;
   onSend: (raw: string, steer: boolean) => Promise<void>;
   onEdit?: (messageId: string, raw: string) => Promise<EditResult>;
+  /** User lines still waiting, oldest first. */
+  waitingIds?: string[];
+  /** The waiting line ArrowUp is on, if any. */
+  queuePick?: string | null;
+  onQueuePick?: (id: string | null) => void;
+  /** Enter on the picked line opens it for editing. */
+  onEditWaiting?: (id: string) => void;
   busy?: boolean;
   /** The bot is mid-turn, so a message can stop it and go now instead of waiting. */
   canSteer?: boolean;
@@ -59,6 +67,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   placeholder,
   onSend,
   onEdit,
+  waitingIds = [],
+  queuePick = null,
+  onQueuePick,
+  onEditWaiting,
   busy = false,
   canSteer = false,
   onStop,
@@ -696,6 +708,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
             refreshEmpty();
             fit();
             scanMention();
+            if (queuePick) onQueuePick?.(null);
           }}
           onClick={scanMention}
           onKeyUp={scanMention}
@@ -761,6 +774,34 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
               if (e.key === "Escape") {
                 e.preventDefault();
                 setMention(null);
+                return;
+              }
+            }
+            if (
+              !editing &&
+              !reply &&
+              attaches.length === 0 &&
+              !e.metaKey &&
+              !e.ctrlKey &&
+              !e.altKey &&
+              !e.shiftKey &&
+              isEditorEmpty(e.currentTarget) &&
+              waitingIds.length > 0
+            ) {
+              if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+                e.preventDefault();
+                onQueuePick?.(
+                  stepQueuePick(
+                    waitingIds,
+                    queuePick,
+                    e.key === "ArrowUp" ? "prev" : "next",
+                  ),
+                );
+                return;
+              }
+              if (e.key === "Enter" && queuePick) {
+                e.preventDefault();
+                onEditWaiting?.(queuePick);
                 return;
               }
             }

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatThread, sideOnlyPeer } from "./components/ChatThread";
@@ -25,6 +25,7 @@ import {
   type ThemePref,
 } from "./theme";
 import { loadShowTools, saveShowTools } from "./tools";
+import { waitingEdit, waitingIds } from "./queuePick";
 import { useCrew } from "./useCrew";
 import { useUpdater } from "./updater";
 
@@ -41,6 +42,8 @@ export function App() {
   const [theme, setTheme] = useState<ThemePref>(loadThemePref);
   const [showTools, setShowTools] = useState(loadShowTools);
   const [jumpSeq, setJumpSeq] = useState(0);
+  const [queuePick, setQueuePick] = useState<string | null>(null);
+  const waiting = useMemo(() => waitingIds(crew.messages), [crew.messages]);
   // `focus` is the run that was clicked, flashed where it sits; the panel
   // opens at the bottom. A search hit is opened on instead (`openAtFocus`).
   const [peek, setPeek] = useState<{
@@ -55,6 +58,14 @@ export function App() {
   const peekOpen = !!(peek && crew.currentAgent);
   const autoFor = useRef<string | null>(null);
   const hitFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    setQueuePick(null);
+  }, [crew.selected]);
+
+  useEffect(() => {
+    if (queuePick && !waiting.includes(queuePick)) setQueuePick(null);
+  }, [queuePick, waiting]);
 
   function finishRename() {
     crew.clearPendingRename();
@@ -285,6 +296,8 @@ export function App() {
           onEditQueued={(id, text, reply) =>
             composerRef.current?.edit(id, text, reply)
           }
+          onSendQueued={(id) => void crew.sendQueued(id)}
+          queuePick={queuePick}
           onAnswerChoice={(agentId, messageId, answers, values, closed) =>
             crew.answerChoice(agentId, messageId, answers, values, closed)
           }
@@ -308,6 +321,16 @@ export function App() {
           placeholder={crew.placeholder}
           onSend={crew.onSend}
           onEdit={crew.editQueued}
+          waitingIds={waiting}
+          queuePick={queuePick}
+          onQueuePick={setQueuePick}
+          onEditWaiting={(id) => {
+            const message = crew.messages.find((m) => m.id === id);
+            if (!message) return;
+            const next = waitingEdit(message.text || "", crew.agents, t);
+            setQueuePick(null);
+            composerRef.current?.edit(id, next.body, next.reply);
+          }}
           onJump={crew.highlightMessage}
           busy={
             crew.currentAgent?.status === "working" ||

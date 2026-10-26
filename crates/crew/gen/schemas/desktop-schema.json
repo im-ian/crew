@@ -369,6 +369,12 @@
           "markdownDescription": "Enables the send_message command without any pre-configured scope."
         },
         {
+          "description": "Enables the send_queued command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-send-queued",
+          "markdownDescription": "Enables the send_queued command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_agent command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-agent",
@@ -637,6 +643,12 @@
           "type": "string",
           "const": "deny-send-message",
           "markdownDescription": "Denies the send_message command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the send_queued command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-send-queued",
+          "markdownDescription": "Denies the send_queued command without any pre-configured scope."
         },
         {
           "description": "Denies the set_agent command without any pre-configured scope.",

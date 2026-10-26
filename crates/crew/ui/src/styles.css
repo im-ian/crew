@@ -1771,6 +1771,9 @@ button.sys-note:focus-visible {
   color: var(--ink);
   text-decoration: underline;
 }
+.row.me.queue-picked .bubble {
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--ink) 45%, transparent);
+}
 .queue-dots {
   display: inline-flex;
   align-items: center;
