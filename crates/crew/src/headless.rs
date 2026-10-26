@@ -621,23 +621,20 @@ fn spawn_and_stream(
         // grok/claude/codex stream every reply as JSON, so a bare line there is
         // CLI chatter and must never become the answer. A text CLI's stdout is
         // the reply, so a line that starts with `{` or `[` stays.
-        if cli != CliKind::Other {
+        if cli == CliKind::Grok {
+            if apply_grok_stdout(session, &mut state, &line).is_some() {
+                if let Ok(mut inner) = session.inner.lock() {
+                    inner.last_output = Instant::now();
+                    inner.seq += 1;
+                }
+            }
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+                turn_end = is_turn_end(cli, &v);
+            }
+        } else if cli != CliKind::Other {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
                 for card in crate::tool_card::from_events(&v) {
                     if cli == CliKind::Claude && is_subagent_call(&v, &card.name) {
-                        continue;
-                    }
-                    // The side chat is the spawn. A child's own tools stay in
-                    // its grok session, not in the parent's tool run.
-                    if cli == CliKind::Grok && hide_grok_tool(&card, &v, &state) {
-                        continue;
-                    }
-                    if cli == CliKind::Grok && hold_grok_tool(&card, &state) {
-                        state.held_tools.push(HeldTool {
-                            id: card.id.clone().unwrap_or_default(),
-                            name: card.name.clone(),
-                            detail: card.detail.clone(),
-                        });
                         continue;
                     }
                     crate::transcript::push_tool(
@@ -657,32 +654,22 @@ fn spawn_and_stream(
                         );
                     }
                 }
-                if cli == CliKind::Grok {
-                    remember_grok_tool_owner(&v, &mut state);
-                    for note in grok_subagent_notes(&v, &mut state) {
-                        crate::transcript::push_subagent(
-                            &session.id,
-                            &note.key,
-                            &note.from,
-                            &note.text,
-                        );
-                    }
-                    flush_held_tools(session, &mut state);
-                }
                 turn_end = is_turn_end(cli, &v);
             }
         }
-        if let Some(chunk) = ingest_line(cli, &line, &mut state) {
-            feed_text(cli, session, &chunk);
-            if let Ok(mut inner) = session.inner.lock() {
-                inner.last_output = Instant::now();
-                inner.seq += 1;
+        if cli != CliKind::Grok {
+            if let Some(chunk) = ingest_line(cli, &line, &mut state) {
+                feed_text(cli, session, &chunk);
+                if let Ok(mut inner) = session.inner.lock() {
+                    inner.last_output = Instant::now();
+                    inner.seq += 1;
+                }
+            } else if let Some(line) = other_reply_line(cli, &line) {
+                if !plain.is_empty() {
+                    plain.push('\n');
+                }
+                plain.push_str(line);
             }
-        } else if let Some(line) = other_reply_line(cli, &line) {
-            if !plain.is_empty() {
-                plain.push('\n');
-            }
-            plain.push_str(line);
         }
         if let Some(id) = state.session_id.as_ref() {
             if let Ok(mut inner) = session.inner.lock() {
@@ -694,6 +681,15 @@ fn spawn_and_stream(
             end_turn_early(session, generation, turn);
             sealed = true;
         }
+    }
+
+    if cli == CliKind::Grok {
+        release_held_reply(&mut state);
+        if let Some(chunk) = state.parent_release.take() {
+            feed_text(cli, session, &chunk);
+            state.got_text = true;
+        }
+        flush_held_tools(session, &mut state);
     }
 
     let status = {
@@ -773,6 +769,44 @@ fn feed_text(cli: CliKind, session: &HeadlessSession, chunk: &str) {
         CliKind::Codex => crate::transcript::set_pending_assistant(&session.id, chunk),
         _ => crate::transcript::on_assistant_delta(&session.id, chunk),
     }
+}
+
+/// Cards, side-chat notes, and reply text for one grok stdout line.
+/// Tool cards wait until this line has updated the call sets, then flush.
+fn apply_grok_stdout(session: &HeadlessSession, state: &mut ParseState, line: &str) -> Option<String> {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+        for card in crate::tool_card::from_events(&v) {
+            // The side chat is the spawn. A child's own tools stay in
+            // its grok session, not in the parent's tool run.
+            if hide_grok_tool(&card, &v, state) {
+                continue;
+            }
+            if hold_grok_tool(&card, state) {
+                state.held_tools.push(HeldTool {
+                    id: card.id.clone().unwrap_or_default(),
+                    name: card.name.clone(),
+                    detail: card.detail.clone(),
+                });
+                continue;
+            }
+            crate::transcript::push_tool(
+                &session.id,
+                card.id.as_deref(),
+                &card.name,
+                &card.detail,
+            );
+        }
+        for note in grok_subagent_notes(&v, state) {
+            crate::transcript::push_subagent(&session.id, &note.key, &note.from, &note.text);
+        }
+        remember_grok_tool_owner(&v, state);
+    }
+    let chunk = ingest_line(CliKind::Grok, line, state);
+    if let Some(text) = chunk.as_deref() {
+        feed_text(CliKind::Grok, session, text);
+    }
+    flush_held_tools(session, state);
+    chunk
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1048,7 +1082,9 @@ fn note_subagent_call(v: &Value, state: &mut ParseState) {
     };
     match kind {
         "tool_call" => {
-            if is_grok_spawn(event) {
+            // A replayed call must not pull a backgrounded spawn back into the
+            // foreground set. Text would then be dropped instead of held.
+            if is_grok_spawn(event) && !state.background_calls.contains(id) {
                 state.open_subagents.insert(id.to_string());
             }
         }
@@ -1075,19 +1111,38 @@ fn note_subagent_call(v: &Value, state: &mut ParseState) {
 }
 
 /// The completed update that only says the child was started in the background.
-/// The child is still writing; this is not its result.
+/// The child is still writing; this is not its result. A later completion, a
+/// failure, or the word "background" anywhere else in the event is the end.
 fn is_background_start(event: &Value) -> bool {
-    if tagged_subagent_id(event).is_none() {
+    if event.get("status").and_then(Value::as_str) != Some("completed") {
         return false;
     }
-    notice_has_background(event)
+    let mut id = None;
+    if let Some(content) = event.get("content") {
+        scan_subagent_line(content, &mut id);
+    }
+    if id.is_none() {
+        if let Some(raw) = event.get("rawOutput") {
+            scan_subagent_line(raw, &mut id);
+        }
+    }
+    id.is_some()
+        && (value_has_background_word(event.get("content"))
+            || value_has_background_word(event.get("rawOutput")))
 }
 
-fn notice_has_background(v: &Value) -> bool {
+fn value_has_background_word(v: Option<&Value>) -> bool {
+    v.is_some_and(text_has_background_word)
+}
+
+fn text_has_background_word(v: &Value) -> bool {
     match v {
-        Value::String(text) => text.to_ascii_lowercase().contains("background"),
-        Value::Array(items) => items.iter().any(notice_has_background),
-        Value::Object(map) => map.values().any(notice_has_background),
+        Value::String(text) => text
+            .to_ascii_lowercase()
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .any(|word| word == "background"),
+        Value::Array(items) => items.iter().any(text_has_background_word),
+        Value::Object(map) => map.values().any(text_has_background_word),
         _ => false,
     }
 }
@@ -1657,10 +1712,12 @@ fn remember_grok_tool_owner(v: &Value, state: &mut ParseState) {
     let Some(sid) = event_session_id(v) else {
         return;
     };
-    if is_foreign_session(state, sid) || state.grok_sessions.contains_key(sid) {
+    if state.grok_sessions.contains_key(sid) || state.grok_pending.contains_key(sid) {
         state.child_tool_ids.insert(id.to_string());
     } else if state.session_id.as_deref() == Some(sid) {
         state.parent_tool_ids.insert(id.to_string());
+    } else if state.session_id.is_some() {
+        state.child_tool_ids.insert(id.to_string());
     }
 }
 
@@ -1677,9 +1734,7 @@ fn hold_grok_tool(card: &crate::tool_card::ToolCard, state: &ParseState) -> bool
     if state.open_subagents.is_empty() && state.background_calls.is_empty() {
         return false;
     }
-    let Some(id) = card.id.as_deref() else {
-        return false;
-    };
+    let id = card.id.as_deref().unwrap_or("");
     !state.parent_tool_ids.contains(id) && !state.child_tool_ids.contains(id)
 }
 
@@ -2820,6 +2875,200 @@ mod tests {
         assert!(side.contains(line_a), "{side}");
         assert!(side.contains(line_b), "{side}");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn drive_grok(st: &mut ParseState, line: &str) -> Option<String> {
+        let v: Value = serde_json::from_str(line).unwrap();
+        let _ = grok_subagent_notes(&v, st);
+        ingest_line(CliKind::Grok, line, st)
+    }
+
+    fn grok_session(id: &str) -> HeadlessSession {
+        HeadlessSession {
+            id: id.to_string(),
+            name: id.to_string(),
+            cmd: vec!["grok".to_string()],
+            cwd: std::path::PathBuf::from("/tmp"),
+            inner: std::sync::Mutex::new(HeadlessInner {
+                status: crate::protocol::AgentStatus::Working,
+                last_output: std::time::Instant::now(),
+                seq: 0,
+                cols: 80,
+                rows: 24,
+                session_id: None,
+                child: None,
+                generation: 0,
+                interrupted: false,
+            }),
+        }
+    }
+
+    /// A later update can repeat `subagent_id` and the word "background" in the
+    /// prompt. That is the child finishing, so the held parent sentence comes out.
+    #[test]
+    fn a_background_word_outside_the_start_notice_closes_the_call() {
+        let mut st = ParseState::default();
+        let parent = "부모는 이 문장을 자식이 끝난 뒤에 봅니다. 길이를 넉넉히 잡습니다.";
+        drive_grok(
+            &mut st,
+            &serde_json::json!({
+                "type": "tool_call",
+                "toolCallId": "call-a",
+                "title": "spawn_subagent",
+                "rawInput": {"description": "rev", "prompt": "Review."}
+            })
+            .to_string(),
+        );
+        drive_grok(
+            &mut st,
+            &serde_json::json!({
+                "type": "tool_call_update",
+                "toolCallId": "call-a",
+                "status": "completed",
+                "content": [{"type": "content", "content": {"type": "text", "text": "Subagent started in background.\nsubagent_id: child-a\n"}}]
+            })
+            .to_string(),
+        );
+        assert!(st.background_calls.contains("call-a"));
+        assert!(drive_grok(
+            &mut st,
+            &serde_json::json!({"type": "text", "data": parent}).to_string(),
+        )
+        .is_none());
+        let released = drive_grok(
+            &mut st,
+            &serde_json::json!({
+                "type": "tool_call_update",
+                "toolCallId": "call-a",
+                "status": "completed",
+                "subagent_id": "child-a",
+                "rawInput": {"prompt": "Run this in the background."},
+                "content": [{"type": "content", "content": {"type": "text", "text": "The review is finished."}}]
+            })
+            .to_string(),
+        )
+        .unwrap_or_default();
+        assert!(released.contains(parent), "{released}");
+        assert!(st.background_calls.is_empty());
+        assert!(st.open_subagents.is_empty());
+    }
+
+    /// A second copy of the spawn call must not drop text that was being held.
+    #[test]
+    fn a_repeated_spawn_call_keeps_holding_parent_text() {
+        let mut st = ParseState::default();
+        let parent = "부모 문장은 호출이 다시 와도 붙잡혀 있다가 나옵니다.";
+        let spawn = serde_json::json!({
+            "type": "tool_call",
+            "toolCallId": "call-a",
+            "title": "spawn_subagent",
+            "rawInput": {"description": "rev", "prompt": "Review."}
+        })
+        .to_string();
+        drive_grok(&mut st, &spawn);
+        drive_grok(
+            &mut st,
+            &serde_json::json!({
+                "type": "tool_call_update",
+                "toolCallId": "call-a",
+                "status": "completed",
+                "rawOutput": {"type": "Text", "text": "Subagent started in background.\nsubagent_id: child-a\n"}
+            })
+            .to_string(),
+        );
+        drive_grok(&mut st, &spawn);
+        assert!(
+            drive_grok(
+                &mut st,
+                &serde_json::json!({"type": "text", "data": parent}).to_string(),
+            )
+            .is_none(),
+        );
+        assert!(!st.spoken.contains(parent));
+        let released = drive_grok(
+            &mut st,
+            &serde_json::json!({
+                "method": "session/update",
+                "params": {
+                    "sessionId": "parent-1",
+                    "update": {
+                        "sessionUpdate": "subagent_finished",
+                        "child_session_id": "child-a",
+                        "subagent_id": "child-a",
+                        "status": "completed",
+                        "output": "child done"
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .unwrap_or_default();
+        assert!(released.contains(parent), "{released}");
+        assert!(!st.open_subagents.contains("call-a"));
+    }
+
+    /// The parent's session is adopted before the tool id is classified, so an
+    /// unbound spawn does not file the parent's card under the child.
+    #[test]
+    fn a_parent_tool_keeps_its_session_while_a_spawn_is_unbound() {
+        crate::paths::testing::with_home("bg-owner", || {
+            let session = grok_session("bg-owner-bot");
+            let mut st = ParseState::default();
+            apply_grok_stdout(
+                &session,
+                &mut st,
+                r#"{"type":"tool_call","toolCallId":"call-a","title":"spawn_subagent","rawInput":{"description":"rev","prompt":"Review."}}"#,
+            );
+            assert!(st.session_id.is_none());
+            apply_grok_stdout(
+                &session,
+                &mut st,
+                r#"{"type":"tool_call","toolCallId":"call-read","title":"read_file","sessionId":"parent-1","rawInput":{"target_file":"a.rs"}}"#,
+            );
+            assert_eq!(st.session_id.as_deref(), Some("parent-1"));
+            assert!(st.parent_tool_ids.contains("call-read"));
+            assert!(!st.child_tool_ids.contains("call-read"));
+            let names: Vec<String> = crate::transcript::messages("bg-owner-bot")
+                .into_iter()
+                .map(|m| m.from)
+                .collect();
+            assert!(names.iter().any(|n| n == "read_file"), "{names:?}");
+        });
+    }
+
+    /// A card held while the spawn is open is published on the line that closes it.
+    #[test]
+    fn a_held_parent_tool_shows_when_the_spawn_completes() {
+        crate::paths::testing::with_home("bg-hold", || {
+            let session = grok_session("bg-hold-bot");
+            let mut st = ParseState::default();
+            apply_grok_stdout(
+                &session,
+                &mut st,
+                r#"{"type":"tool_call","toolCallId":"call-a","title":"spawn_subagent","rawInput":{"description":"rev","prompt":"Review."}}"#,
+            );
+            apply_grok_stdout(
+                &session,
+                &mut st,
+                r#"{"type":"tool_call","toolCallId":"call-grep","title":"grep","rawInput":{"pattern":"foo"}}"#,
+            );
+            let before: Vec<String> = crate::transcript::messages("bg-hold-bot")
+                .into_iter()
+                .map(|m| m.from)
+                .collect();
+            assert!(!before.iter().any(|n| n == "grep"), "{before:?}");
+            apply_grok_stdout(
+                &session,
+                &mut st,
+                r#"{"type":"tool_call_update","toolCallId":"call-a","status":"completed","content":[{"type":"content","content":{"type":"text","text":"done"}}]}"#,
+            );
+            let after: Vec<String> = crate::transcript::messages("bg-hold-bot")
+                .into_iter()
+                .map(|m| m.from)
+                .collect();
+            assert!(after.iter().any(|n| n == "grep"), "{after:?}");
+            assert!(st.held_tools.is_empty());
+        });
     }
 
     fn note(key: &str, from: &str, text: &str) -> SubagentNote {
