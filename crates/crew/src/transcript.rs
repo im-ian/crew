@@ -733,7 +733,12 @@ fn pin_ask_tool(agent: &str, call_id: Option<&str>) {
     };
     chat.messages.push(m.clone());
     chat.pending_idx = Some(chat.messages.len() - 1);
-    chat.tool_ids.insert(id.to_string(), m.id);
+    pin_queued_below_reply(chat);
+    let Some(idx) = chat.pending_idx else {
+        return;
+    };
+    chat.tool_ids
+        .insert(id.to_string(), chat.messages[idx].id.clone());
 }
 
 pub fn attach_choice(agent: &str, call_id: Option<&str>, mut card: ChoiceCard) -> ChatMessage {
@@ -1165,6 +1170,25 @@ pub fn on_assistant_delta(agent: &str, chunk: &str) {
     on_pty_bytes(agent, chunk.as_bytes());
 }
 
+/// A queued follow-up lands before the first token of the reply. Keep it
+/// under that reply, or the next token draws the bot's chat beneath it.
+fn pin_queued_below_reply(chat: &mut AgentChat) {
+    let Some(pending) = chat.pending_idx else {
+        return;
+    };
+    if pending >= chat.messages.len() {
+        return;
+    }
+    if !chat.messages[..pending].iter().any(|m| m.queued) {
+        return;
+    }
+    let id = chat.messages[pending].id.clone();
+    let queued: Vec<_> = chat.messages.iter().filter(|m| m.queued).cloned().collect();
+    chat.messages.retain(|m| !m.queued);
+    chat.pending_idx = chat.messages.iter().position(|m| m.id == id);
+    chat.messages.extend(queued);
+}
+
 pub fn set_pending_assistant(agent: &str, text: &str) {
     let msg = {
         let mut map = match chats().lock() {
@@ -1188,6 +1212,10 @@ pub fn set_pending_assistant(agent: &str, text: &str) {
         if let Some(idx) = chat.pending_idx {
             chat.messages[idx].text = cleaned;
             chat.messages[idx].ts = now_ms();
+            pin_queued_below_reply(chat);
+            let Some(idx) = chat.pending_idx else {
+                return;
+            };
             if chat.last_emit.elapsed() >= EMIT_INTERVAL {
                 chat.last_emit = Instant::now();
                 chat.dirty = false;
@@ -1209,11 +1237,15 @@ pub fn set_pending_assistant(agent: &str, text: &str) {
                 approval: None,
                 choice: None,
             };
-            chat.messages.push(m.clone());
+            chat.messages.push(m);
             chat.pending_idx = Some(chat.messages.len() - 1);
+            pin_queued_below_reply(chat);
+            let Some(idx) = chat.pending_idx else {
+                return;
+            };
             chat.last_emit = Instant::now();
             chat.dirty = false;
-            Some(m)
+            Some(chat.messages[idx].clone())
         }
     };
     if let Some(msg) = msg {
@@ -1256,6 +1288,10 @@ pub fn on_pty_bytes(agent: &str, bytes: &[u8]) {
                 return;
             }
             chat.messages[idx].ts = now_ms();
+            pin_queued_below_reply(chat);
+            let Some(idx) = chat.pending_idx else {
+                return;
+            };
             if chat.last_emit.elapsed() >= EMIT_INTERVAL {
                 chat.last_emit = Instant::now();
                 chat.dirty = false;
@@ -1277,11 +1313,15 @@ pub fn on_pty_bytes(agent: &str, bytes: &[u8]) {
                 approval: None,
                 choice: None,
             };
-            chat.messages.push(m.clone());
+            chat.messages.push(m);
             chat.pending_idx = Some(chat.messages.len() - 1);
+            pin_queued_below_reply(chat);
+            let Some(idx) = chat.pending_idx else {
+                return;
+            };
             chat.last_emit = Instant::now();
             chat.dirty = false;
-            Some(m)
+            Some(chat.messages[idx].clone())
         }
     };
     if let Some(msg) = msg {
@@ -1989,6 +2029,71 @@ mod tests {
             assert!(last_ts(&agent) > note.ts, "the unread dot missed it");
             assert_eq!(preview(&agent).as_deref(), Some("working on it, done"));
             drop_agent(&agent);
+        });
+    }
+
+    /// A follow-up sent while the bot is still answering stays under that
+    /// reply. The first tokens used to land after it and shove it upward.
+    #[test]
+    fn a_queued_follow_up_stays_below_the_reply() {
+        crate::paths::testing::with_home("pin-queued", || {
+            let n = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let before = format!("pin-before-{n}");
+            push_user(&before, "user", "first");
+            begin_turn(&before);
+            let follow = push_user(&before, "user", "follow-up");
+            set_queued(&before, &follow.id, true);
+            on_assistant_delta(&before, "one");
+            let rows: Vec<(Role, String, bool)> = messages(&before)
+                .into_iter()
+                .map(|m| (m.role, m.text, m.queued))
+                .collect();
+            assert_eq!(
+                rows,
+                [
+                    (Role::User, "first".into(), false),
+                    (Role::Assistant, "one".into(), false),
+                    (Role::User, "follow-up".into(), true),
+                ]
+            );
+            on_assistant_delta(&before, " two");
+            let again: Vec<(Role, String)> = messages(&before)
+                .into_iter()
+                .map(|m| (m.role, m.text))
+                .collect();
+            assert_eq!(
+                again,
+                [
+                    (Role::User, "first".into()),
+                    (Role::Assistant, "one two".into()),
+                    (Role::User, "follow-up".into()),
+                ]
+            );
+
+            let after = format!("pin-after-{n}");
+            push_user(&after, "user", "first");
+            begin_turn(&after);
+            on_assistant_delta(&after, "one");
+            let follow = push_user(&after, "user", "follow-up");
+            set_queued(&after, &follow.id, true);
+            on_assistant_delta(&after, " two");
+            let rows: Vec<(Role, String, bool)> = messages(&after)
+                .into_iter()
+                .map(|m| (m.role, m.text, m.queued))
+                .collect();
+            assert_eq!(
+                rows,
+                [
+                    (Role::User, "first".into(), false),
+                    (Role::Assistant, "one two".into(), false),
+                    (Role::User, "follow-up".into(), true),
+                ]
+            );
+            drop_agent(&before);
+            drop_agent(&after);
         });
     }
 

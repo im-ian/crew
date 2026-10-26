@@ -43,11 +43,13 @@ function MsgSlot({
   id,
   start,
   typing = false,
+  className,
   children,
 }: {
   id: string;
   start: number | null;
   typing?: boolean;
+  className?: string;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -58,7 +60,7 @@ function MsgSlot({
   }, [id, start]);
   return (
     <div
-      className="msg-slot"
+      className={"msg-slot" + (className ? " " + className : "")}
       data-typing-slot={typing ? "" : undefined}
       ref={ref}
     >
@@ -352,10 +354,12 @@ export function ChatThread({
           }
           const time = clocks.get(id);
           const start = arrive.get(id);
+          const pin = row.kind === "msg" && row.msg.queued;
           return (
             <MsgSlot
               key={id}
               id={id}
+              className={pin ? "pin-bottom" : undefined}
               start={start === undefined ? null : start}
             >
               {time ? <ThreadTime ts={time.ts} label={time.label} /> : null}

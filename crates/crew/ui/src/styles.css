@@ -1132,6 +1132,8 @@ header .who-name {
   max-width: 100%;
   min-width: 0;
 }
+/* A queued follow-up stays under the reply and the typing row. */
+.thread > .msg-slot.pin-bottom { order: 1; }
 .msg-grow {
   display: flex;
   flex-direction: column;
