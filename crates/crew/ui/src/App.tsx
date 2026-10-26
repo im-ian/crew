@@ -24,6 +24,7 @@ import {
   saveThemePref,
   type ThemePref,
 } from "./theme";
+import { loadDelivery, saveDelivery } from "./deliveryPref";
 import { loadShowTools, saveShowTools } from "./tools";
 import { waitingEdit, waitingIds } from "./queuePick";
 import { useCrew } from "./useCrew";
@@ -41,6 +42,7 @@ export function App() {
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [theme, setTheme] = useState<ThemePref>(loadThemePref);
   const [showTools, setShowTools] = useState(loadShowTools);
+  const [delivery, setDelivery] = useState(loadDelivery);
   const [jumpSeq, setJumpSeq] = useState(0);
   const [queuePick, setQueuePick] = useState<string | null>(null);
   const waiting = useMemo(() => waitingIds(crew.messages), [crew.messages]);
@@ -337,6 +339,7 @@ export function App() {
             crew.currentAgent?.status === "blocked"
           }
           canSteer={crew.currentAgent?.status === "working"}
+          delivery={delivery}
           onStop={() => {
             void crew.stopAgent();
           }}
@@ -408,6 +411,11 @@ export function App() {
         onShowTools={(show) => {
           setShowTools(show);
           saveShowTools(show);
+        }}
+        delivery={delivery}
+        onDelivery={(mode) => {
+          setDelivery(mode);
+          saveDelivery(mode);
         }}
         onClose={() => setSettingsOpen(false)}
         onOpenShortcuts={() => {

@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { useLocale, useT } from "../LocaleContext";
 import type { Locale } from "../i18n";
+import type { Delivery } from "../deliveryPref";
 import { loadNotify, saveNotify } from "../notifyPref";
 import type { ThemePref } from "../theme";
 import type { UpdaterApi } from "../updater";
@@ -15,6 +16,8 @@ type Props = {
   onTheme: (theme: ThemePref) => void;
   showTools: boolean;
   onShowTools: (show: boolean) => void;
+  delivery: Delivery;
+  onDelivery: (mode: Delivery) => void;
   onClose: () => void;
   onOpenShortcuts: () => void;
   onOpenSkills: () => void;
@@ -32,6 +35,8 @@ export function SettingsPane({
   onTheme,
   showTools,
   onShowTools,
+  delivery,
+  onDelivery,
   onClose,
   onOpenShortcuts,
   onOpenSkills,
@@ -73,6 +78,21 @@ export function SettingsPane({
           <p className="apply-note">{t("settings.language.note")}</p>
         </SettingsGroup>
         <SettingsGroup title={t("settings.group.chat")}>
+          <Field label={t("settings.delivery")}>
+            <Seg
+              value={delivery}
+              options={[
+                { value: "queue", label: t("settings.delivery.queue") },
+                { value: "interrupt", label: t("settings.delivery.interrupt") },
+              ]}
+              onChange={onDelivery}
+            />
+          </Field>
+          <p className="apply-note">
+            {delivery === "interrupt"
+              ? t("settings.delivery.note.interrupt")
+              : t("settings.delivery.note.queue")}
+          </p>
           <Field label={t("settings.tools")}>
             <Seg
               value={showTools ? "on" : "off"}
