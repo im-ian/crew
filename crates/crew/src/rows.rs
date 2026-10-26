@@ -177,6 +177,7 @@ mod tests {
             kind: None,
             approval: None,
             choice: None,
+            mention: false,
         }
     }
 

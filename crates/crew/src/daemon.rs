@@ -1692,10 +1692,11 @@ fn notify_from_frame(ev: &Event) {
     crate::notify::maybe_status_notify(agent, &name, prev, *status, interrupted || waited);
 }
 
-/// The bot that asked for this turn, when the reply is copied into its chat.
-/// The turn is that chat's news, not this one's.
+/// The bot that asked for this turn. A user's @mention copies the reply back
+/// to the chat they typed in, but that bot did not ask, so the turn stays in
+/// the mentioned bot's thread instead of a side chat with that chat.
 fn asked_by(origin: &TurnOrigin, agent: &str) -> Option<String> {
-    targeting::postback_targets(origin, agent).agent
+    targeting::waiting_asker(origin, agent)
 }
 
 /// The wake `id`'s turn still owes: the bot that ran `crew tell` and is
@@ -2810,7 +2811,7 @@ fn tell_agent_origin(
                 .map(|map| map.contains_key(owner))
                 .unwrap_or(false);
             if known {
-                crate::transcript::push_notice(owner, &format!("to:{to}"), text, None);
+                crate::transcript::push_mention_notice(owner, &format!("to:{to}"), text);
             }
         }
     }
@@ -3717,6 +3718,61 @@ mod daemon_tests {
         clear_agent_context(&peer);
     }
 
+    /// The user @mentioned `named` while sitting in `chat`. `chat` did not ask,
+    /// so the mention is not a side chat with `chat`. The answer is still
+    /// copied back there.
+    #[test]
+    fn a_user_mention_is_not_a_side_chat() {
+        paths::testing::with_home("mention-side", || {
+            paths::write_notifications_enabled(false);
+            let chat = test_id("mention-chat");
+            let named = test_id("mention-named");
+            for id in [&chat, &named] {
+                claude_bot(id);
+                headless_status(id, AgentStatus::Working);
+            }
+            tell_agent_origin(
+                "user",
+                &named,
+                "구현 끝났어?",
+                Some(TurnOrigin::mention_tell(&chat)),
+                false,
+                &mut VecDeque::new(),
+            )
+            .unwrap();
+
+            let rows = crate::transcript::messages(&named);
+            let mention = rows.iter().find(|m| m.from == "user").expect("mention");
+            assert_eq!(mention.peer, None, "the chat they typed in did not ask");
+            assert!(
+                rows.iter().all(|m| m.peer.as_deref() != Some(chat.as_str())),
+                "a mention does not tag the turn with that chat: {rows:?}"
+            );
+
+            set_origin(&named, TurnOrigin::mention_tell(&chat));
+            on_assistant_sealed(&named, &sealed_reply(&named, "아직이야"));
+            let back = crate::transcript::messages(&chat);
+            assert!(
+                back.iter().any(|m| {
+                    m.kind == Some(crate::protocol::MessageKind::Handoff)
+                        && m.text.contains("아직이야")
+                }),
+                "the answer still comes back to the chat: {back:?}"
+            );
+            assert!(
+                back.iter()
+                    .any(|m| m.from == format!("to:{named}") && m.mention),
+                "the chat still shows the mention was sent, and that receipt is marked: {back:?}"
+            );
+
+            for id in [&chat, &named] {
+                headless_status(id, AgentStatus::Idle);
+                clear_inbox(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
     /// 가위바위보의 신 answered 클로드 "**바위.**" and also ran `crew tell` back
     /// with "바위.". 클로드 heard the tell alone, and its chat showed both.
     #[test]
@@ -3872,6 +3928,7 @@ mod daemon_tests {
             kind: None,
             approval: None,
             choice: None,
+            mention: false,
         }
     }
 

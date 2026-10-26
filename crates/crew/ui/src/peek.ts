@@ -104,6 +104,10 @@ function speechText(m: ChatMessage): string {
   return stripCrewMarkers(splitReply(m.text || "").body);
 }
 
+function speakerIsUser(m: ChatMessage): boolean {
+  return m.role === "user" || m.from === "user";
+}
+
 function asSpeech(m: ChatMessage, from: string): ChatMessage | null {
   const text = speechText(m);
   if (!text) return null;
@@ -122,6 +126,8 @@ export function peekMessages(
     const ref = noteRef(m, roster(agentIds));
     if (ref) {
       if (ref.otherId !== peerId) continue;
+      // Marked only on the receipt of a user's @mention.
+      if (ref.kind === "sent" && m.mention) continue;
       const row = asSpeech(m, ref.kind === "sent" ? selfId : peerId);
       if (!row) continue;
       // A tell back from the turn the peer asked for is the answer: the daemon
@@ -132,10 +138,9 @@ export function peekMessages(
       out.push(row);
       continue;
     }
-    // The rest of a turn the peer asked for: this bot's reply, and the user's
-    // words when they were typed in the peer's chat. What this bot says to the
-    // user in its own turns stays in the thread, even right after a note.
-    if (m.peer !== peerId || m.kind === "tool") continue;
+    // The rest of a turn the peer asked for. What this bot says to the user
+    // in its own turns stays in the thread, and so does the user's sentence.
+    if (m.peer !== peerId || m.kind === "tool" || speakerIsUser(m)) continue;
     const row = asSpeech(m, m.role === "assistant" ? selfId : m.from);
     if (!row) continue;
     // A terminal can type the tell back, envelope and all, before the reply.
