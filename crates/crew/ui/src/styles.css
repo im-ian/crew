@@ -2891,9 +2891,6 @@ html.peek-resizing .peek-resize::after {
 .peek-resize:focus-visible {
   outline: none;
 }
-html.peek-resizing .peek-room {
-  animation: none;
-}
 .peek-head {
   display: flex;
   align-items: center;

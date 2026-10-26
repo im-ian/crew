@@ -44,8 +44,6 @@ export function PeekRoom({
   const t = useT();
   const roomRef = useRef<HTMLDivElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
-  // The dragged width lives only while this room is mounted. Closing
-  // unmounts it, so the next open falls back to the stylesheet size.
   const [preferred, setPreferred] = useState<number | null>(null);
   const [mainW, setMainW] = useState(0);
   const [boxW, setBoxW] = useState(PEEK_MIN);
