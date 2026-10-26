@@ -122,18 +122,14 @@ export function peekMessages(
 ): ChatMessage[] {
   const out: ChatMessage[] = [];
   const replies = new Set<string>();
-  // A mention forwards the sentence the user typed. That sentence stays in
-  // the chat where they typed it, including when it was copied as a sent note.
-  const userSaid = new Set(
-    messages.filter(speakerIsUser).map(speechText).filter((text) => text),
-  );
   for (const m of messages) {
     const ref = noteRef(m, roster(agentIds));
     if (ref) {
       if (ref.otherId !== peerId) continue;
+      // Marked only on the receipt of a user's @mention.
+      if (ref.kind === "sent" && m.mention) continue;
       const row = asSpeech(m, ref.kind === "sent" ? selfId : peerId);
       if (!row) continue;
-      if (ref.kind === "sent" && userSaid.has(row.text)) continue;
       // A tell back from the turn the peer asked for is the answer: the daemon
       // drops that turn's reply for it, so the peer never heard the reply.
       if (ref.kind === "sent" && m.peer === peerId) {

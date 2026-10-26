@@ -130,6 +130,8 @@ export type ChatMessage = {
   kind?: MessageKind | null;
   approval?: ApprovalState | null;
   choice?: ChoiceCard | null;
+  /** Sent receipt of a user's @mention. A side chat leaves that sentence where it was typed. */
+  mention?: boolean;
 };
 
 export type PendingAvatar = {

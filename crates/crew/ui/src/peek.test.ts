@@ -269,7 +269,7 @@ describe("peekMessages", () => {
     const rows = peekMessages(
       [
         msg("user", "user", "@beta say hi"),
-        msg("system", "to:beta", "@beta say hi", { kind: "sent" }),
+        msg("system", "to:beta", "@beta say hi", { kind: "sent", mention: true }),
         msg("system", "to:beta", "please review", { kind: "sent" }),
         msg("system", "beta", "hi", { kind: "handoff" }),
       ],
@@ -280,6 +280,23 @@ describe("peekMessages", () => {
     expect(rows.map((m) => [m.from, m.text])).toEqual([
       ["alpha", "please review"],
       ["beta", "hi"],
+    ]);
+  });
+
+  it("keeps a bot's tell that repeats the user's words", () => {
+    const rows = peekMessages(
+      [
+        msg("user", "user", "README 고쳐줘"),
+        msg("system", "to:beta", "README 고쳐줘", { kind: "sent" }),
+        msg("system", "beta", "고쳤어", { kind: "handoff" }),
+      ],
+      "beta",
+      "alpha",
+      AGENTS,
+    );
+    expect(rows.map((m) => [m.from, m.text])).toEqual([
+      ["alpha", "README 고쳐줘"],
+      ["beta", "고쳤어"],
     ]);
   });
 

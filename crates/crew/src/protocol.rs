@@ -414,6 +414,10 @@ pub struct ChatMessage {
     pub approval: Option<ApprovalState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub choice: Option<ChoiceCard>,
+    /// Sent receipt of a user's @mention. The sentence was typed in this chat
+    /// and forwarded to another bot, so a side chat must not speak it again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mention: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -714,6 +718,7 @@ mod tests {
             kind: None,
             approval: None,
             choice: None,
+            mention: false,
         };
         let line = serde_json::to_string(&msg).unwrap();
         assert!(line.contains("\"role\":\"user\""));

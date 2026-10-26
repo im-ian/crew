@@ -2811,7 +2811,7 @@ fn tell_agent_origin(
                 .map(|map| map.contains_key(owner))
                 .unwrap_or(false);
             if known {
-                crate::transcript::push_notice(owner, &format!("to:{to}"), text, None);
+                crate::transcript::push_mention_notice(owner, &format!("to:{to}"), text);
             }
         }
     }
@@ -3760,8 +3760,9 @@ mod daemon_tests {
                 "the answer still comes back to the chat: {back:?}"
             );
             assert!(
-                back.iter().any(|m| m.from == format!("to:{named}")),
-                "the chat still shows the mention was sent: {back:?}"
+                back.iter()
+                    .any(|m| m.from == format!("to:{named}") && m.mention),
+                "the chat still shows the mention was sent, and that receipt is marked: {back:?}"
             );
 
             for id in [&chat, &named] {
@@ -3927,6 +3928,7 @@ mod daemon_tests {
             kind: None,
             approval: None,
             choice: None,
+            mention: false,
         }
     }
 

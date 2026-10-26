@@ -518,7 +518,7 @@ fn recap_of(msgs: &[ChatMessage]) -> Option<String> {
 }
 
 pub fn push_user(agent: &str, from: &str, text: &str) -> ChatMessage {
-    push_role(agent, Role::User, from, text, true, None, None)
+    push_role(agent, Role::User, from, text, true, None, None, false)
 }
 
 /// `peer` is the bot that asked for the turn this row starts, if one did.
@@ -531,6 +531,7 @@ pub fn push_system(agent: &str, from: &str, text: &str, peer: Option<String>) ->
         true,
         infer_system_kind(from),
         peer,
+        false,
     )
 }
 
@@ -545,6 +546,22 @@ pub fn push_notice(agent: &str, from: &str, text: &str, peer: Option<String>) ->
         false,
         Some(MessageKind::Sent),
         peer,
+        false,
+    )
+}
+
+/// The receipt of a user's @mention. Same row as [`push_notice`], and marked
+/// so a side chat can leave the sentence in the chat where it was typed.
+pub fn push_mention_notice(agent: &str, from: &str, text: &str) -> ChatMessage {
+    push_role(
+        agent,
+        Role::System,
+        from,
+        text,
+        false,
+        Some(MessageKind::Sent),
+        None,
+        true,
     )
 }
 
@@ -557,6 +574,7 @@ pub fn push_handoff(agent: &str, from: &str, text: &str) -> ChatMessage {
         false,
         Some(MessageKind::Handoff),
         None,
+        false,
     )
 }
 
@@ -627,6 +645,7 @@ pub fn push_tool(agent: &str, call_id: Option<&str>, name: &str, detail: &str) -
                 kind: Some(MessageKind::Tool),
                 approval: None,
                 choice: None,
+                mention: false,
             };
         }
         // Unrecognised payload: still show a tool row so the turn isn't silent.
@@ -677,6 +696,7 @@ fn push_in_turn(
         kind: Some(kind),
         approval: None,
         choice: None,
+        mention: false,
     };
     if let Ok(mut map) = chats().lock() {
         let chat = map
@@ -809,6 +829,7 @@ fn pin_ask_tool(agent: &str, call_id: Option<&str>) {
         kind: None,
         approval: None,
         choice: None,
+        mention: false,
     };
     chat.messages.push(m.clone());
     chat.pending_idx = Some(chat.messages.len() - 1);
@@ -842,6 +863,7 @@ pub fn attach_choice(agent: &str, call_id: Option<&str>, mut card: ChoiceCard) -
                     kind: None,
                     approval: None,
                     choice: Some(card),
+                    mention: false,
                 };
             }
         };
@@ -916,6 +938,7 @@ pub fn attach_choice(agent: &str, call_id: Option<&str>, mut card: ChoiceCard) -
                 kind: None,
                 approval: None,
                 choice: Some(card),
+                mention: false,
             };
             chat.messages.push(m.clone());
             if let Some(id) = call_id {
@@ -1046,6 +1069,7 @@ pub fn push_routine(agent: &str, name: &str, text: &str) -> ChatMessage {
         true,
         Some(MessageKind::Routine),
         None,
+        false,
     )
 }
 
@@ -1080,6 +1104,7 @@ fn push_role(
     expect: bool,
     kind: Option<MessageKind>,
     peer: Option<String>,
+    mention: bool,
 ) -> ChatMessage {
     let msg = ChatMessage {
         id: new_id(),
@@ -1092,6 +1117,7 @@ fn push_role(
         kind,
         approval: None,
         choice: None,
+        mention,
     };
     let sealed = match chats().lock() {
         Ok(mut map) => {
@@ -1331,6 +1357,7 @@ pub fn set_pending_assistant(agent: &str, text: &str) {
                 kind: None,
                 approval: None,
                 choice: None,
+                mention: false,
             };
             chat.messages.push(m);
             chat.pending_idx = Some(chat.messages.len() - 1);
@@ -1407,6 +1434,7 @@ pub fn on_pty_bytes(agent: &str, bytes: &[u8]) {
                 kind: None,
                 approval: None,
                 choice: None,
+                mention: false,
             };
             chat.messages.push(m);
             chat.pending_idx = Some(chat.messages.len() - 1);
@@ -1815,6 +1843,7 @@ mod tests {
             kind,
             approval: None,
             choice: None,
+            mention: false,
         };
         let msgs = vec![
             row(
@@ -2503,13 +2532,19 @@ mod tests {
             kind: None,
             approval: None,
             choice: None,
+            mention: false,
         };
         let line = serde_json::to_string(&msg).unwrap();
         assert!(!line.contains("queued"), "{line}");
+        assert!(!line.contains("mention"), "{line}");
         let back: ChatMessage = serde_json::from_str(&line).unwrap();
         assert_eq!(back.from, "alpha");
         assert_eq!(back.role, Role::System);
         assert!(!back.queued);
+        assert!(!back.mention);
+        let old = r#"{"id":"a","role":"system","from":"alpha","text":"hi","ts":9}"#;
+        let legacy: ChatMessage = serde_json::from_str(old).unwrap();
+        assert!(!legacy.mention);
     }
 
     #[test]
@@ -2526,11 +2561,30 @@ mod tests {
         assert_eq!(msg.role, Role::System);
         assert_eq!(msg.from, "to:pm");
         assert_eq!(msg.text, "hello");
+        assert!(!msg.mention);
         {
             let map = chats().lock().unwrap();
             let chat = map.get(&agent).unwrap();
             assert!(!chat.expecting);
         }
+        drop_agent(&agent);
+    }
+
+    #[test]
+    fn a_mention_receipt_is_marked_on_the_stored_row() {
+        let agent = format!(
+            "mention-note-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        let msg = push_mention_notice(&agent, "to:beta", "README 고쳐줘");
+        assert!(msg.mention);
+        assert!(messages(&agent).last().unwrap().mention);
+        let line = serde_json::to_string(&msg).unwrap();
+        assert!(line.contains("\"mention\":true"), "{line}");
         drop_agent(&agent);
     }
 
