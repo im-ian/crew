@@ -158,8 +158,17 @@ pub fn messages(agent: &str) -> Vec<ChatMessage> {
 /// asked for is not, unless it left a card the user has to answer. Newest by
 /// time, not by place: a reply being written stays above rows that land
 /// meanwhile, and can finish after them.
+///
+/// Scans under the lock. Cloning the transcript here only to read `ts` copied
+/// every message each time the channel list refreshed.
 pub fn last_ts(key: &str) -> u64 {
-    messages(key)
+    let Ok(map) = chats().lock() else {
+        return 0;
+    };
+    let Some(chat) = map.get(key) else {
+        return 0;
+    };
+    chat.messages
         .iter()
         .filter(|m| is_for_user(m))
         .map(|m| m.ts)
@@ -186,15 +195,25 @@ pub fn set_peer(agent: &str, peer: Option<String>) -> Option<String> {
 }
 
 pub fn preview(agent: &str) -> Option<String> {
-    let msgs = messages(agent);
+    let map = chats().lock().ok()?;
+    let chat = map.get(agent)?;
     // Newest balloon. A tool call is newer while it runs, and its text is the
     // arguments (`{ "command": ... }`), which was showing in the channel list.
     // A row that still has nothing to quote is skipped, so the balloon before
-    // it stays up.
-    msgs.iter()
-        .filter_map(|m| preview_line(m).map(|line| (m.ts, line)))
-        .max_by_key(|(ts, _)| *ts)
-        .map(|(_, line)| line)
+    // it stays up. The scan stays on the stored rows: the roster asks for this
+    // on every refresh, and cloning the whole chat only to quote one line
+    // copied every message.
+    let mut best: Option<(u64, String)> = None;
+    for msg in &chat.messages {
+        let Some(line) = preview_line(msg) else {
+            continue;
+        };
+        if best.as_ref().is_some_and(|(ts, _)| *ts > msg.ts) {
+            continue;
+        }
+        best = Some((msg.ts, line));
+    }
+    best.map(|(_, line)| line)
 }
 
 /// What the channel list can quote from one row. Tool arguments and a bare
