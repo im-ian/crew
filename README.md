@@ -177,81 +177,35 @@ xattr -dr com.apple.quarantine /Applications/Crew.app
 
 ## 소스에서 빌드
 
-미리 빌드된 앱 대신 저장소를 받아서 직접 빌드할 수도 있어요. 요구사항은 **Rust** stable (`rustup`, rustc 1.95에서 확인), **Node.js** 20+, **Xcode Command Line Tools**예요.
-
-### 1. 도구
+미리 빌드된 앱 대신 저장소에서 한 번에 빌드해 설치할 수 있어요. 요구사항은 **Rust** stable (`rustup`, rustc 1.95에서 확인), **Node.js** 20+, **Xcode Command Line Tools**예요. 스크립트는 없는 것을 채운 뒤 릴리스 바이너리를 `~/.local/bin/crew`에 넣어요.
 
 ```bash
-# Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Xcode Command Line Tools (아직 없다면)
-xcode-select --install
+git clone https://github.com/im-ian/crew.git
+cd crew
+./scripts/setup-macos.sh
 ```
 
-Node는 [nodejs.org](https://nodejs.org)에서 받거나 `brew install node`로 설치하면 돼요.
+이미 켜 둔 셸에서 실행하면 그 PATH의 Rust와 Node를 써요. Rust가 없으면 rustup으로, Node가 없고 Homebrew가 있으면 `brew install node`로 설치해요. Xcode Command Line Tools가 없으면 설치 창을 띄우고 끝나니, 설치가 끝난 뒤 같은 명령을 다시 실행해요. 바이너리 위치는 `CREW_BIN_DIR`로 바꿀 수 있어요. 릴리스 설치 스크립트가 만들어 둔 `~/.local/bin/crew` 링크가 있으면, 그 링크는 소스 빌드 바이너리로 바뀌어요.
 
-### 2. 에이전트 CLI (필요한 것만)
+`~/.local/bin`이 PATH에 없으면 셸 설정에 추가한 뒤 `crew`로 실행해요. 인자 없이 실행하거나 `crew app`을 쓰면 데스크톱 창이 열려요. 데몬이 떠 있지 않으면 같은 바이너리가 백그라운드 데몬을 함께 띄워요. 창만 닫으면 데몬은 남아 있을 수 있어요. 완전히 종료하려면 `crew stop`. 창은 한 번에 하나예요.
 
-각 도구의 공식 설치 방법을 따른 뒤, 터미널에서 해당 명령이 실행되는지만 확인하면 돼요.
+`build.rs`가 `crates/crew/ui`에서 `npm install`과 `npm run build`를 실행해요. 첫 빌드는 Node 의존성 때문에 시간이 좀 더 걸려요.
+
+macOS `.app` / `.dmg`는 `./scripts/build-macos.sh`로 만들어요. 서명 키가 없으면 업데이터 아티팩트 없이 호스트 아키텍처 번들만 나와요. 체크아웃 없이 바이너리만 받으려면:
+
+```bash
+cargo install --git https://github.com/im-ian/crew.git --locked crew
+```
+
+`cargo install`은 `~/.cargo/bin/crew`에 설치해요. rustup으로 설치했다면 이미 PATH에 잡혀 있어요.
+
+에이전트 CLI는 쓸 것만 각 도구의 공식 방법으로 설치하면 돼요. Crew는 모델을 내장하지 않아요.
 
 ```bash
 grok --version
 claude --version
 codex --version
 ```
-
-### 3. Crew 빌드
-
-**저장소에서 빌드**
-
-```bash
-git clone https://github.com/im-ian/crew.git
-cd crew
-cargo build --release -p crew
-```
-
-바이너리: `target/release/crew`
-
-macOS `.app` / `.dmg`는 다음으로 만들어요. 서명 키가 없으면 업데이터 아티팩트 없이 호스트 아키텍처 번들만 나와요.
-
-```bash
-./scripts/build-macos.sh
-```
-
-PATH에 넣으려면:
-
-```bash
-install -m 755 target/release/crew "$HOME/.local/bin/crew"
-# 또는
-cargo install --path crates/crew --locked
-```
-
-`cargo install`은 `~/.cargo/bin/crew`에 설치해요. rustup으로 설치했다면 이미 PATH에 잡혀 있어요.
-
-**Git에서 바로 설치**
-
-```bash
-cargo install --git https://github.com/im-ian/crew.git --locked crew
-```
-
-두 방법 모두 `build.rs`가 `crates/crew/ui`에서 `npm install`과 `npm run build`를 실행해요. 첫 빌드는 Node 의존성 때문에 시간이 좀 더 걸려요.
-
-### 4. 실행
-
-```bash
-crew
-```
-
-인자 없이 실행하거나 `crew app`을 쓰면 데스크톱 창이 열려요. 데몬이 떠 있지 않으면 같은 바이너리가 백그라운드 데몬을 함께 띄워요.
-
-창만 닫으면 데몬은 남아 있을 수 있어요. 완전히 종료하려면:
-
-```bash
-crew stop
-```
-
-창은 한 번에 하나예요. 이미 실행 중인 Crew가 있다면 먼저 종료하고 다시 여는 편이 안전해요.
 
 ---
 
