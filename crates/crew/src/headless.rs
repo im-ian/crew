@@ -591,6 +591,12 @@ fn spawn_and_stream(
     // This turn's command, not the session's first one: a bot changes CLI in place.
     let cli = CliKind::from_program(&argv[0]);
     let mut state = ParseState::default();
+    // Grok names a child session folder with `current_dir()`, which resolves
+    // symlinks. A spawn that omits `cwd` lives next to the parent session.
+    state.grok_cwd = std::fs::canonicalize(cwd)
+        .unwrap_or_else(|_| cwd.to_path_buf())
+        .display()
+        .to_string();
     // The same process keeps the parent's grok session across turns. A child
     // session id must not be adopted just because it speaks first this turn.
     if let Ok(inner) = session.inner.lock() {
@@ -826,6 +832,9 @@ struct ParseState {
     grok_child_lines: HashSet<String>,
     /// Tests point this at a temp dir. Empty uses `~/.grok/sessions`.
     grok_sessions_root: PathBuf,
+    /// Canonical directory of this grok process. A spawn with no `cwd` stores
+    /// its session here.
+    grok_cwd: String,
 }
 
 /// One grok subagent, as a side chat on its parent bot. Not a roster bot.
@@ -1053,9 +1062,7 @@ fn grok_other_session(v: &Value, state: &ParseState) -> bool {
         .is_some_and(|parent| parent != sid)
 }
 
-/// A child utterance on the parent process. Grok forwards it on the same
-/// stdout once the spawn tool has been marked completed, which is how a
-/// review ended up glued to the parent's next sentence.
+/// A child utterance, or a later copy of one, must not join the parent reply.
 fn grok_child_utterance(v: &Value, state: &ParseState) -> bool {
     let (event, kind) = grok_event(v);
     if let Some(sid) = event_session_id(v) {
@@ -1502,11 +1509,17 @@ fn grok_subagent_notes(v: &Value, state: &mut ParseState) -> Vec<SubagentNote> {
                         text: prompt,
                     });
                 }
+                let spawned = spawn_cwd(event);
+                let cwd = if spawned.is_empty() {
+                    state.grok_cwd.clone()
+                } else {
+                    spawned
+                };
                 state.grok_children.insert(
                     id,
                     GrokChild {
                         peer,
-                        cwd: spawn_cwd(event),
+                        cwd,
                         session_id: None,
                         report: String::new(),
                         last: String::new(),
@@ -2343,6 +2356,8 @@ mod tests {
         }
         let mut st = ParseState::default();
         st.grok_sessions_root = root.clone();
+        // An explicit spawn directory wins over the process directory.
+        st.grok_cwd = "/other".into();
         take(&mut st, r#"{"method":"session/update","params":{"sessionId":"parent-1","update":{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"spawn_subagent","rawInput":{"description":"reviewer","prompt":"Review.","cwd":"/work/app"}}}}"#);
         let finished = r#"{"method":"session/update","params":{"sessionId":"parent-1","update":{"sessionUpdate":"subagent_finished","child_session_id":"child-1","subagent_id":"child-1","status":"completed","output":"Review notes are in /tmp/notes.md."}}}"#;
         assert_eq!(
@@ -2354,6 +2369,40 @@ mod tests {
             )]
         );
         assert!(take(&mut st, finished).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_spawn_without_cwd_reads_the_process_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "crew-grok-sub-fallback-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let cwd = "/work/app";
+        let dir = root.join(encode_component(cwd)).join("child-2");
+        std::fs::create_dir_all(&dir).unwrap();
+        let line1 = r#"{"method":"session/update","params":{"sessionId":"child-2","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Looking at the diff."}}}}"#;
+        let line2 = r#"{"method":"session/update","params":{"sessionId":"child-2","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"The report is ready."}}}}"#;
+        std::fs::write(dir.join("updates.jsonl"), format!("{line1}\n{line2}\n")).unwrap();
+
+        fn take(st: &mut ParseState, line: &str) -> Vec<SubagentNote> {
+            let v: Value = serde_json::from_str(line).unwrap();
+            grok_subagent_notes(&v, st)
+        }
+        let mut st = ParseState::default();
+        st.grok_sessions_root = root.clone();
+        st.grok_cwd = cwd.into();
+        take(&mut st, r#"{"method":"session/update","params":{"sessionId":"parent-1","update":{"sessionUpdate":"tool_call","toolCallId":"call-2","title":"spawn_subagent","rawInput":{"description":"reviewer","prompt":"Review.","background":false}}}}"#);
+        let finished = r#"{"method":"session/update","params":{"sessionId":"parent-1","update":{"sessionUpdate":"subagent_finished","child_session_id":"child-2","status":"completed","output":"The report is ready."}}}"#;
+        assert_eq!(
+            take(&mut st, finished),
+            [note(
+                "call-2/report",
+                "sub:call-2:reviewer",
+                "Looking at the diff.\n\nThe report is ready."
+            )]
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
