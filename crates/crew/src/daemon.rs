@@ -446,6 +446,7 @@ fn remember_prompt(id: &str, prompt: Vec<PendingDelivery>) -> bool {
             text,
             msg_ids,
             got_output: false,
+            resumed: false,
         },
     );
     true
@@ -651,6 +652,21 @@ pub(crate) fn halt_unheard(id: &str, flight: headless::InFlight) {
         "The CLI is not responding."
     } else {
         "CLI가 응답하지 않습니다"
+    };
+    crate::transcript::push_system(id, "crew", line, None);
+}
+
+/// The first-output watch on a resumed turn. Its session is already dropped,
+/// so the prompt goes back to the front ready to start again on a new one.
+/// What waits on this turn keeps waiting: it is the same turn, sent again.
+pub(crate) fn retry_unheard(id: &str, flight: headless::InFlight) {
+    requeue_unanswered(id, flight);
+    unpark_prefix(id);
+    finish_halted_turn(id);
+    let line = if crate::paths::locale() == "en" {
+        "The CLI did not answer in its last session. Sending again in a new one."
+    } else {
+        "CLI가 이전 세션에서 응답하지 않아 새 세션으로 다시 보냅니다"
     };
     crate::transcript::push_system(id, "crew", line, None);
 }
@@ -1055,6 +1071,12 @@ fn note_relay_stop(id: &str, origin: &TurnOrigin) {
 /// for `id` starts. Neither waits on the other.
 pub(crate) fn pump_inbox(id: &str) {
     advance_serial(id);
+    pump_inbox_inner(id);
+}
+
+/// Start the prompt `retry_unheard` put back. The turn is not over, so what
+/// waits on it is not released here; the retried turn's end does that.
+pub(crate) fn resend_unheard(id: &str) {
     pump_inbox_inner(id);
 }
 
@@ -4300,6 +4322,91 @@ mod daemon_tests {
                 1,
                 "the silent prompt started again"
             );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// Logs `resume:` or `fresh:` and the prompt. A resumed turn whose prompt
+    /// has `needle` hangs; a fresh one does too when `fresh_hangs`, or answers.
+    fn hang_on_resume(log: &std::path::Path, needle: &str, fresh_hangs: bool) -> String {
+        let fresh = if fresh_hangs {
+            "exec sleep 30".to_string()
+        } else {
+            r#"printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"새 세션"}]}}'"#
+                .to_string()
+        };
+        format!(
+            "case \" $* \" in *' --resume '*) mode=resume ;; *) mode=fresh ;; esac\n\
+             printf '%s:%s|' \"$mode\" \"$last\" >> '{log}'\n\
+             case \"$mode:$last\" in resume:*{needle}*) exec sleep 30 ;; fresh:*{needle}*) {fresh} ;; esac",
+            log = log.display(),
+        )
+    }
+
+    fn resume_from(id: &str, session_id: &str) {
+        headless::save_session(id, session_id).unwrap();
+        if let Some(LiveAgent::Headless(session)) = agents().lock().unwrap().get(id) {
+            session.inner.lock().unwrap().session_id = Some(session_id.to_string());
+        }
+    }
+
+    fn system_said(id: &str, line: &str) -> bool {
+        crate::transcript::messages(id)
+            .iter()
+            .any(|m| m.role == Role::System && m.text == line)
+    }
+
+    /// A resumed session that never answers (grok waiting on a background task
+    /// its last process left) hangs every later resume too. The watch drops
+    /// that session and sends the same prompt once more on a new one.
+    #[test]
+    fn a_resumed_session_that_never_answers_is_retried_on_a_new_one() {
+        paths::testing::with_home("stuck-resume", || {
+            let bot = test_id("stuck");
+            let log = paths::home_dir().join("prompts");
+            fake_bot_running(&bot, &hang_on_resume(&log, "하나", false));
+            wait_idle(&bot);
+            set_output_wait(&bot, Duration::from_millis(400));
+            resume_from(&bot, "stuck-session");
+            send_agent(&bot, "하나").unwrap();
+            eventually(Duration::from_secs(5), "never sent again", || {
+                fs::read_to_string(&log).is_ok_and(|s| s.matches("하나").count() >= 2)
+            });
+            wait_idle(&bot);
+            let sent = fs::read_to_string(&log).unwrap();
+            let tries: Vec<&str> = sent.split('|').filter(|t| t.contains("하나")).collect();
+            assert_eq!(tries.len(), 2, "{sent}");
+            assert!(tries[0].starts_with("resume:"), "{sent}");
+            assert!(tries[1].starts_with("fresh:"), "{sent}");
+            assert!(system_said(&bot, "CLI가 이전 세션에서 응답하지 않아 새 세션으로 다시 보냅니다"));
+            assert!(!system_said(&bot, "CLI가 응답하지 않습니다"));
+            assert!(queued_text(&bot).is_empty(), "{:?}", queued_text(&bot));
+            assert_ne!(headless::load_session(&bot).as_deref(), Some("stuck-session"));
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// The new session hangs as well. That is one retry, not a loop: the line
+    /// waits again and the chat says the CLI is not responding.
+    #[test]
+    fn a_retry_that_never_answers_either_is_parked() {
+        paths::testing::with_home("stuck-twice", || {
+            let bot = test_id("twice");
+            let log = paths::home_dir().join("prompts");
+            fake_bot_running(&bot, &hang_on_resume(&log, "하나", true));
+            wait_idle(&bot);
+            set_output_wait(&bot, Duration::from_millis(400));
+            resume_from(&bot, "stuck-session");
+            send_agent(&bot, "하나").unwrap();
+            eventually(Duration::from_secs(5), "the second stall was not reported", || {
+                system_said(&bot, "CLI가 응답하지 않습니다")
+            });
+            assert_eq!(queued_text(&bot), ["하나"]);
+            assert!(!agent_busy(&bot).unwrap(), "the stall left the bot working");
+            std::thread::sleep(Duration::from_millis(900));
+            let sent = fs::read_to_string(&log).unwrap();
+            assert_eq!(sent.matches("하나").count(), 2, "{sent}");
+            assert!(system_said(&bot, "CLI가 이전 세션에서 응답하지 않아 새 세션으로 다시 보냅니다"));
             remove_agent(&bot).unwrap();
         });
     }
