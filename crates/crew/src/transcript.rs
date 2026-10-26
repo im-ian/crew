@@ -192,8 +192,12 @@ pub fn preview(agent: &str) -> Option<String> {
 
 /// What the channel list can quote from one row. Tool arguments and a bare
 /// JSON dump are not a sentence. A question on that row still is. A reply is
-/// several balloons; the list quotes the last one.
+/// several balloons; the list quotes the last one. A message still waiting
+/// has not gone out, so the line before it stays.
 fn preview_line(msg: &ChatMessage) -> Option<String> {
+    if msg.queued {
+        return None;
+    }
     if msg.kind == Some(MessageKind::Tool) && msg.choice.is_none() && msg.approval.is_none() {
         return None;
     }
@@ -2081,6 +2085,37 @@ mod tests {
             drop_agent(&ask);
             drop_agent(&gated);
             drop_agent(&gated_gap);
+        });
+    }
+
+    /// A message waiting to send is not the channel list's line. The one already
+    /// in the chat stays, and the waiting text shows once it goes out.
+    #[test]
+    fn a_queued_message_stays_out_of_the_channel_preview() {
+        crate::paths::testing::with_home("preview-queued", || {
+            let n = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let waiting = format!("preview-queued-{n}");
+            push_user(&waiting, "user", "이전 이야기");
+            begin_turn(&waiting);
+            on_assistant_delta(&waiting, "여기까지 했습니다.");
+            end_turn(&waiting);
+            std::thread::sleep(Duration::from_millis(5));
+            let queued = push_user(&waiting, "user", "이어서 해줘");
+            set_queued(&waiting, &queued.id, true);
+            assert_eq!(preview(&waiting).as_deref(), Some("여기까지 했습니다."));
+            set_queued(&waiting, &queued.id, false);
+            assert_eq!(preview(&waiting).as_deref(), Some("이어서 해줘"));
+
+            let held_only = format!("preview-queued-only-{n}");
+            let held = push_user(&held_only, "user", "아직 보내지 않음");
+            set_queued(&held_only, &held.id, true);
+            assert_eq!(preview(&held_only), None);
+
+            drop_agent(&waiting);
+            drop_agent(&held_only);
         });
     }
 
