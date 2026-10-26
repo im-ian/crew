@@ -686,6 +686,45 @@ fn push_in_turn(
     msg
 }
 
+fn choice_title(q: &crate::protocol::ChoiceQuestion) -> &str {
+    let header = q.header.as_deref().unwrap_or("").trim();
+    if header.is_empty() {
+        q.question.trim()
+    } else {
+        header
+    }
+}
+
+/// True when every title on `next` is already an open question on `open`.
+fn same_pending_question(open: &crate::protocol::ChoiceCard, next: &crate::protocol::ChoiceCard) -> bool {
+    if open.state != ChoiceState::Pending {
+        return false;
+    }
+    let have: Vec<&str> = open.questions.iter().map(choice_title).filter(|t| !t.is_empty()).collect();
+    let want: Vec<&str> = next.questions.iter().map(choice_title).filter(|t| !t.is_empty()).collect();
+    !want.is_empty() && want.iter().all(|t| have.iter().any(|h| h == t))
+}
+
+/// The user already has this question open, so another ask must not add a card.
+pub fn has_pending_question(agent: &str, question: &str) -> bool {
+    let want = question.trim();
+    if want.is_empty() {
+        return false;
+    }
+    let Ok(map) = chats().lock() else {
+        return false;
+    };
+    let Some(chat) = map.get(agent) else {
+        return false;
+    };
+    chat.messages.iter().any(|m| {
+        m.choice.as_ref().is_some_and(|c| {
+            c.state == ChoiceState::Pending
+                && c.questions.iter().any(|q| choice_title(q) == want)
+        })
+    })
+}
+
 /// Attach a picker to the in-flight assistant row, or open a new one.
 fn is_pinned_ask(agent: &str, call_id: Option<&str>) -> bool {
     let Some(id) = call_id.filter(|s| !s.is_empty()) else {
@@ -796,6 +835,17 @@ pub fn attach_choice(agent: &str, call_id: Option<&str>, mut card: ChoiceCard) -
                 .unwrap_or(false)
         });
         let idx = known_free.or(pending);
+        // The same question is already on screen. A retry must not stack a
+        // second card the user has to answer again.
+        if idx.is_none() {
+            if let Some(open) = chat.messages.iter().rposition(|m| {
+                m.choice
+                    .as_ref()
+                    .is_some_and(|c| same_pending_question(c, &card))
+            }) {
+                return chat.messages[open].clone();
+            }
+        }
         let out = if let Some(idx) = idx {
             let row = &mut chat.messages[idx];
             let keep = row
@@ -2593,6 +2643,73 @@ mod tests {
             last.choice.as_ref().unwrap().questions[0].question,
             "어느 쪽을 고를래?"
         );
+        drop_agent(&agent);
+    }
+
+    #[test]
+    fn a_second_ask_with_the_same_question_stays_one_card() {
+        let agent = format!(
+            "ask-same-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        begin_turn(&agent);
+        on_assistant_delta(&agent, "진행해도 되는지 알려 주세요.");
+        let detail = |label: &str| {
+            format!(
+                r#"{{"questions":[{{"question":"어떻게 할까요?","options":[{{"label":"{label}"}},{{"label":"그대로 둔다"}}]}}]}}"#
+            )
+        };
+        push_tool(
+            &agent,
+            Some("call-1"),
+            "ask_user_question",
+            &detail("지운다 (Recommended)"),
+        );
+        push_tool(&agent, Some("call-2"), "ask_user_question", &detail("지운다"));
+        let cards: Vec<_> = messages(&agent)
+            .into_iter()
+            .filter(|m| m.choice.is_some())
+            .collect();
+        assert_eq!(cards.len(), 1);
+        let q = &cards[0].choice.as_ref().unwrap().questions[0];
+        assert_eq!(q.question, "어떻게 할까요?");
+        assert_eq!(q.options[0].label, "지운다 (Recommended)");
+        assert!(has_pending_question(&agent, "어떻게 할까요?"));
+        drop_agent(&agent);
+    }
+
+    #[test]
+    fn a_different_question_opens_its_own_card() {
+        let agent = format!(
+            "ask-diff-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        begin_turn(&agent);
+        push_tool(
+            &agent,
+            Some("call-1"),
+            "ask_user_question",
+            r#"{"question":"어느 쪽을 고를래?","options":[{"label":"A"},{"label":"B"}]}"#,
+        );
+        push_tool(
+            &agent,
+            Some("call-2"),
+            "ask_user_question",
+            r#"{"question":"이름을 뭐로 할까?","options":[{"label":"가"},{"label":"나"}]}"#,
+        );
+        let n = messages(&agent)
+            .into_iter()
+            .filter(|m| m.choice.is_some())
+            .count();
+        assert_eq!(n, 2);
         drop_agent(&agent);
     }
 

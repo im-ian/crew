@@ -568,6 +568,9 @@ fn start_ask(
     if !known_agent(agent) {
         anyhow::bail!("unknown agent {agent}");
     }
+    if crate::transcript::has_pending_question(agent, question) {
+        anyhow::bail!("this question is already waiting for an answer");
+    }
     let card = crate::choice::card_from_cli(question, &options, &inputs, hint.as_deref())?;
     let msg = crate::transcript::attach_choice(agent, None, card);
     let Some(choice) = msg.choice.clone() else {
