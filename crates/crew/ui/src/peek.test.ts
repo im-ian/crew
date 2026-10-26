@@ -252,7 +252,7 @@ describe("peekMessages", () => {
     expect(rows).toEqual([]);
   });
 
-  it("shows the user's words when they were typed in the peer's chat", () => {
+  it("leaves the user's words in the chat where they were typed", () => {
     const rows = peekMessages(
       [
         msg("system", "user", "@beta say hi", { peer: "alpha" }),
@@ -262,8 +262,23 @@ describe("peekMessages", () => {
       "beta",
       AGENTS,
     );
+    expect(rows.map((m) => [m.from, m.text])).toEqual([["beta", "hi"]]);
+  });
+
+  it("leaves a forwarded copy of the user's words out of the side chat", () => {
+    const rows = peekMessages(
+      [
+        msg("user", "user", "@beta say hi"),
+        msg("system", "to:beta", "@beta say hi", { kind: "sent" }),
+        msg("system", "to:beta", "please review", { kind: "sent" }),
+        msg("system", "beta", "hi", { kind: "handoff" }),
+      ],
+      "beta",
+      "alpha",
+      AGENTS,
+    );
     expect(rows.map((m) => [m.from, m.text])).toEqual([
-      ["user", "@beta say hi"],
+      ["alpha", "please review"],
       ["beta", "hi"],
     ]);
   });

@@ -104,6 +104,10 @@ function speechText(m: ChatMessage): string {
   return stripCrewMarkers(splitReply(m.text || "").body);
 }
 
+function speakerIsUser(m: ChatMessage): boolean {
+  return m.role === "user" || m.from === "user";
+}
+
 function asSpeech(m: ChatMessage, from: string): ChatMessage | null {
   const text = speechText(m);
   if (!text) return null;
@@ -118,12 +122,18 @@ export function peekMessages(
 ): ChatMessage[] {
   const out: ChatMessage[] = [];
   const replies = new Set<string>();
+  // A mention forwards the sentence the user typed. That sentence stays in
+  // the chat where they typed it, including when it was copied as a sent note.
+  const userSaid = new Set(
+    messages.filter(speakerIsUser).map(speechText).filter((text) => text),
+  );
   for (const m of messages) {
     const ref = noteRef(m, roster(agentIds));
     if (ref) {
       if (ref.otherId !== peerId) continue;
       const row = asSpeech(m, ref.kind === "sent" ? selfId : peerId);
       if (!row) continue;
+      if (ref.kind === "sent" && userSaid.has(row.text)) continue;
       // A tell back from the turn the peer asked for is the answer: the daemon
       // drops that turn's reply for it, so the peer never heard the reply.
       if (ref.kind === "sent" && m.peer === peerId) {
@@ -132,10 +142,9 @@ export function peekMessages(
       out.push(row);
       continue;
     }
-    // The rest of a turn the peer asked for: this bot's reply, and the user's
-    // words when they were typed in the peer's chat. What this bot says to the
-    // user in its own turns stays in the thread, even right after a note.
-    if (m.peer !== peerId || m.kind === "tool") continue;
+    // The rest of a turn the peer asked for. What this bot says to the user
+    // in its own turns stays in the thread, and so does the user's sentence.
+    if (m.peer !== peerId || m.kind === "tool" || speakerIsUser(m)) continue;
     const row = asSpeech(m, m.role === "assistant" ? selfId : m.from);
     if (!row) continue;
     // A terminal can type the tell back, envelope and all, before the reply.
