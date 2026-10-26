@@ -11,7 +11,7 @@ import type {
   Kind,
 } from "../types";
 import { resolveFace } from "../avatar";
-import { splitBubbles } from "../bubbles";
+import { isMediaBlock, splitBubbles } from "../bubbles";
 import { messageDefinitions } from "../markdown";
 import { displayWho, noteRef, sentTarget, subagentFace } from "../peek";
 import {
@@ -768,7 +768,9 @@ function Incoming({
   // Closing that bubble keeps it mounted for the shrink, so the thread does
   // not jump when the turn ends.
   const dots = useDotsLeave(caret);
-  const parts = dots.show ? [...splitBubbles(body), ""] : splitBubbles(body);
+  const raw = dots.show ? [...splitBubbles(body), ""] : splitBubbles(body);
+  const media = raw.filter((part) => isMediaBlock(part));
+  const parts = raw.filter((part) => !isMediaBlock(part));
   return (
     <div
       className={
@@ -809,7 +811,23 @@ function Incoming({
           </div>
         )}
         {reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
-        <div className="bubble-stack">
+        {media.length ? (
+          <div className="msg-media">
+            {media.map((part, i) => (
+              <MdBody
+                key={m.id + "-media-" + i}
+                className="md"
+                text={part}
+                defs={defs}
+                agents={agents}
+                onMention={onSelectAgent}
+                baseDir={agent?.cwd || undefined}
+              />
+            ))}
+          </div>
+        ) : null}
+        {parts.length ? (
+          <div className="bubble-stack">
           {parts.map((part, i) => {
             const last = i === parts.length - 1;
             const stack =
@@ -874,7 +892,8 @@ function Incoming({
               </div>
             );
           })}
-        </div>
+          </div>
+        ) : null}
         {queued ? <QueueWait /> : null}
         {m.choice ? (
           <ChoiceCard
@@ -1414,6 +1433,9 @@ function Bubble({
   }
   const queued = !!m.queued;
   const { reply, body } = splitReply(text);
+  const parts = splitBubbles(body);
+  const media = parts.filter((part) => isMediaBlock(part));
+  const prose = parts.filter((part) => !isMediaBlock(part)).join("\n\n");
   const cls =
     "bubble md" + (caret ? " streaming" : "") + (queued ? " queued" : "");
   return (
@@ -1423,21 +1445,35 @@ function Bubble({
     >
       <div className="me-msg">
         {reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
-        {body.trim() ? (
+        {media.length ? (
+          <div className="msg-media">
+            {media.map((part, i) => (
+              <MdBody
+                key={m.id + "-media-" + i}
+                className="md"
+                text={part}
+                agents={agents}
+                onMention={onSelectAgent}
+                baseDir={currentAgent?.cwd || undefined}
+              />
+            ))}
+          </div>
+        ) : null}
+        {prose.trim() ? (
           <div className="bubble-row">
             <MdBody
               className={cls}
-              text={body}
+              text={prose}
               agents={agents}
               onMention={onSelectAgent}
               baseDir={currentAgent?.cwd || undefined}
             />
             <MsgActions
-              copy={body.trim()}
+              copy={prose.trim()}
               ts={m.ts}
               onReply={
                 onReply
-                  ? () => onReply(makeReply({ ...m, text: body }, agents, t))
+                  ? () => onReply(makeReply({ ...m, text: prose }, agents, t))
                   : undefined
               }
             />
