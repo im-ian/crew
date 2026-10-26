@@ -943,6 +943,13 @@ button.avatar {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.draft-mark {
+  display: inline-flex;
+  flex: none;
+  align-self: center;
+  margin-left: 4px;
+  color: var(--faint);
+}
 /* Today is the clock, an older row the date. It stays put while the name
    truncates, and does not pick up the unread name's weight. */
 .rail-stamp {

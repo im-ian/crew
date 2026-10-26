@@ -34,6 +34,7 @@ export function App() {
   const crewRef = useRef(crew);
   crewRef.current = crew;
   const [renameId, setRenameId] = useState<string | null>(null);
+  const [drafting, setDrafting] = useState<string[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -239,6 +240,7 @@ export function App() {
         onMove={crew.moveToGroup}
         onReorderGroup={crew.reorderGroup}
         unread={crew.unread}
+        drafting={drafting}
         searchRef={searchRef}
         onOpenSettings={() => setSettingsOpen(true)}
       />
@@ -316,6 +318,13 @@ export function App() {
             void crew.stopAgent();
           }}
           onOpenSkills={() => setSkillsOpen(true)}
+          onDrafts={(ids) =>
+            setDrafting((prev) =>
+              prev.length === ids.length && prev.every((id, i) => id === ids[i])
+                ? prev
+                : ids,
+            )
+          }
         />
         <AgentPane
           open={crew.paneOpen}

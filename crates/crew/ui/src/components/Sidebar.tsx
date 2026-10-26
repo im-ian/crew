@@ -18,7 +18,7 @@ import { mentionRuns, mentionText } from "../mentions";
 import { numberDuplicateNames } from "../rail";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
-import { ChevronDown, Plus, Settings } from "../icons";
+import { ChevronDown, Ellipsis, Plus, Settings } from "../icons";
 
 const RAIL_DEFAULT = 232;
 const RAIL_MIN = 176;
@@ -263,6 +263,8 @@ type Props = {
   onMove: (kind: Kind, id: string, groupId: string | null, beforeKey?: string | null) => void;
   onReorderGroup: (id: string, beforeId: string | null) => void;
   unread?: string[];
+  /** Agent ids whose composer still holds unsent text. */
+  drafting?: string[];
   searchRef?: Ref<HTMLInputElement>;
   onOpenSettings?: () => void;
 };
@@ -325,6 +327,7 @@ export function Sidebar({
   onMove,
   onReorderGroup,
   unread = [],
+  drafting = [],
   searchRef,
   onOpenSettings,
 }: Props) {
@@ -751,6 +754,7 @@ export function Sidebar({
                         agents={agents}
                         active={selectedKind === item.kind && selected === item.id}
                         unread={unread.includes(item.key)}
+                        drafting={drafting.includes(item.id)}
                         dragging={drag?.kind === "item" && drag.key === item.key && drag.armed}
                         onSelect={() => {
                           if (didDrag.current) return;
@@ -783,6 +787,7 @@ export function Sidebar({
                     agents={agents}
                     active={selectedKind === item.kind && selected === item.id}
                     unread={unread.includes(item.key)}
+                    drafting={drafting.includes(item.id)}
                     dragging={drag?.kind === "item" && drag.key === item.key && drag.armed}
                     onSelect={() => {
                       if (didDrag.current) return;
@@ -978,6 +983,7 @@ function ItemRow({
   agents,
   active,
   unread,
+  drafting,
   dragging,
   ghost,
   onSelect,
@@ -988,6 +994,7 @@ function ItemRow({
   agents: AgentInfo[];
   active?: boolean;
   unread?: boolean;
+  drafting?: boolean;
   dragging?: boolean;
   ghost?: boolean;
   onSelect?: () => void;
@@ -995,6 +1002,7 @@ function ItemRow({
   onPointerDown?: (e: ReactPointerEvent<HTMLButtonElement>) => void;
 }) {
   const a = item.agent;
+  const t = useT();
   const { locale } = useLocale();
   const ts = a?.last_ts || 0;
   const stamp = listStamp(ts, locale);
@@ -1022,6 +1030,11 @@ function ItemRow({
         <div className="agent-name">
           <span className="agent-name-label">
             <span className="agent-name-text">{item.name}</span>
+            {drafting ? (
+              <span className="draft-mark" title={t("sidebar.draft")} aria-label={t("sidebar.draft")}>
+                <Ellipsis size={14} />
+              </span>
+            ) : null}
             {item.ordinal ? (
               <span className="name-ordinal">#{item.ordinal}</span>
             ) : null}

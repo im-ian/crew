@@ -32,6 +32,8 @@ type Props = {
   onStop?: () => void;
   onOpenSkills?: () => void;
   onJump?: (id: string) => void;
+  /** Bots whose composer still holds unsent text, files, or a reply. */
+  onDrafts?: (ids: string[]) => void;
 };
 
 type Mention = { start: number; query: string };
@@ -62,6 +64,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   onStop,
   onOpenSkills,
   onJump,
+  onDrafts,
 }, ref) {
   const t = useT();
   const inputRef = useRef<HTMLDivElement>(null);
@@ -80,6 +83,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   const fileRef = useRef<HTMLInputElement>(null);
   const plusRef = useRef<HTMLDivElement>(null);
   const pendingSteer = useRef(false);
+  const onDraftsRef = useRef(onDrafts);
+  onDraftsRef.current = onDrafts;
 
   function focusEditor() {
     const el = inputRef.current;
@@ -318,15 +323,39 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
       else drafts.current.set(from, { html: el.innerHTML, attaches: held, reply: heldReply });
     }
     const next = chatKey ? drafts.current.get(chatKey) : undefined;
+    const nextAttaches = next?.attaches ?? [];
+    const nextReply = next?.reply ?? null;
+    // The draft report below reads these before the next render.
+    attachRef.current = nextAttaches;
+    replyRef.current = nextReply;
     if (el) el.innerHTML = next?.html ?? "";
-    setAttaches(next?.attaches ?? []);
-    setReply(next?.reply ?? null);
+    setAttaches(nextAttaches);
+    setReply(nextReply);
     setMention(null);
     setSlash(null);
     closePlus();
     refreshEmpty();
     fit();
   }, [chatKey]);
+
+  useEffect(() => {
+    const ids = new Set<string>();
+    for (const key of drafts.current.keys()) {
+      if (!key.startsWith("agent:")) continue;
+      const id = key.slice("agent:".length);
+      if (id) ids.add(id);
+    }
+    if (selectedKind === "agent" && selected) {
+      const el = inputRef.current;
+      const live =
+        (!!el && !isEditorEmpty(el)) ||
+        attachRef.current.length > 0 ||
+        !!replyRef.current;
+      if (live) ids.add(selected);
+      else ids.delete(selected);
+    }
+    onDraftsRef.current?.([...ids].sort());
+  }, [attaches, reply, empty, editing, chatKey, selected, selectedKind]);
 
   useEffect(() => {
     fit();

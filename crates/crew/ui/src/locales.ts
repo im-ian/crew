@@ -89,6 +89,7 @@ export const KO = {
   "sidebar.resize": "사이드바 너비 조절",
   "sidebar.expand": "펼치기",
   "sidebar.collapse": "접기",
+  "sidebar.draft": "작성 중",
 
   "header.pickChat": "대화를 선택하세요",
   "header.botInfo": "봇 정보 ⌘I",
@@ -360,6 +361,7 @@ export const EN: { [K in MessageKey]: string } = {
   "sidebar.resize": "Resize sidebar",
   "sidebar.expand": "Expand",
   "sidebar.collapse": "Collapse",
+  "sidebar.draft": "Draft",
 
   "header.pickChat": "Select a chat",
   "header.botInfo": "Bot info ⌘I",
