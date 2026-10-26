@@ -1462,6 +1462,21 @@ button.channel-who:hover {
   text-align: center;
   word-break: break-word;
 }
+button.sys-note {
+  border: 1px solid color-mix(in srgb, var(--muted) 35%, transparent);
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  border-radius: 999px;
+}
+button.sys-note:hover,
+button.sys-note:focus-visible {
+  border-color: transparent;
+  background: var(--hover);
+  color: var(--ink);
+  outline: none;
+}
 .copy-btn {
   display: inline-flex;
   align-items: center;

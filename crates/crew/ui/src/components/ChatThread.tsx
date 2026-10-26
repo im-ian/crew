@@ -25,6 +25,7 @@ import {
   type ThreadRow,
 } from "../tools";
 import { answeredOptionView, optionView, shortLabels } from "../choiceView";
+import { routineSwitchName } from "../routineNote";
 import { clockLabels, messageClockParts } from "../clock";
 import { ChevronDown, Reply, X } from "../icons";
 import { Avatar } from "./Avatar";
@@ -528,9 +529,24 @@ function SystemOrIncoming({
   const from = String(m.from || "");
   if (from === "crew") {
     // A note the daemon wrote about the conversation itself, not a bot speaking.
+    const text = displayText(m);
+    // Switching a routine in the sheet leaves this sentence. It opens that sheet.
+    if (routineSwitchName(text) && onOpenRoutines) {
+      return (
+        <button
+          type="button"
+          className={"sys-note" + (flash ? " flash" : "")}
+          data-msg-id={m.id}
+          title={t("thread.routineOpen")}
+          onClick={() => onOpenRoutines()}
+        >
+          {text}
+        </button>
+      );
+    }
     return (
       <div className={"sys-note" + (flash ? " flash" : "")} data-msg-id={m.id}>
-        {displayText(m)}
+        {text}
       </div>
     );
   }
