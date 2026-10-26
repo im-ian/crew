@@ -161,10 +161,17 @@ pub fn messages(agent: &str) -> Vec<ChatMessage> {
 pub fn last_ts(key: &str) -> u64 {
     messages(key)
         .iter()
-        .filter(|m| m.peer.is_none() || m.choice.is_some() || m.approval.is_some())
+        .filter(|m| is_for_user(m))
         .map(|m| m.ts)
         .max()
         .unwrap_or(0)
+}
+
+/// Said in this chat, not in a side chat. A turn another bot asked for answers
+/// that bot, and the thread folds it beside the chat; a card on it still waits
+/// on the user.
+fn is_for_user(msg: &ChatMessage) -> bool {
+    msg.peer.is_none() || msg.choice.is_some() || msg.approval.is_some()
 }
 
 /// The bot that asked for the turn starting here, or None for the user's own
@@ -193,9 +200,10 @@ pub fn preview(agent: &str) -> Option<String> {
 /// What the channel list can quote from one row. Tool arguments and a bare
 /// JSON dump are not a sentence. A question on that row still is. A reply is
 /// several balloons; the list quotes the last one. A message still waiting
-/// has not gone out, so the line before it stays.
+/// has not gone out, so the line before it stays. A reply in a side chat was
+/// not said here.
 fn preview_line(msg: &ChatMessage) -> Option<String> {
-    if msg.queued {
+    if msg.queued || !is_for_user(msg) {
         return None;
     }
     if msg.kind == Some(MessageKind::Tool) && msg.choice.is_none() && msg.approval.is_none() {
@@ -2285,6 +2293,37 @@ mod tests {
 
             drop_agent(&waiting);
             drop_agent(&held_only);
+        });
+    }
+
+    /// A reply to a turn another bot asked for sits in the side chat, so the
+    /// list keeps the line said in this chat.
+    #[test]
+    fn a_side_chat_reply_stays_out_of_the_channel_preview() {
+        crate::paths::testing::with_home("preview-peer", || {
+            let n = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let agent = format!("preview-peer-{n}");
+            push_user(&agent, "user", "버그 고쳐줘");
+            begin_turn(&agent);
+            on_assistant_delta(&agent, "고쳐 보겠습니다.");
+            end_turn(&agent);
+            std::thread::sleep(Duration::from_millis(5));
+            push_system(&agent, "rival", "PR 올리면 알려줘", Some("rival".into()));
+            set_peer(&agent, Some("rival".into()));
+            begin_turn(&agent);
+            on_assistant_delta(&agent, "PR #119는 머지되었습니다.");
+            seal_now(&agent);
+            set_peer(&agent, None);
+            assert_eq!(preview(&agent).as_deref(), Some("고쳐 보겠습니다."));
+
+            std::thread::sleep(Duration::from_millis(5));
+            push_user(&agent, "user", "작업 중이야?");
+            assert_eq!(preview(&agent).as_deref(), Some("작업 중이야?"));
+
+            drop_agent(&agent);
         });
     }
 
