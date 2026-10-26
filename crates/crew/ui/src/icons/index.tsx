@@ -125,6 +125,16 @@ export function CircleDot(props: Props) {
   );
 }
 
+export function Ellipsis(props: Props) {
+  return (
+    <Icon {...props}>
+      <circle cx="5" cy="12" r="1" />
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="19" cy="12" r="1" />
+    </Icon>
+  );
+}
+
 /** Lucide's square, filled: an outline reads as a shape, not as "stop". */
 export function StopSquare(props: Props) {
   return (
