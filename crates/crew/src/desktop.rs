@@ -828,6 +828,39 @@ mod tests {
     use super::*;
 
     /// Serialised: `START_ERROR` is process-wide.
+    /// The window declares an ACL, so a command in `generate_handler!` that
+    /// never makes it into `build.rs` and `capabilities/default.json` is
+    /// rejected on every call. Shared memory shipped that way.
+    #[test]
+    fn every_window_command_is_granted() {
+        let src = include_str!("desktop.rs");
+        let start = src
+            .find("generate_handler![")
+            .expect("handler")
+            + "generate_handler![".len();
+        let end = src[start..].find("])").expect("handler end");
+        let names: Vec<&str> = src[start..start + end]
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with("//"))
+            .map(|line| line.trim_end_matches(','))
+            .collect();
+        assert!(names.len() > 10, "the handler list was not parsed");
+        let build = include_str!("../build.rs");
+        let caps = include_str!("../capabilities/default.json");
+        for name in names {
+            assert!(
+                build.contains(&format!("\"{name}\"")),
+                "{name} is missing from build.rs"
+            );
+            let allow = format!("\"allow-{}\"", name.replace('_', "-"));
+            assert!(
+                caps.contains(&allow),
+                "{name} is missing from capabilities ({allow})"
+            );
+        }
+    }
+
     #[test]
     fn a_recorded_start_reason_outranks_the_bare_socket_error() {
         set_start_error(Some("parse agents.json: expected value".into()));
