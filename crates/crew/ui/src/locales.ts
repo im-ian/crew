@@ -157,6 +157,7 @@ export const KO = {
   "thread.viewFull": "전체보기",
   "thread.peekReadOnly": "이 채팅은 보기 전용이에요",
   "thread.peekClose": "채팅 닫기",
+  "thread.peekResize": "사이드 채팅 너비 조절",
 
   "confirm.reset.title": "대화를 지울까요?",
   "confirm.reset.body": "봇 설정은 그대로 두고, 지금까지의 대화만 지웁니다.",
@@ -435,6 +436,7 @@ export const EN: { [K in MessageKey]: string } = {
   "thread.viewFull": "View chat",
   "thread.peekReadOnly": "This chat is view-only",
   "thread.peekClose": "Close chat",
+  "thread.peekResize": "Resize side chat",
 
   "confirm.reset.title": "Clear this chat?",
   "confirm.reset.body": "Bot settings stay. Only the conversation is cleared.",
