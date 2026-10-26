@@ -35,13 +35,26 @@ pub struct HeadlessInner {
     pub interrupted: bool,
     /// Prompt the CLI has been given and has not finished with.
     pub in_flight: Option<InFlight>,
-    /// How long a turn may run with no stdout before it is given back.
-    pub first_output_timeout: Duration,
+    /// Replaces this CLI's `first_output_limit`, for tests that cannot wait.
+    pub first_output_timeout: Option<Duration>,
 }
 
 /// How long a turn may sit before its first stdout line. Later silence is a
 /// tool call, which is normal, so only the first line counts.
-pub const FIRST_OUTPUT_TIMEOUT: Duration = Duration::from_secs(90);
+///
+/// Each streaming CLI writes an event as soon as it starts: grok in about a
+/// second (its own log: 0.35s typical, 3.7s slowest), claude once its MCP
+/// servers connect (about 4s here). The limit is several times that, so a
+/// stuck resume is caught in seconds, not minutes. A CLI on text output
+/// (gemini, agy, copilot, opencode, a custom command) prints only its answer,
+/// so silence is how it works, and it gets no limit.
+fn first_output_limit(cli: CliKind) -> Option<Duration> {
+    match cli {
+        CliKind::Grok => Some(Duration::from_secs(15)),
+        CliKind::Claude | CliKind::Codex => Some(Duration::from_secs(30)),
+        CliKind::Other => None,
+    }
+}
 
 /// The prompt a turn handed to the CLI.
 pub struct InFlight {
@@ -86,7 +99,7 @@ pub fn open(
             generation: 0,
             interrupted: false,
             in_flight: None,
-            first_output_timeout: FIRST_OUTPUT_TIMEOUT,
+            first_output_timeout: None,
         }),
     }))
 }
@@ -296,7 +309,7 @@ fn mark_resumed(session: &HeadlessSession, resumed: bool) {
 
 pub fn set_first_output_timeout(session: &HeadlessSession, wait: Duration) {
     if let Ok(mut inner) = session.inner.lock() {
-        inner.first_output_timeout = wait;
+        inner.first_output_timeout = Some(wait);
     }
 }
 
@@ -341,12 +354,15 @@ fn pull_turn(
     Some(PulledTurn { child, unheard })
 }
 
-fn arm_first_output_watch(session: Arc<HeadlessSession>, generation: u64) {
-    let wait = session
+fn arm_first_output_watch(session: Arc<HeadlessSession>, generation: u64, cli: CliKind) {
+    let set = session
         .inner
         .lock()
-        .map(|inner| inner.first_output_timeout)
-        .unwrap_or(FIRST_OUTPUT_TIMEOUT);
+        .ok()
+        .and_then(|inner| inner.first_output_timeout);
+    let Some(wait) = set.or_else(|| first_output_limit(cli)) else {
+        return;
+    };
     let id = session.id.clone();
     if std::thread::Builder::new()
         .name(format!("crew-silent-{id}"))
@@ -360,7 +376,7 @@ fn arm_first_output_watch(session: Arc<HeadlessSession>, generation: u64) {
     }
 }
 
-/// 90s with no stdout: the CLI is stuck, not thinking. A line already arrived
+/// No stdout within the CLI's limit: it is stuck, not thinking. A line already arrived
 /// and the process is quiet because a tool is running, so that turn stays.
 ///
 /// A resumed session can be what hangs (grok waits forever on a background
@@ -751,7 +767,6 @@ fn spawn_and_stream(
         }
         inner.child = Some(child);
     }
-    arm_first_output_watch(Arc::clone(session), generation);
 
     let stderr_handle = stderr.map(|err| {
         std::thread::spawn(move || {
@@ -763,6 +778,7 @@ fn spawn_and_stream(
 
     // This turn's command, not the session's first one: a bot changes CLI in place.
     let cli = CliKind::from_program(&argv[0]);
+    arm_first_output_watch(Arc::clone(session), generation, cli);
     let mut state = ParseState::default();
     // Grok names a child session folder with `current_dir()`, which resolves
     // symlinks. A spawn that omits `cwd` lives next to the parent session.
@@ -2442,6 +2458,17 @@ mod tests {
     }
 
     #[test]
+    fn only_a_cli_that_streams_from_the_start_has_a_first_output_limit() {
+        assert_eq!(first_output_limit(CliKind::Grok), Some(Duration::from_secs(15)));
+        assert_eq!(first_output_limit(CliKind::Claude), Some(Duration::from_secs(30)));
+        assert_eq!(first_output_limit(CliKind::Codex), Some(Duration::from_secs(30)));
+        // gemini, agy, copilot and opencode print only the answer.
+        for program in ["gemini", "agy", "copilot", "opencode", "/usr/local/bin/my-bot"] {
+            assert_eq!(first_output_limit(CliKind::from_program(program)), None, "{program}");
+        }
+    }
+
+    #[test]
     fn turn_end_is_each_clis_own_event() {
         let end = |cli, line: &str| is_turn_end(cli, &serde_json::from_str(line).unwrap());
         assert!(end(CliKind::Grok, r#"{"type":"end"}"#));
@@ -3074,7 +3101,7 @@ mod tests {
                 generation: 0,
                 interrupted: false,
                 in_flight: None,
-                first_output_timeout: FIRST_OUTPUT_TIMEOUT,
+                first_output_timeout: None,
             }),
         }
     }
