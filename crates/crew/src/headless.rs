@@ -804,7 +804,15 @@ fn spawn_and_stream(
         // A stopped CLI's last lines are still in the pipe: read now, they land
         // under the user's stop or in the next turn's reply. The first line
         // that still belongs to this turn marks the prompt heard.
-        if sealed || note_stdout(session, generation) {
+        // A sealed grok turn still reads child results into the side chat.
+        // That does not add to the parent's reply or take back what it said.
+        if note_stdout(session, generation) {
+            continue;
+        }
+        if sealed {
+            if cli == CliKind::Grok {
+                note_sealed_grok_child(session, &mut state, &line);
+            }
             continue;
         }
         let mut turn_end = false;
@@ -961,6 +969,19 @@ fn feed_text(cli: CliKind, session: &HeadlessSession, chunk: &str) {
     }
 }
 
+/// A line that arrives after grok's `end`. Child results still become side
+/// notes. Parent speech stays sealed, including any release this line would
+/// have appended.
+fn note_sealed_grok_child(session: &HeadlessSession, state: &mut ParseState, line: &str) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+        return;
+    };
+    for note in grok_subagent_notes(&v, state) {
+        crate::transcript::push_subagent(&session.id, &note.key, &note.from, &note.text);
+    }
+    state.parent_release = None;
+}
+
 /// Cards, side-chat notes, and reply text for one grok stdout line.
 /// Tool cards wait until this line has updated the call sets, then flush.
 fn apply_grok_stdout(session: &HeadlessSession, state: &mut ParseState, line: &str) -> Option<String> {
@@ -1049,10 +1070,10 @@ struct ParseState {
     /// stays out of the parent's reply.
     open_subagents: HashSet<String>,
     /// Backgrounded spawns still running. Grok marks those calls completed
-    /// when they start. Untagged `text` lines after that are held, and kept
-    /// only when they are not the child's own sentences.
+    /// when they start. The parent's own text is shown while they run. A
+    /// sentence already in the side chat is left out of that text.
     background_calls: HashSet<String>,
-    /// Untagged text held while `background_calls` is non-empty.
+    /// Parent text waiting until a foreground spawn no longer owns the stream.
     held_reply: String,
     /// Parent speech to show on the event that released `held_reply`.
     parent_release: Option<String>,
@@ -1200,12 +1221,14 @@ fn grok_text(v: &Value, state: &mut ParseState) -> Option<String> {
             if !state.open_subagents.is_empty() {
                 return None;
             }
-            // Backgrounding completes the call while the child keeps talking.
-            // Those copies are `text` lines with no session, so hold them until
-            // the child finishes and drop the ones the side chat already has.
+            // Background: the parent keeps speaking. Drop only the child
+            // sentences the side chat already has.
             if !state.background_calls.is_empty() {
-                state.held_reply.push_str(&chunk);
-                return None;
+                let kept = strip_child_utterances(&chunk, &state.grok_child_lines);
+                if kept.is_empty() {
+                    return None;
+                }
+                return grok_reply(kept, state);
             }
             grok_reply(chunk, state)
         }
@@ -1215,8 +1238,8 @@ fn grok_text(v: &Value, state: &mut ParseState) -> Option<String> {
     }
 }
 
-/// The child's reply sits between the spawn and that call's terminal update.
-/// The parent's own reply is what arrives after the tool finishes.
+/// Foreground child text stays out until that spawn finishes. A background
+/// child's text is not an excuse to hold the parent's own reply.
 fn grok_reply(chunk: String, state: &mut ParseState) -> Option<String> {
     if !state.open_subagents.is_empty() {
         return None;
@@ -1273,7 +1296,7 @@ fn note_subagent_call(v: &Value, state: &mut ParseState) {
     match kind {
         "tool_call" => {
             // A replayed call must not pull a backgrounded spawn back into the
-            // foreground set. Text would then be dropped instead of held.
+            // foreground set. The parent's text would then be dropped.
             if is_grok_spawn(event) && !state.background_calls.contains(id) {
                 state.open_subagents.insert(id.to_string());
             }
@@ -1810,7 +1833,9 @@ fn settle_child_call(state: &mut ParseState, call: &str) {
 }
 
 fn release_held_reply(state: &mut ParseState) {
-    if !state.open_subagents.is_empty() || !state.background_calls.is_empty() {
+    // A foreground spawn still owns the stream. A background child does not,
+    // so parent text must not wait for that call to finish.
+    if !state.open_subagents.is_empty() {
         return;
     }
     let held = std::mem::take(&mut state.held_reply);
@@ -3030,11 +3055,20 @@ mod tests {
             reports.extend(notes);
         }
 
-        for text in [line_a, line_b, parent_mid] {
+        for text in [line_a, line_b] {
             let line = serde_json::json!({"type": "text", "data": text}).to_string();
             let (_, got) = drive(&mut st, &line);
             assert!(got.is_none(), "{text}");
         }
+        let (_, got) = drive(
+            &mut st,
+            &serde_json::json!({"type": "text", "data": parent_mid}).to_string(),
+        );
+        let got = got.unwrap_or_default();
+        assert!(got.contains(parent_mid), "{got}");
+        assert!(!got.contains(line_a), "{got}");
+        assert!(!got.contains(line_b), "{got}");
+        assert!(st.spoken.contains(parent_mid));
         assert!(!st.spoken.contains(line_a));
         assert!(!st.spoken.contains(line_b));
 
@@ -3062,7 +3096,7 @@ mod tests {
         let (notes, released) = drive(&mut st, &finished("child-b", line_b));
         reports.extend(notes);
         let released = released.unwrap_or_default();
-        assert!(released.contains(parent_mid), "{released}");
+        assert!(!released.contains(parent_mid), "{released}");
         assert!(!released.contains("I'll review"), "{released}");
         assert!(!st.spoken.contains(line_a));
         assert!(!st.spoken.contains(line_b));
@@ -3107,11 +3141,11 @@ mod tests {
     }
 
     /// A later update can repeat `subagent_id` and the word "background" in the
-    /// prompt. That is the child finishing, so the held parent sentence comes out.
+    /// prompt. That is the child finishing. The parent sentence is already out.
     #[test]
     fn a_background_word_outside_the_start_notice_closes_the_call() {
         let mut st = ParseState::default();
-        let parent = "부모는 이 문장을 자식이 끝난 뒤에 봅니다. 길이를 넉넉히 잡습니다.";
+        let parent = "부모는 이 문장을 자식이 도는 동안 봅니다. 길이를 넉넉히 잡습니다.";
         drive_grok(
             &mut st,
             &serde_json::json!({
@@ -3133,11 +3167,14 @@ mod tests {
             .to_string(),
         );
         assert!(st.background_calls.contains("call-a"));
-        assert!(drive_grok(
+        let shown = drive_grok(
             &mut st,
             &serde_json::json!({"type": "text", "data": parent}).to_string(),
         )
-        .is_none());
+        .unwrap_or_default();
+        assert!(shown.contains(parent), "{shown}");
+        assert!(st.spoken.contains(parent));
+        assert!(st.background_calls.contains("call-a"));
         let released = drive_grok(
             &mut st,
             &serde_json::json!({
@@ -3151,16 +3188,17 @@ mod tests {
             .to_string(),
         )
         .unwrap_or_default();
-        assert!(released.contains(parent), "{released}");
+        assert!(!released.contains(parent), "{released}");
         assert!(st.background_calls.is_empty());
         assert!(st.open_subagents.is_empty());
     }
 
-    /// A second copy of the spawn call must not drop text that was being held.
+    /// A second copy of the spawn call must not pull it back to the foreground,
+    /// where the parent's sentence would be dropped.
     #[test]
-    fn a_repeated_spawn_call_keeps_holding_parent_text() {
+    fn a_repeated_spawn_call_shows_parent_text() {
         let mut st = ParseState::default();
-        let parent = "부모 문장은 호출이 다시 와도 붙잡혀 있다가 나옵니다.";
+        let parent = "부모 문장은 호출이 다시 와도 바로 보입니다.";
         let spawn = serde_json::json!({
             "type": "tool_call",
             "toolCallId": "call-a",
@@ -3180,14 +3218,14 @@ mod tests {
             .to_string(),
         );
         drive_grok(&mut st, &spawn);
-        assert!(
-            drive_grok(
-                &mut st,
-                &serde_json::json!({"type": "text", "data": parent}).to_string(),
-            )
-            .is_none(),
-        );
-        assert!(!st.spoken.contains(parent));
+        let shown = drive_grok(
+            &mut st,
+            &serde_json::json!({"type": "text", "data": parent}).to_string(),
+        )
+        .unwrap_or_default();
+        assert!(shown.contains(parent), "{shown}");
+        assert!(st.spoken.contains(parent));
+        assert!(st.background_calls.contains("call-a"));
         let released = drive_grok(
             &mut st,
             &serde_json::json!({
@@ -3206,7 +3244,7 @@ mod tests {
             .to_string(),
         )
         .unwrap_or_default();
-        assert!(released.contains(parent), "{released}");
+        assert!(!released.contains(parent), "{released}");
         assert!(!st.open_subagents.contains("call-a"));
     }
 
@@ -3236,6 +3274,121 @@ mod tests {
                 .map(|m| m.from)
                 .collect();
             assert!(names.iter().any(|n| n == "read_file"), "{names:?}");
+        });
+    }
+
+    /// The parent's own tool shows while a background child is still running.
+    /// A card with no owner waits until that spawn settles.
+    #[test]
+    fn a_parent_tool_shows_while_a_background_child_runs() {
+        crate::paths::testing::with_home("bg-live-tool", || {
+            let session = grok_session("bg-live-tool-bot");
+            let mut st = ParseState::default();
+            apply_grok_stdout(
+                &session,
+                &mut st,
+                r#"{"type":"tool_call","toolCallId":"call-a","title":"spawn_subagent","rawInput":{"description":"rev","prompt":"Review."}}"#,
+            );
+            apply_grok_stdout(
+                &session,
+                &mut st,
+                r#"{"type":"tool_call_update","toolCallId":"call-a","status":"completed","rawOutput":{"type":"Text","text":"Subagent started in background.\nsubagent_id: child-a\n"}}"#,
+            );
+            assert!(st.background_calls.contains("call-a"));
+            apply_grok_stdout(
+                &session,
+                &mut st,
+                r#"{"type":"tool_call","toolCallId":"call-read","title":"read_file","sessionId":"parent-1","rawInput":{"target_file":"a.rs"}}"#,
+            );
+            apply_grok_stdout(
+                &session,
+                &mut st,
+                r#"{"type":"tool_call","toolCallId":"call-grep","title":"grep","rawInput":{"pattern":"foo"}}"#,
+            );
+            let mid: Vec<String> = crate::transcript::messages("bg-live-tool-bot")
+                .into_iter()
+                .map(|m| m.from)
+                .collect();
+            assert!(mid.iter().any(|n| n == "read_file"), "{mid:?}");
+            assert!(!mid.iter().any(|n| n == "grep"), "{mid:?}");
+            assert!(st.background_calls.contains("call-a"));
+            apply_grok_stdout(
+                &session,
+                &mut st,
+                r#"{"method":"session/update","params":{"sessionId":"parent-1","update":{"sessionUpdate":"subagent_finished","child_session_id":"child-a","subagent_id":"child-a","status":"completed","output":"child done"}}}"#,
+            );
+            let after: Vec<String> = crate::transcript::messages("bg-live-tool-bot")
+                .into_iter()
+                .map(|m| m.from)
+                .collect();
+            assert!(after.iter().any(|n| n == "grep"), "{after:?}");
+            assert!(st.held_tools.is_empty());
+        });
+    }
+
+    /// After `end`, a child result is still a side note. The sealed parent
+    /// sentence stays as it was.
+    #[test]
+    fn a_sealed_turn_still_files_the_child_report() {
+        crate::paths::testing::with_home("seal-child", || {
+            let session = grok_session("seal-child-bot");
+            let mut st = ParseState::default();
+            drive_grok(
+                &mut st,
+                &serde_json::json!({
+                    "type": "tool_call",
+                    "toolCallId": "call-a",
+                    "title": "spawn_subagent",
+                    "rawInput": {"description": "rev", "prompt": "Review."}
+                })
+                .to_string(),
+            );
+            drive_grok(
+                &mut st,
+                &serde_json::json!({
+                    "type": "tool_call_update",
+                    "toolCallId": "call-a",
+                    "status": "completed",
+                    "content": [{"type": "content", "content": {"type": "text", "text": "Subagent started in background.\nsubagent_id: child-a\n"}}]
+                })
+                .to_string(),
+            );
+            st.got_text = true;
+            st.spoken = "이미 말했습니다.".into();
+            let child = "The child report arrives after the turn is sealed.";
+            note_sealed_grok_child(
+                &session,
+                &mut st,
+                &serde_json::json!({
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "child-a",
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": {"type": "text", "text": child}
+                        }
+                    }
+                })
+                .to_string(),
+            );
+            let late = "봉인 뒤에 온 부모 문장입니다. 길이를 채웁니다.";
+            note_sealed_grok_child(
+                &session,
+                &mut st,
+                &serde_json::json!({"type": "text", "data": late}).to_string(),
+            );
+            assert_eq!(st.spoken, "이미 말했습니다.");
+            assert!(st.parent_release.is_none());
+            let msgs = crate::transcript::messages("seal-child-bot");
+            assert!(
+                msgs.iter()
+                    .any(|m| m.from.starts_with("sub:") && m.text.contains(child)),
+                "{msgs:?}"
+            );
+            assert!(
+                msgs.iter().all(|m| !m.text.contains(late)),
+                "{msgs:?}"
+            );
         });
     }
 
