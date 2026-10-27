@@ -15,6 +15,7 @@ import {
   withUnaccepted,
   type HeldSend,
 } from "./sendGate";
+import { openPendingOnFocus } from "./focusChat";
 import { useT } from "./LocaleContext";
 import { loadNotify } from "./notifyPref";
 import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
@@ -1096,10 +1097,18 @@ export function useCrew() {
       fireNotice(hit);
     }
     function onWinFocus() {
+      // The file records who finished while the window was away. Opening that
+      // chat here is why coming back lands on a different bot. A notification
+      // click calls go() itself. This only opens a pending chat when the
+      // window has none yet.
       void api
         .takePendingFocus()
         .then((hit) => {
-          if (hit) go(hit);
+          const open = openPendingOnFocus(
+            selectedRef.current.id,
+            hit?.id ?? null,
+          );
+          if (hit && open) go(hit);
         })
         .catch(() => null);
     }
