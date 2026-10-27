@@ -1854,8 +1854,19 @@ fn strip_child_utterances(held: &str, lines: &HashSet<String>) -> String {
         .filter(|line| line.len() >= 40)
         .collect();
     lines.sort_by_key(|line| std::cmp::Reverse(line.len()));
+    let mut removed = false;
     for line in lines {
-        text = text.replace(line, "\n");
+        if text.contains(line) {
+            text = text.replace(line, "\n");
+            removed = true;
+        }
+    }
+    // A streaming-json `text` event is one token, and its space sits on the
+    // edge. This runs on every token while a background child is open.
+    // Reflowing a token that held no child sentence deletes that space, so
+    // "The" + " return" is stored as "Thereturn".
+    if !removed {
+        return text;
     }
     let mut out = String::new();
     for para in text.split("\n\n") {
@@ -3191,6 +3202,55 @@ mod tests {
         assert!(!released.contains(parent), "{released}");
         assert!(st.background_calls.is_empty());
         assert!(st.open_subagents.is_empty());
+    }
+
+    /// Grok's `text` events are tokens. The space is on the token, and a
+    /// background child must not be a reason to trim it off.
+    #[test]
+    fn background_text_tokens_keep_the_space_on_the_token() {
+        let mut st = ParseState::default();
+        drive_grok(
+            &mut st,
+            &serde_json::json!({
+                "type": "tool_call",
+                "toolCallId": "call-a",
+                "title": "spawn_subagent",
+                "rawInput": {"description": "rev", "prompt": "Review."}
+            })
+            .to_string(),
+        );
+        drive_grok(
+            &mut st,
+            &serde_json::json!({
+                "type": "tool_call_update",
+                "toolCallId": "call-a",
+                "status": "completed",
+                "content": [{"type": "content", "content": {"type": "text", "text": "Subagent started in background.\nsubagent_id: child-a\n"}}]
+            })
+            .to_string(),
+        );
+        assert!(st.background_calls.contains("call-a"));
+        let child = "The return path is careful, but the guard updates only on render.";
+        st.grok_child_lines.insert(child.to_string());
+        let mut spoken = String::new();
+        for token in ["The", " return", " path", " ", "is", "\n", "careful."] {
+            let got = drive_grok(
+                &mut st,
+                &serde_json::json!({"type": "text", "data": token}).to_string(),
+            )
+            .unwrap_or_default();
+            spoken.push_str(&got);
+        }
+        assert_eq!(spoken, "The return path is\ncareful.");
+        let mixed = format!("부모입니다. {child} 이어서 말합니다.");
+        let got = drive_grok(
+            &mut st,
+            &serde_json::json!({"type": "text", "data": mixed}).to_string(),
+        )
+        .unwrap_or_default();
+        assert!(!got.contains("return path"), "{got}");
+        assert!(got.contains("부모입니다."), "{got}");
+        assert!(got.contains("이어서 말합니다."), "{got}");
     }
 
     /// A second copy of the spawn call must not pull it back to the foreground,
