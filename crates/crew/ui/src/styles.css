@@ -694,10 +694,37 @@ button.avatar {
   animation-name: avatar-ponder;
   animation-duration: 8.4s;
 }
+@property --gaze-x {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+@property --gaze-y {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
 .avatar-face.is-tracking .avatar-gaze {
   animation: none;
   transition: none;
   transform: translate(var(--gaze-x, 0px), var(--gaze-y, 0px));
+}
+/* Keep the duration in step with GAZE_RETURN_MS in BotFace.tsx.
+   Registered lengths so the return eases instead of snapping the transform.
+   After a hover, idle gaze restarts at rest so the phase offset cannot pop. */
+.avatar-face.is-gaze-return {
+  transition:
+    --gaze-x 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    --gaze-y 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.avatar-face.is-gaze-return .avatar-gaze {
+  animation: none;
+  transform: translate(var(--gaze-x, 0px), var(--gaze-y, 0px));
+}
+.avatar-face.is-gaze-settled.is-idle .avatar-gaze,
+.avatar-face.is-gaze-settled.is-happy .avatar-gaze,
+.avatar-face.is-gaze-settled.is-working .avatar-gaze {
+  animation-delay: 0s;
 }
 .avatar-face.is-idle .avatar-blink,
 .avatar-face.is-working .avatar-blink,
@@ -766,6 +793,8 @@ button.avatar {
   .avatar-face.is-blocked .avatar-eye:last-child,
   .avatar-face.is-happy .avatar-gaze,
   .avatar-face.is-tracking .avatar-gaze,
+  .avatar-face.is-gaze-return,
+  .avatar-face.is-gaze-return .avatar-gaze,
   .avatar-pill,
   .avatar-arc {
     animation: none;

@@ -252,55 +252,145 @@ function gazeFromPointer(
   return { x: nx * GAZE_X, y: ny * GAZE_Y };
 }
 
+// Leave eases home. A matching duration lives on `.is-gaze-return` in styles.css.
+const GAZE_RETURN_MS = 320;
+
+function setGazeVar(svg: SVGSVGElement, name: string, value: string | null) {
+  const current = svg.style.getPropertyValue(name);
+  if (value === null) {
+    if (current) svg.style.removeProperty(name);
+    return;
+  }
+  if (current !== value) svg.style.setProperty(name, value);
+}
+
 function applyGaze(
   svg: SVGSVGElement | null,
   g: { x: number; y: number } | null,
+  flags: { returning: boolean; settled: boolean },
 ) {
   if (!svg) return;
+  // Tracking stays transitionless so the pointer still hits the same frame.
+  // `is-gaze-return` is the only state that eases `--gaze-*` back to rest.
+  svg.classList.toggle("is-tracking", !!g && !flags.returning);
+  svg.classList.toggle("is-gaze-return", flags.returning);
+  svg.classList.toggle("is-gaze-settled", flags.settled);
+  if (flags.returning) svg.style.removeProperty("transition");
+  else svg.style.transition = "none";
   if (g) {
-    svg.style.setProperty("--gaze-x", `${g.x}px`);
-    svg.style.setProperty("--gaze-y", `${g.y}px`);
-    svg.classList.add("is-tracking");
+    setGazeVar(svg, "--gaze-x", `${g.x}px`);
+    setGazeVar(svg, "--gaze-y", `${g.y}px`);
   } else {
-    svg.style.removeProperty("--gaze-x");
-    svg.style.removeProperty("--gaze-y");
-    svg.classList.remove("is-tracking");
+    setGazeVar(svg, "--gaze-x", null);
+    setGazeVar(svg, "--gaze-y", null);
   }
 }
+
+type GazeMode = "idle" | "track" | "return";
 
 export function BotFace({ shape, color, className, title, status, id }: Props) {
   const eyes = eyesAt(shape);
   const live = useHappy(status) ? "happy" : liveMood(status);
   const svgRef = useRef<SVGSVGElement>(null);
   const gazeRef = useRef<{ x: number; y: number } | null>(null);
-  const [tracking, setTracking] = useState(false);
+  const settledRef = useRef(false);
+  const [mode, setMode] = useState<GazeMode>("idle");
+  const modeRef = useRef<GazeMode>("idle");
+  modeRef.current = mode;
 
   useLayoutEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
     if (live) svg.style.setProperty("--avatar-phase", String(avatarPhase(id)));
     else svg.style.removeProperty("--avatar-phase");
-    applyGaze(svg, gazeRef.current);
+    applyGaze(svg, gazeRef.current, {
+      returning: mode === "return",
+      settled: settledRef.current,
+    });
   });
+
+  useEffect(() => {
+    if (mode !== "return") return;
+    const svg = svgRef.current;
+    if (!svg) return;
+    let finished = false;
+    let raf2 = 0;
+    let timer = 0;
+    const finish = () => {
+      if (finished || modeRef.current !== "return") return;
+      finished = true;
+      gazeRef.current = null;
+      settledRef.current = true;
+      applyGaze(svg, null, { returning: false, settled: true });
+      modeRef.current = "idle";
+      setMode("idle");
+    };
+    const onEnd = (ev: Event) => {
+      const e = ev as TransitionEvent;
+      if (e.target !== svg) return;
+      if (e.propertyName !== "--gaze-x" && e.propertyName !== "--gaze-y") return;
+      finish();
+    };
+    // The offset has to be painted with the return transition armed before
+    // the target moves to rest, or the eyes skip straight home.
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        if (finished || modeRef.current !== "return" || !svg.isConnected) return;
+        gazeRef.current = { x: 0, y: 0 };
+        applyGaze(svg, gazeRef.current, {
+          returning: true,
+          settled: settledRef.current,
+        });
+        svg.addEventListener("transitionend", onEnd);
+        timer = window.setTimeout(finish, GAZE_RETURN_MS + 160);
+      });
+    });
+    return () => {
+      finished = true;
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      window.clearTimeout(timer);
+      svg.removeEventListener("transitionend", onEnd);
+    };
+  }, [mode]);
 
   function onPointerMove(e: PointerEvent<SVGSVGElement>) {
     if (prefersReducedMotion()) return;
     const g = gazeFromPointer(e, eyes);
     gazeRef.current = g;
-    applyGaze(e.currentTarget, g);
-    setTracking(true);
+    applyGaze(e.currentTarget, g, {
+      returning: false,
+      settled: settledRef.current,
+    });
+    // Written on this turn so a return frame already queued cannot treat the
+    // pointer as still gone. A leave may have queued "return" while the last
+    // commit was still "track"; skipping setMode would keep that queue.
+    const prev = modeRef.current;
+    modeRef.current = "track";
+    if (prev !== "track" || mode !== "track") setMode("track");
   }
 
   function onPointerLeave(e: PointerEvent<SVGSVGElement>) {
-    gazeRef.current = null;
-    applyGaze(e.currentTarget, null);
-    setTracking(false);
+    const g = gazeRef.current;
+    if (!g) return;
+    const nearHome = Math.abs(g.x) < 0.05 && Math.abs(g.y) < 0.05;
+    if (prefersReducedMotion() || nearHome) {
+      gazeRef.current = null;
+      settledRef.current = true;
+      applyGaze(e.currentTarget, null, { returning: false, settled: true });
+      modeRef.current = "idle";
+      setMode("idle");
+      return;
+    }
+    modeRef.current = "return";
+    setMode("return");
   }
 
   const cls = [
     "avatar-face",
     live ? `is-${live}` : "",
-    tracking ? "is-tracking" : "",
+    mode === "track" ? "is-tracking" : "",
+    mode === "return" ? "is-gaze-return" : "",
     className,
   ]
     .filter(Boolean)
