@@ -17,6 +17,8 @@ type Props = {
   overlay?: ReactNode;
   as?: "div" | "button" | "span";
   onClick?: (e: MouseEvent) => void;
+  /** Client point an idle face follows. */
+  lookAt?: { x: number; y: number } | null;
 };
 
 function faceStatus(
@@ -69,6 +71,7 @@ export function Avatar({
   overlay,
   as = "div",
   onClick,
+  lookAt = null,
 }: Props) {
   const [broken, setBroken] = useState(false);
   useEffect(() => {
@@ -106,6 +109,7 @@ export function Avatar({
           shape={face.shape}
           color={face.color}
           status={live}
+          lookAt={lookAt}
         />
       ) : null}
       {!showFace ? (
