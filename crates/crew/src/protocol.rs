@@ -164,10 +164,13 @@ pub enum Request {
         agent: String,
         message_id: String,
     },
-    /// Allow-once or deny a pending judgment card.
+    /// Allow-once, allow from now on, or deny a pending judgment card.
     Approve {
         agent: String,
         allow: bool,
+        /// Remember this bot: later judgment questions continue without a card.
+        #[serde(default)]
+        always: bool,
     },
     /// Show a picker or form in chat and wait for the user's answer.
     Ask {

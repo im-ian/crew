@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { handleBackdropPointerDown } from "../dialogLayer";
 import { useT } from "../LocaleContext";
 import type { AgentInfo, CliKind, PaneTab, Routine } from "../types";
 import { Field } from "./Field";
@@ -60,9 +61,7 @@ export function AgentPane({
   return (
     <div
       className={"overlay" + (open ? " open" : "")}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+      onPointerDown={(e) => handleBackdropPointerDown(e, onClose)}
     >
       <div className="sheet agent-sheet">
         <div className="sheet-head">

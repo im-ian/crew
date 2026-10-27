@@ -6,9 +6,12 @@ import {
   moveGroup,
   moveItem,
   adoptNewGroups,
+  folderName,
   normalizeGroups,
   parseItemKey,
+  projectCwd,
   pruneLayout,
+  splitPlace,
   railOrder,
   toPersist,
   visibleUngroupedKeys,
@@ -73,6 +76,46 @@ describe("normalizeGroups", () => {
   it("omits the bucket when nothing is ungrouped", () => {
     expect(toPersist({ groups: [group("g1", [])], ungrouped: [] })).toHaveLength(1);
   });
+
+  it("keeps a project folder across a save and drops a blank one", () => {
+    const layout = {
+      groups: [
+        { id: "g1", name: "app", collapsed: false, items: ["agent:a1"], path: "/tmp/app" },
+      ],
+      ungrouped: [] as string[],
+    };
+    expect(normalizeGroups(toPersist(layout))).toEqual(layout);
+    const blank = normalizeGroups([
+      { id: "g1", name: "app", items: [], path: "  " },
+    ]);
+    expect(blank.groups[0].path).toBeUndefined();
+  });
+});
+
+describe("folderName", () => {
+  it("uses the last segment and ignores a trailing slash", () => {
+    expect(folderName("/Users/a/crew")).toBe("crew");
+    expect(folderName("/Users/a/crew/")).toBe("crew");
+    expect(folderName("crew")).toBe("crew");
+    expect(folderName("")).toBe("");
+    expect(projectCwd({ path: " /tmp/app " })).toBe("/tmp/app");
+    expect(projectCwd({ path: "  " })).toBeNull();
+    expect(projectCwd(null)).toBeNull();
+  });
+});
+
+describe("splitPlace", () => {
+  const groups = [
+    { id: "g1", path: null },
+    { id: "p1", path: "/tmp/app" },
+  ];
+
+  it("sends a folder to the project and anything else to the group", () => {
+    expect(splitPlace(groups, "p1")).toEqual({ groupId: "", projectId: "p1" });
+    expect(splitPlace(groups, "g1")).toEqual({ groupId: "g1", projectId: "" });
+    expect(splitPlace(groups, null)).toEqual({ groupId: "", projectId: "" });
+    expect(splitPlace(groups, "missing")).toEqual({ groupId: "", projectId: "" });
+  });
 });
 
 describe("adoptNewGroups", () => {
@@ -113,6 +156,19 @@ describe("adoptNewGroups", () => {
       ["g2", []],
       ["g3", ["agent:a1"]],
     ]);
+  });
+});
+
+describe("moveItem", () => {
+  it("keeps the project folder when a bot moves in", () => {
+    const layout = {
+      groups: [{ id: "g1", name: "app", collapsed: false, items: [], path: "/tmp/app" }],
+      ungrouped: ["agent:a1"],
+    };
+    const next = moveItem(layout, "agent:a1", "g1", null, ["agent:a1"]);
+    expect(next.groups[0].path).toBe("/tmp/app");
+    expect(next.groups[0].items).toEqual(["agent:a1"]);
+    expect(next.ungrouped).toEqual([]);
   });
 });
 

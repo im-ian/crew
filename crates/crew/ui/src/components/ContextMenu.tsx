@@ -1,9 +1,12 @@
+import type { ReactNode } from "react";
+
 export type MenuEntry =
   | {
       type: "action";
       label: string;
       hint?: string;
       danger?: boolean;
+      icon?: ReactNode;
       onClick: () => void;
     }
   | { type: "sep" }
@@ -55,6 +58,7 @@ function MenuList({ items }: { items: MenuEntry[] }) {
             className={item.danger ? "ctx-remove" : undefined}
             onClick={item.onClick}
           >
+            {item.icon ? <span className="ctx-ico">{item.icon}</span> : null}
             {item.label}
             {item.hint ? <span className="ctx-hint">{item.hint}</span> : null}
           </button>

@@ -39,18 +39,59 @@ export function normalizeGroups(raw: unknown): RailLayout {
     const name = typeof g.name === "string" ? g.name.trim() : "";
     if (!id || !name || seen.has(id)) continue;
     seen.add(id);
-    out.push({
+    const path = typeof g.path === "string" ? g.path.trim() : "";
+    const next: Group = {
       id,
       name,
       collapsed: !!g.collapsed,
       items: uniqueKeys(items),
-    });
+    };
+    if (path) next.path = path;
+    out.push(next);
   }
   return { groups: out, ungrouped };
 }
 
+/** Last path segment. A trailing slash is the picker's, not part of the name. */
+export function folderName(path: string): string {
+  const trimmed = path.trim().replace(/[\\/]+$/, "");
+  const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return (cut >= 0 ? trimmed.slice(cut + 1) : trimmed).trim();
+}
+
+/** Working folder a project imposes. Blank is the same as none. */
+export function projectCwd(
+  group: { path?: string | null } | null | undefined,
+): string | null {
+  const path = group?.path?.trim() ?? "";
+  return path || null;
+}
+
+/** A bot sits in one place. A folder makes that place a project. */
+export function splitPlace(
+  groups: { id: string; path?: string | null }[],
+  id: string | null | undefined,
+): { groupId: string; projectId: string } {
+  if (!id) return { groupId: "", projectId: "" };
+  const found = groups.find((g) => g.id === id);
+  if (!found) return { groupId: "", projectId: "" };
+  if (projectCwd(found)) return { groupId: "", projectId: found.id };
+  return { groupId: found.id, projectId: "" };
+}
+
+function persistedGroup(g: Group): Group {
+  const path = projectCwd(g);
+  if (!path) {
+    if (g.path == null) return g;
+    return { id: g.id, name: g.name, collapsed: g.collapsed, items: g.items };
+  }
+  return { ...g, path };
+}
+
 export function toPersist(layout: RailLayout): Group[] {
-  const groups = layout.groups.filter((g) => g.id !== UNGROUPED_ID);
+  const groups = layout.groups
+    .filter((g) => g.id !== UNGROUPED_ID)
+    .map(persistedGroup);
   if (!layout.ungrouped.length) return groups;
   return [
     ...groups,

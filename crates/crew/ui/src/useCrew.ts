@@ -7,6 +7,14 @@ import {
   type MouseEvent,
 } from "react";
 import { api, errMsg, newestOnly, oneAtATime } from "./api";
+import {
+  applyStop,
+  heldFor,
+  rollbackSend,
+  sendKeptQueued,
+  withUnaccepted,
+  type HeldSend,
+} from "./sendGate";
 import { useT } from "./LocaleContext";
 import { loadNotify } from "./notifyPref";
 import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
@@ -19,6 +27,7 @@ import {
   moveItem,
   newGroupId,
   normalizeGroups,
+  projectCwd,
   pruneLayout,
   toPersist,
   UNGROUPED_ID,
@@ -68,6 +77,8 @@ export function useCrew() {
   const [confirmKind, setConfirmKind] = useState<ConfirmKind>("reset");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [newBotOpen, setNewBotOpen] = useState(false);
+  const [newBotPlace, setNewBotPlace] = useState<string | null>(null);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [toast, setToast] = useState({ text: "", show: false });
   const [ctx, setCtx] = useState<Ctx>({
     open: false,
@@ -88,6 +99,8 @@ export function useCrew() {
   const faceSave = useRef(Promise.resolve());
   const paneOpenRef = useRef(paneOpen);
   paneOpenRef.current = paneOpen;
+  const newProjectOpenRef = useRef(newProjectOpen);
+  newProjectOpenRef.current = newProjectOpen;
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
   const listAgents = useRef(newestOnly(api.listAgents)).current;
@@ -101,6 +114,8 @@ export function useCrew() {
   const toastTimer = useRef<number | null>(null);
   const cancelling = useRef(new Set<string>());
   const sendingQueued = useRef(new Set<string>());
+  const heldSends = useRef<HeldSend[]>([]);
+  const sendSeq = useRef(0);
 
   const currentAgent = useMemo(() => {
     if (selectedKind !== "agent" || !selected) return null;
@@ -175,8 +190,18 @@ export function useCrew() {
     setConfirmKind("reset");
   }
 
+  function openNewBot(groupId?: string | null) {
+    setNewBotPlace(groupId || null);
+    setNewBotOpen(true);
+  }
+
   function closeNewBot() {
+    setNewBotPlace(null);
     setNewBotOpen(false);
+  }
+
+  function pinCwd(id: string, cwd: string) {
+    void api.setCwd(id, cwd).then(() => refreshList()).catch((err) => showError(err));
   }
 
   function selectAgent(id: string, highlight: string | null = null) {
@@ -272,6 +297,45 @@ export function useCrew() {
     setPendingRenameId(id);
   }
 
+  function openNewProject() {
+    setNewProjectOpen(true);
+  }
+
+  function closeNewProject() {
+    setNewProjectOpen(false);
+  }
+
+  async function pickProjectFolder(): Promise<string | null> {
+    try {
+      return await api.pickFolder();
+    } catch (err) {
+      showError(err);
+      return null;
+    }
+  }
+
+  function createProject(name: string, path: string) {
+    const trimmed = name.trim();
+    const folder = path.trim();
+    if (!trimmed || !folder) return;
+    const current = groupsRef.current;
+    const id = newGroupId(current.groups.map((g) => g.id));
+    persistLayout({
+      groups: [
+        ...current.groups,
+        {
+          id,
+          name: uniqueGroupName(current.groups, trimmed),
+          collapsed: false,
+          items: [],
+          path: folder,
+        },
+      ],
+      ungrouped: current.ungrouped,
+    });
+    setNewProjectOpen(false);
+  }
+
   function renameGroup(id: string, name: string) {
     const trimmed = name.trim();
     if (!trimmed) return;
@@ -299,12 +363,17 @@ export function useCrew() {
     beforeKey?: string | null,
   ) {
     const current = groupsRef.current;
+    const fromId = groupIdOf(current.groups, kind, id);
     const visual = visibleUngroupedKeys(
       current.groups,
       current.ungrouped,
       agentsRef.current,
     );
     persistLayout(moveItem(current, itemKey(kind, id), groupId, beforeKey, visual));
+    if (kind !== "agent" || !groupId || groupId === fromId) return;
+    const dest = projectCwd(current.groups.find((g) => g.id === groupId));
+    const prev = projectCwd(current.groups.find((g) => g.id === fromId));
+    if (dest && dest !== prev) pinCwd(id, dest);
   }
 
   function reorderGroup(id: string, beforeId: string | null) {
@@ -396,19 +465,53 @@ export function useCrew() {
     }
     const next = await getMessages(id);
     if (!next) return;
-    setMessages(next);
+    // A send the daemon has not answered stays held, and stays off the bubble path.
+    setMessages(withUnaccepted(next, heldFor(id, heldSends.current)));
     setMessagesFor(id);
   }, []);
 
-  async function onSend(raw: string, steer = false) {
+  async function onSend(raw: string, steer = false): Promise<boolean> {
     const { id: sel } = selectedRef.current;
-    if (!sel) return;
+    if (!sel) return false;
+    sendSeq.current += 1;
+    const held: HeldSend = {
+      id: `local-send-${sendSeq.current}`,
+      agent: sel,
+      text: raw,
+    };
+    heldSends.current = [...heldSends.current, held];
+    if (selectedRef.current.id === sel) {
+      setMessages((prev) => withUnaccepted(prev, [held]));
+    }
+    let accepted = false;
     try {
       await api.sendMessage(sel, raw, steer);
-      await refreshMessages();
+      accepted = true;
     } catch (err) {
-      showError(err);
+      // A failed start can still leave the line queued. That is the waiting
+      // row, so the composer must not also put the draft back.
+      try {
+        const next = await getMessages(sel);
+        if (next && sendKeptQueued(next, raw)) accepted = true;
+        else showError(err);
+      } catch {
+        showError(err);
+      }
+    } finally {
+      heldSends.current = heldSends.current.filter((h) => h.id !== held.id);
     }
+    if (selectedRef.current.id === sel) {
+      // Failure drops the line this window inserted. Success then takes the daemon rows.
+      setMessages((prev) => rollbackSend(prev, held.id).messages);
+      if (accepted) {
+        try {
+          await refreshMessages();
+        } catch (err) {
+          showError(err);
+        }
+      }
+    }
+    return accepted;
   }
 
   async function stopAgent(agentId?: string) {
@@ -418,6 +521,8 @@ export function useCrew() {
     if (!id) return;
     try {
       await api.stopAgent(id);
+      // Stop adds no thread row. Whatever the daemon sends next is the thread.
+      setMessages((prev) => applyStop(prev));
       await refreshList();
       await refreshMessages();
     } catch (err) {
@@ -470,13 +575,13 @@ export function useCrew() {
     return "saved";
   }
 
-  async function approveAgent(allow: boolean, agentId?: string) {
+  async function approveAgent(allow: boolean, agentId?: string, always = false) {
     const id =
       agentId ||
       (selectedRef.current.kind === "agent" ? selectedRef.current.id : null);
     if (!id) return;
     try {
-      await api.approveAgent(id, allow);
+      await api.approveAgent(id, allow, always);
       await refreshList();
       await refreshMessages();
     } catch (err) {
@@ -694,7 +799,7 @@ export function useCrew() {
           setSelected(null);
           setMessages([]);
         }
-      } else if (kind === "remove-group") {
+      } else if (kind === "remove-group" || kind === "remove-project") {
         removeGroup(id);
         await refreshList();
         await refreshMessages();
@@ -734,6 +839,8 @@ export function useCrew() {
     cmd: string;
     shape: string | null;
     color: string | null;
+    groupId: string | null;
+    projectId: string | null;
   }) {
     const name = args.name.trim();
     if (!name) {
@@ -746,6 +853,19 @@ export function useCrew() {
       return;
     }
     const model = args.model.trim();
+    const project = args.projectId
+      ? groupsRef.current.groups.find(
+          (g) => g.id === args.projectId && projectCwd(g),
+        )
+      : undefined;
+    const group =
+      project || !args.groupId
+        ? undefined
+        : groupsRef.current.groups.find(
+            (g) => g.id === args.groupId && !projectCwd(g),
+          );
+    const placeId = project?.id ?? group?.id ?? null;
+    const cwd = project ? projectCwd(project) : null;
     try {
       const id = await api.addAgent({
         name,
@@ -755,6 +875,7 @@ export function useCrew() {
         role: null,
         description: null,
         cmd: args.cli === "custom" ? cmd : null,
+        cwd,
       });
       if (args.shape || args.color) {
         // The bot already exists. A face that fails to stick must not leave
@@ -790,6 +911,9 @@ export function useCrew() {
       setMessages([]);
       closePane();
       await refreshList();
+      if (placeId && groupsRef.current.groups.some((g) => g.id === placeId)) {
+        moveToGroup("agent", id, placeId);
+      }
       await refreshMessages();
     } catch (err) {
       showError(err);
@@ -909,6 +1033,11 @@ export function useCrew() {
     function onKey(e: KeyboardEvent) {
       if (e.defaultPrevented) return;
       if (e.key !== "Escape") return;
+      if (newProjectOpenRef.current) {
+        e.preventDefault();
+        setNewProjectOpen(false);
+        return;
+      }
       closeConfirm();
       closePane();
       closeNewBot();
@@ -1015,6 +1144,8 @@ export function useCrew() {
     confirmOpen,
     confirmKind,
     newBotOpen,
+    newBotPlace,
+    newProjectOpen,
     toast,
     ctx,
     groups,
@@ -1030,9 +1161,13 @@ export function useCrew() {
     openConfirm,
     closeConfirm,
     doConfirm,
-    openNewBot: () => setNewBotOpen(true),
+    openNewBot,
     closeNewBot,
     createBot,
+    openNewProject,
+    closeNewProject,
+    pickProjectFolder,
+    createProject,
     cloneBot,
     showCtx,
     showCreateMenu,

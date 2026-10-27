@@ -121,8 +121,12 @@ fn edit_queued(agent: String, message_id: String, text: String) -> Result<(), St
 }
 
 #[tauri::command(async)]
-fn approve_agent(agent: String, allow: bool) -> Result<(), String> {
-    match client::rpc(Request::Approve { agent, allow }) {
+fn approve_agent(agent: String, allow: bool, always: bool) -> Result<(), String> {
+    match client::rpc(Request::Approve {
+        agent,
+        allow,
+        always,
+    }) {
         Ok(Event::Ok) => Ok(()),
         Ok(Event::Error { message }) => Err(message),
         Ok(_) => Err("unexpected daemon response".into()),
@@ -367,6 +371,7 @@ fn add_agent(
     role: Option<String>,
     description: Option<String>,
     cmd: Option<String>,
+    cwd: Option<String>,
 ) -> Result<String, String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     let name = name.trim().to_string();
@@ -374,7 +379,8 @@ fn add_agent(
         return Err("name is required".into());
     }
     let (cmd, headless) = if cli.trim().eq_ignore_ascii_case("custom") {
-        let argv = crate::config::split_cmd(cmd.as_deref().unwrap_or("")).map_err(|e| e.to_string())?;
+        let argv =
+            crate::config::split_cmd(cmd.as_deref().unwrap_or("")).map_err(|e| e.to_string())?;
         let headless = crate::config::headless_cmd(true, &argv);
         (argv, headless)
     } else {
@@ -392,7 +398,7 @@ fn add_agent(
         id: id.clone(),
         name,
         cmd,
-        cwd: None,
+        cwd: cwd.and_then(empty_to_none),
         model,
         effort,
         headless,
@@ -670,6 +676,57 @@ fn set_notifications(enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Blank when the person cancels. A trailing slash is the dialog's, not part of the folder.
+fn folder_from_picker(stdout: &str) -> Option<String> {
+    let path = stdout.trim();
+    if path.is_empty() {
+        return None;
+    }
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    Some(if trimmed.is_empty() {
+        "/".to_string()
+    } else {
+        trimmed.to_string()
+    })
+}
+
+fn choose_folder_script(prompt: &str) -> String {
+    format!(
+        "try\nPOSIX path of (choose folder with prompt \"{prompt}\")\non error number -128\nreturn \"\"\nend try"
+    )
+}
+
+/// Native folder chooser. Cancel is `Ok(None)`, not an error.
+#[tauri::command(async)]
+fn pick_folder() -> Result<Option<String>, String> {
+    let prompt = if crate::paths::locale() == "en" {
+        "Project folder"
+    } else {
+        "프로젝트 폴더"
+    };
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(choose_folder_script(prompt))
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        let err = err.trim();
+        if err.is_empty() {
+            return Ok(None);
+        }
+        return Err(err.to_string());
+    }
+    let path = folder_from_picker(&String::from_utf8_lossy(&output.stdout));
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    if !std::path::Path::new(&path).is_dir() {
+        return Err(format!("not a folder: {path}"));
+    }
+    Ok(Some(path))
+}
+
 #[tauri::command(async)]
 fn open_path(path: String) -> Result<(), String> {
     let raw = path.trim();
@@ -825,6 +882,7 @@ pub fn run() -> anyhow::Result<()> {
             take_pending_focus,
             open_path,
             open_url,
+            pick_folder,
             set_dock_badge,
             set_locale,
             set_notifications
@@ -845,10 +903,7 @@ mod tests {
     #[test]
     fn every_window_command_is_granted() {
         let src = include_str!("desktop.rs");
-        let start = src
-            .find("generate_handler![")
-            .expect("handler")
-            + "generate_handler![".len();
+        let start = src.find("generate_handler![").expect("handler") + "generate_handler![".len();
         let end = src[start..].find("])").expect("handler end");
         let names: Vec<&str> = src[start..start + end]
             .lines()
@@ -890,12 +945,29 @@ mod tests {
     }
 
     #[test]
+    fn a_picked_folder_keeps_root_and_drops_a_cancel() {
+        assert_eq!(folder_from_picker("").as_deref(), None);
+        assert_eq!(folder_from_picker("  \n").as_deref(), None);
+        assert_eq!(
+            folder_from_picker("/Users/a/app/\n").as_deref(),
+            Some("/Users/a/app")
+        );
+        assert_eq!(folder_from_picker("/\n").as_deref(), Some("/"));
+        let script = choose_folder_script("프로젝트 폴더");
+        assert!(script.contains("프로젝트 폴더"));
+        assert!(script.contains("-128"));
+    }
+
+    #[test]
     fn a_web_or_mail_link_is_one_open_argument() {
         assert_eq!(
             web_url("https://example.com/a?b=1#c").unwrap(),
             "https://example.com/a?b=1#c"
         );
-        assert_eq!(web_url("  HTTP://Example.com  ").unwrap(), "HTTP://Example.com");
+        assert_eq!(
+            web_url("  HTTP://Example.com  ").unwrap(),
+            "HTTP://Example.com"
+        );
         assert_eq!(
             web_url("mailto:a@b.co?subject=hi").unwrap(),
             "mailto:a@b.co?subject=hi"

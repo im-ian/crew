@@ -48,6 +48,36 @@ export function trimMentionPunct(token: string): string {
   return token.replace(/[,.!?:;)\]}"']+$/, "");
 }
 
+/** `@id` where `handleAt` would end the handle. A longer token is not it. */
+export function mentionsId(text: string, id: string): boolean {
+  if (!text || !id) return false;
+  let prevWs = true;
+  for (let i = 0; i < text.length; i++) {
+    if (prevWs && text[i] === "@") {
+      const raw = (text.slice(i + 1).match(/^[^\s<]+/) || [""])[0];
+      const token = (raw.match(/^[A-Za-z0-9_-]+/) || [""])[0];
+      const rest = raw.slice(token.length);
+      const ends = !rest || /^[^\x00-\x7f]/.test(rest) || !trimMentionPunct(rest);
+      if (token === id && ends) return true;
+    }
+    prevWs = /\s/.test(text[i]);
+  }
+  return false;
+}
+
+/**
+ * The copy a user's @mention leaves in the named bot's chat.
+ * The sentence stays where it was typed, so this copy is not drawn.
+ */
+export function isSelfMentionDelivery(
+  m: { role: string; from: string; kind?: string | null; text?: string | null },
+  selfId: string | null | undefined,
+): boolean {
+  if (!selfId) return false;
+  if (m.role !== "system" || m.from !== "user" || m.kind !== "received") return false;
+  return mentionsId(m.text || "", selfId);
+}
+
 function attr(s: string): string {
   return String(s)
     .replace(/&/g, "&amp;")

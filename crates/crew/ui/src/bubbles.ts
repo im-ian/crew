@@ -9,6 +9,20 @@ const LINK_DEF = /^ {0,3}\[(?!\^)[^\]]+\]:[ \t]*\S/;
 /** A rule alone would be an empty balloon; the gap between balloons already divides them. */
 const RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 
+/** A one-line heading stays with the paragraph under it. */
+function isLabelLine(line: string): boolean {
+  const t = line.trim();
+  if (/^#{1,6}\s+\S/.test(t)) return true;
+  if (/^\*\*[^*\n]+\*\*$/.test(t) || /^__[^_\n]+__$/.test(t)) return true;
+  // "Format:" is a label. "Severity: bug" and "http://x" are not.
+  return /^[^:\n]+:$/.test(t);
+}
+
+function isLabelBlock(lines: string[]): boolean {
+  const kept = lines.map((line) => line.trim()).filter(Boolean);
+  return kept.length > 0 && kept.every(isLabelLine);
+}
+
 /** Split one assistant turn into chat balloons, one per paragraph. */
 export function splitBubbles(text: string): string[] {
   const parts: string[] = [];
@@ -35,7 +49,8 @@ export function splitBubbles(text: string): string[] {
     } else {
       const open = FENCE_OPEN.exec(line);
       // A fenced block is the answer to the line above it, so they share a balloon.
-      if (gap && !open) flush();
+      // A heading does too: it is the name of the paragraph under it.
+      if (gap && !open && !isLabelBlock(lines)) flush();
       gap = false;
       if (open) fence = open[1];
     }

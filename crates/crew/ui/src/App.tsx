@@ -9,15 +9,18 @@ import { ContextMenu, type MenuEntry } from "./components/ContextMenu";
 import { AgentPane } from "./components/AgentPane";
 import { ConnectionBanner } from "./components/ConnectionBanner";
 import { NewBotModal } from "./components/NewBotModal";
+import { NewProjectModal } from "./components/NewProjectModal";
 import { SettingsPane } from "./components/SettingsPane";
 import { SkillsPane } from "./components/SkillsPane";
 import { ShortcutHelp } from "./components/ShortcutHelp";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
 import { railOrder } from "./groups";
+import { Folder, Layers } from "./icons";
 import { useT } from "./LocaleContext";
 import type { TFn } from "./i18n";
 import { isTypingTarget, shortcutId } from "./shortcuts";
+import { popoverIsOpen } from "./usePopover";
 import {
   applyTheme,
   loadThemePref,
@@ -27,6 +30,7 @@ import {
 import { loadDelivery, saveDelivery } from "./deliveryPref";
 import { loadShowTools, saveShowTools } from "./tools";
 import { waitingEdit, waitingIds } from "./queuePick";
+import { stopTurn } from "./sendGate";
 import { useCrew } from "./useCrew";
 import { useUpdater } from "./updater";
 
@@ -102,7 +106,7 @@ export function App() {
     if (autoFor.current === sel && (!hit || hitFor.current === hit)) return;
     autoFor.current = sel;
     hitFor.current = hit;
-    const peer = sideOnlyPeer(crew.messages, crew.agents, hit);
+    const peer = sideOnlyPeer(crew.messages, crew.agents, hit, crew.selected);
     if (peer) setPeek({ peer, focus: hit ? [hit] : [], openAtFocus: !!hit });
   }, [
     crew.selected,
@@ -136,6 +140,7 @@ export function App() {
       // The skills window handles its own Escape, and no shortcut should act
       // on the app hidden behind it.
       if (skillsOpen) return;
+      if ((settingsOpen || helpOpen) && e.key === "Escape" && popoverIsOpen()) return;
       if (settingsOpen && e.key === "Escape") {
         e.preventDefault();
         setSettingsOpen(false);
@@ -195,7 +200,7 @@ export function App() {
         return;
       }
       if (id === "stop") {
-        void c.stopAgent();
+        stopTurn(() => void c.stopAgent());
         return;
       }
       if (id === "bottom") {
@@ -293,7 +298,9 @@ export function App() {
               crew.currentAgent?.status === "blocked")
           }
           onSelectAgent={crew.selectAgent}
-          onApprove={(allow, id) => void crew.approveAgent(allow, id)}
+          onApprove={(allow, id, always) =>
+            void crew.approveAgent(allow, id, !!always)
+          }
           onCancelQueued={(id) => void crew.cancelQueued(id)}
           onEditQueued={(id, text, reply) =>
             composerRef.current?.edit(id, text, reply)
@@ -340,9 +347,7 @@ export function App() {
           }
           canSteer={crew.currentAgent?.status === "working"}
           delivery={delivery}
-          onStop={() => {
-            void crew.stopAgent();
-          }}
+          onStop={() => stopTurn(() => void crew.stopAgent())}
           onOpenSkills={() => setSkillsOpen(true)}
           onDrafts={(ids) =>
             setDrafting((prev) =>
@@ -394,8 +399,16 @@ export function App() {
       />
       <NewBotModal
         open={crew.newBotOpen}
+        groups={crew.groups}
+        placeId={crew.newBotPlace}
         onClose={crew.closeNewBot}
         onCreate={crew.createBot}
+      />
+      <NewProjectModal
+        open={crew.newProjectOpen}
+        onClose={crew.closeNewProject}
+        onPickFolder={crew.pickProjectFolder}
+        onCreate={crew.createProject}
       />
       <ContextMenu
         open={crew.ctx.open}
@@ -452,19 +465,43 @@ function menuItems(
           crew.openNewBot();
         },
       },
+      { type: "sep" },
       {
         type: "action",
         label: t("menu.newGroup"),
+        icon: <Layers size={14} />,
         onClick: () => {
           crew.hideCtx();
           crew.createGroup();
+        },
+      },
+      {
+        type: "action",
+        label: t("menu.newProject"),
+        icon: <Folder size={14} />,
+        onClick: () => {
+          crew.hideCtx();
+          crew.openNewProject();
         },
       },
     ];
   }
   if (ctx.kind === "group") {
     const id = ctx.id;
-    return [
+    const project = id ? groups.find((g) => g.id === id) : undefined;
+    const items: MenuEntry[] = [];
+    if (id) {
+      items.push({
+        type: "action",
+        label: t("menu.newBot"),
+        onClick: () => {
+          crew.hideCtx();
+          crew.openNewBot(id);
+        },
+      });
+      items.push({ type: "sep" });
+    }
+    items.push(
       {
         type: "action",
         label: t("menu.rename"),
@@ -475,14 +512,15 @@ function menuItems(
       },
       {
         type: "action",
-        label: t("menu.deleteGroup"),
+        label: project?.path ? t("menu.deleteProject") : t("menu.deleteGroup"),
         danger: true,
         onClick: () => {
           crew.hideCtx();
-          if (id) crew.openConfirm(id, "remove-group");
+          if (id) crew.openConfirm(id, project?.path ? "remove-project" : "remove-group");
         },
       },
-    ];
+    );
+    return items;
   }
   const id = ctx.id;
   const currentGroup = id ? crew.itemGroupId("agent", id) : null;
@@ -491,6 +529,7 @@ function menuItems(
     .map((g) => ({
       type: "action" as const,
       label: g.name,
+      icon: g.path ? <Folder size={14} /> : <Layers size={14} />,
       onClick: () => {
         crew.hideCtx();
         if (id) crew.moveToGroup("agent", id, g.id);

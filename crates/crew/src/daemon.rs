@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
+use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{broadcast, oneshot};
@@ -173,6 +174,12 @@ static ORIGINS: OnceLock<Mutex<HashMap<String, TurnOrigin>>> = OnceLock::new();
 static PENDING_HANDOFFS: OnceLock<Mutex<HashMap<String, Vec<PendingHandoff>>>> = OnceLock::new();
 /// Jobs that wait on a bot's turn in progress, then run one at a time in order.
 static SERIAL: OnceLock<Mutex<SerialBoard>> = OnceLock::new();
+/// Bot-to-bot tells restored after a restart. Not the user inbox: a user line
+/// and a tell that were both waiting come back in different lists.
+static RECOVERED_TELLS: OnceLock<Mutex<HashMap<String, VecDeque<PendingDelivery>>>> =
+    OnceLock::new();
+/// One silent resend per prompt. A second hang parks instead of sending again.
+static SILENT_RETRIES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 #[derive(Clone)]
 struct PendingDelivery {
@@ -499,9 +506,19 @@ pub(crate) fn requeue_unanswered(id: &str, flight: headless::InFlight) {
         }
         for mut item in prompt.into_iter().rev() {
             item.parked = true;
+            if let Some(mid) = &item.msg_id {
+                if let Some(existing) = q
+                    .iter_mut()
+                    .find(|d| d.msg_id.as_deref() == Some(mid.as_str()))
+                {
+                    existing.parked = true;
+                    continue;
+                }
+            }
             q.push_front(item);
         }
     }
+    note_parked(id, parked_ids(id));
 }
 
 fn inbox_front_parked(id: &str) -> bool {
@@ -513,18 +530,21 @@ fn inbox_front_parked(id: &str) -> bool {
 }
 
 fn unpark_prefix(id: &str) {
-    let Ok(mut map) = inbox().lock() else {
-        return;
-    };
-    let Some(q) = map.get_mut(id) else {
-        return;
-    };
-    for item in q.iter_mut() {
-        if !item.parked {
-            break;
+    {
+        let Ok(mut map) = inbox().lock() else {
+            return;
+        };
+        let Some(q) = map.get_mut(id) else {
+            return;
+        };
+        for item in q.iter_mut() {
+            if !item.parked {
+                break;
+            }
+            item.parked = false;
         }
-        item.parked = false;
     }
+    note_parked(id, parked_ids(id));
 }
 
 fn enqueue_delivery(
@@ -536,25 +556,31 @@ fn enqueue_delivery(
     origin: TurnOrigin,
     then: &mut VecDeque<SerialJob>,
 ) -> anyhow::Result<()> {
-    let mut map = inbox().lock().expect("inbox mutex");
-    let q = map.entry(id.to_string()).or_default();
-    if q.len() >= MAX_INBOX {
-        anyhow::bail!("agent {id} is busy (inbox full)");
-    }
-    // Marked before anyone can pop it. A turn that ends right after the push
-    // starts it and clears the mark, and a mark set after that stayed up.
-    if let Some(mid) = msg_id.as_deref() {
-        crate::transcript::set_queued(id, mid, true);
-    }
-    q.push_back(PendingDelivery {
-        text: text.to_string(),
-        newline,
-        msg_id,
-        joins,
-        origin,
-        then: std::mem::take(then),
-        parked: false,
-    });
+    let saved = {
+        let mut map = inbox().lock().expect("inbox mutex");
+        let q = map.entry(id.to_string()).or_default();
+        if q.len() >= MAX_INBOX {
+            anyhow::bail!("agent {id} is busy (inbox full)");
+        }
+        // Marked before anyone can pop it. A turn that ends right after the push
+        // starts it and clears the mark, and a mark set after that stayed up.
+        if let Some(mid) = msg_id.as_deref() {
+            crate::transcript::set_queued(id, mid, true);
+        }
+        let item = PendingDelivery {
+            text: text.to_string(),
+            newline,
+            msg_id,
+            joins,
+            origin,
+            then: std::mem::take(then),
+            parked: false,
+        };
+        let saved = item.clone();
+        q.push_back(item);
+        saved
+    };
+    remember_tell(id, &saved);
     Ok(())
 }
 
@@ -619,11 +645,18 @@ fn halt_turn(id: &str) -> anyhow::Result<()> {
     // the one that runs when they eventually go out.
     clear_serial_after(id);
     take_wake(id);
-    let live = {
-        let map = agents().lock().expect("agents mutex");
-        map.get(id)
-            .cloned()
-            .with_context(|| format!("unknown agent {id}"))?
+    // Epoch is already moved. Failing to record the stop, or to take a lock,
+    // must not keep the turn alive or panic out of the stop.
+    let live = match agents().lock() {
+        Ok(map) => map.get(id).cloned(),
+        Err(_) => {
+            finish_halted_turn(id);
+            return Ok(());
+        }
+    };
+    let Some(live) = live else {
+        finish_halted_turn(id);
+        anyhow::bail!("unknown agent {id}");
     };
     match live {
         LiveAgent::Headless(session) => headless::interrupt(&session),
@@ -634,11 +667,21 @@ fn halt_turn(id: &str) -> anyhow::Result<()> {
 }
 
 fn finish_halted_turn(id: &str) {
+    // Each step returns when its lock is unavailable. None of them adds a row,
+    // and a miss does not undo the epoch bump above.
     crate::transcript::end_turn(id);
     let closed = crate::transcript::close_pending_choices(id);
     fail_asks(&closed, "interrupted");
     crate::transcript::drop_pending_approval(id);
     emit_agent_frame(id);
+}
+
+fn unheard_line() -> &'static str {
+    if crate::paths::locale() == "en" {
+        "The CLI is not responding."
+    } else {
+        "CLI가 응답하지 않습니다"
+    }
 }
 
 /// The first-output watch. The turn never spoke, so it ends like a stop and
@@ -648,18 +691,19 @@ pub(crate) fn halt_unheard(id: &str, flight: headless::InFlight) {
     take_wake(id);
     requeue_unanswered(id, flight);
     finish_halted_turn(id);
-    let line = if crate::paths::locale() == "en" {
-        "The CLI is not responding."
-    } else {
-        "CLI가 응답하지 않습니다"
-    };
-    crate::transcript::push_system(id, "crew", line, None);
+    crate::transcript::push_system(id, "crew", unheard_line(), None);
 }
 
 /// The first-output watch on a resumed turn. Its session is already dropped,
 /// so the prompt goes back to the front ready to start again on a new one.
 /// What waits on this turn keeps waiting: it is the same turn, sent again.
 pub(crate) fn retry_unheard(id: &str, flight: headless::InFlight) {
+    if !claim_silent_retry(id, &flight.msg_ids, &flight.text) {
+        // This prompt was already sent again once. Park it. Do not send it
+        // another time, and do not add a second copy of the line.
+        park_unheard_again(id, flight);
+        return;
+    }
     requeue_unanswered(id, flight);
     unpark_prefix(id);
     finish_halted_turn(id);
@@ -671,10 +715,84 @@ pub(crate) fn retry_unheard(id: &str, flight: headless::InFlight) {
     crate::transcript::push_system(id, "crew", line, None);
 }
 
-fn approve_agent(id: &str, allow: bool) -> anyhow::Result<()> {
+/// The one retry was used. Leave the prompt parked and say so once.
+fn park_unheard_again(id: &str, flight: headless::InFlight) {
+    clear_serial_after(id);
+    take_wake(id);
+    requeue_unanswered(id, flight);
+    finish_halted_turn(id);
+    let line = unheard_line();
+    let said = crate::transcript::messages(id)
+        .iter()
+        .any(|m| m.role == Role::System && m.text == line);
+    if !said {
+        crate::transcript::push_system(id, "crew", line, None);
+    }
+}
+
+fn auto_approve_gate() -> &'static Mutex<()> {
+    static GATE: OnceLock<Mutex<()>> = OnceLock::new();
+    GATE.get_or_init(|| Mutex::new(()))
+}
+
+fn auto_approve_path() -> PathBuf {
+    paths::home_dir().join("auto-approve.json")
+}
+
+fn read_auto_approve() -> HashSet<String> {
+    fs::read_to_string(auto_approve_path())
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .collect()
+}
+
+fn write_auto_approve(ids: &HashSet<String>) -> anyhow::Result<()> {
+    let mut list: Vec<_> = ids.iter().cloned().collect();
+    list.sort();
+    paths::ensure_home()?;
+    let raw = serde_json::to_string(&list)? + "\n";
+    paths::write_atomic(&auto_approve_path(), raw.as_bytes())?;
+    Ok(())
+}
+
+fn agent_auto_approves(id: &str) -> bool {
+    let _gate = auto_approve_gate()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    read_auto_approve().contains(id)
+}
+
+fn remember_auto_approve(id: &str) -> anyhow::Result<()> {
+    let _gate = auto_approve_gate()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let mut ids = read_auto_approve();
+    if !ids.insert(id.to_string()) {
+        return Ok(());
+    }
+    write_auto_approve(&ids)
+}
+
+fn forget_auto_approve(id: &str) {
+    let _gate = auto_approve_gate()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let mut ids = read_auto_approve();
+    if !ids.remove(id) {
+        return;
+    }
+    let _ = write_auto_approve(&ids);
+}
+
+fn approve_agent(id: &str, allow: bool, always: bool) -> anyhow::Result<()> {
     let Some(msg) = crate::transcript::pending_approval(id) else {
         anyhow::bail!("no pending approval");
     };
+    if allow && always {
+        remember_auto_approve(id)?;
+    }
     let state = if allow {
         crate::protocol::ApprovalState::Allowed
     } else {
@@ -1053,6 +1171,7 @@ fn steer_delivery(
                 parked: false,
             });
     }
+    note_parked(id, parked_ids(id));
     pump_inbox_inner(id);
     Ok(())
 }
@@ -1110,6 +1229,37 @@ fn pump_inbox_inner(id: &str) {
         return;
     };
     let mut run = next_run(id);
+    if run.first().is_none() {
+        // A parked user line stays until the user sends. A restored tell is
+        // not that line, and it does not start ahead of one.
+        if inbox_front_parked(id) {
+            return;
+        }
+        let Some(tell) = pop_recovered_tell(id) else {
+            return;
+        };
+        let text = tell.text.clone();
+        let origin = tell.origin.clone();
+        let msg_id = tell.msg_id.clone();
+        let joined: Vec<String> = msg_id.iter().cloned().collect();
+        let newline = tell.newline;
+        let prompt = vec![tell.clone()];
+        let mut then = VecDeque::new();
+        match start_delivery(
+            start,
+            &text,
+            newline,
+            origin,
+            msg_id.as_deref(),
+            &joined,
+            &mut then,
+            prompt,
+        ) {
+            Ok(()) => unmark(id, &tell),
+            Err(_) => push_recovered_front(id, tell),
+        }
+        return;
+    }
     let Some(first) = run.first() else {
         return;
     };
@@ -1158,14 +1308,20 @@ fn pump_inbox_inner(id: &str) {
                 }
             }
         }
+        // The turn did not start. Put the lines back at the front, still
+        // waiting. Clearing the mark here dropped a line the user had not
+        // gotten through, and pumping again walked into the same failure.
         Err(err) => {
-            for item in &run {
-                unmark(id, item);
+            for (item, n) in run.iter_mut().zip(named) {
+                item.then = then.drain(..n).collect();
+            }
+            if let Ok(mut map) = inbox().lock() {
+                let q = map.entry(id.to_string()).or_default();
+                for item in run.into_iter().rev() {
+                    q.push_front(item);
+                }
             }
             eprintln!("[crew] inbox {id}: {err:#}");
-            // The rest of its chain goes on without this bot.
-            release(then);
-            pump_inbox_inner(id);
         }
     }
 }
@@ -1205,6 +1361,7 @@ fn next_run(id: &str) -> Vec<PendingDelivery> {
 fn unmark(id: &str, item: &PendingDelivery) {
     if let Some(mid) = &item.msg_id {
         crate::transcript::set_queued(id, mid, false);
+        forget_wait(id, mid);
     }
 }
 
@@ -1222,6 +1379,7 @@ fn cancel_queued(id: &str, msg_id: &str) -> anyhow::Result<()> {
     };
     settle_handoff(id, msg_id, false);
     crate::transcript::remove_row(id, msg_id);
+    forget_wait(id, msg_id);
     item.then.retain(|job| !job.named_in(id));
     release(item.then);
     Ok(())
@@ -1234,7 +1392,7 @@ fn edit_queued(id: &str, msg_id: &str, text: &str) -> anyhow::Result<()> {
         anyhow::bail!("an edited message needs text");
     }
     let roster = roster_vec();
-    {
+    let saved = {
         let mut map = inbox()
             .lock()
             .map_err(|_| anyhow::anyhow!("inbox lock poisoned"))?;
@@ -1245,10 +1403,12 @@ fn edit_queued(id: &str, msg_id: &str, text: &str) -> anyhow::Result<()> {
             anyhow::bail!("that message is no longer waiting");
         };
         // Only a row that shows all the bot will get: not a choice answer with
-        // its secrets masked, nor a note the daemon wrote.
+        // its secrets masked, nor a note the daemon wrote. The hint is optional.
+        // A newer line may have dropped the teammates this one named, and then
+        // the waiting text is the raw line again.
         let old = crate::transcript::text_of(id, msg_id).filter(|old| {
-            item.origin == TurnOrigin::user()
-                && crate::config::with_mention_hint(old, id, &roster) == item.text
+            let hinted = crate::config::with_mention_hint(old, id, &roster);
+            item.origin == TurnOrigin::user() && (item.text == *old || item.text == hinted)
         });
         let Some(old) = old else {
             anyhow::bail!("that message can't be edited");
@@ -1267,9 +1427,11 @@ fn edit_queued(id: &str, msg_id: &str, text: &str) -> anyhow::Result<()> {
         let mut then = named_tells(text, id, &roster);
         then.extend(item.then.drain(own..));
         item.then = then;
-    }
-    // Off the inbox lock: this writes the file.
+        item.clone()
+    };
+    // Off the inbox lock: both of these write a file.
     crate::transcript::set_text(id, msg_id, text);
+    remember_named(id, &saved);
     Ok(())
 }
 
@@ -1318,6 +1480,7 @@ fn send_queued_now(id: &str, msg_id: &str) -> anyhow::Result<()> {
                     Ok(()) => {
                         if let Some(mid) = mid.as_deref() {
                             crate::transcript::set_queued(id, mid, false);
+                            forget_wait(id, mid);
                         }
                         return Ok(());
                     }
@@ -1347,9 +1510,12 @@ fn put_queued_front(id: &str, item: PendingDelivery) {
     if let Some(mid) = item.msg_id.as_deref() {
         crate::transcript::set_queued(id, mid, true);
     }
+    let saved = item.clone();
     if let Ok(mut map) = inbox().lock() {
         map.entry(id.to_string()).or_default().push_front(item);
     }
+    remember_tell(id, &saved);
+    note_parked(id, parked_ids(id));
 }
 
 #[cfg(test)]
@@ -1466,11 +1632,16 @@ fn follow_turn(agent: &str, epoch: u64, mut jobs: VecDeque<SerialJob>) {
 
 /// A stop: nothing waiting on this turn answers it.
 fn clear_serial_after(agent: &str) {
-    if let Ok(mut board) = serial_board().lock() {
+    let epoch = {
+        let Ok(mut board) = serial_board().lock() else {
+            return;
+        };
         board.queues.remove(agent);
         let epoch = board.epoch.entry(agent.to_string()).or_insert(0);
         *epoch = epoch.wrapping_add(1);
-    }
+        *epoch
+    };
+    note_epoch(agent, epoch);
 }
 
 /// A newer message from the user drops the teammates their earlier ones named
@@ -1483,10 +1654,45 @@ fn drop_mention_followers(agent: &str) {
             q.retain(|job| !job.named_in(agent));
         }
     }
-    if let Ok(mut map) = inbox().lock() {
-        for item in map.get_mut(agent).into_iter().flatten() {
+    // The hint says those teammates already have the request. Once their
+    // tells are dropped, the queued line goes back to the raw transcript.
+    let raw: HashMap<String, String> = crate::transcript::messages(agent)
+        .into_iter()
+        .filter(|message| message.role == Role::User)
+        .map(|message| (message.id, message.text))
+        .collect();
+    let rewritten = {
+        let Ok(mut map) = inbox().lock() else {
+            return;
+        };
+        let Some(q) = map.get_mut(agent) else {
+            return;
+        };
+        let mut rewritten = Vec::new();
+        for item in q.iter_mut() {
+            let before = item.then.len();
             item.then.retain(|job| !job.named_in(agent));
+            if item.then.len() == before {
+                continue;
+            }
+            if item.origin.from != "user" || item.origin.reply_agent.is_some() {
+                continue;
+            }
+            if !item.then.iter().any(|job| job.named_in(agent)) {
+                if let Some(mid) = item.msg_id.as_deref() {
+                    if let Some(text) = raw.get(mid) {
+                        item.text = text.clone();
+                    }
+                }
+            }
+            rewritten.push(item.clone());
         }
+        rewritten
+    };
+    // Disk is updated after the inbox lock. A restart would otherwise put
+    // the dropped tells back on this line.
+    for item in &rewritten {
+        remember_named(agent, item);
     }
 }
 
@@ -1799,6 +2005,383 @@ fn open_agent(
     }
 }
 
+fn recovered_tells() -> &'static Mutex<HashMap<String, VecDeque<PendingDelivery>>> {
+    RECOVERED_TELLS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn pop_recovered_tell(id: &str) -> Option<PendingDelivery> {
+    let mut map = recovered_tells().lock().ok()?;
+    let q = map.get_mut(id)?;
+    let item = q.pop_front()?;
+    if q.is_empty() {
+        map.remove(id);
+    }
+    Some(item)
+}
+
+fn push_recovered_front(id: &str, item: PendingDelivery) {
+    if let Ok(mut map) = recovered_tells().lock() {
+        map.entry(id.to_string()).or_default().push_front(item);
+    }
+}
+
+fn inbox_has(id: &str, msg_id: &str) -> bool {
+    inbox()
+        .lock()
+        .ok()
+        .and_then(|map| {
+            map.get(id)
+                .map(|q| q.iter().any(|d| d.msg_id.as_deref() == Some(msg_id)))
+        })
+        .unwrap_or(false)
+}
+
+fn parked_ids(id: &str) -> Vec<String> {
+    inbox()
+        .lock()
+        .ok()
+        .and_then(|map| {
+            map.get(id).map(|q| {
+                q.iter()
+                    .filter(|d| d.parked)
+                    .filter_map(|d| d.msg_id.clone())
+                    .collect()
+            })
+        })
+        .unwrap_or_default()
+}
+
+fn silent_retries() -> &'static Mutex<HashSet<String>> {
+    SILENT_RETRIES.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// `true` the first time this prompt is sent again after a silent resume.
+fn claim_silent_retry(id: &str, msg_ids: &[String], text: &str) -> bool {
+    let key = format!("{id}\0{}\0{text}", msg_ids.join("\0"));
+    let mut set = match silent_retries().lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    set.insert(key)
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+struct AgentWaits {
+    #[serde(default)]
+    epoch: u64,
+    #[serde(default)]
+    parked: Vec<String>,
+    #[serde(default)]
+    tells: Vec<SavedTell>,
+    /// `@` tells still riding on a queued user line. They are not delivered yet.
+    #[serde(default)]
+    named: Vec<SavedNamed>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct SavedTell {
+    msg_id: String,
+    from: String,
+    text: String,
+    hops: u32,
+    #[serde(default)]
+    wake_spent: bool,
+    epoch: u64,
+    #[serde(default)]
+    reply_agent: Option<String>,
+    #[serde(default)]
+    routine: Option<String>,
+    #[serde(default)]
+    skip_judgment: bool,
+}
+
+/// One teammate a queued user line still has to message.
+#[derive(Clone, Serialize, Deserialize)]
+struct SavedNamed {
+    msg_id: String,
+    to: String,
+    text: String,
+    #[serde(default)]
+    reply_agent: Option<String>,
+}
+
+fn waits_edit_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn load_waits(id: &str) -> AgentWaits {
+    let Ok(bytes) = fs::read(paths::waits_path(id)) else {
+        return AgentWaits::default();
+    };
+    serde_json::from_slice(&bytes).unwrap_or_default()
+}
+
+fn update_waits(id: &str, edit: impl FnOnce(&mut AgentWaits)) {
+    let _guard = waits_edit_lock().lock().unwrap_or_else(|p| p.into_inner());
+    let mut saved = load_waits(id);
+    let before = serde_json::to_string(&saved).unwrap_or_default();
+    edit(&mut saved);
+    let after = serde_json::to_string(&saved).unwrap_or_default();
+    if before == after {
+        return;
+    }
+    let path = paths::waits_path(id);
+    let empty = saved.epoch == 0
+        && saved.parked.is_empty()
+        && saved.tells.is_empty()
+        && saved.named.is_empty();
+    if empty {
+        let _ = fs::remove_file(&path);
+        return;
+    }
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(bytes) = serde_json::to_vec(&saved) {
+        let _ = paths::write_atomic(&path, &bytes);
+    }
+}
+
+fn note_epoch(id: &str, epoch: u64) {
+    update_waits(id, |saved| {
+        // A stop with nothing waiting does not need a file. The epoch is
+        // worth keeping once a tell or a parked line already is.
+        let tracked = saved.epoch > 0
+            || !saved.parked.is_empty()
+            || !saved.tells.is_empty()
+            || !saved.named.is_empty();
+        if tracked && epoch > saved.epoch {
+            saved.epoch = epoch;
+        }
+    });
+}
+
+fn note_parked(id: &str, parked: Vec<String>) {
+    let epoch = serial_epoch(id);
+    update_waits(id, |saved| {
+        if !parked.is_empty() {
+            saved.epoch = saved.epoch.max(epoch);
+        }
+        if saved.parked != parked {
+            saved.parked = parked;
+        }
+    });
+}
+
+/// A bot-to-bot tell sitting in the inbox. The epoch is the target's at the
+/// moment it was queued, and it is not rewritten when the target is stopped.
+fn remember_tell(id: &str, item: &PendingDelivery) {
+    if item.origin.from.is_empty() {
+        return;
+    }
+    // The user's own waiting line is not a tell. The `@` jobs on it are.
+    // A tell the user already handed to the target is a system row, even
+    // when it has no reply chat, and has to be saved like any other tell.
+    if item.origin.from == "user" && item.origin.reply_agent.is_none() {
+        let system = item.msg_id.as_ref().is_some_and(|msg_id| {
+            crate::transcript::messages(id)
+                .iter()
+                .any(|m| &m.id == msg_id && m.role == Role::System)
+        });
+        if !system {
+            remember_named(id, item);
+            return;
+        }
+    }
+    let Some(msg_id) = item.msg_id.clone() else {
+        return;
+    };
+    let epoch = serial_epoch(id);
+    update_waits(id, |saved| {
+        saved.epoch = saved.epoch.max(epoch);
+        if saved.tells.iter().any(|tell| tell.msg_id == msg_id) {
+            return;
+        }
+        saved.tells.push(SavedTell {
+            msg_id,
+            from: item.origin.from.clone(),
+            text: item.text.clone(),
+            hops: item.origin.hops,
+            wake_spent: item.origin.wake_spent,
+            epoch,
+            reply_agent: item.origin.reply_agent.clone(),
+            routine: item.origin.routine.clone(),
+            skip_judgment: item.origin.skip_judgment,
+        });
+    });
+}
+
+/// `@` tells still waiting on a queued user line. Replaces that line's list.
+fn remember_named(id: &str, item: &PendingDelivery) {
+    let Some(msg_id) = item.msg_id.clone() else {
+        return;
+    };
+    let named: Vec<SavedNamed> = item
+        .then
+        .iter()
+        .filter_map(|job| {
+            let SerialKind::Tell { from, text, origin } = &job.kind;
+            if from != "user" {
+                return None;
+            }
+            Some(SavedNamed {
+                msg_id: msg_id.clone(),
+                to: job.to.clone(),
+                text: text.clone(),
+                reply_agent: origin.as_ref().and_then(|o| o.reply_agent.clone()),
+            })
+        })
+        .collect();
+    update_waits(id, |saved| {
+        saved.named.retain(|row| row.msg_id != msg_id);
+        saved.named.extend(named);
+    });
+}
+
+fn forget_wait(id: &str, msg_id: &str) {
+    let msg_id = msg_id.to_string();
+    update_waits(id, |saved| {
+        saved.parked.retain(|parked| parked != &msg_id);
+        saved.tells.retain(|tell| tell.msg_id != msg_id);
+        saved.named.retain(|row| row.msg_id != msg_id);
+    });
+}
+
+fn drop_waits(id: &str) {
+    let _ = fs::remove_file(paths::waits_path(id));
+    if let Ok(mut map) = recovered_tells().lock() {
+        map.remove(id);
+    }
+    let prefix = format!("{id}\0");
+    if let Ok(mut set) = silent_retries().lock() {
+        set.retain(|key| !key.starts_with(&prefix));
+    }
+}
+
+fn restore_epoch(agent: &str, epoch: u64) {
+    if let Ok(mut board) = serial_board().lock() {
+        board.epoch.insert(agent.to_string(), epoch);
+    }
+}
+
+/// Queued user lines go to the front of that bot's inbox, in transcript order.
+/// A line whose turn already spoke is not put back. Tells that were not
+/// accepted go to a separate list, with the hops they already had. A tell
+/// whose target has moved past the epoch it was created in is dropped.
+fn restore_waiting(cfg: &Config) {
+    let roster = &cfg.agents;
+    for agent_cfg in &cfg.agents {
+        let id = &agent_cfg.id;
+        let saved = load_waits(id);
+        restore_epoch(id, saved.epoch);
+        let current = serial_epoch(id);
+        let msgs = crate::transcript::messages(id);
+        let mut users = Vec::new();
+        for (i, message) in msgs.iter().enumerate() {
+            if message.role != Role::User || !message.queued {
+                continue;
+            }
+            let answered = msgs[i + 1..]
+                .iter()
+                .any(|later| later.role == Role::Assistant && later.peer.is_none());
+            if answered {
+                crate::transcript::set_queued(id, &message.id, false);
+                forget_wait(id, &message.id);
+                continue;
+            }
+            users.push(message.clone());
+        }
+        let joins_ok = !agent_cfg.uses_pty();
+        if let Ok(mut map) = inbox().lock() {
+            let q = map.entry(id.to_string()).or_default();
+            let existing = std::mem::take(q);
+            let mut front = VecDeque::new();
+            for message in users {
+                if existing
+                    .iter()
+                    .chain(front.iter())
+                    .any(|item| item.msg_id.as_deref() == Some(message.id.as_str()))
+                {
+                    continue;
+                }
+                let parked = saved.parked.iter().any(|parked| parked == &message.id);
+                let mut then = VecDeque::new();
+                for row in saved.named.iter().filter(|row| row.msg_id == message.id) {
+                    let reply = row
+                        .reply_agent
+                        .clone()
+                        .unwrap_or_else(|| id.to_string());
+                    then.push_back(SerialJob {
+                        to: row.to.clone(),
+                        kind: SerialKind::Tell {
+                            from: "user".into(),
+                            text: row.text.clone(),
+                            origin: Some(TurnOrigin::mention_tell(&reply)),
+                        },
+                        own: false,
+                    });
+                }
+                // The hint says those teammates already have the request. It is
+                // only true once their tells are still here to be sent.
+                let text = if then.is_empty() {
+                    message.text.clone()
+                } else {
+                    crate::config::with_mention_hint(&message.text, id, roster)
+                };
+                front.push_back(PendingDelivery {
+                    text,
+                    newline: true,
+                    msg_id: Some(message.id),
+                    joins: joins_ok && !is_slash_command(&message.text),
+                    origin: TurnOrigin::user(),
+                    then,
+                    parked,
+                });
+            }
+            front.extend(existing);
+            *q = front;
+        }
+        let mut tells = VecDeque::new();
+        for message in &msgs {
+            if message.role != Role::System || !message.queued {
+                continue;
+            }
+            let Some(meta) = saved.tells.iter().find(|tell| tell.msg_id == message.id) else {
+                continue;
+            };
+            if current > meta.epoch {
+                crate::transcript::set_queued(id, &message.id, false);
+                forget_wait(id, &message.id);
+                continue;
+            }
+            tells.push_back(PendingDelivery {
+                text: meta.text.clone(),
+                newline: true,
+                msg_id: Some(meta.msg_id.clone()),
+                joins: false,
+                origin: TurnOrigin {
+                    from: meta.from.clone(),
+                    reply_agent: meta.reply_agent.clone(),
+                    routine: meta.routine.clone(),
+                    hops: meta.hops,
+                    wake_spent: meta.wake_spent,
+                    skip_judgment: meta.skip_judgment,
+                },
+                then: VecDeque::new(),
+                parked: false,
+            });
+        }
+        if let Ok(mut map) = recovered_tells().lock() {
+            if tells.is_empty() {
+                map.remove(id);
+            } else {
+                map.insert(id.to_string(), tells);
+            }
+        }
+    }
+}
+
 /// Boot reads back what every configured bot already owns on disk. Creating a
 /// bot drops that id's transcript first, so a freed id cannot open onto the
 /// old conversation.
@@ -1806,6 +2389,7 @@ fn restore_transcripts(cfg: &Config) {
     for agent_cfg in &cfg.agents {
         crate::transcript::load_agent(&agent_cfg.id);
     }
+    restore_waiting(cfg);
 }
 
 /// Two readings in a row before acting, because one `stat` can fail for
@@ -1862,6 +2446,11 @@ pub async fn run() -> anyhow::Result<()> {
                 }
             }
         }
+    }
+    // Waiting lines come back with the transcripts. Parked ones stay parked.
+    // A tell is only started here when that bot has no user line ready.
+    for agent_cfg in &cfg.agents {
+        pump_inbox_inner(&agent_cfg.id);
     }
     let _ = write_roster(&cfg.agents);
 
@@ -2315,7 +2904,11 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
                 message: err.to_string(),
             }],
         },
-        Request::Approve { agent, allow } => match approve_agent(&agent, allow) {
+        Request::Approve {
+            agent,
+            allow,
+            always,
+        } => match approve_agent(&agent, allow, always) {
             Ok(()) => vec![Event::Ok],
             Err(err) => vec![Event::Error {
                 message: err.to_string(),
@@ -2636,6 +3229,7 @@ fn send_from_user(id: &str, shown: &str, text: &str, steer: bool) -> anyhow::Res
     let mut then = named_tells(text, id, &roster);
     let delivered = crate::config::with_mention_hint(text, id, &roster);
     let named_here = then.len();
+    let headless_joins = is_headless(id) && !is_slash_command(text);
     if matches!(live_status(id), Ok(AgentStatus::Blocked)) {
         // A message to a bot waiting on allow / deny answers it, as Allow
         // does: the turn goes on in this one, and what waited on it waits on
@@ -2645,21 +3239,37 @@ fn send_from_user(id: &str, shown: &str, text: &str, steer: bool) -> anyhow::Res
         drop_mention_followers(id);
     }
     let started = if action == UserSendAction::Redirect {
-        steer_delivery(id, &delivered, msg.id, &mut then)
+        steer_delivery(id, &delivered, msg.id.clone(), &mut then)
     } else {
         // A terminal takes each Enter as a prompt of its own, so only a
         // headless CLI gets waiting lines together. A command goes alone.
-        let joins = is_headless(id) && !is_slash_command(text);
         submit_delivery_then(
             id,
             &delivered,
             true,
-            Some(msg.id),
-            joins,
+            Some(msg.id.clone()),
+            headless_joins,
             TurnOrigin::user(),
             &mut then,
         )
     };
+    // The turn never started and the line is not already waiting: keep it at
+    // the front, still queued. The teammates it named are released below, as
+    // they were when a start failed.
+    if started.is_err() && !inbox_has(id, &msg.id) {
+        put_queued_front(
+            id,
+            PendingDelivery {
+                text: delivered,
+                newline: true,
+                msg_id: Some(msg.id),
+                joins: action != UserSendAction::Redirect && headless_joins,
+                origin: TurnOrigin::user(),
+                then: VecDeque::new(),
+                parked: false,
+            },
+        );
+    }
     if started.is_err() {
         let held = then.split_off(named_here.min(then.len()));
         if agent_busy(id).unwrap_or(true) {
@@ -3035,6 +3645,7 @@ fn remove_agent(id: &str) -> anyhow::Result<()> {
     crate::headless::clear_session(id);
     crate::headless::clear_recap(id);
     clear_inbox(id);
+    drop_waits(id);
     // Before the kill, which would otherwise put a silent prompt back.
     forget_prompt(id);
     clear_agent_context(id);
@@ -3044,6 +3655,7 @@ fn remove_agent(id: &str) -> anyhow::Result<()> {
     // back moments after we unlink it.
     crate::transcript::drop_agent(id);
     crate::memory::remove(id);
+    forget_auto_approve(id);
     save_state()?;
     inject_roster_update(None);
     Ok(())
@@ -3422,15 +4034,8 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
             enqueue_handoff(&peer, agent, &text, Some(&row.id));
         }
     }
-    // A reply the user cut off with a stop is not a question waiting on them.
-    // skip_judgment is a new bot asking what to take, not a permission check.
-    if !origin.skip_judgment
-        && crate::interrupt::looks_like_judgment_question(&text)
-        && !agent_interrupted(agent)
-    {
-        crate::transcript::set_approval(agent, &msg.id, crate::protocol::ApprovalState::Pending);
-        set_live_status(agent, AgentStatus::Blocked);
-    }
+    // Permission prompts stay with the CLI, which already runs allow-all.
+    // A sentence like "진행할까요?" is a normal reply, not a card.
 }
 
 /// `id`'s turn is over: wake the bot waiting on its answer, and stop tagging
@@ -3537,8 +4142,14 @@ mod daemon_tests {
             headless::save_session(&bot, "claude-session").unwrap();
 
             session.inner.lock().unwrap().status = AgentStatus::Working;
-            assert!(set_cli(&bot, "codex", Vec::new()).unwrap_err().to_string().contains("working"));
-            assert_eq!(headless::load_session(&bot).as_deref(), Some("claude-session"));
+            assert!(set_cli(&bot, "codex", Vec::new())
+                .unwrap_err()
+                .to_string()
+                .contains("working"));
+            assert_eq!(
+                headless::load_session(&bot).as_deref(),
+                Some("claude-session")
+            );
             session.inner.lock().unwrap().status = AgentStatus::Idle;
 
             set_cli(&bot, "codex", Vec::new()).unwrap();
@@ -3745,7 +4356,8 @@ mod daemon_tests {
             let mention = rows.iter().find(|m| m.from == "user").expect("mention");
             assert_eq!(mention.peer, None, "the chat they typed in did not ask");
             assert!(
-                rows.iter().all(|m| m.peer.as_deref() != Some(chat.as_str())),
+                rows.iter()
+                    .all(|m| m.peer.as_deref() != Some(chat.as_str())),
                 "a mention does not tag the turn with that chat: {rows:?}"
             );
 
@@ -4216,7 +4828,7 @@ mod daemon_tests {
             assert!(crate::transcript::pending_approval(&bot).is_none());
             wait_idle(&bot);
             assert!(
-                approve_agent(&bot, true).is_err(),
+                approve_agent(&bot, true, false).is_err(),
                 "nothing left to approve"
             );
             remove_agent(&bot).unwrap();
@@ -4435,10 +5047,16 @@ mod daemon_tests {
             assert_eq!(tries.len(), 2, "{sent}");
             assert!(tries[0].starts_with("resume:"), "{sent}");
             assert!(tries[1].starts_with("fresh:"), "{sent}");
-            assert!(system_said(&bot, "CLI가 이전 세션에서 응답하지 않아 새 세션으로 다시 보냅니다"));
+            assert!(system_said(
+                &bot,
+                "CLI가 이전 세션에서 응답하지 않아 새 세션으로 다시 보냅니다"
+            ));
             assert!(!system_said(&bot, "CLI가 응답하지 않습니다"));
             assert!(queued_text(&bot).is_empty(), "{:?}", queued_text(&bot));
-            assert_ne!(headless::load_session(&bot).as_deref(), Some("stuck-session"));
+            assert_ne!(
+                headless::load_session(&bot).as_deref(),
+                Some("stuck-session")
+            );
             remove_agent(&bot).unwrap();
         });
     }
@@ -4455,15 +5073,20 @@ mod daemon_tests {
             set_output_wait(&bot, Duration::from_millis(400));
             resume_from(&bot, "stuck-session");
             send_agent(&bot, "하나").unwrap();
-            eventually(Duration::from_secs(5), "the second stall was not reported", || {
-                system_said(&bot, "CLI가 응답하지 않습니다")
-            });
+            eventually(
+                Duration::from_secs(5),
+                "the second stall was not reported",
+                || system_said(&bot, "CLI가 응답하지 않습니다"),
+            );
             assert_eq!(queued_text(&bot), ["하나"]);
             assert!(!agent_busy(&bot).unwrap(), "the stall left the bot working");
             std::thread::sleep(Duration::from_millis(900));
             let sent = fs::read_to_string(&log).unwrap();
             assert_eq!(sent.matches("하나").count(), 2, "{sent}");
-            assert!(system_said(&bot, "CLI가 이전 세션에서 응답하지 않아 새 세션으로 다시 보냅니다"));
+            assert!(system_said(
+                &bot,
+                "CLI가 이전 세션에서 응답하지 않아 새 세션으로 다시 보냅니다"
+            ));
             remove_agent(&bot).unwrap();
         });
     }
@@ -4914,11 +5537,17 @@ exec sleep 5"#,
 
             cancel_queued(&bot, &row.id).unwrap();
             assert!(inbox_is_empty(&bot));
-            assert!(inbox_is_empty(&b), "B was named only by the cancelled message");
+            assert!(
+                inbox_is_empty(&b),
+                "B was named only by the cancelled message"
+            );
             assert!(!crate::transcript::messages(&bot)
                 .iter()
                 .any(|m| m.id == row.id));
-            assert!(cancel_queued(&bot, &row.id).is_err(), "nothing left to cancel");
+            assert!(
+                cancel_queued(&bot, &row.id).is_err(),
+                "nothing left to cancel"
+            );
 
             for id in [&bot, &b] {
                 set_status(id, AgentStatus::Idle);
@@ -5178,7 +5807,7 @@ exec sleep 1"#,
             set_live_status(&bot, AgentStatus::Blocked);
             defer_tell(&bot, &builder, &bot, "구현해줘", None);
 
-            approve_agent(&bot, true).unwrap();
+            approve_agent(&bot, true, false).unwrap();
             eventually(Duration::from_secs(5), "Continue never started", || {
                 fs::read_to_string(&prompt)
                     .unwrap_or_default()
@@ -5340,9 +5969,8 @@ exec sleep 1"#,
         });
     }
 
-    /// "What should I work on?" matches the allow/deny markers. A new bot's
-    /// first question is not a permission check, so that turn stays a reply.
-    /// The same sentence on an ordinary user turn still raises the card.
+    /// "What should I work on?" matches the old allow/deny markers. That
+    /// sentence is a normal reply on a new bot and on an ordinary turn.
     #[test]
     fn a_new_bot_question_is_not_an_approval_card() {
         paths::testing::with_home("new-bot-ask", || {
@@ -5374,10 +6002,100 @@ exec sleep 1"#,
             assert_eq!(live_status(&bot).unwrap(), AgentStatus::Idle);
 
             seal(TurnOrigin::user());
-            assert!(crate::transcript::pending_approval(&bot).is_some());
-            assert_eq!(live_status(&bot).unwrap(), AgentStatus::Blocked);
+            assert!(crate::transcript::pending_approval(&bot).is_none());
+            assert_eq!(live_status(&bot).unwrap(), AgentStatus::Idle);
 
             take_origin(&bot);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// Allow once answers this card only. Always allow remembers the bot.
+    /// A later "삭제할까요?" is still a normal reply: no card, no Continue.
+    #[test]
+    fn always_allow_skips_the_next_question() {
+        paths::testing::with_home("always-allow", || {
+            paths::write_notifications_enabled(false);
+            let bot = test_id("always");
+            insert_spawned_agent(AgentConfig::new(
+                bot.clone(),
+                bot.clone(),
+                AgentCli::Claude.default_cmd(),
+                None,
+            ))
+            .unwrap();
+
+            // A live child keeps Allow from starting a new CLI while it records
+            // the choice. Status alone does not: Allow sets the bot idle first.
+            use std::os::unix::process::CommandExt;
+            let child = std::process::Command::new("sleep")
+                .arg("30")
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            match agents().lock().unwrap().get(&bot) {
+                Some(LiveAgent::Headless(session)) => {
+                    session.inner.lock().unwrap().child = Some(child);
+                }
+                _ => panic!("runs headless"),
+            }
+
+            let once = crate::transcript::push_system(&bot, "crew", "이 파일을 삭제할까요?", None);
+            crate::transcript::set_approval(
+                &bot,
+                &once.id,
+                crate::protocol::ApprovalState::Pending,
+            );
+            approve_agent(&bot, true, false).unwrap();
+            assert!(!agent_auto_approves(&bot));
+            clear_inbox(&bot);
+
+            let stay = crate::transcript::push_system(&bot, "crew", "로그도 삭제할까요?", None);
+            crate::transcript::set_approval(
+                &bot,
+                &stay.id,
+                crate::protocol::ApprovalState::Pending,
+            );
+            approve_agent(&bot, true, true).unwrap();
+            assert!(agent_auto_approves(&bot));
+            clear_inbox(&bot);
+
+            let child = match agents().lock().unwrap().get(&bot) {
+                Some(LiveAgent::Headless(session)) => session.inner.lock().unwrap().child.take(),
+                _ => None,
+            };
+            if let Some(mut child) = child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            headless_status(&bot, AgentStatus::Working);
+            set_origin(&bot, TurnOrigin::user());
+            let row = crate::transcript::push_system(&bot, "crew", "x", None);
+            let row_id = row.id.clone();
+            let reply = ChatMessage {
+                role: Role::Assistant,
+                text: "남은 로그도 삭제할까요?".into(),
+                ..row
+            };
+            on_assistant_sealed(&bot, &reply);
+            assert!(crate::transcript::pending_approval(&bot).is_none());
+            let kept = crate::transcript::messages(&bot)
+                .into_iter()
+                .find(|m| m.id == row_id)
+                .expect("sealed row");
+            assert_eq!(kept.approval, None);
+            let queued = inbox()
+                .lock()
+                .unwrap()
+                .get(&bot)
+                .and_then(|q| q.front().map(|item| item.text.clone()))
+                .unwrap_or_default();
+            assert!(!queued.contains("Continue"), "{queued}");
+            assert_eq!(live_status(&bot).unwrap(), AgentStatus::Working);
+
+            take_origin(&bot);
+            headless_status(&bot, AgentStatus::Idle);
+            clear_inbox(&bot);
             remove_agent(&bot).unwrap();
         });
     }
@@ -5712,5 +6430,437 @@ exec sleep 1"#,
         assert_eq!(job.to, b);
         let SerialKind::Tell { text, .. } = job.kind;
         assert_eq!(text, "kept");
+    }
+
+    fn inbox_texts(id: &str) -> Vec<(String, bool)> {
+        inbox()
+            .lock()
+            .unwrap()
+            .get(id)
+            .map(|q| {
+                q.iter()
+                    .map(|item| (item.text.clone(), item.parked))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// A stop returns, adds no transcript row, and a follower from before the
+    /// stop does not attach. Closing an approval is bookkeeping, not a new row.
+    #[test]
+    fn a_stop_returns_without_a_new_row() {
+        paths::testing::with_home("halt-return", || {
+            let bot = test_id("halt");
+            fake_bot(&bot, "");
+            wait_idle(&bot);
+            crate::transcript::begin_turn(&bot);
+            crate::transcript::on_assistant_delta(&bot, "이대로 진행할까요?");
+            crate::transcript::end_turn(&bot);
+            let ask = crate::transcript::messages(&bot).last().unwrap().id.clone();
+            crate::transcript::set_approval(&bot, &ask, crate::protocol::ApprovalState::Pending);
+            let before = crate::transcript::messages(&bot).len();
+            let seen = serial_epoch(&bot);
+            follow_turn(&bot, seen, VecDeque::from([tell_job("reviewer", "이어서")]));
+            assert_eq!(take_followers(&bot).len(), 1);
+
+            halt_turn(&bot).unwrap();
+
+            assert_eq!(crate::transcript::messages(&bot).len(), before);
+            assert!(crate::transcript::pending_approval(&bot).is_none());
+            assert!(take_followers(&bot).is_empty());
+            follow_turn(&bot, seen, VecDeque::from([tell_job("reviewer", "늦음")]));
+            assert!(
+                take_followers(&bot).is_empty(),
+                "a follower from the stopped turn attached"
+            );
+            assert!(!system_said(&bot, "CLI가 응답하지 않습니다"));
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// The inbox error path used to clear the waiting mark when a start failed.
+    /// The lines stay at the front, still queued, and a second pump does not
+    /// spin. A send that fails before the turn starts is put back the same way.
+    #[test]
+    fn a_failed_start_keeps_the_user_line_queued_at_the_front() {
+        paths::testing::with_home("start-rollback", || {
+            let bot = test_id("rollback");
+            fake_bot(&bot, "");
+            wait_idle(&bot);
+            headless_status(&bot, AgentStatus::Working);
+            send_agent(&bot, "하나").unwrap();
+            send_agent(&bot, "둘").unwrap();
+            assert_eq!(queued_text(&bot), ["하나", "둘"]);
+            configs().lock().unwrap().remove(&bot);
+            headless_status(&bot, AgentStatus::Idle);
+            let before = crate::transcript::messages(&bot).len();
+
+            pump_inbox(&bot);
+            pump_inbox(&bot);
+
+            assert_eq!(queued_text(&bot), ["하나", "둘"]);
+            let waiting = inbox_texts(&bot);
+            assert!(waiting[0].0.contains("하나"), "{waiting:?}");
+            assert!(waiting[1].0.contains("둘"), "{waiting:?}");
+            assert_eq!(crate::transcript::messages(&bot).len(), before);
+
+            let err = send_agent(&bot, "셋").unwrap_err();
+            assert!(!err.to_string().contains("is working"), "{err}");
+            assert_eq!(queued_text(&bot), ["하나", "둘", "셋"]);
+            let waiting = inbox_texts(&bot);
+            assert!(waiting[0].0.contains("셋"), "{waiting:?}");
+            assert_eq!(waiting.len(), 3, "{waiting:?}");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// Cancel and edit only reach a line that is still in the inbox.
+    #[test]
+    fn an_accepted_line_cannot_be_cancelled_or_edited() {
+        paths::testing::with_home("accepted-line", || {
+            let bot = test_id("accepted");
+            let log = paths::home_dir().join("prompts");
+            fake_bot_running(&bot, &hold_when(&log, "안녕"));
+            wait_idle(&bot);
+            headless_status(&bot, AgentStatus::Working);
+            send_agent(&bot, "안녕").unwrap();
+            assert_eq!(queued_text(&bot), ["안녕"]);
+            headless_status(&bot, AgentStatus::Idle);
+            pump_inbox(&bot);
+            assert!(queued_text(&bot).is_empty(), "the line was still waiting");
+            let row = crate::transcript::messages(&bot)
+                .into_iter()
+                .find(|m| m.role == Role::User && m.text == "안녕")
+                .unwrap();
+            assert!(cancel_queued(&bot, &row.id).is_err());
+            assert!(edit_queued(&bot, &row.id, "다른 말").is_err());
+            let still = crate::transcript::messages(&bot)
+                .into_iter()
+                .find(|m| m.id == row.id)
+                .unwrap();
+            assert_eq!(still.text, "안녕");
+            interrupt_turn(&bot).unwrap();
+            wait_idle(&bot);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A prompt that never answers is sent again once. The next time it is parked.
+    #[test]
+    fn a_silent_resend_happens_once_per_prompt() {
+        paths::testing::with_home("silent-once", || {
+            let bot = test_id("once");
+            let row = crate::transcript::push_user(&bot, "user", "하나");
+            let flight = || headless::InFlight {
+                text: "하나".into(),
+                msg_ids: vec![row.id.clone()],
+                got_output: false,
+                resumed: true,
+            };
+            retry_unheard(&bot, flight());
+            assert!(system_said(
+                &bot,
+                "CLI가 이전 세션에서 응답하지 않아 새 세션으로 다시 보냅니다"
+            ));
+            assert!(!system_said(&bot, "CLI가 응답하지 않습니다"));
+            assert_eq!(inbox_texts(&bot), [("하나".into(), false)]);
+
+            retry_unheard(&bot, flight());
+            retry_unheard(&bot, flight());
+
+            assert_eq!(inbox_texts(&bot), [("하나".into(), true)]);
+            assert_eq!(queued_text(&bot), ["하나"]);
+            let again = crate::transcript::messages(&bot)
+                .iter()
+                .filter(|m| m.text == "CLI가 이전 세션에서 응답하지 않아 새 세션으로 다시 보냅니다")
+                .count();
+            let parked = crate::transcript::messages(&bot)
+                .iter()
+                .filter(|m| m.text == "CLI가 응답하지 않습니다")
+                .count();
+            assert_eq!(again, 1);
+            assert_eq!(parked, 1);
+            crate::transcript::drop_agent(&bot);
+            drop_waits(&bot);
+        });
+    }
+
+    /// After a restart, queued user lines are at the front of that bot's inbox
+    /// in order. A parked line does not start. A turn that already spoke is not
+    /// put back. An unaccepted tell comes back on its own list, with the hops
+    /// it had, and is dropped once the target's epoch has moved past it.
+    #[test]
+    fn a_restart_restores_queued_user_lines_and_tells_apart() {
+        paths::testing::with_home("restore-waits", || {
+            let bot = test_id("back");
+            let other = test_id("from");
+            let log = paths::home_dir().join("prompts");
+            fake_bot_running(
+                &bot,
+                &format!("printf '%s|' \"$last\" >> '{}'", log.display()),
+            );
+            wait_idle(&bot);
+
+            // The reply stays under the user line. Marking it queued after that
+            // is a turn that already spoke and must not be sent again.
+            let done = crate::transcript::push_user(&bot, "user", "했어");
+            crate::transcript::begin_turn(&bot);
+            crate::transcript::on_assistant_delta(&bot, "답");
+            crate::transcript::end_turn(&bot);
+            crate::transcript::set_queued(&bot, &done.id, true);
+            let one = crate::transcript::push_user(&bot, "user", "하나");
+            let two = crate::transcript::push_user(&bot, "user", "둘");
+            crate::transcript::set_queued(&bot, &one.id, true);
+            crate::transcript::set_queued(&bot, &two.id, true);
+            note_parked(&bot, vec![two.id.clone()]);
+            let tell = crate::transcript::push_system(&bot, &other, "이어서", None);
+            crate::transcript::set_queued(&bot, &tell.id, true);
+            remember_tell(
+                &bot,
+                &PendingDelivery {
+                    text: crate::protocol::envelope(&other, "이어서"),
+                    newline: true,
+                    msg_id: Some(tell.id.clone()),
+                    joins: false,
+                    origin: TurnOrigin {
+                        from: other.clone(),
+                        hops: 3,
+                        wake_spent: true,
+                        ..TurnOrigin::default()
+                    },
+                    then: VecDeque::new(),
+                    parked: false,
+                },
+            );
+            assert_eq!(targeting::MAX_RELAY_HOPS, 4);
+            let stored = fs::read_to_string(paths::transcript_path(&bot)).unwrap();
+            assert!(stored.contains("\"queued\":true"), "{stored}");
+
+            clear_inbox(&bot);
+            recovered_tells().lock().unwrap().remove(&bot);
+            restore_epoch(&bot, 0);
+            let cfg = Config {
+                agents: vec![AgentConfig::new(
+                    bot.clone(),
+                    bot.clone(),
+                    vec!["claude".into()],
+                    None,
+                )],
+            };
+            restore_transcripts(&cfg);
+
+            let waiting = inbox_texts(&bot);
+            assert_eq!(waiting.len(), 2, "{waiting:?}");
+            assert!(
+                waiting[0].0.contains("하나") && !waiting[0].1,
+                "{waiting:?}"
+            );
+            assert!(waiting[1].0.contains("둘") && waiting[1].1, "{waiting:?}");
+            assert!(!crate::transcript::messages(&bot)
+                .iter()
+                .any(|m| m.text == "했어" && m.queued));
+            let tells = recovered_tells().lock().unwrap().get(&bot).cloned();
+            let tells = tells.unwrap();
+            assert_eq!(tells.len(), 1);
+            assert_eq!(tells[0].origin.hops, 3);
+            assert!(tells[0].origin.wake_spent);
+            assert_eq!(tells[0].origin.from, other);
+            assert!(inbox_texts(&bot).iter().all(|(text, _)| text != "이어서"));
+
+            pump_inbox(&bot);
+            eventually(
+                Duration::from_secs(5),
+                "the waiting line never started",
+                || fs::read_to_string(&log).is_ok_and(|s| s.contains("하나")),
+            );
+            wait_idle(&bot);
+            let sent = fs::read_to_string(&log).unwrap();
+            assert!(!sent.contains("둘"), "{sent}");
+            assert_eq!(inbox_texts(&bot), [(waiting[1].0.clone(), true)]);
+            let tells = recovered_tells()
+                .lock()
+                .unwrap()
+                .get(&bot)
+                .cloned()
+                .unwrap();
+            assert_eq!(tells[0].origin.hops, 3);
+            assert!(tells[0].origin.wake_spent);
+
+            pump_inbox(&bot);
+            assert_eq!(inbox_texts(&bot).len(), 1);
+            assert!(inbox_texts(&bot)[0].1);
+            assert!(!fs::read_to_string(&log).unwrap().contains("둘"));
+
+            clear_serial_after(&bot);
+            clear_inbox(&bot);
+            recovered_tells().lock().unwrap().remove(&bot);
+            restore_transcripts(&cfg);
+            assert!(recovered_tells().lock().unwrap().get(&bot).is_none());
+            assert!(!crate::transcript::messages(&bot)
+                .iter()
+                .any(|m| m.id == tell.id && m.queued));
+            let left = inbox_texts(&bot);
+            assert_eq!(left.len(), 1, "{left:?}");
+            assert!(left[0].0.contains("둘") && left[0].1, "{left:?}");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A queued `@` stays on the user line, and a user tell already in the
+    /// target inbox comes back on the tell list. Neither is reported as sent
+    /// unless it is still going out.
+    #[test]
+    fn a_restart_keeps_queued_mentions_and_user_tells() {
+        paths::testing::with_home("restore-mention", || {
+            let bot = test_id("src");
+            let peer = test_id("dst");
+            let cfg = Config {
+                agents: vec![
+                    AgentConfig::new(bot.clone(), bot.clone(), vec!["claude".into()], None),
+                    AgentConfig::new(peer.clone(), peer.clone(), vec!["claude".into()], None),
+                ],
+            };
+            let line_text = format!("봐줘 @{peer}");
+            let line = crate::transcript::push_user(&bot, "user", &line_text);
+            crate::transcript::set_queued(&bot, &line.id, true);
+            let then = named_tells(&line_text, &bot, &cfg.agents);
+            assert_eq!(then.len(), 1, "the mention did not name the peer");
+            remember_tell(
+                &bot,
+                &PendingDelivery {
+                    text: line_text.clone(),
+                    newline: true,
+                    msg_id: Some(line.id.clone()),
+                    joins: true,
+                    origin: TurnOrigin::user(),
+                    then,
+                    parked: false,
+                },
+            );
+
+            let mentioned =
+                crate::transcript::push_system(&peer, "user", "봐줘", Some(bot.clone()));
+            crate::transcript::set_queued(&peer, &mentioned.id, true);
+            remember_tell(
+                &peer,
+                &PendingDelivery {
+                    text: crate::protocol::envelope("user", "봐줘"),
+                    newline: true,
+                    msg_id: Some(mentioned.id.clone()),
+                    joins: false,
+                    origin: TurnOrigin::mention_tell(&bot),
+                    then: VecDeque::new(),
+                    parked: false,
+                },
+            );
+            let direct = crate::transcript::push_system(&peer, "user", "직접", None);
+            crate::transcript::set_queued(&peer, &direct.id, true);
+            remember_tell(
+                &peer,
+                &PendingDelivery {
+                    text: crate::protocol::envelope("user", "직접"),
+                    newline: true,
+                    msg_id: Some(direct.id.clone()),
+                    joins: false,
+                    origin: TurnOrigin::user(),
+                    then: VecDeque::new(),
+                    parked: false,
+                },
+            );
+
+            clear_inbox(&bot);
+            clear_inbox(&peer);
+            recovered_tells().lock().unwrap().remove(&bot);
+            recovered_tells().lock().unwrap().remove(&peer);
+            restore_transcripts(&cfg);
+
+            let waiting = inbox().lock().unwrap().get(&bot).cloned().unwrap();
+            assert_eq!(waiting.len(), 1);
+            assert!(
+                waiting[0].text.contains(&peer) && waiting[0].text.contains("already messaged"),
+                "{}",
+                waiting[0].text
+            );
+            assert_eq!(waiting[0].then.len(), 1);
+            assert_eq!(waiting[0].then[0].to, peer);
+
+            let tells = recovered_tells()
+                .lock()
+                .unwrap()
+                .get(&peer)
+                .cloned()
+                .unwrap();
+            assert_eq!(tells.len(), 2);
+            assert!(tells.iter().any(|item| {
+                item.msg_id.as_deref() == Some(mentioned.id.as_str())
+                    && item.origin.reply_agent.as_deref() == Some(bot.as_str())
+            }));
+            assert!(tells.iter().any(|item| {
+                item.msg_id.as_deref() == Some(direct.id.as_str()) && item.origin.from == "user"
+            }));
+
+            clear_inbox(&bot);
+            clear_inbox(&peer);
+            recovered_tells().lock().unwrap().remove(&bot);
+            recovered_tells().lock().unwrap().remove(&peer);
+            crate::transcript::drop_agent(&bot);
+            crate::transcript::drop_agent(&peer);
+            drop_waits(&bot);
+            drop_waits(&peer);
+        });
+    }
+
+    /// Dropping the teammates a queued line named has to stick across a
+    /// restart. The line still mentions them, and that must not bring the
+    /// tells back or claim they were already sent.
+    #[test]
+    fn a_dropped_mention_stays_dropped_after_restart() {
+        paths::testing::with_home("drop-named", || {
+            let bot = test_id("src");
+            let peer = test_id("dst");
+            let cfg = Config {
+                agents: vec![
+                    AgentConfig::new(bot.clone(), bot.clone(), vec!["claude".into()], None),
+                    AgentConfig::new(peer.clone(), peer.clone(), vec!["claude".into()], None),
+                ],
+            };
+            let line_text = format!("봐줘 @{peer}");
+            let line = crate::transcript::push_user(&bot, "user", &line_text);
+            crate::transcript::set_queued(&bot, &line.id, true);
+            let then = named_tells(&line_text, &bot, &cfg.agents);
+            assert_eq!(then.len(), 1);
+            if let Ok(mut map) = inbox().lock() {
+                map.entry(bot.clone()).or_default().push_back(PendingDelivery {
+                    text: crate::config::with_mention_hint(&line_text, &bot, &cfg.agents),
+                    newline: true,
+                    msg_id: Some(line.id.clone()),
+                    joins: true,
+                    origin: TurnOrigin::user(),
+                    then,
+                    parked: false,
+                });
+            }
+            remember_tell(
+                &bot,
+                &inbox().lock().unwrap().get(&bot).unwrap()[0].clone(),
+            );
+            drop_mention_followers(&bot);
+            clear_inbox(&bot);
+            recovered_tells().lock().unwrap().remove(&bot);
+            restore_transcripts(&cfg);
+            let waiting = inbox().lock().unwrap().get(&bot).cloned().unwrap();
+            assert_eq!(waiting.len(), 1);
+            assert!(waiting[0].then.is_empty(), "then {}", waiting[0].then.len());
+            assert!(
+                !waiting[0].text.contains("already messaged"),
+                "{}",
+                waiting[0].text
+            );
+            assert!(waiting[0].text.contains(&peer));
+            crate::transcript::drop_agent(&bot);
+            crate::transcript::drop_agent(&peer);
+            drop_waits(&bot);
+            drop_waits(&peer);
+        });
     }
 }

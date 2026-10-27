@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   injectMentionChips,
+  isSelfMentionDelivery,
   mentionIds,
+  mentionsId,
   mentionRuns,
   mentionText,
   resolveMention,
@@ -163,6 +165,38 @@ describe("mentionRuns edge cases", () => {
       { text: "@alpha ping" },
     ]);
     expect(mentionRuns("", agents)).toEqual([]);
+  });
+});
+
+describe("a mention delivered into the named bot's chat", () => {
+  const copy = {
+    role: "system",
+    from: "user",
+    kind: "received" as const,
+    text: "@grok-project 에게 물어봐서 바꿔줘",
+  };
+
+  it("is the received copy that names this bot", () => {
+    expect(mentionsId(copy.text, "grok-project")).toBe(true);
+    expect(mentionsId("@grok-project, 다음", "grok-project")).toBe(true);
+    expect(mentionsId("mail@grok-project now", "grok-project")).toBe(false);
+    expect(mentionsId("@grok-project-2 hi", "grok-project")).toBe(false);
+    expect(mentionsId("@grok-project.ai 봐", "grok-project")).toBe(false);
+    expect(mentionsId("@grok-project/cli 봐", "grok-project")).toBe(false);
+    expect(mentionsId("@grok-project's 봐", "grok-project")).toBe(false);
+    expect(isSelfMentionDelivery(copy, "grok-project")).toBe(true);
+  });
+
+  it("stays in the chat where it was typed", () => {
+    expect(
+      isSelfMentionDelivery(
+        { role: "user", from: "user", text: copy.text },
+        "grok-project",
+      ),
+    ).toBe(false);
+    expect(isSelfMentionDelivery(copy, "someone-else")).toBe(false);
+    expect(isSelfMentionDelivery({ ...copy, from: "alpha" }, "grok-project")).toBe(false);
+    expect(isSelfMentionDelivery(copy, null)).toBe(false);
   });
 });
 
