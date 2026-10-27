@@ -36,6 +36,30 @@ describe("splitBubbles", () => {
     ]);
   });
 
+  it("keeps a heading with the paragraph under it", () => {
+    const text = [
+      "Format:",
+      "",
+      "**Summary**",
+      "",
+      "<2 to 4 sentence overall assessment.>",
+      "",
+      "## Issues",
+      "",
+      "**Issue 1 -- Severity:** bug",
+      "- File: path",
+      "",
+      "Severity must be one of: bug, suggestion, nit.",
+    ].join("\n");
+    expect(splitBubbles(text)).toEqual([
+      "Format:\n\n**Summary**\n\n<2 to 4 sentence overall assessment.>",
+      "## Issues\n\n**Issue 1 -- Severity:** bug\n- File: path",
+      "Severity must be one of: bug, suggestion, nit.",
+    ]);
+    expect(splitBubbles("본문.\n\n## 끝")).toEqual(["본문.", "## 끝"]);
+    expect(splitBubbles("Severity: bug\n\n다음")).toEqual(["Severity: bug", "다음"]);
+  });
+
   it("gives each paragraph of a long answer its own balloon", () => {
     const text =
       "계정은 **3개**입니다. 세 계정 모두 활성 상태입니다.\n\n" +

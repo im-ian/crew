@@ -7,6 +7,7 @@ import { useT } from "../LocaleContext";
 import { mediaKind } from "../markdown";
 import { mentionIds, resolveMention, trimMentionPunct } from "../mentions";
 import { sendSteers, type Delivery } from "../deliveryPref";
+import { composerAfterSend } from "../sendGate";
 import { stepQueuePick } from "../queuePick";
 import { oneLine, wrapReply, type ReplyTarget } from "../reply";
 import { Avatar } from "./Avatar";
@@ -26,7 +27,8 @@ type Props = {
   selected: string | null;
   selectedKind: Kind;
   placeholder: string;
-  onSend: (raw: string, steer: boolean) => Promise<void>;
+  /** False when the daemon did not take the message. The draft comes back. */
+  onSend: (raw: string, steer: boolean) => Promise<boolean>;
   onEdit?: (messageId: string, raw: string) => Promise<EditResult>;
   /** User lines still waiting, oldest first. */
   waitingIds?: string[];
@@ -298,6 +300,27 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   const editingRef = useRef(editing);
   editingRef.current = editing;
 
+  /** The daemon refused the send. Put the draft back in the chat it left. */
+  function restoreDraft(key: string, snapshot: Draft) {
+    if (prevKey.current !== key) {
+      // A switch already stored what was typed after this send.
+      if (!drafts.current.has(key)) drafts.current.set(key, snapshot);
+      return;
+    }
+    const el = inputRef.current;
+    if ((el && !isEditorEmpty(el)) || attachRef.current.length || replyRef.current) return;
+    if (el) el.innerHTML = snapshot.html;
+    attachRef.current = snapshot.attaches;
+    replyRef.current = snapshot.reply;
+    drafts.current.set(key, snapshot);
+    setAttaches(snapshot.attaches);
+    setReply(snapshot.reply);
+    setMention(null);
+    setSlash(null);
+    refreshEmpty();
+    fit();
+  }
+
   /** Back to what was typed before the edit. */
   function putBack(was: Draft) {
     const el = inputRef.current;
@@ -443,15 +466,31 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           }
           return;
         }
+        const key = chatKey;
+        const snapshot: Draft = {
+          html: el.innerHTML,
+          attaches: attachRef.current,
+          reply: replyRef.current,
+        };
         el.innerHTML = "";
-        drafts.current.delete(chatKey);
+        drafts.current.delete(key);
         setMention(null);
-        for (const a of attaches) revokePreview(a);
         setAttaches([]);
         setReply(null);
         setEmpty(true);
         fit();
-        await onSend(raw, steer);
+        let accepted = false;
+        try {
+          accepted = await onSend(raw, steer);
+        } catch {
+          accepted = false;
+        }
+        // Cleared before the daemon answered. Failure puts that draft back.
+        if (composerAfterSend(accepted, snapshot.html) === null) {
+          for (const a of snapshot.attaches) revokePreview(a);
+          return;
+        }
+        restoreDraft(key, snapshot);
       }}
     >
       <div

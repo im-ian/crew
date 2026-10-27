@@ -36,6 +36,12 @@ export function ConfirmDialog({ open, kind, onCancel, onConfirm }: Props) {
     ok = t("common.delete");
     okClass = "danger";
     showToggle = false;
+  } else if (kind === "remove-project") {
+    title = t("confirm.removeProject.title");
+    body = t("confirm.removeProject.body");
+    ok = t("common.delete");
+    okClass = "danger";
+    showToggle = false;
   }
 
   return (

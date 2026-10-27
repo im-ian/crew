@@ -443,9 +443,18 @@ button.linkish {
   transition: transform 0.12s ease;
 }
 .group-head.collapsed .group-chevron { transform: rotate(-90deg); }
+.group-mark {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--muted);
+}
 .group-name {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
   border: 0;
   background: transparent;
   color: var(--muted);
@@ -457,9 +466,14 @@ button.linkish {
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
+}
+.group-name-text {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
 }
 .group-name:hover { color: var(--ink); }
+.group-name:hover .group-mark { color: var(--ink); }
 .group-name-input {
   flex: 1;
   min-width: 0;
@@ -483,7 +497,8 @@ button.linkish {
   color: var(--ink);
 }
 .group-head.drop-into .group-name,
-.group-head.drop-into .group-chevron {
+.group-head.drop-into .group-chevron,
+.group-head.drop-into .group-mark {
   color: var(--ink);
 }
 .rail-drop-line {
@@ -1386,6 +1401,10 @@ button.sys-routine:focus-visible {
   flex-direction: column;
   align-items: flex-start;
 }
+.channel-msg:has(.approval-card) {
+  width: min(560px, 100%);
+  max-width: min(560px, calc(100% - 42px));
+}
 .channel-who {
   margin: 0 0 var(--space-4) var(--space-2);
   border: 0;
@@ -1815,45 +1834,85 @@ button.sys-note:focus-visible {
   }
 }
 .approval-card {
-  margin-top: var(--space-8);
-  padding: var(--space-12);
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: var(--space-10);
+  padding: var(--space-16) var(--space-18) var(--space-14);
   border: 1px solid var(--line);
   border-radius: var(--radius-xl);
   background: var(--elevated);
-  max-width: 100%;
 }
-.approval-copy {
+.approval-kicker {
   color: var(--ink);
-  font-size: var(--text-md);
-  font-weight: 600;
-  margin-bottom: var(--space-8);
+  font-size: var(--text-xl);
+  font-weight: 650;
+  line-height: 1.35;
+}
+.approval-detail {
+  margin-top: var(--space-12);
+  padding: var(--space-12) var(--space-14);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--text-2xl);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+}
+.approval-hint {
+  margin: var(--space-10) 0 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.45;
 }
 .approval-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-8);
+  margin-top: var(--space-14);
 }
 .approval-allow,
+.approval-always,
 .approval-deny {
   border: 0;
-  border-radius: var(--radius-sm);
-  padding: var(--space-6) var(--space-10);
+  border-radius: var(--radius-md);
+  padding: var(--space-10) var(--space-14);
   font: inherit;
-  font-size: var(--text-md);
+  font-size: var(--text-lg);
+  font-weight: 600;
   cursor: pointer;
 }
 .approval-allow {
   background: var(--working);
   color: var(--on-ink);
 }
+.approval-always {
+  background: transparent;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
 .approval-deny {
   background: var(--chip);
   color: var(--ink);
 }
-.approval-allow:hover {
+.approval-allow:hover,
+.approval-always:hover {
   filter: brightness(1.08);
+}
+.approval-always:hover {
+  background: var(--hover);
+  filter: none;
 }
 .approval-deny:hover {
   background: var(--chip-hover);
+}
+.approval-allow:focus-visible,
+.approval-always:focus-visible,
+.approval-deny:focus-visible {
+  outline: 2px solid var(--field-focus);
+  outline-offset: 2px;
 }
 .approval-status {
   margin-top: var(--space-6);
@@ -3826,17 +3885,24 @@ button.mention-chip:active {
 .sheet > .form-stack {
   margin-top: var(--space-16);
 }
-/* The card opens upward and must stay inside this scroller. The extra room
-   is covered by the card, so a long list can scroll instead of being clipped. */
-.dialog:has(.model-pick.open) > .form-stack,
-.sheet-body > div:not([hidden]):has(.model-pick.open) > .form-stack {
-  margin-top: 120px;
+/* A centered dialog that grows to fit an open picker slides its buttons
+   onto the cursor. The card draws outside the box instead. */
+.dialog:has(.model-pick.open),
+.dialog:has(.face-pop.open),
+.sheet-body:has(.model-pick.open),
+.sheet-body:has(.face-pop.open) {
+  overflow: visible;
 }
 .settings-groups {
   display: flex;
   flex-direction: column;
   gap: var(--space-22);
   margin-top: var(--space-18);
+}
+/* Notes under a switch wrap to one or two lines. A short one must not pull
+   the controls below it up onto the cursor. */
+.settings-groups .apply-note {
+  min-height: 2.9em;
 }
 .settings-group h4 {
   margin: 0 0 var(--space-10);
@@ -3867,6 +3933,11 @@ label.field {
   color: var(--muted);
   margin: 0;
 }
+label.field:has(svg) {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+}
 .field-head {
   display: flex;
   align-items: baseline;
@@ -3886,6 +3957,28 @@ label.field {
   line-height: 1.2;
 }
 .field-action:hover { color: var(--ink); }
+.path-pick {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-8);
+}
+.path-pick .textin {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+.path-pick .ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  flex-shrink: 0;
+  padding: 0 var(--space-12);
+  white-space: nowrap;
+}
+.path-pick .ghost:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .textin, textarea.textin, select.textin {
   width: 100%;
   background: var(--bg);
@@ -4340,10 +4433,18 @@ textarea.textin.skill-body {
   justify-content: space-between;
   gap: var(--space-12);
 }
-.ctx button:has(.ctx-hint) {
+.ctx button:has(.ctx-hint),
+.ctx button:has(.ctx-ico) {
   display: flex;
   align-items: center;
   gap: var(--space-16);
+}
+.ctx button:has(.ctx-ico) { gap: var(--space-8); }
+.ctx-ico {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--muted);
 }
 .ctx-hint {
   margin-left: auto;

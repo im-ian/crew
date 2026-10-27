@@ -337,6 +337,14 @@ pub fn transcript_path(agent_id: &str) -> PathBuf {
     transcripts_dir().join(format!("{}.jsonl", safe_agent_id(agent_id)))
 }
 
+/// Epoch, parked user lines, and bot-to-bot tells that have not been accepted.
+/// The inbox itself dies with the process. This file is only those waits.
+pub fn waits_path(agent_id: &str) -> PathBuf {
+    home_dir()
+        .join("waits")
+        .join(format!("{}.json", safe_agent_id(agent_id)))
+}
+
 pub fn roster_path() -> PathBuf {
     home_dir().join("roster.md")
 }

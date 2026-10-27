@@ -27,6 +27,8 @@ import {
 } from "../tools";
 import { answeredOptionView, optionView, shortLabels } from "../choiceView";
 import { routineSwitchName } from "../routineNote";
+import { queueActions, shownInThread, userLineAppearance } from "../sendGate";
+import { isSelfMentionDelivery } from "../mentions";
 import { clockLabels, messageClockParts } from "../clock";
 import {
   acceptHeight,
@@ -148,7 +150,7 @@ type Props = {
   onStick: (stick: boolean) => void;
   streaming?: boolean;
   onSelectAgent?: (id: string) => void;
-  onApprove?: (allow: boolean, agentId?: string) => void;
+  onApprove?: (allow: boolean, agentId?: string, always?: boolean) => void;
   /** Take back the user's own message while it waits for the bot. */
   onCancelQueued?: (messageId: string) => void;
   /** Change it in the composer; it keeps its place in line. */
@@ -206,7 +208,7 @@ export function ChatThread({
   const { locale } = useLocale();
   const ref = useRef<HTMLDivElement>(null);
   const { away, sync: syncStick, jump: jumpBottom } = useStick(ref, onStick);
-  const visible = visibleMessages(messages, showTools);
+  const visible = visibleMessages(messages, showTools, selected);
   const all = threadRows(visible, agents);
   // A bot that has only talked with other bots has no conversation here: the
   // thread stays empty, and its side chat opens beside it (`sideOnlyPeer`).
@@ -244,13 +246,6 @@ export function ChatThread({
       return true;
     });
   }
-  function blockedCards(): AgentInfo[] {
-    const live =
-      currentAgent?.status === "blocked" ? [currentAgent] : [];
-    return live.filter(
-      (a) => !messages.some((m) => m.from === a.id && m.approval === "pending"),
-    );
-  }
 
   // A new bot asks before any row exists, so the dots have to stand alone.
   // A side-only thread already has rows, and those dots stay in the side chat.
@@ -258,10 +253,7 @@ export function ChatThread({
     direct || (streaming && messages.length === 0)
       ? workingPlaceholders()
       : [];
-  const blocked = blockedCards();
-  // An approval card means it is waiting on the reader here, and "start a
-  // chat" would contradict it.
-  const empty = !direct && !blocked.length && placeholders.length === 0;
+  const empty = !direct && placeholders.length === 0;
   // Only what is written after the chat opens plays the entrance. The thread
   // is not remounted per chat, so the moment is kept per chat key.
   const chatKey = `${selectedKind}:${selected ?? ""}`;
@@ -562,6 +554,7 @@ export function ChatThread({
       const caret =
         streaming && m.role === "assistant" && m.id === lastVisible?.id;
       const flash = highlightId === m.id;
+      const revise = queueActions(m);
       node =
         m.role === "system" && m.from !== "user" ? (
           <SystemOrIncoming
@@ -586,7 +579,9 @@ export function ChatThread({
             caret={caret}
             onSelectAgent={openAgent}
             onApprove={
-              onApprove ? (allow) => onApprove(allow, m.from) : undefined
+              onApprove
+                ? (allow, always) => onApprove(allow, m.from, always)
+                : undefined
             }
             onAnswerChoice={
               onAnswerChoice
@@ -594,13 +589,21 @@ export function ChatThread({
                     onAnswerChoice(m.from, m.id, answers, values, closed)
                 : undefined
             }
-            onCancel={onCancelQueued ? () => onCancelQueued(m.id) : undefined}
+            onCancel={
+              revise.cancel && onCancelQueued
+                ? () => onCancelQueued(m.id)
+                : undefined
+            }
             onEdit={
-              onEditQueued
+              revise.edit && onEditQueued
                 ? (text, reply) => onEditQueued(m.id, text, reply)
                 : undefined
             }
-            onSend={onSendQueued ? () => onSendQueued(m.id) : undefined}
+            onSend={
+              revise.cancel && onSendQueued
+                ? () => onSendQueued(m.id)
+                : undefined
+            }
             picked={queuePick === m.id}
             onReply={onReply}
             onJump={onJump}
@@ -717,16 +720,7 @@ export function ChatThread({
             </MsgSlot>
           );
         })}
-        {blocked.map((agent) => (
-          <ApprovalCard
-            key={"block-" + agent.id}
-            state="pending"
-            who={agent.name || agent.id}
-            onApprove={
-              onApprove ? (allow) => onApprove(allow, agent.id) : undefined
-            }
-          />
-        ))}
+
       </div>
       {away ? <JumpBottom onClick={jumpBottom} /> : null}
     </div>
@@ -1091,7 +1085,7 @@ function Incoming({
   caret?: boolean;
   openName?: boolean;
   onSelectAgent?: (id: string) => void;
-  onApprove?: (allow: boolean) => void;
+  onApprove?: (allow: boolean, always?: boolean) => void;
   onAnswerChoice?: (
     answers: string[][],
     values: string[][],
@@ -1110,6 +1104,7 @@ function Incoming({
       : undefined;
   const t = useT();
   const queued = !!m.queued;
+  const pendingAsk = m.approval === "pending";
   const { reply, body } = splitReply(m.text || "");
   const defs = useMemo(() => messageDefinitions(body), [body]);
   // The wait dots get a bubble of their own under the text, not a tail on it.
@@ -1174,7 +1169,7 @@ function Incoming({
             ))}
           </div>
         ) : null}
-        {parts.length ? (
+        {parts.length && !pendingAsk ? (
           <div className="bubble-stack">
           {parts.map((part, i) => {
             const last = i === parts.length - 1;
@@ -1250,7 +1245,11 @@ function Incoming({
             onAnswer={onAnswerChoice}
           />
         ) : null}
-        <ApprovalCard state={m.approval} onApprove={onApprove} />
+        <ApprovalCard
+          state={m.approval}
+          detail={pendingAsk ? body.trim() : ""}
+          onApprove={onApprove}
+        />
       </div>
     </div>
   );
@@ -1443,11 +1442,13 @@ function ToolRow({
 function ApprovalCard({
   state,
   who,
+  detail,
   onApprove,
 }: {
   state?: ChatMessage["approval"];
   who?: string;
-  onApprove?: (allow: boolean) => void;
+  detail?: string;
+  onApprove?: (allow: boolean, always?: boolean) => void;
 }) {
   const t = useT();
   if (!state) return null;
@@ -1458,16 +1459,18 @@ function ApprovalCard({
     return <div className="approval-status is-denied">{t("thread.denied")}</div>;
   }
   if (!onApprove) return null;
+  const work = (detail || "").trim();
   return (
     <div className="approval-card">
-      <div className="approval-copy">
+      <div className="approval-kicker">
         {who ? t("thread.approveAskWho", { who }) : t("thread.approveAsk")}
       </div>
+      {work ? <div className="approval-detail">{work}</div> : null}
       <div className="approval-actions">
-        <button type="button" className="approval-allow" onClick={() => onApprove(true)}>
+        <button type="button" className="approval-allow" onClick={() => onApprove(true, false)}>
           {t("thread.allowOnce")}
         </button>
-        <button type="button" className="approval-deny" onClick={() => onApprove(false)}>
+        <button type="button" className="approval-deny" onClick={() => onApprove(false, false)}>
           {t("thread.deny")}
         </button>
       </div>
@@ -1745,7 +1748,7 @@ function Bubble({
   currentAgent: AgentInfo | null;
   caret?: boolean;
   onSelectAgent?: (id: string) => void;
-  onApprove?: (allow: boolean) => void;
+  onApprove?: (allow: boolean, always?: boolean) => void;
   onAnswerChoice?: (
     answers: string[][],
     values: string[][],
@@ -1783,7 +1786,10 @@ function Bubble({
       />
     );
   }
-  const queued = !!m.queued;
+  const appearance = userLineAppearance(m);
+  // Not accepted yet: drawing it here would be a sent bubble ahead of the daemon.
+  if (appearance === "hold") return null;
+  const queued = appearance === "waiting";
   const { reply, body } = splitReply(text);
   const parts = splitBubbles(body);
   const media = parts.filter((part) => isMediaBlock(part));
@@ -2042,8 +2048,9 @@ export function sideOnlyPeer(
   messages: ChatMessage[],
   agents: AgentInfo[],
   hit: string | null = null,
+  selfId: string | null = null,
 ): string | null {
-  const rows = threadRows(visibleMessages(messages, false), agents);
+  const rows = threadRows(visibleMessages(messages, false, selfId), agents);
   if (rows.some((row) => row.kind === "msg")) return null;
   let peer: string | null = null;
   for (const row of rows) {
@@ -2057,8 +2064,11 @@ export function sideOnlyPeer(
 function visibleMessages(
   messages: ChatMessage[],
   showTools: boolean,
+  selfId: string | null = null,
 ): ChatMessage[] {
   return messages.filter((m, i) => {
+    if (isSelfMentionDelivery(m, selfId)) return false;
+    if (!shownInThread(m)) return false;
     if (m.kind === "tool") return showTools;
     if (m.role !== "assistant") return true;
     const raw = m.text || "";

@@ -1,4 +1,5 @@
-import type { MouseEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
+import { handleBackdropPointerDown, rememberSelectClose } from "../dialogLayer";
 
 type Props = {
   open: boolean;
@@ -12,9 +13,8 @@ export function Modal({ open, title, onClose, children, className }: Props) {
   return (
     <div
       className={"modal" + (open ? " open" : "")}
-      onClick={(e: MouseEvent) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+      onPointerDown={(e) => handleBackdropPointerDown(e, onClose)}
+      onBlur={(e) => rememberSelectClose(e.currentTarget, e.target)}
     >
       <div className={"dialog" + (className ? " " + className : "")}>
         <h3>{title}</h3>

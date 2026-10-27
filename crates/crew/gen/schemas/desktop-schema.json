@@ -315,6 +315,12 @@
           "markdownDescription": "Enables the peek_pending_focus command without any pre-configured scope."
         },
         {
+          "description": "Enables the pick_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pick-folder",
+          "markdownDescription": "Enables the pick_folder command without any pre-configured scope."
+        },
+        {
           "description": "Enables the remove_agent command without any pre-configured scope.",
           "type": "string",
           "const": "allow-remove-agent",
@@ -589,6 +595,12 @@
           "type": "string",
           "const": "deny-peek-pending-focus",
           "markdownDescription": "Denies the peek_pending_focus command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pick_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pick-folder",
+          "markdownDescription": "Denies the pick_folder command without any pre-configured scope."
         },
         {
           "description": "Denies the remove_agent command without any pre-configured scope.",

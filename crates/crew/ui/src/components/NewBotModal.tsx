@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { randomFace, type AvatarShape } from "../avatar";
+import { projectCwd, splitPlace } from "../groups";
 import { useT } from "../LocaleContext";
-import type { CliKind } from "../types";
+import type { CliKind, Group } from "../types";
+import { Folder, Layers } from "../icons";
 import { Avatar } from "./Avatar";
 import { FacePop } from "./FacePicker";
 import { Field } from "./Field";
@@ -10,6 +12,9 @@ import { ModelPicker } from "./ModelPicker";
 
 type Props = {
   open: boolean;
+  groups: Group[];
+  /** Sidebar place that opened this dialog, when it was opened from one. */
+  placeId?: string | null;
   onClose: () => void;
   onCreate: (args: {
     name: string;
@@ -19,11 +24,15 @@ type Props = {
     cmd: string;
     shape: string | null;
     color: string | null;
+    groupId: string | null;
+    projectId: string | null;
   }) => Promise<void>;
 };
 
 export function NewBotModal({
   open,
+  groups,
+  placeId,
   onClose,
   onCreate,
 }: Props) {
@@ -35,8 +44,14 @@ export function NewBotModal({
   const [effort, setEffort] = useState("");
   const [shape, setShape] = useState<AvatarShape | "">("");
   const [color, setColor] = useState("");
+  const [groupId, setGroupId] = useState("");
+  const [projectId, setProjectId] = useState("");
   const [busy, setBusy] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
+  const plain = groups.filter((g) => !projectCwd(g));
+  const projects = groups.filter((g) => projectCwd(g));
 
   useEffect(() => {
     if (!open) return;
@@ -45,6 +60,9 @@ export function NewBotModal({
     setCli("grok");
     setCommand("");
     setEffort("");
+    const place = splitPlace(groupsRef.current, placeId);
+    setGroupId(place.groupId);
+    setProjectId(place.projectId);
     // #3a3a3c is a swatch to pick, not a face to start from: on the dark
     // dialog it reads as an empty slot.
     const face = randomFace({ color: "#3a3a3c" });
@@ -53,34 +71,32 @@ export function NewBotModal({
     setBusy(false);
     const t = window.setTimeout(() => nameRef.current?.focus(), 0);
     return () => window.clearTimeout(t);
-  }, [open]);
+  }, [open, placeId]);
+
+  function payload(botName: string) {
+    return {
+      name: botName,
+      cli,
+      model,
+      effort,
+      cmd: command,
+      shape: shape || null,
+      color: color || null,
+      groupId: groupId || null,
+      projectId: projectId || null,
+    };
+  }
 
   async function submit() {
     const trimmed = name.trim();
     if (!trimmed) {
       nameRef.current?.focus();
-      await onCreate({
-        name: "",
-        cli,
-        model,
-        effort,
-        cmd: command,
-        shape: shape || null,
-        color: color || null,
-      });
+      await onCreate(payload(""));
       return;
     }
     setBusy(true);
     try {
-      await onCreate({
-        name: trimmed,
-        cli,
-        model,
-        effort,
-        cmd: command,
-        shape: shape || null,
-        color: color || null,
-      });
+      await onCreate(payload(trimmed));
     } finally {
       setBusy(false);
     }
@@ -146,6 +162,59 @@ export function NewBotModal({
             onCommand={setCommand}
           />
         </Field>
+        <Field
+          label={
+            <>
+              <Layers size={12} />
+              {t("field.group")}
+            </>
+          }
+          htmlFor="new-group"
+        >
+          <select
+            id="new-group"
+            className="textin"
+            value={groupId}
+            onChange={(e) => {
+              setGroupId(e.target.value);
+              if (e.target.value) setProjectId("");
+            }}
+          >
+            <option value="">{t("newBot.none")}</option>
+            {plain.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field
+          label={
+            <>
+              <Folder size={12} />
+              {t("field.project")}
+            </>
+          }
+          htmlFor="new-project"
+        >
+          <select
+            id="new-project"
+            className="textin"
+            value={projectId}
+            onChange={(e) => {
+              setProjectId(e.target.value);
+              if (e.target.value) setGroupId("");
+            }}
+          >
+            <option value="">{t("newBot.none")}</option>
+            {projects.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <p className="apply-note">{t("newBot.placeHint")}</p>
       </div>
       <div className="actions spread">
         <button type="button" className="ghost" onClick={onClose}>

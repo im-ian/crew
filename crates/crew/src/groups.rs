@@ -17,6 +17,9 @@ pub struct SidebarGroup {
     pub collapsed: bool,
     #[serde(default)]
     pub items: Vec<String>,
+    /// Folder bound to a project. Empty for an ordinary group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 pub fn load() -> anyhow::Result<Vec<SidebarGroup>> {
@@ -81,6 +84,7 @@ pub fn add_group(
         name,
         collapsed: false,
         items,
+        path: None,
     };
     groups.push(created.clone());
     Ok(created)
@@ -150,6 +154,7 @@ mod tests {
             name: "작업".into(),
             collapsed: true,
             items: vec!["agent:grok".into(), "channel:room".into()],
+            path: None,
         }];
         save_to(&path, &groups).unwrap();
         let loaded = load_from(&path).unwrap();
@@ -175,12 +180,14 @@ mod tests {
                 name: String::new(),
                 collapsed: false,
                 items: vec!["agent:a2".into()],
+                path: None,
             },
             SidebarGroup {
                 id: "g1".into(),
                 name: "작업".into(),
                 collapsed: false,
                 items: vec!["agent:a1".into(), "channel:room".into()],
+                path: None,
             },
         ];
         let created = add_group(
@@ -208,12 +215,37 @@ mod tests {
             name: "개인".into(),
             collapsed: false,
             items: vec![],
+            path: None,
         }];
         assert!(add_group(&mut groups, "  ", &[], 1).is_err());
         assert_eq!(groups.len(), 1);
         let created = add_group(&mut groups, "다른", &[], 1).unwrap();
         assert_eq!(created.id, "g1-2");
         assert_eq!(created.name, "다른");
+    }
+
+    #[test]
+    fn a_project_folder_roundtrips_and_an_old_group_has_none() {
+        let plain: Vec<SidebarGroup> =
+            serde_json::from_str(r#"[{"id":"g1","name":"개인"}]"#).unwrap();
+        assert_eq!(plain[0].path, None);
+        let dir = std::env::temp_dir().join(format!("crew-groups-path-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("groups.json");
+        let groups = vec![SidebarGroup {
+            id: "g1".into(),
+            name: "app".into(),
+            collapsed: false,
+            items: vec![],
+            path: Some("/tmp/app".into()),
+        }];
+        save_to(&path, &groups).unwrap();
+        let loaded = load_from(&path).unwrap();
+        assert_eq!(loaded[0].path.as_deref(), Some("/tmp/app"));
+        let raw = fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("/tmp/app"));
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir(&dir);
     }
 
     #[test]

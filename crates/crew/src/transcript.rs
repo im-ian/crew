@@ -297,8 +297,9 @@ fn json_suffix(parts: &[String]) -> Option<usize> {
 }
 
 /// Balloons of one reply, matching `splitBubbles` in `ui/src/bubbles.ts`.
-/// A blank line starts a balloon. A fence stays with the line above it, and
-/// a balloon that is only a rule or link definitions is dropped.
+/// A blank line starts a balloon. A fence stays with the line above it.
+/// A one-line heading stays with the paragraph under it. A balloon that is
+/// only a rule or link definitions is dropped.
 fn balloons(text: &str) -> Vec<String> {
     let mut parts = Vec::new();
     let mut lines: Vec<&str> = Vec::new();
@@ -313,7 +314,9 @@ fn balloons(text: &str) -> Vec<String> {
             gap = true;
         } else {
             let open = fence_opens(line);
-            if gap && open.is_none() {
+            // A heading is the name of the paragraph under it, so the blank
+            // line between them does not start a balloon.
+            if gap && open.is_none() && !is_label_block(&lines) {
                 push_balloon(&mut parts, &lines);
                 lines.clear();
             }
@@ -332,6 +335,53 @@ fn balloons(text: &str) -> Vec<String> {
         }
     }
     parts
+}
+
+/// `Format:`, `**Summary**`, and `## Issues` name the next paragraph.
+/// `Severity: bug` does not.
+fn is_label_block(lines: &[&str]) -> bool {
+    let mut any = false;
+    for line in lines {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if !is_label_line(line) {
+            return false;
+        }
+        any = true;
+    }
+    any
+}
+
+fn is_label_line(line: &str) -> bool {
+    is_atx_heading(line) || is_wrapped_bold(line) || is_colon_label(line)
+}
+
+fn is_atx_heading(line: &str) -> bool {
+    let rest = line.trim_start_matches('#');
+    let n = line.len() - rest.len();
+    (1..=6).contains(&n)
+        && rest.starts_with(|c: char| c.is_whitespace())
+        && !rest.trim().is_empty()
+}
+
+fn is_wrapped_bold(line: &str) -> bool {
+    let inner = line
+        .strip_prefix("**")
+        .and_then(|s| s.strip_suffix("**"))
+        .or_else(|| line.strip_prefix("__").and_then(|s| s.strip_suffix("__")));
+    match inner {
+        Some(inner) => !inner.is_empty() && !inner.contains('*') && !inner.contains('_'),
+        None => false,
+    }
+}
+
+fn is_colon_label(line: &str) -> bool {
+    let Some(body) = line.strip_suffix(':') else {
+        return false;
+    };
+    !body.is_empty() && !body.contains(':')
 }
 
 fn push_balloon(parts: &mut Vec<String>, lines: &[&str]) {
@@ -1218,15 +1268,18 @@ pub fn set_queued(agent: &str, id: &str, queued: bool) {
         let Some(chat) = map.get_mut(agent) else {
             return;
         };
-        let Some(m) = chat.messages.iter_mut().rev().find(|m| m.id == id) else {
+        let Some(idx) = chat.messages.iter().rposition(|m| m.id == id) else {
             return;
         };
-        if m.queued == queued {
+        if chat.messages[idx].queued == queued {
             return;
         }
-        // Memory only: the file never keeps it, and this runs under the inbox lock.
-        m.queued = queued;
-        m.clone()
+        // Kept in the file so a restart can put a waiting line back. Callers
+        // often hold the inbox lock; this only writes the chat, which it
+        // already has.
+        chat.messages[idx].queued = queued;
+        persist(agent, chat);
+        chat.messages[idx].clone()
     };
     emit(agent, msg);
 }
@@ -1633,7 +1686,6 @@ fn persist(agent: &str, chat: &AgentChat) {
     let mut out = String::new();
     for m in &chat.messages {
         let mut stored = m.clone();
-        stored.queued = false;
         redact_secrets(&mut stored);
         if let Ok(line) = serde_json::to_string(&stored) {
             out.push_str(&line);
@@ -2373,6 +2425,41 @@ mod tests {
 
             drop_agent(&agent);
         });
+    }
+
+    /// A heading names the paragraph under it. The blank line between them
+    /// does not open a balloon. A later paragraph still does.
+    #[test]
+    fn a_heading_stays_with_the_paragraph_under_it() {
+        let text = "\
+Format:
+
+**Summary**
+
+설명입니다.
+
+## Issues
+
+**Issue 1 -- Severity:** bug
+- File: path
+
+Severity must be one of: bug.";
+        assert_eq!(
+            super::balloons(text),
+            vec![
+                "Format:\n\n**Summary**\n\n설명입니다.".to_string(),
+                "## Issues\n\n**Issue 1 -- Severity:** bug\n- File: path".to_string(),
+                "Severity must be one of: bug.".to_string(),
+            ]
+        );
+        assert_eq!(
+            super::balloons("본문.\n\n## 끝"),
+            vec!["본문.".to_string(), "## 끝".to_string()]
+        );
+        assert_eq!(
+            super::balloons("Severity: bug\n\n다음"),
+            vec!["Severity: bug".to_string(), "다음".to_string()]
+        );
     }
 
     /// A turn is one row split into balloons. The list was quoting the first.

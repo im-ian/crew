@@ -42,6 +42,34 @@ describe("api.setAgent", () => {
   });
 });
 
+describe("api.setCwd", () => {
+  beforeEach(() => {
+    mocks.invoke.mockReset();
+  });
+
+  it("sets only the working folder", async () => {
+    await api.setCwd("bot-3", "/tmp/app");
+    expect(mocks.invoke.mock.calls[0]).toEqual([
+      "set_agent",
+      {
+        id: "bot-3",
+        model: null,
+        effort: null,
+        unsetModel: false,
+        unsetEffort: false,
+        title: null,
+        description: null,
+        role: null,
+        unsetTitle: false,
+        unsetDescription: false,
+        unsetRole: false,
+        cwd: "/tmp/app",
+        unsetCwd: false,
+      },
+    ]);
+  });
+});
+
 describe("api.listModels", () => {
   beforeEach(() => {
     mocks.invoke.mockReset();

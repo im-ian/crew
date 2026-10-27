@@ -6,13 +6,15 @@ export type PaneTab = "info" | "routines" | "memory";
 /** How saving an edit to a waiting message ended. "gone": it went out first. */
 export type EditResult = "saved" | "gone" | "failed";
 export type CtxKind = Kind | "group" | "create";
-export type ConfirmKind = "reset" | "remove" | "remove-group";
+export type ConfirmKind = "reset" | "remove" | "remove-group" | "remove-project";
 
 export type Group = {
   id: string;
   name: string;
   collapsed: boolean;
   items: string[];
+  /** Folder this project is bound to. Ordinary groups leave it unset. */
+  path?: string;
 };
 export type CliKind =
   | "grok"
@@ -125,6 +127,8 @@ export type ChatMessage = {
   text: string;
   ts: number;
   queued?: boolean;
+  /** Window-only. The daemon has not accepted this send, so it is not a bubble. */
+  optimistic?: boolean;
   /** The bot that asked for the turn this row came from: it belongs beside the thread, with that bot. */
   peer?: string | null;
   kind?: MessageKind | null;

@@ -68,8 +68,8 @@ export const api = {
     invoke<void>("edit_queued", { agent, messageId, text }),
   sendQueued: (agent: string, messageId: string) =>
     invoke<void>("send_queued", { agent, messageId }),
-  approveAgent: (agent: string, allow: boolean) =>
-    invoke<void>("approve_agent", { agent, allow }),
+  approveAgent: (agent: string, allow: boolean, always = false) =>
+    invoke<void>("approve_agent", { agent, allow, always }),
   answerChoice: (args: {
     agent: string;
     messageId: string;
@@ -121,7 +121,26 @@ export const api = {
     role: string | null;
     description: string | null;
     cmd?: string | null;
-  }) => invoke<string>("add_agent", args),
+    cwd?: string | null;
+  }) => invoke<string>("add_agent", { ...args, cwd: args.cwd ?? null }),
+  /** Working folder only. The other set_agent fields stay as they are. */
+  setCwd: (id: string, cwd: string) =>
+    invoke<void>("set_agent", {
+      id,
+      model: null,
+      effort: null,
+      unsetModel: false,
+      unsetEffort: false,
+      title: null,
+      description: null,
+      role: null,
+      unsetTitle: false,
+      unsetDescription: false,
+      unsetRole: false,
+      cwd,
+      unsetCwd: false,
+    }),
+  pickFolder: () => invoke<string | null>("pick_folder"),
   cloneAgent: (id: string, name: string | null = null) =>
     invoke<string>("clone_agent", { id, name }),
   removeAgent: (id: string) => invoke<void>("remove_agent", { id }),
