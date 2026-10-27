@@ -30,6 +30,8 @@ import { routineSwitchName } from "../routineNote";
 import { queueActions, shownInThread, userLineAppearance } from "../sendGate";
 import { isSelfMentionDelivery } from "../mentions";
 import { clockLabels, messageClockParts } from "../clock";
+import type { CaretPoint } from "../caretPoint";
+import { threadFaceId } from "../threadFace";
 import {
   acceptHeight,
   anchorIndex,
@@ -177,6 +179,8 @@ type Props = {
   showTools?: boolean;
   /** A routine run opens the routines pane instead of quoting its prompt. */
   onOpenRoutines?: () => void;
+  /** Caret in the composer, while this bot is idle. */
+  lookAt?: CaretPoint | null;
 };
 
 export function ChatThread({
@@ -204,6 +208,7 @@ export function ChatThread({
   onPeek,
   showTools = false,
   onOpenRoutines,
+  lookAt = null,
 }: Props) {
   const { locale } = useLocale();
   const ref = useRef<HTMLDivElement>(null);
@@ -254,6 +259,11 @@ export function ChatThread({
       ? workingPlaceholders()
       : [];
   const empty = !direct && placeholders.length === 0;
+  const typingId = placeholders[0] ? "working-" + placeholders[0].id : null;
+  const faceId =
+    selectedKind === "agent" && selected
+      ? threadFaceId(visible, selected, typingId)
+      : null;
   // Only what is written after the chat opens plays the entrance. The thread
   // is not remounted per chat, so the moment is kept per chat key.
   const chatKey = `${selectedKind}:${selected ?? ""}`;
@@ -608,6 +618,8 @@ export function ChatThread({
             onReply={onReply}
             onJump={onJump}
             flash={flash}
+            faceId={faceId}
+            lookAt={lookAt}
           />
         );
     }
@@ -691,7 +703,7 @@ export function ChatThread({
           rows.map((row) => oneRow(row, startOf(row)))
         )}
         {pinned.map((row) => oneRow(row, startOf(row)))}
-        {empty ? <EmptyChat agent={currentAgent} /> : null}
+        {empty ? <EmptyChat agent={currentAgent} lookAt={lookAt} /> : null}
         {placeholders.map((agent) => {
           const id = "working-" + agent.id;
           const start = arrive.get(id);
@@ -715,6 +727,9 @@ export function ChatThread({
                 agents={agents}
                 caret
                 openName={false}
+                showName={false}
+                showFace
+                lookAt={lookAt}
                 onSelectAgent={openAgent}
               />
             </MsgSlot>
@@ -773,7 +788,13 @@ export function JumpBottom({ onClick }: { onClick: () => void }) {
   );
 }
 
-function EmptyChat({ agent }: { agent: AgentInfo | null }) {
+function EmptyChat({
+  agent,
+  lookAt = null,
+}: {
+  agent: AgentInfo | null;
+  lookAt?: CaretPoint | null;
+}) {
   const t = useT();
   if (agent) {
     return (
@@ -785,6 +806,7 @@ function EmptyChat({ agent }: { agent: AgentInfo | null }) {
           shape={agent.avatar_shape}
           color={agent.avatar_color}
           status={agent.status}
+          lookAt={lookAt}
         />
         <strong>{agent.name || agent.id}</strong>
         <span>{t("thread.startChat")}</span>
@@ -1071,6 +1093,9 @@ function Incoming({
   agents,
   caret = false,
   openName = true,
+  showFace = true,
+  showName = true,
+  lookAt = null,
   onSelectAgent,
   onApprove,
   onAnswerChoice,
@@ -1084,6 +1109,11 @@ function Incoming({
   agents: AgentInfo[];
   caret?: boolean;
   openName?: boolean;
+  /** The bot's face. A 1:1 room draws it on the latest line only. */
+  showFace?: boolean;
+  /** The name beside a message. A 1:1 room leaves it off. */
+  showName?: boolean;
+  lookAt?: CaretPoint | null;
   onSelectAgent?: (id: string) => void;
   onApprove?: (allow: boolean, always?: boolean) => void;
   onAnswerChoice?: (
@@ -1117,11 +1147,14 @@ function Incoming({
   return (
     <div
       className={
-        "row them incoming" + (queued ? " queued" : "") + (flash ? " flash" : "")
+        "row them incoming" +
+        (queued ? " queued" : "") +
+        (flash ? " flash" : "") +
+        (showFace && !showName ? " face-end" : "")
       }
       data-msg-id={m.id}
     >
-      {agent ? (
+      {agent && showFace ? (
         <Avatar
           as={open ? "button" : "div"}
           className="msg-avatar"
@@ -1133,10 +1166,13 @@ function Incoming({
           status={agent.status}
           title={who}
           onClick={open}
+          lookAt={lookAt}
         />
+      ) : agent ? (
+        <div className="msg-avatar" aria-hidden="true" />
       ) : null}
       <div className="channel-msg">
-        {open ? (
+        {!showName ? null : open ? (
           <button
             type="button"
             className="channel-who"
@@ -1740,6 +1776,8 @@ function Bubble({
   onReply,
   onJump,
   flash = false,
+  faceId = null,
+  lookAt = null,
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
@@ -1761,6 +1799,8 @@ function Bubble({
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
   flash?: boolean;
+  faceId?: string | null;
+  lookAt?: CaretPoint | null;
 }) {
   const t = useT();
   const text =
@@ -1777,6 +1817,9 @@ function Bubble({
         agents={agents}
         caret={caret}
         openName={!self}
+        showName={!self}
+        showFace={!self || m.id === faceId}
+        lookAt={self && m.id === faceId ? lookAt : null}
         onSelectAgent={onSelectAgent}
         onApprove={onApprove}
         onAnswerChoice={onAnswerChoice}

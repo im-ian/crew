@@ -16,6 +16,8 @@ type Props = {
   title?: string;
   status?: AgentStatus | null;
   id?: string | null;
+  /** Client point the idle face follows. Pointer aim wins while the cursor is on the face. */
+  lookAt?: { x: number; y: number } | null;
 };
 
 function eyesAt(shape: AvatarShape): { x: number; y: number } {
@@ -240,16 +242,24 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
+function gazeToward(
+  rect: { left: number; top: number; width: number; height: number },
+  clientX: number,
+  clientY: number,
+  eyes: { x: number; y: number },
+): { x: number; y: number } {
+  const x = ((clientX - rect.left) / Math.max(rect.width, 1)) * 64;
+  const y = ((clientY - rect.top) / Math.max(rect.height, 1)) * 64;
+  const nx = Math.max(-1, Math.min(1, (x - eyes.x) / 28));
+  const ny = Math.max(-1, Math.min(1, (y - eyes.y) / 20));
+  return { x: nx * GAZE_X, y: ny * GAZE_Y };
+}
+
 function gazeFromPointer(
   e: PointerEvent<SVGSVGElement>,
   eyes: { x: number; y: number },
 ): { x: number; y: number } {
-  const rect = e.currentTarget.getBoundingClientRect();
-  const x = ((e.clientX - rect.left) / Math.max(rect.width, 1)) * 64;
-  const y = ((e.clientY - rect.top) / Math.max(rect.height, 1)) * 64;
-  const nx = Math.max(-1, Math.min(1, (x - eyes.x) / 28));
-  const ny = Math.max(-1, Math.min(1, (y - eyes.y) / 20));
-  return { x: nx * GAZE_X, y: ny * GAZE_Y };
+  return gazeToward(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY, eyes);
 }
 
 // Leave eases home. A matching duration lives on `.is-gaze-return` in styles.css.
@@ -288,26 +298,94 @@ function applyGaze(
 
 type GazeMode = "idle" | "track" | "return";
 
-export function BotFace({ shape, color, className, title, status, id }: Props) {
+export function BotFace({ shape, color, className, title, status, id, lookAt = null }: Props) {
   const eyes = eyesAt(shape);
   const live = useHappy(status) ? "happy" : liveMood(status);
   const svgRef = useRef<SVGSVGElement>(null);
   const gazeRef = useRef<{ x: number; y: number } | null>(null);
   const settledRef = useRef(false);
+  const pointerRef = useRef(false);
+  const lookRef = useRef(lookAt);
+  lookRef.current = lookAt;
   const [mode, setMode] = useState<GazeMode>("idle");
   const modeRef = useRef<GazeMode>("idle");
   modeRef.current = mode;
+
+  function followCaret(svg: SVGSVGElement, point: { x: number; y: number }) {
+    const g = gazeToward(svg.getBoundingClientRect(), point.x, point.y, eyes);
+    gazeRef.current = g;
+    if (modeRef.current !== "track") {
+      modeRef.current = "track";
+      setMode("track");
+    }
+    applyGaze(svg, g, { returning: false, settled: settledRef.current });
+  }
+
+  function releaseCaret(svg: SVGSVGElement) {
+    const g = gazeRef.current;
+    const nearHome = !g || (Math.abs(g.x) < 0.05 && Math.abs(g.y) < 0.05);
+    if (prefersReducedMotion() || nearHome) {
+      gazeRef.current = null;
+      settledRef.current = true;
+      applyGaze(svg, null, { returning: false, settled: true });
+      if (modeRef.current !== "idle") {
+        modeRef.current = "idle";
+        setMode("idle");
+      }
+      return;
+    }
+    if (modeRef.current !== "return") {
+      modeRef.current = "return";
+      setMode("return");
+    }
+  }
 
   useLayoutEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
     if (live) svg.style.setProperty("--avatar-phase", String(avatarPhase(id)));
     else svg.style.removeProperty("--avatar-phase");
+    const follow =
+      !pointerRef.current &&
+      !!lookAt &&
+      status === "idle" &&
+      !prefersReducedMotion();
+    if (follow) {
+      followCaret(svg, lookAt);
+      return;
+    }
+    if (!pointerRef.current && modeRef.current === "track") {
+      releaseCaret(svg);
+      return;
+    }
     applyGaze(svg, gazeRef.current, {
       returning: mode === "return",
       settled: settledRef.current,
     });
   });
+
+  useEffect(() => {
+    if (!lookAt || status !== "idle") return;
+    const refresh = () => {
+      const svg = svgRef.current;
+      const point = lookRef.current;
+      if (!svg || !point || pointerRef.current || prefersReducedMotion()) return;
+      const g = gazeToward(
+        svg.getBoundingClientRect(),
+        point.x,
+        point.y,
+        eyesAt(shape),
+      );
+      gazeRef.current = g;
+      applyGaze(svg, g, { returning: false, settled: settledRef.current });
+    };
+    window.addEventListener("scroll", refresh, true);
+    window.addEventListener("resize", refresh);
+    return () => {
+      window.removeEventListener("scroll", refresh, true);
+      window.removeEventListener("resize", refresh);
+    };
+  }, [lookAt, status, shape]);
 
   useEffect(() => {
     if (mode !== "return") return;
@@ -356,6 +434,7 @@ export function BotFace({ shape, color, className, title, status, id }: Props) {
 
   function onPointerMove(e: PointerEvent<SVGSVGElement>) {
     if (prefersReducedMotion()) return;
+    pointerRef.current = true;
     const g = gazeFromPointer(e, eyes);
     gazeRef.current = g;
     applyGaze(e.currentTarget, g, {
@@ -371,6 +450,12 @@ export function BotFace({ shape, color, className, title, status, id }: Props) {
   }
 
   function onPointerLeave(e: PointerEvent<SVGSVGElement>) {
+    pointerRef.current = false;
+    const point = lookRef.current;
+    if (point && status === "idle" && !prefersReducedMotion()) {
+      followCaret(e.currentTarget, point);
+      return;
+    }
     const g = gazeRef.current;
     if (!g) return;
     const nearHome = Math.abs(g.x) < 0.05 && Math.abs(g.y) < 0.05;

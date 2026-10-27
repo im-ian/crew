@@ -10,6 +10,7 @@ import { sendSteers, type Delivery } from "../deliveryPref";
 import { composerAfterSend } from "../sendGate";
 import { stepQueuePick } from "../queuePick";
 import { oneLine, wrapReply, type ReplyTarget } from "../reply";
+import { caretClientPoint, type CaretPoint } from "../caretPoint";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
 import { ArrowUp, CircleDot, Paperclip, Play, Plus, StopSquare, X } from "../icons";
@@ -47,6 +48,8 @@ type Props = {
   onJump?: (id: string) => void;
   /** Bots whose composer still holds unsent text, files, or a reply. */
   onDrafts?: (ids: string[]) => void;
+  /** Caret while a prompt is being typed. Null when the field is idle. */
+  onCaret?: (point: CaretPoint | null) => void;
 };
 
 type Mention = { start: number; query: string };
@@ -83,6 +86,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   onOpenSkills,
   onJump,
   onDrafts,
+  onCaret,
 }, ref) {
   const t = useT();
   const inputRef = useRef<HTMLDivElement>(null);
@@ -345,7 +349,46 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     for (const a of attachRef.current) revokePreview(a);
     putBack(ed.was);
   }
+  const onCaretRef = useRef(onCaret);
+  onCaretRef.current = onCaret;
   const chatKey = selected ? `${selectedKind}:${selected}` : "";
+
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const publish = () => {
+      const node = inputRef.current;
+      if (!node || document.activeElement !== node || isEditorEmpty(node)) {
+        onCaretRef.current?.(null);
+        return;
+      }
+      const point = caretClientPoint(node);
+      if (point) onCaretRef.current?.(point);
+    };
+    const blur = () => onCaretRef.current?.(null);
+    const box = new ResizeObserver(publish);
+    el.addEventListener("focus", publish);
+    el.addEventListener("input", publish);
+    el.addEventListener("keyup", publish);
+    el.addEventListener("pointerup", publish);
+    el.addEventListener("scroll", publish);
+    el.addEventListener("blur", blur);
+    document.addEventListener("selectionchange", publish);
+    window.addEventListener("resize", publish);
+    box.observe(el);
+    return () => {
+      el.removeEventListener("focus", publish);
+      el.removeEventListener("input", publish);
+      el.removeEventListener("keyup", publish);
+      el.removeEventListener("pointerup", publish);
+      el.removeEventListener("scroll", publish);
+      el.removeEventListener("blur", blur);
+      document.removeEventListener("selectionchange", publish);
+      window.removeEventListener("resize", publish);
+      box.disconnect();
+      onCaretRef.current?.(null);
+    };
+  }, [chatKey]);
   const prevKey = useRef(chatKey);
 
   useEffect(() => {
@@ -367,7 +410,20 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     // The draft report below reads these before the next render.
     attachRef.current = nextAttaches;
     replyRef.current = nextReply;
-    if (el) el.innerHTML = next?.html ?? "";
+    if (el) {
+      el.innerHTML = next?.html ?? "";
+      if (document.activeElement === el && !isEditorEmpty(el)) {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+        onCaretRef.current?.(caretClientPoint(el));
+      } else {
+        onCaretRef.current?.(null);
+      }
+    }
     setAttaches(nextAttaches);
     setReply(nextReply);
     setMention(null);

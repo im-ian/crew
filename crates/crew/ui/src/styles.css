@@ -1270,6 +1270,8 @@ header .who-name {
 }
 .row.me { justify-content: flex-end; }
 .row.them { justify-content: flex-start; align-items: flex-start; gap: var(--space-10); }
+.row.them.face-end { align-items: flex-end; }
+.row.them.face-end .msg-avatar { margin-top: 0; margin-bottom: 2px; }
 .msg-avatar {
   width: 32px;
   height: 32px;
