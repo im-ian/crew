@@ -222,9 +222,12 @@ export function App() {
       }
       if (id === "approve" || id === "deny") {
         const allow = id === "approve";
-        if (c.currentAgent?.status === "blocked") {
-          void c.approveAgent(allow, c.currentAgent.id);
-        }
+        const agent = c.currentAgent;
+        const waiting =
+          agent?.status === "blocked" &&
+          c.messagesFor === agent.id &&
+          c.messages.some((m) => m.approval === "pending");
+        if (waiting && agent) void c.approveAgent(allow, agent.id);
       }
     }
     window.addEventListener("keydown", onKey, true);
