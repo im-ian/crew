@@ -3254,32 +3254,32 @@ fn send_from_user(id: &str, shown: &str, text: &str, steer: bool) -> anyhow::Res
         )
     };
     // The turn never started and the line is not already waiting: keep it at
-    // the front, still queued. The teammates it named are released below, as
-    // they were when a start failed.
+    // the front, still queued, with the teammates it named. Sending those
+    // now would drop them on restart while the hint says they already have it.
     if started.is_err() && !inbox_has(id, &msg.id) {
+        let named_end = named_here.min(then.len());
+        let named: VecDeque<_> = then.drain(..named_end).collect();
+        let prompt = if named.is_empty() {
+            text.to_string()
+        } else {
+            delivered
+        };
         put_queued_front(
             id,
             PendingDelivery {
-                text: delivered,
+                text: prompt,
                 newline: true,
                 msg_id: Some(msg.id),
                 joins: action != UserSendAction::Redirect && headless_joins,
                 origin: TurnOrigin::user(),
-                then: VecDeque::new(),
+                then: named,
                 parked: false,
             },
         );
-    }
-    if started.is_err() {
-        let held = then.split_off(named_here.min(then.len()));
+        // What waited on a blocked turn is not one of those tells.
         if agent_busy(id).unwrap_or(true) {
-            // Refused (its inbox is full): the teammates it named go with it,
-            // and what waited on the blocked turn keeps waiting.
-            queue_serial_after(id, held);
+            queue_serial_after(id, then);
         } else {
-            // It could not start: they still answer, in order, instead of the
-            // chain dying with this bot.
-            then.extend(held);
             release(then);
         }
     }
@@ -6511,6 +6511,69 @@ exec sleep 1"#,
             assert!(waiting[0].0.contains("셋"), "{waiting:?}");
             assert_eq!(waiting.len(), 3, "{waiting:?}");
             remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A start that fails keeps the `@` tell on the user line. It is not sent
+    /// now, and a restart still has it. The hint stays only while that tell does.
+    #[test]
+    fn a_failed_start_keeps_the_queued_mention() {
+        paths::testing::with_home("fail-mention", || {
+            let bot = test_id("src");
+            let peer = test_id("dst");
+            fake_bot(&bot, "");
+            fake_bot(&peer, "");
+            wait_idle(&bot);
+            wait_idle(&peer);
+            configs().lock().unwrap().remove(&bot);
+            headless_status(&bot, AgentStatus::Idle);
+            let text = format!("봐줘 @{peer}");
+            let err = send_agent(&bot, &text).unwrap_err();
+            assert!(!err.to_string().contains("is working"), "{err}");
+
+            let waiting = inbox().lock().unwrap().get(&bot).cloned().unwrap();
+            assert_eq!(waiting.len(), 1);
+            assert_eq!(waiting[0].then.len(), 1);
+            assert_eq!(waiting[0].then[0].to, peer);
+            assert!(
+                waiting[0].text.contains("already messaged"),
+                "{}",
+                waiting[0].text
+            );
+            assert!(inbox()
+                .lock()
+                .unwrap()
+                .get(&peer)
+                .is_none_or(|q| q.is_empty()));
+
+            clear_inbox(&bot);
+            recovered_tells().lock().unwrap().remove(&bot);
+            let cfg = Config {
+                agents: vec![
+                    AgentConfig::new(bot.clone(), bot.clone(), vec!["claude".into()], None),
+                    AgentConfig::new(peer.clone(), peer.clone(), vec!["claude".into()], None),
+                ],
+            };
+            restore_transcripts(&cfg);
+            let waiting = inbox().lock().unwrap().get(&bot).cloned().unwrap();
+            assert_eq!(waiting.len(), 1);
+            assert_eq!(waiting[0].then.len(), 1);
+            assert_eq!(waiting[0].then[0].to, peer);
+            assert!(
+                waiting[0].text.contains("already messaged"),
+                "{}",
+                waiting[0].text
+            );
+            assert!(inbox()
+                .lock()
+                .unwrap()
+                .get(&peer)
+                .is_none_or(|q| q.is_empty()));
+
+            remove_agent(&bot).unwrap();
+            remove_agent(&peer).unwrap();
+            drop_waits(&bot);
+            drop_waits(&peer);
         });
     }
 
