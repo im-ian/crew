@@ -235,6 +235,8 @@ export function ChatThread({
     onStick(at);
   });
   const settledRef = useRef(false);
+  // The reader has taken the scroll over: stop putting the divider back.
+  const movedRef = useRef(false);
   const visible = visibleMessages(messages, showTools, selected);
   const all = threadRows(visible, agents);
   // A bot that has only talked with other bots has no conversation here: the
@@ -301,6 +303,7 @@ export function ChatThread({
     if (resume?.key === chatKey) return;
     if (openedRead?.key !== chatKey) return;
     settledRef.current = false;
+    movedRef.current = false;
     const id = firstUnreadId(
       rows.map((row) => ({
         id: rowKey(row),
@@ -558,15 +561,16 @@ export function ChatThread({
   // Open on the divider: the first line the reader has not seen at the top.
   // Once there, a scroll that reaches the bottom is the reader's own.
   useLayoutEffect(() => {
-    if (!resumeHold || highlightId) return;
+    if (!resumeHold || highlightId || movedRef.current) return;
     const root = ref.current;
     const el = root?.querySelector("[data-resume-divider]");
     if (!root || !(el instanceof HTMLElement)) return;
     const top =
       el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop;
     root.scrollTop = Math.max(0, top - 8);
-    syncStick();
+    // A thread that still ends in view has nothing below to hold for.
     settledRef.current = true;
+    syncStick();
   }, [resumeHold, resumeId, highlightId, virtual, heightRev]);
 
   // Expiry is its own effect on its own clock. Sharing the one above meant a
@@ -697,6 +701,10 @@ export function ChatThread({
     );
   }
 
+  function takeOver() {
+    movedRef.current = true;
+  }
+
   function onThreadScroll() {
     syncStick();
     const el = ref.current;
@@ -737,7 +745,15 @@ export function ChatThread({
 
   return (
     <div className="thread-wrap">
-      <div className="thread" ref={ref} onScroll={onThreadScroll}>
+      <div
+        className="thread"
+        ref={ref}
+        onScroll={onThreadScroll}
+        onWheel={takeOver}
+        onPointerDown={takeOver}
+        onTouchMove={takeOver}
+        onKeyDown={takeOver}
+      >
         {virtual ? (
           flow.length > 0 ? (
             <div className="thread-window" style={{ height: flowTotal }}>
