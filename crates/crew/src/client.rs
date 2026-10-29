@@ -135,7 +135,7 @@ fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
     // `connect` arms every socket with `ANSWER_TIMEOUT`. Ask waits on a
     // person and Subscribe is a stream, so that default would cut them off.
     if answer.is_none() {
-        stream.set_read_timeout(None).map_err(stalled)?;
+        stream.set_read_timeout(None).map_err(closed_early)?;
     }
     let line = req.to_line()?;
     writeln!(stream, "{line}").map_err(stalled)?;
@@ -153,7 +153,10 @@ fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
             if left.is_zero() {
                 return Err(no_answer());
             }
-            reader.get_ref().set_read_timeout(Some(left))?;
+            reader
+                .get_ref()
+                .set_read_timeout(Some(left))
+                .map_err(closed_early)?;
         }
         buf.clear();
         let n = reader.read_line(&mut buf).map_err(stalled)?;
@@ -233,9 +236,21 @@ pub fn connect() -> anyhow::Result<UnixStream> {
             paths::socket_path().display()
         )
     })?;
-    stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
-    stream.set_read_timeout(Some(ANSWER_TIMEOUT))?;
+    stream
+        .set_write_timeout(Some(WRITE_TIMEOUT))
+        .and_then(|()| stream.set_read_timeout(Some(ANSWER_TIMEOUT)))
+        .map_err(closed_early)?;
     Ok(stream)
+}
+
+/// macOS refuses a socket option with EINVAL once the daemon has closed the
+/// socket. That is a lost connection, so the caller retries as for one.
+fn closed_early(err: std::io::Error) -> anyhow::Error {
+    if err.kind() == std::io::ErrorKind::InvalidInput {
+        anyhow::Error::from(err).context("daemon closed the connection")
+    } else {
+        err.into()
+    }
 }
 
 pub fn tell_from(explicit: Option<String>) -> String {
@@ -697,6 +712,16 @@ mod tests {
             assert!(started, "nothing was listening");
             assert!(matches!(ev, Event::Pong), "{ev:?}");
         });
+    }
+
+    /// macOS answers a socket option on a socket the daemon already closed
+    /// with EINVAL. The retry has to see that as the drop it is.
+    #[test]
+    fn a_socket_option_refused_after_a_close_is_a_lost_connection() {
+        let err = closed_early(std::io::Error::from_raw_os_error(22));
+        assert!(connection_lost(&err), "{err:#}");
+        let other = closed_early(std::io::Error::from_raw_os_error(13));
+        assert!(!connection_lost(&other), "{other:#}");
     }
 
     #[test]
