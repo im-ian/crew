@@ -200,36 +200,41 @@ fn list_groups() -> Result<Vec<SidebarGroup>, String> {
     crate::groups::load().map_err(|e| e.to_string())
 }
 
-/// A project that leaves the sidebar takes its notes with it.
 #[tauri::command]
 fn set_groups(groups: Vec<SidebarGroup>) -> Result<(), String> {
-    let before = crate::groups::load().unwrap_or_default();
-    crate::groups::save(&groups).map_err(|e| e.to_string())?;
-    for gone in before
-        .iter()
-        .filter(|old| !groups.iter().any(|g| g.id == old.id))
-    {
-        crate::memory::remove_project(&gone.id);
+    crate::groups::save(&groups).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_group_memory(group: String) -> Result<String, String> {
+    let group = group.trim();
+    if group.is_empty() {
+        return Err("group is required".into());
     }
+    Ok(crate::memory::read_group(group))
+}
+
+/// `base` is the notes the dialog loaded. False means a bot changed them since
+/// and nothing was written.
+#[tauri::command]
+fn set_group_memory(group: String, text: String, base: String) -> Result<bool, String> {
+    let group = group.trim();
+    if group.is_empty() {
+        return Err("group is required".into());
+    }
+    crate::memory::write_group_if_unchanged(group, &base, &text).map_err(|e| e.to_string())
+}
+
+/// Only an explicit delete drops the notes. A layout saved without a group,
+/// say before the window loaded the file, must not take them along.
+#[tauri::command]
+fn remove_group_memory(group: String) -> Result<(), String> {
+    let group = group.trim();
+    if group.is_empty() {
+        return Err("group is required".into());
+    }
+    crate::memory::remove_group(group);
     Ok(())
-}
-
-#[tauri::command]
-fn get_project_memory(group: String) -> Result<String, String> {
-    let group = group.trim();
-    if group.is_empty() {
-        return Err("group is required".into());
-    }
-    Ok(crate::memory::read_project(group))
-}
-
-#[tauri::command]
-fn set_project_memory(group: String, text: String) -> Result<(), String> {
-    let group = group.trim();
-    if group.is_empty() {
-        return Err("group is required".into());
-    }
-    crate::memory::write_project(group, &text).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -723,9 +728,9 @@ fn choose_folder_script(prompt: &str) -> String {
 #[tauri::command(async)]
 fn pick_folder() -> Result<Option<String>, String> {
     let prompt = if crate::paths::locale() == "en" {
-        "Project folder"
+        "Group folder"
     } else {
-        "프로젝트 폴더"
+        "그룹 폴더"
     };
     let output = std::process::Command::new("osascript")
         .arg("-e")
@@ -891,8 +896,9 @@ pub fn run() -> anyhow::Result<()> {
             get_memory,
             set_memory,
             get_shared_memory,
-            get_project_memory,
-            set_project_memory,
+            get_group_memory,
+            set_group_memory,
+            remove_group_memory,
             list_groups,
             set_groups,
             list_models,
@@ -977,8 +983,8 @@ mod tests {
             Some("/Users/a/app")
         );
         assert_eq!(folder_from_picker("/\n").as_deref(), Some("/"));
-        let script = choose_folder_script("프로젝트 폴더");
-        assert!(script.contains("프로젝트 폴더"));
+        let script = choose_folder_script("그룹 폴더");
+        assert!(script.contains("그룹 폴더"));
         assert!(script.contains("-128"));
     }
 

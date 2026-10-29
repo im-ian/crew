@@ -2,60 +2,77 @@ import { useEffect, useRef, useState } from "react";
 import { useT } from "../LocaleContext";
 import type { Group } from "../types";
 import { Field } from "./Field";
+import { FolderPick } from "./FolderPick";
 import { Modal } from "./Modal";
 
 type Props = {
   open: boolean;
   group: Group | null;
   onClose: () => void;
+  onPickFolder: () => Promise<string | null>;
   onLoad: (id: string) => Promise<string>;
-  onSave: (id: string, text: string) => Promise<boolean>;
+  onSave: (
+    id: string,
+    fields: { path: string; memory: string; base: string },
+  ) => Promise<boolean>;
 };
 
-export function ProjectSettingsModal({ open, group, onClose, onLoad, onSave }: Props) {
+export function GroupSettingsModal({
+  open,
+  group,
+  onClose,
+  onPickFolder,
+  onLoad,
+  onSave,
+}: Props) {
   const t = useT();
+  const [path, setPath] = useState("");
   const [memory, setMemory] = useState("");
   const [busy, setBusy] = useState(false);
   const edited = useRef(false);
-  const memoryRef = useRef<HTMLTextAreaElement>(null);
+  // The notes as loaded. A bot may add to them while the dialog is open.
+  const base = useRef("");
 
   useEffect(() => {
     if (!open || !group) return;
+    setPath(group.path ?? "");
     setMemory("");
     setBusy(false);
     edited.current = false;
+    base.current = "";
     void onLoad(group.id).then((text) => {
-      if (!edited.current) setMemory(text);
+      if (edited.current) return;
+      base.current = text;
+      setMemory(text);
     });
-    const timer = window.setTimeout(() => memoryRef.current?.focus(), 0);
-    return () => window.clearTimeout(timer);
   }, [open, group?.id]);
 
   async function submit() {
     if (!group || busy) return;
     setBusy(true);
     try {
-      if (await onSave(group.id, memory)) onClose();
+      if (await onSave(group.id, { path, memory, base: base.current })) onClose();
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <Modal open={open} title={t("projectSettings.title")} onClose={onClose}>
+    <Modal open={open} title={t("groupSettings.title")} onClose={onClose}>
       <div className="form-stack">
-        <p className="apply-note">
-          {group?.path
-            ? t("projectSettings.of", { name: group.name, path: group.path })
-            : group?.name}
-        </p>
-        <p className="apply-note">{t("projectSettings.memoryNote")}</p>
-        <Field label={t("projectSettings.memoryLabel")} htmlFor="project-memory">
+        <p className="apply-note">{group?.name}</p>
+        <Field label={t("group.folderLabel")} htmlFor="group-path" hint={t("group.folderHint")}>
+          <FolderPick id="group-path" path={path} onPick={onPickFolder} onChange={setPath} />
+        </Field>
+        <Field
+          label={t("groupSettings.memoryLabel")}
+          htmlFor="group-memory"
+          hint={t("groupSettings.memoryNote")}
+        >
           <textarea
-            id="project-memory"
-            ref={memoryRef}
+            id="group-memory"
             className="textin memory"
-            placeholder={t("projectSettings.memoryPh")}
+            placeholder={t("groupSettings.memoryPh")}
             value={memory}
             onChange={(e) => {
               edited.current = true;

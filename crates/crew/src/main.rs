@@ -195,6 +195,30 @@ enum GroupCmd {
         #[arg(long = "bot")]
         bots: Vec<String>,
     },
+    /// Notes every bot in a group shares. Defaults to the group $CREW_AGENT_ID sits in.
+    Memory {
+        /// Group id, from `crew group list`.
+        #[arg(long, global = true)]
+        group: Option<String>,
+        #[command(subcommand)]
+        cmd: GroupMemoryCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum GroupMemoryCmd {
+    /// Print the group's notes.
+    Show,
+    /// Replace the group's notes. Text from args, or stdin.
+    Set {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        text: Vec<String>,
+    },
+    /// Append a note to the group.
+    Append {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        text: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -598,6 +622,7 @@ fn run() -> anyhow::Result<()> {
         }
         Some(Cmd::Group(GroupCmd::List)) => list_groups_cmd(),
         Some(Cmd::Group(GroupCmd::Add { name, bots })) => add_group_cmd(name, bots),
+        Some(Cmd::Group(GroupCmd::Memory { group, cmd })) => group_memory_cmd(group, cmd),
         Some(Cmd::Routine(sub)) => run_routine(sub),
         Some(Cmd::Memory(sub)) => run_memory(sub),
         Some(Cmd::Share(sub)) => run_share(sub),
@@ -619,7 +644,7 @@ fn run_share(cmd: ShareCmd) -> anyhow::Result<()> {
             if let Some(id) = &id {
                 print!(
                     "{}",
-                    crate::config::project_memory_section(crate::memory::project_for(id).as_ref())
+                    crate::config::group_memory_section(crate::memory::group_for(id).as_ref())
                 );
             }
             Ok(())
@@ -994,6 +1019,46 @@ fn list_groups_cmd() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `--group`, else the group the calling bot sits in.
+fn memory_group_id(explicit: Option<String>) -> anyhow::Result<String> {
+    let groups = groups::load()?;
+    if let Some(id) = explicit.and_then(empty_to_none) {
+        if !groups.iter().any(|g| g.id == id && g.id != groups::UNGROUPED_ID) {
+            anyhow::bail!("unknown group {id}");
+        }
+        return Ok(id);
+    }
+    let agent = session_agent_id()
+        .ok_or_else(|| anyhow::anyhow!("group memory needs --group (or CREW_AGENT_ID)"))?;
+    groups::group_of(&groups, &agent)
+        .map(|g| g.id.clone())
+        .ok_or_else(|| anyhow::anyhow!("{agent} is in no group; pass --group"))
+}
+
+fn group_memory_cmd(group: Option<String>, cmd: GroupMemoryCmd) -> anyhow::Result<()> {
+    let id = memory_group_id(group)?;
+    match cmd {
+        GroupMemoryCmd::Show => {
+            print!("{}", crate::memory::read_group(&id));
+            Ok(())
+        }
+        GroupMemoryCmd::Set { text } => {
+            let body = memory_body(text)?;
+            if body.trim().is_empty() {
+                anyhow::bail!("group memory set needs text; it replaces the group's notes");
+            }
+            crate::memory::write_group(&id, &body)
+        }
+        GroupMemoryCmd::Append { text } => {
+            let body = memory_body(text)?;
+            if body.trim().is_empty() {
+                anyhow::bail!("group memory append needs text");
+            }
+            crate::memory::append_group(&id, &body)
+        }
+    }
+}
+
 fn add_group_cmd(name: String, bots: Vec<String>) -> anyhow::Result<()> {
     let name = name.trim();
     if name.is_empty() {
@@ -1248,6 +1313,56 @@ mod tests {
             }
             _ => panic!("expected group add"),
         }
+    }
+
+    #[test]
+    fn group_memory_flags() {
+        match parse_ok(&["crew", "group", "memory", "append", "--group", "g1", "ship", "it"]).cmd {
+            Some(Cmd::Group(GroupCmd::Memory {
+                group,
+                cmd: GroupMemoryCmd::Append { text },
+            })) => {
+                assert_eq!(group.as_deref(), Some("g1"));
+                assert_eq!(text, vec!["ship", "it"]);
+            }
+            _ => panic!("expected group memory append"),
+        }
+        match parse_ok(&["crew", "group", "memory", "show"]).cmd {
+            Some(Cmd::Group(GroupCmd::Memory {
+                group: None,
+                cmd: GroupMemoryCmd::Show,
+            })) => {}
+            _ => panic!("expected group memory show"),
+        }
+    }
+
+    #[test]
+    fn group_memory_writes_the_named_group() {
+        paths::testing::with_home("group-memory", || {
+            groups::save(&[groups::SidebarGroup {
+                id: "g1".into(),
+                name: "app".into(),
+                collapsed: false,
+                items: vec!["agent:review".into()],
+                path: None,
+            }])
+            .unwrap();
+            let append = |text: &str| GroupMemoryCmd::Append {
+                text: vec![text.into()],
+            };
+            group_memory_cmd(Some("g1".into()), append("one")).unwrap();
+            group_memory_cmd(Some("g1".into()), append("two")).unwrap();
+            assert_eq!(crate::memory::read_group("g1"), "one\ntwo\n");
+            assert!(group_memory_cmd(Some("nope".into()), append("x")).is_err());
+            group_memory_cmd(
+                Some("g1".into()),
+                GroupMemoryCmd::Set {
+                    text: vec!["fresh".into()],
+                },
+            )
+            .unwrap();
+            assert_eq!(crate::memory::read_group("g1"), "fresh");
+        });
     }
 
     #[test]

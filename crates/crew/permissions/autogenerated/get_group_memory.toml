@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-group-memory"
+description = "Enables the get_group_memory command without any pre-configured scope."
+commands.allow = ["get_group_memory"]
+
+[[permission]]
+identifier = "deny-get-group-memory"
+description = "Denies the get_group_memory command without any pre-configured scope."
+commands.deny = ["get_group_memory"]

@@ -17,7 +17,7 @@ pub struct SidebarGroup {
     pub collapsed: bool,
     #[serde(default)]
     pub items: Vec<String>,
-    /// Folder bound to a project. Empty for an ordinary group.
+    /// Working folder for the group's bots. A group need not have one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
 }
@@ -233,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn a_project_folder_roundtrips_and_an_old_group_has_none() {
+    fn a_group_folder_roundtrips_and_an_old_group_has_none() {
         let plain: Vec<SidebarGroup> =
             serde_json::from_str(r#"[{"id":"g1","name":"개인"}]"#).unwrap();
         assert_eq!(plain[0].path, None);

@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { randomFace, type AvatarShape } from "../avatar";
-import { projectCwd, splitPlace } from "../groups";
 import { useT } from "../LocaleContext";
 import type { CliKind, Group } from "../types";
-import { Folder, Layers } from "../icons";
 import { Avatar } from "./Avatar";
 import { FacePop } from "./FacePicker";
 import { Field } from "./Field";
@@ -25,7 +23,6 @@ type Props = {
     shape: string | null;
     color: string | null;
     groupId: string | null;
-    projectId: string | null;
   }) => Promise<void>;
 };
 
@@ -45,13 +42,10 @@ export function NewBotModal({
   const [shape, setShape] = useState<AvatarShape | "">("");
   const [color, setColor] = useState("");
   const [groupId, setGroupId] = useState("");
-  const [projectId, setProjectId] = useState("");
   const [busy, setBusy] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
-  const plain = groups.filter((g) => !projectCwd(g));
-  const projects = groups.filter((g) => projectCwd(g));
 
   useEffect(() => {
     if (!open) return;
@@ -60,9 +54,9 @@ export function NewBotModal({
     setCli("grok");
     setCommand("");
     setEffort("");
-    const place = splitPlace(groupsRef.current, placeId);
-    setGroupId(place.groupId);
-    setProjectId(place.projectId);
+    setGroupId(
+      placeId && groupsRef.current.some((g) => g.id === placeId) ? placeId : "",
+    );
     // #3a3a3c is a swatch to pick, not a face to start from: on the dark
     // dialog it reads as an empty slot.
     const face = randomFace({ color: "#3a3a3c" });
@@ -83,7 +77,6 @@ export function NewBotModal({
       shape: shape || null,
       color: color || null,
       groupId: groupId || null,
-      projectId: projectId || null,
     };
   }
 
@@ -162,59 +155,21 @@ export function NewBotModal({
             onCommand={setCommand}
           />
         </Field>
-        <Field
-          label={
-            <>
-              <Layers size={12} />
-              {t("field.group")}
-            </>
-          }
-          htmlFor="new-group"
-        >
+        <Field label={t("field.group")} htmlFor="new-group" hint={t("newBot.placeHint")}>
           <select
             id="new-group"
             className="textin"
             value={groupId}
-            onChange={(e) => {
-              setGroupId(e.target.value);
-              if (e.target.value) setProjectId("");
-            }}
+            onChange={(e) => setGroupId(e.target.value)}
           >
             <option value="">{t("newBot.none")}</option>
-            {plain.map((g) => (
+            {groups.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.name}
               </option>
             ))}
           </select>
         </Field>
-        <Field
-          label={
-            <>
-              <Folder size={12} />
-              {t("field.project")}
-            </>
-          }
-          htmlFor="new-project"
-        >
-          <select
-            id="new-project"
-            className="textin"
-            value={projectId}
-            onChange={(e) => {
-              setProjectId(e.target.value);
-              if (e.target.value) setGroupId("");
-            }}
-          >
-            <option value="">{t("newBot.none")}</option>
-            {projects.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <p className="apply-note">{t("newBot.placeHint")}</p>
       </div>
       <div className="actions spread">
         <button type="button" className="ghost" onClick={onClose}>

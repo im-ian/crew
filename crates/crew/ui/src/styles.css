@@ -443,12 +443,6 @@ button.linkish {
   transition: transform 0.12s ease;
 }
 .group-head.collapsed .group-chevron { transform: rotate(-90deg); }
-.group-mark {
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  color: var(--muted);
-}
 .group-name {
   flex: 1;
   min-width: 0;
@@ -473,8 +467,8 @@ button.linkish {
   text-overflow: ellipsis;
 }
 .group-name:hover { color: var(--ink); }
-.group-name:hover .group-mark { color: var(--ink); }
-/* Shown while the head is hovered, so a resting rail stays quiet. */
+/* "+" and "..." on a folder head. Shown while the head is hovered, so a
+   resting rail stays quiet. */
 .group-more {
   width: 20px;
   height: 20px;
@@ -516,8 +510,7 @@ button.linkish {
   color: var(--ink);
 }
 .group-head.drop-into .group-name,
-.group-head.drop-into .group-chevron,
-.group-head.drop-into .group-mark {
+.group-head.drop-into .group-chevron {
   color: var(--ink);
 }
 .rail-drop-line {
@@ -4444,7 +4437,8 @@ textarea.textin.skill-body {
   color: var(--btn-disabled-ink);
   cursor: default;
 }
-.apply-note {
+.apply-note,
+.field-hint {
   font-size: var(--text-sm);
   color: var(--muted);
   margin: 0;

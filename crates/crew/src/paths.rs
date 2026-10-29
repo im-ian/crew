@@ -363,10 +363,10 @@ pub fn memory_path(agent_id: &str) -> PathBuf {
     memory_dir().join(format!("{}.md", safe_agent_id(agent_id)))
 }
 
-/// Notes the user keeps for one sidebar project, by group id.
-pub fn project_memory_path(group_id: &str) -> PathBuf {
+/// Notes the user keeps for one sidebar group, by group id.
+pub fn group_memory_path(group_id: &str) -> PathBuf {
     home_dir()
-        .join("project-memory")
+        .join("group-memory")
         .join(format!("{}.md", safe_agent_id(group_id)))
 }
 

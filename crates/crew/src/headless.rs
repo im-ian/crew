@@ -242,8 +242,8 @@ fn shared_note_for_turn(
         return None;
     }
     let mut note = crate::config::shared_memory_note(agent, roster, &crate::memory::read_shared());
-    note.push_str(&crate::config::project_memory_section(
-        crate::memory::project_for(&agent.id).as_ref(),
+    note.push_str(&crate::config::group_memory_section(
+        crate::memory::group_for(&agent.id).as_ref(),
     ));
     Some(note)
 }
@@ -3870,7 +3870,7 @@ mod tests {
             let path = shared_note_for_turn("/Users/me/shot.png 이거 봐줘", &alpha, &roster)
                 .expect("a path still gets the live list");
             assert!(path.contains("beta — Beta"));
-            assert!(!note.contains("Project memory"));
+            assert!(!note.contains("Group memory"));
             crate::groups::save(&[crate::groups::SidebarGroup {
                 id: "g1".into(),
                 name: "app".into(),
@@ -3879,12 +3879,14 @@ mod tests {
                 path: Some("/tmp/app".into()),
             }])
             .unwrap();
-            crate::memory::write_project("g1", "ship on fridays").unwrap();
+            let empty = shared_note_for_turn("hi", &alpha, &roster).unwrap();
+            assert!(empty.ends_with("# Group memory (app)\nNotes every bot in the group you are in shares.\n(none)\n"), "{empty}");
+            crate::memory::write_group("g1", "ship on fridays").unwrap();
             let note = shared_note_for_turn("hi", &alpha, &roster).unwrap();
-            assert!(note.contains("# Project memory (app)\n"), "{note}");
+            assert!(note.contains("# Group memory (app)\n"), "{note}");
             assert!(note.ends_with("ship on fridays\n"), "{note}");
             let beta_note = shared_note_for_turn("hi", &roster[1], &roster).unwrap();
-            assert!(!beta_note.contains("Project memory"));
+            assert!(!beta_note.contains("Group memory"));
         });
     }
 
