@@ -509,16 +509,22 @@ pub fn handoff_envelope(from: &str, text: &str) -> String {
     format!("[crew handoff from:{from}]\n{text}")
 }
 
-pub const HANDOFF_CLIP: usize = 800;
+/// A full report fits. The 800 it was cut a teammate's report off after its
+/// progress lines and table, before what it was blocked on.
+pub const HANDOFF_CLIP: usize = 4000;
 
-pub fn clip_chars(s: &str, n: usize) -> String {
-    let mut chars = s.chars();
-    let out: String = chars.by_ref().take(n).collect();
-    if chars.next().is_some() {
-        format!("{out}…")
-    } else {
-        out.to_string()
+/// A reply opens with progress lines and ends with what is left, so a long one
+/// keeps its start and, mostly, its end.
+pub fn clip_middle(s: &str, n: usize) -> String {
+    let total = s.chars().count();
+    if total <= n {
+        return s.to_string();
     }
+    let head = n * 2 / 5;
+    let tail = n - head;
+    let start: String = s.chars().take(head).collect();
+    let end: String = s.chars().skip(total - tail).collect();
+    format!("{start}\n…\n{end}")
 }
 
 /// Stick `extra` after the first `[crew …]` marker line so origin parsing
@@ -551,6 +557,19 @@ mod tests {
         assert_eq!(AgentStatus::Exited.label("ko"), "종료됨");
         // Anything that is not English stays Korean, the daemon's default.
         assert_eq!(AgentStatus::Idle.label(""), "대기");
+    }
+
+    #[test]
+    fn a_long_reply_keeps_its_start_and_end() {
+        assert_eq!(clip_middle("짧은 답", 10), "짧은 답");
+        let report = format!("{}{}{}", "가".repeat(10), "나".repeat(30), "다".repeat(10));
+        let kept = format!(
+            "{}\n…\n{}{}",
+            "가".repeat(8),
+            "나".repeat(2),
+            "다".repeat(10)
+        );
+        assert_eq!(clip_middle(&report, 20), kept);
     }
 
     #[test]

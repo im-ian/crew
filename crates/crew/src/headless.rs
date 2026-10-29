@@ -500,7 +500,7 @@ fn run_turn(
             return;
         }
     }
-    let turn = crate::transcript::begin_turn(&session.id);
+    let mut turn = crate::transcript::begin_turn(&session.id);
 
     let program = cfg.binary_name();
     let stored = session
@@ -581,7 +581,7 @@ fn run_turn(
     if let Err(err) = crate::paths::create_cwd(&cwd) {
         eprintln!("[crew] cwd {}: {err:#}", cwd.display());
     }
-    let result = spawn_and_stream(&session, &argv, generation, turn, &cwd);
+    let result = spawn_and_stream(&session, &argv, generation, &mut turn, &cwd);
 
     if is_stale(&session, generation) {
         crate::transcript::end_turn_gen(&session.id, Some(turn));
@@ -728,7 +728,7 @@ fn spawn_and_stream(
     session: &Arc<HeadlessSession>,
     argv: &[String],
     generation: u64,
-    turn: u64,
+    turn: &mut u64,
     cwd: &std::path::Path,
 ) -> anyhow::Result<TurnOutcome> {
     if argv.is_empty() {
@@ -810,10 +810,25 @@ fn spawn_and_stream(
             continue;
         }
         if sealed {
-            if cli == CliKind::Grok {
-                note_sealed_grok_child(session, &mut state, &line);
+            match cli {
+                CliKind::Grok => note_sealed_grok_child(session, &mut state, &line),
+                // Claude keeps the process up past `result` while a task it put in
+                // the background runs, and answers again when the task ends. Its
+                // `init` opens that reply, which then reads like any other.
+                CliKind::Claude => match serde_json::from_str::<Value>(line.trim()) {
+                    Ok(v) if is_claude_turn_start(&v) => {
+                        *turn = reopen_turn(session, generation);
+                        state.start_reply();
+                        sealed = false;
+                    }
+                    Ok(v) => note_claude_background(&v, &mut state),
+                    Err(_) => {}
+                },
+                _ => {}
             }
-            continue;
+            if sealed {
+                continue;
+            }
         }
         let mut turn_end = false;
         // grok/claude/codex stream every reply as JSON, so a bare line there is
@@ -843,6 +858,7 @@ fn spawn_and_stream(
                     );
                 }
                 if cli == CliKind::Claude {
+                    note_claude_background(&v, &mut state);
                     for note in claude_subagent_notes(&v, &mut state) {
                         crate::transcript::push_subagent(
                             &session.id,
@@ -876,7 +892,7 @@ fn spawn_and_stream(
         }
         // Without text the exit path still has an error to post, so wait for it.
         if turn_end && state.got_text {
-            end_turn_early(session, generation, turn);
+            end_turn_early(session, generation, *turn, state.claude_background > 0);
             sealed = true;
         }
     }
@@ -934,7 +950,8 @@ fn spawn_and_stream(
 }
 
 /// Each CLI's own "turn over" event. The process outlives it by about a second
-/// (session save, MCP shutdown), and the chat should not wait for that.
+/// (session save, MCP shutdown), and the chat should not wait for that. Claude
+/// outlives it for as long as a task it put in the background runs.
 fn is_turn_end(cli: CliKind, v: &Value) -> bool {
     let ty = v.get("type").and_then(Value::as_str);
     match cli {
@@ -948,18 +965,66 @@ fn is_turn_end(cli: CliKind, v: &Value) -> bool {
 /// Seal the reply and show the agent idle before the CLI exits. `inner.child`
 /// stays set until exit, so a send in that gap still queues instead of resuming
 /// a session the CLI is still writing; run_turn pumps the inbox after exit.
-fn end_turn_early(session: &HeadlessSession, generation: u64, turn: u64) {
+/// With a task still in the background the agent stays working: the CLI is
+/// not done, and a send waits for it.
+///
+/// What waited on the answer goes now, not at exit: a background task can
+/// keep the CLI up for minutes, and the tells this turn ran sat that long.
+fn end_turn_early(session: &HeadlessSession, generation: u64, turn: u64, background: bool) {
     crate::transcript::end_turn_gen(&session.id, Some(turn));
-    if let Ok(mut inner) = session.inner.lock() {
+    let blocked = {
+        let Ok(mut inner) = session.inner.lock() else {
+            return;
+        };
         if inner.generation != generation {
             return;
         }
-        if inner.status == AgentStatus::Working {
+        if inner.status == AgentStatus::Working && !background {
             inner.status = AgentStatus::Idle;
         }
         inner.seq += 1;
-    }
+        inner.status == AgentStatus::Blocked
+    };
     crate::daemon::emit_agent_frame(&session.id);
+    // A reply waiting on the user's approval is not the answer yet.
+    if !blocked {
+        crate::daemon::turn_answered(&session.id);
+    }
+}
+
+/// The CLI started a reply nobody sent a prompt for. It is a turn of its own:
+/// a new row, and the agent working until it ends.
+fn reopen_turn(session: &HeadlessSession, generation: u64) -> u64 {
+    let turn = crate::transcript::begin_turn(&session.id);
+    if let Ok(mut inner) = session.inner.lock() {
+        if inner.generation == generation && inner.status == AgentStatus::Idle {
+            inner.status = AgentStatus::Working;
+        }
+        inner.last_output = Instant::now();
+        inner.seq += 1;
+    }
+    crate::daemon::turn_reopened(&session.id);
+    crate::daemon::emit_agent_frame(&session.id);
+    turn
+}
+
+/// Claude's `init`, which starts each reply, including one it starts itself.
+fn is_claude_turn_start(v: &Value) -> bool {
+    v.get("type").and_then(Value::as_str) == Some("system")
+        && v.get("subtype").and_then(Value::as_str) == Some("init")
+}
+
+/// Claude lists the tasks still running in the background on every change.
+fn note_claude_background(v: &Value, state: &mut ParseState) {
+    if v.get("type").and_then(Value::as_str) != Some("system")
+        || v.get("subtype").and_then(Value::as_str) != Some("background_tasks_changed")
+    {
+        return;
+    }
+    state.claude_background = v
+        .get("tasks")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
 }
 
 fn feed_text(cli: CliKind, session: &HeadlessSession, chunk: &str) {
@@ -1075,6 +1140,8 @@ struct ParseState {
     background_calls: HashSet<String>,
     /// Parent text waiting until a foreground spawn no longer owns the stream.
     held_reply: String,
+    /// Claude tasks running in the background, from its latest list.
+    claude_background: usize,
     /// Parent speech to show on the event that released `held_reply`.
     parent_release: Option<String>,
     /// Tool calls that belong to a child session.
@@ -1100,6 +1167,14 @@ struct ParseState {
     /// Canonical directory of this grok process. A spawn with no `cwd` stores
     /// its session here.
     grok_cwd: String,
+}
+
+impl ParseState {
+    /// A new reply in the same process does not start after the last one's tool.
+    fn start_reply(&mut self) {
+        self.tool_after_text = false;
+        self.reply_break = false;
+    }
 }
 
 /// A tool card waiting to learn whether it belongs to the parent or a child.
