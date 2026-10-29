@@ -155,7 +155,7 @@ export function NewBotModal({
             onCommand={setCommand}
           />
         </Field>
-        <Field label={t("field.group")} htmlFor="new-group">
+        <Field label={t("field.group")} htmlFor="new-group" hint={t("newBot.placeHint")}>
           <select
             id="new-group"
             className="textin"
@@ -170,7 +170,6 @@ export function NewBotModal({
             ))}
           </select>
         </Field>
-        <p className="apply-note">{t("newBot.placeHint")}</p>
       </div>
       <div className="actions spread">
         <button type="button" className="ghost" onClick={onClose}>

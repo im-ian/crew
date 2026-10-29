@@ -62,7 +62,7 @@ export function NewGroupModal({ open, onClose, onPickFolder, onCreate }: Props) 
             }}
           />
         </Field>
-        <Field label={t("field.cwd")} htmlFor="new-group-path">
+        <Field label={t("field.cwd")} htmlFor="new-group-path" hint={t("group.folderHint")}>
           <FolderPick
             id="new-group-path"
             path={path}
@@ -73,8 +73,11 @@ export function NewGroupModal({ open, onClose, onPickFolder, onCreate }: Props) 
             }}
           />
         </Field>
-        <p className="apply-note">{t("group.folderHint")}</p>
-        <Field label={t("groupSettings.memoryLabel")} htmlFor="new-group-memory">
+        <Field
+          label={t("groupSettings.memoryLabel")}
+          htmlFor="new-group-memory"
+          hint={t("groupSettings.memoryNote")}
+        >
           <textarea
             id="new-group-memory"
             className="textin memory"
@@ -83,7 +86,6 @@ export function NewGroupModal({ open, onClose, onPickFolder, onCreate }: Props) 
             onChange={(e) => setMemory(e.target.value)}
           />
         </Field>
-        <p className="apply-note">{t("groupSettings.memoryNote")}</p>
       </div>
       <div className="actions spread">
         <button type="button" className="ghost" onClick={onClose}>

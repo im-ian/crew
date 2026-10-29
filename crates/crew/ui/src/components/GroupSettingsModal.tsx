@@ -61,11 +61,14 @@ export function GroupSettingsModal({
     <Modal open={open} title={t("groupSettings.title")} onClose={onClose}>
       <div className="form-stack">
         <p className="apply-note">{group?.name}</p>
-        <Field label={t("field.cwd")} htmlFor="group-path">
+        <Field label={t("field.cwd")} htmlFor="group-path" hint={t("group.folderHint")}>
           <FolderPick id="group-path" path={path} onPick={onPickFolder} onChange={setPath} />
         </Field>
-        <p className="apply-note">{t("group.folderHint")}</p>
-        <Field label={t("groupSettings.memoryLabel")} htmlFor="group-memory">
+        <Field
+          label={t("groupSettings.memoryLabel")}
+          htmlFor="group-memory"
+          hint={t("groupSettings.memoryNote")}
+        >
           <textarea
             id="group-memory"
             className="textin memory"
@@ -77,7 +80,6 @@ export function GroupSettingsModal({
             }}
           />
         </Field>
-        <p className="apply-note">{t("groupSettings.memoryNote")}</p>
       </div>
       <div className="actions spread">
         <button type="button" className="ghost" onClick={onClose}>

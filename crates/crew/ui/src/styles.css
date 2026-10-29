@@ -4341,7 +4341,8 @@ textarea.textin.skill-body {
   color: var(--btn-disabled-ink);
   cursor: default;
 }
-.apply-note {
+.apply-note,
+.field-hint {
   font-size: var(--text-sm);
   color: var(--muted);
   margin: 0;
