@@ -43,6 +43,7 @@
     "allow-get-shared-memory",
     "allow-get-group-memory",
     "allow-set-group-memory",
+    "allow-remove-group-memory",
     "allow-list-groups",
     "allow-set-groups",
     "allow-list-models",

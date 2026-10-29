@@ -427,6 +427,7 @@ export function useCrew() {
       groups: current.groups.filter((g) => g.id !== id),
       ungrouped: uniqueKeys([...(gone?.items || []), ...current.ungrouped]),
     });
+    void api.removeGroupMemory(id).catch((err) => showError(err));
   }
 
   function moveToGroup(

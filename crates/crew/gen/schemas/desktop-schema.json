@@ -237,6 +237,12 @@
           "markdownDescription": "Enables the edit_routine command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_group_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-group-memory",
+          "markdownDescription": "Enables the get_group_memory command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_memory command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-memory",
@@ -247,12 +253,6 @@
           "type": "string",
           "const": "allow-get-messages",
           "markdownDescription": "Enables the get_messages command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the get_project_memory command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-get-project-memory",
-          "markdownDescription": "Enables the get_project_memory command without any pre-configured scope."
         },
         {
           "description": "Enables the get_shared_memory command without any pre-configured scope.",
@@ -333,6 +333,12 @@
           "markdownDescription": "Enables the remove_agent command without any pre-configured scope."
         },
         {
+          "description": "Enables the remove_group_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remove-group-memory",
+          "markdownDescription": "Enables the remove_group_memory command without any pre-configured scope."
+        },
+        {
           "description": "Enables the remove_routine command without any pre-configured scope.",
           "type": "string",
           "const": "allow-remove-routine",
@@ -411,6 +417,12 @@
           "markdownDescription": "Enables the set_dock_badge command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_group_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-group-memory",
+          "markdownDescription": "Enables the set_group_memory command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_groups command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-groups",
@@ -433,12 +445,6 @@
           "type": "string",
           "const": "allow-set-notifications",
           "markdownDescription": "Enables the set_notifications command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the set_project_memory command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-set-project-memory",
-          "markdownDescription": "Enables the set_project_memory command without any pre-configured scope."
         },
         {
           "description": "Enables the set_routine_enabled command without any pre-configured scope.",
@@ -525,6 +531,12 @@
           "markdownDescription": "Denies the edit_routine command without any pre-configured scope."
         },
         {
+          "description": "Denies the get_group_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-group-memory",
+          "markdownDescription": "Denies the get_group_memory command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_memory command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-memory",
@@ -535,12 +547,6 @@
           "type": "string",
           "const": "deny-get-messages",
           "markdownDescription": "Denies the get_messages command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the get_project_memory command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-get-project-memory",
-          "markdownDescription": "Denies the get_project_memory command without any pre-configured scope."
         },
         {
           "description": "Denies the get_shared_memory command without any pre-configured scope.",
@@ -621,6 +627,12 @@
           "markdownDescription": "Denies the remove_agent command without any pre-configured scope."
         },
         {
+          "description": "Denies the remove_group_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remove-group-memory",
+          "markdownDescription": "Denies the remove_group_memory command without any pre-configured scope."
+        },
+        {
           "description": "Denies the remove_routine command without any pre-configured scope.",
           "type": "string",
           "const": "deny-remove-routine",
@@ -699,6 +711,12 @@
           "markdownDescription": "Denies the set_dock_badge command without any pre-configured scope."
         },
         {
+          "description": "Denies the set_group_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-group-memory",
+          "markdownDescription": "Denies the set_group_memory command without any pre-configured scope."
+        },
+        {
           "description": "Denies the set_groups command without any pre-configured scope.",
           "type": "string",
           "const": "deny-set-groups",
@@ -721,12 +739,6 @@
           "type": "string",
           "const": "deny-set-notifications",
           "markdownDescription": "Denies the set_notifications command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the set_project_memory command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-set-project-memory",
-          "markdownDescription": "Denies the set_project_memory command without any pre-configured scope."
         },
         {
           "description": "Denies the set_routine_enabled command without any pre-configured scope.",

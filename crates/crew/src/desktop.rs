@@ -198,18 +198,9 @@ fn list_groups() -> Result<Vec<SidebarGroup>, String> {
     crate::groups::load().map_err(|e| e.to_string())
 }
 
-/// A group that leaves the sidebar takes its notes with it.
 #[tauri::command]
 fn set_groups(groups: Vec<SidebarGroup>) -> Result<(), String> {
-    let before = crate::groups::load().unwrap_or_default();
-    crate::groups::save(&groups).map_err(|e| e.to_string())?;
-    for gone in before
-        .iter()
-        .filter(|old| !groups.iter().any(|g| g.id == old.id))
-    {
-        crate::memory::remove_group(&gone.id);
-    }
-    Ok(())
+    crate::groups::save(&groups).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -230,6 +221,18 @@ fn set_group_memory(group: String, text: String, base: String) -> Result<bool, S
         return Err("group is required".into());
     }
     crate::memory::write_group_if_unchanged(group, &base, &text).map_err(|e| e.to_string())
+}
+
+/// Only an explicit delete drops the notes. A layout saved without a group,
+/// say before the window loaded the file, must not take them along.
+#[tauri::command]
+fn remove_group_memory(group: String) -> Result<(), String> {
+    let group = group.trim();
+    if group.is_empty() {
+        return Err("group is required".into());
+    }
+    crate::memory::remove_group(group);
+    Ok(())
 }
 
 #[tauri::command]
@@ -893,6 +896,7 @@ pub fn run() -> anyhow::Result<()> {
             get_shared_memory,
             get_group_memory,
             set_group_memory,
+            remove_group_memory,
             list_groups,
             set_groups,
             list_models,

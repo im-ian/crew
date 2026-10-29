@@ -160,6 +160,7 @@ export const api = {
   getGroupMemory: (group: string) => invoke<string>("get_group_memory", { group }),
   setGroupMemory: (group: string, text: string, base: string) =>
     invoke<boolean>("set_group_memory", { group, text, base }),
+  removeGroupMemory: (group: string) => invoke<void>("remove_group_memory", { group }),
   listGroups: () => invoke<Group[]>("list_groups"),
   setGroups: (groups: Group[]) => invoke<void>("set_groups", { groups }),
   searchCrew: (query: string) => invoke<SearchHit[]>("search_crew", { query }),
