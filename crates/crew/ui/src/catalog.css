@@ -1,0 +1,32 @@
+/* The app shell pins html, body and #root to the window with overflow hidden.
+   These pages are long, so let the document scroll. */
+html { height: auto; max-height: none; overflow: auto; overscroll-behavior: auto; }
+body, #root { height: auto; max-height: none; overflow: visible; }
+html { background: var(--bg); }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, sans-serif; }
+.cat { min-height: 100vh; box-sizing: border-box; max-width: 1080px; margin: 0 auto; padding: 24px 24px 80px; }
+.cat h1 { font-size: 20px; margin: 0 16px 0 0; }
+.cat h2 { font-size: 15px; margin: 36px 0 14px; color: var(--muted); font-weight: 600; }
+.cat h3 { font-size: 14px; margin: 0; }
+.cat-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+.cat-bar label { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.cat select, .cat button { background: var(--btn); color: var(--ink); border: 0; border-radius: 6px; padding: 6px 10px; font: inherit; cursor: pointer; }
+.cat button:hover { background: var(--btn-hover); }
+.cat-swatches { display: flex; gap: 6px; }
+.cat-swatches button { width: 20px; height: 20px; padding: 0; border-radius: 50%; outline-offset: 2px; }
+.cat-swatches button.on { outline: 2px solid var(--ink); }
+.cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.cat-card { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+.cat-card.is-new { border-color: color-mix(in srgb, var(--working) 55%, var(--line)); }
+.cat-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.cat-tag { font-size: 11px; color: var(--working); }
+.cat-stage { display: grid; place-items: center; height: 204px; padding: 16px 0 40px; box-sizing: border-box; overflow: visible; }
+.cat-sizes { display: flex; gap: 16px; align-items: flex-end; justify-content: center; }
+.cat-card p { margin: 0; color: var(--muted); font-size: 12.5px; }
+.cat-actions { display: flex; gap: 6px; }
+.cat-face { flex-shrink: 0; }
+.cat-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+.cat-tabs button.on { background: var(--working); color: #fff; }
+.cat-shapes { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 22px 10px; }
+.cat-shapes figure { margin: 0; display: grid; justify-items: center; gap: 8px; padding-top: 10px; }
+.cat-shapes figcaption { font-size: 11px; color: var(--muted); }
