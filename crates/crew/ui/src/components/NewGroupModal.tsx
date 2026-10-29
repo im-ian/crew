@@ -9,13 +9,14 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onPickFolder: () => Promise<string | null>;
-  onCreate: (name: string, path: string) => void;
+  onCreate: (name: string, path: string, memory: string) => void;
 };
 
 export function NewGroupModal({ open, onClose, onPickFolder, onCreate }: Props) {
   const t = useT();
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
+  const [memory, setMemory] = useState("");
   const nameRef = useRef<HTMLInputElement>(null);
   const nameEdited = useRef(false);
 
@@ -23,6 +24,7 @@ export function NewGroupModal({ open, onClose, onPickFolder, onCreate }: Props) 
     if (!open) return;
     setName("");
     setPath("");
+    setMemory("");
     nameEdited.current = false;
     const timer = window.setTimeout(() => nameRef.current?.focus(), 0);
     return () => window.clearTimeout(timer);
@@ -34,7 +36,7 @@ export function NewGroupModal({ open, onClose, onPickFolder, onCreate }: Props) 
       nameRef.current?.focus();
       return;
     }
-    onCreate(trimmed, path.trim());
+    onCreate(trimmed, path.trim(), memory);
   }
 
   return (
@@ -72,6 +74,16 @@ export function NewGroupModal({ open, onClose, onPickFolder, onCreate }: Props) 
           />
         </Field>
         <p className="apply-note">{t("group.folderHint")}</p>
+        <Field label={t("groupSettings.memoryLabel")} htmlFor="new-group-memory">
+          <textarea
+            id="new-group-memory"
+            className="textin memory"
+            placeholder={t("groupSettings.memoryPh")}
+            value={memory}
+            onChange={(e) => setMemory(e.target.value)}
+          />
+        </Field>
+        <p className="apply-note">{t("groupSettings.memoryNote")}</p>
       </div>
       <div className="actions spread">
         <button type="button" className="ghost" onClick={onClose}>

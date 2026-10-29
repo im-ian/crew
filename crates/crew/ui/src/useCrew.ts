@@ -333,7 +333,7 @@ export function useCrew() {
   }
 
   /** A folder is optional. With one, it becomes the working folder of the group's bots. */
-  function createNamedGroup(name: string, path: string) {
+  function createNamedGroup(name: string, path: string, memory = "") {
     const trimmed = name.trim();
     if (!trimmed) return;
     const current = groupsRef.current;
@@ -351,6 +351,11 @@ export function useCrew() {
       ungrouped: current.ungrouped,
     });
     setNewGroupOpen(false);
+    // The group is there either way; a memory that fails to save can be
+    // written again from its settings.
+    if (memory.trim()) {
+      void api.setGroupMemory(id, memory).catch((err) => showError(err));
+    }
   }
 
   function openGroupSettings(id: string) {
