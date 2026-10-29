@@ -25,7 +25,7 @@ import {
   toolSummary,
   type ThreadRow,
 } from "../tools";
-import { answeredOptionView, optionView, shortLabels } from "../choiceView";
+import { answeredOptionView, optionView, otherBadge, shortLabels } from "../choiceView";
 import { routineSwitchName } from "../routineNote";
 import { queueActions, shownInThread, userLineAppearance } from "../sendGate";
 import { isSelfMentionDelivery } from "../mentions";
@@ -166,6 +166,7 @@ type Props = {
     messageId: string,
     answers: string[][],
     values: string[][],
+    others: string[],
     closed: boolean,
   ) => void | Promise<void>;
   highlightId?: string | null;
@@ -595,8 +596,8 @@ export function ChatThread({
             }
             onAnswerChoice={
               onAnswerChoice
-                ? (answers, values, closed) =>
-                    onAnswerChoice(m.from, m.id, answers, values, closed)
+                ? (answers, values, others, closed) =>
+                    onAnswerChoice(m.from, m.id, answers, values, others, closed)
                 : undefined
             }
             onCancel={
@@ -1119,6 +1120,7 @@ function Incoming({
   onAnswerChoice?: (
     answers: string[][],
     values: string[][],
+    others: string[],
     closed: boolean,
   ) => void | Promise<void>;
   onReply?: (target: ReplyTarget) => void;
@@ -1522,6 +1524,7 @@ function ChoiceCard({
   onAnswer?: (
     answers: string[][],
     values: string[][],
+    others: string[],
     closed: boolean,
   ) => void | Promise<void>;
 }) {
@@ -1537,6 +1540,9 @@ function ChoiceCard({
   const [values, setValues] = useState<string[][]>(() =>
     questions.map((q) => (q.fields || []).map((f) => f.value || "")),
   );
+  const [others, setOthers] = useState<string[]>(() =>
+    questions.map((q) => q.other || ""),
+  );
   const [sent, setSent] = useState(false);
   const open = pending && !sent;
 
@@ -1550,7 +1556,21 @@ function ChoiceCard({
       return [id];
     });
     setPicks(next);
-    if (!needsSubmit && !multi) void send(next, values, false);
+    // One answer per single pick: an option replaces what was typed.
+    const nextOthers = multi
+      ? others
+      : others.map((v, i) => (i === qi ? "" : v));
+    setOthers(nextOthers);
+    if (!needsSubmit && !multi) void send(next, values, nextOthers, false);
+  }
+
+  function setOther(qi: number, next: string) {
+    if (!open || !onAnswer) return;
+    setOthers((prev) => questions.map((_, i) => (i === qi ? next : prev[i] || "")));
+    // Typing is the answer on a single pick, so the option it replaces lets go.
+    if (!questions[qi]?.multi && next.trim()) {
+      setPicks((prev) => prev.map((row, i) => (i === qi ? [] : row)));
+    }
   }
 
   function setField(qi: number, fi: number, next: string) {
@@ -1566,20 +1586,24 @@ function ChoiceCard({
     );
   }
 
-  function complete(nextPicks = picks, nextValues = values) {
+  function complete(nextPicks = picks, nextValues = values, nextOthers = others) {
     const allOk = questions.every((q, qi) => {
       const fields = q.fields || [];
       const fieldOk = fields.every((f, fi) => {
         if (f.required === false) return true;
         return (nextValues[qi]?.[fi] || "").trim() !== "";
       });
-      const optOk = !(q.options || []).length || (nextPicks[qi] || []).length > 0;
+      const optOk =
+        !(q.options || []).length ||
+        (nextPicks[qi] || []).length > 0 ||
+        (nextOthers[qi] || "").trim() !== "";
       return fieldOk && optOk;
     });
     const any = questions.some((_, qi) => {
       const fields = questions[qi].fields || [];
       return (
         (nextPicks[qi] || []).length > 0 ||
+        (nextOthers[qi] || "").trim() !== "" ||
         (nextValues[qi] || []).some((v) => v.trim()) ||
         (fields.length > 0 && fields.every((f) => f.required === false))
       );
@@ -1590,18 +1614,19 @@ function ChoiceCard({
   function submit() {
     if (!open || !onAnswer) return;
     if (!complete()) return;
-    void send(picks, values, false);
+    void send(picks, values, others, false);
   }
 
   async function send(
     answers: string[][],
     fieldValues: string[][],
+    typed: string[],
     closed: boolean,
   ) {
     if (!onAnswer) return;
     setSent(true);
     try {
-      await onAnswer(answers, fieldValues, closed);
+      await onAnswer(answers, fieldValues, typed, closed);
     } catch {
       setSent(false);
     }
@@ -1627,6 +1652,9 @@ function ChoiceCard({
           (open ||
             (card.state === "answered" && (q.multi || questions.length > 1)));
         const picked = (q.options || []).filter((o) => selected.includes(o.id));
+        const other = pending ? others[qi] || "" : q.other || "";
+        // Below the options: an answer the bot did not list.
+        const badge = otherBadge(q.options || []);
         // Per question, not per option: "A" beside "백오프" as a badge reads as
         // two kinds of answer.
         const short = shortLabels(q.options || []);
@@ -1640,7 +1668,7 @@ function ChoiceCard({
                   className="choice-x"
                   title={t("thread.choiceClose")}
                   aria-label={t("thread.choiceClose")}
-                  onClick={() => void send(picks, values, true)}
+                  onClick={() => void send(picks, values, others, true)}
                 >
                   <X size={14} />
                 </button>
@@ -1713,8 +1741,33 @@ function ChoiceCard({
                     </button>
                   );
                 })}
+                {open || other.trim() ? (
+                  <label
+                    className={
+                      "choice-option choice-other" + (other.trim() ? " is-on" : "")
+                    }
+                  >
+                    <span className="choice-badge">{badge}</span>
+                    <input
+                      className="choice-other-input"
+                      type="text"
+                      value={other}
+                      placeholder={t("thread.choiceOther")}
+                      disabled={!open || !onAnswer}
+                      autoComplete="off"
+                      onChange={(e) => setOther(qi, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter" || e.nativeEvent.isComposing) {
+                          return;
+                        }
+                        e.preventDefault();
+                        submit();
+                      }}
+                    />
+                  </label>
+                ) : null}
               </div>
-            ) : picked.length ? (
+            ) : picked.length || other.trim() ? (
               <div className="choice-picked">
                 {picked.map((o) => {
                   const view = answeredOptionView(q.options || [], o);
@@ -1729,6 +1782,14 @@ function ChoiceCard({
                     </div>
                   );
                 })}
+                {other.trim() ? (
+                  <div className="choice-option is-on">
+                    <span className="choice-badge">{badge}</span>
+                    <span className="choice-copy">
+                      <span className="choice-label">{other.trim()}</span>
+                    </span>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -1748,7 +1809,7 @@ function ChoiceCard({
             <button
               type="button"
               className="choice-dismiss"
-              onClick={() => void send(picks, values, true)}
+              onClick={() => void send(picks, values, others, true)}
             >
               {t("thread.choiceDismiss")}
             </button>
@@ -1790,6 +1851,7 @@ function Bubble({
   onAnswerChoice?: (
     answers: string[][],
     values: string[][],
+    others: string[],
     closed: boolean,
   ) => void | Promise<void>;
   onCancel?: () => void;

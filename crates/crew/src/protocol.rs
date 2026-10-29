@@ -192,6 +192,9 @@ pub enum Request {
         /// Text typed into each question's fields, in order. Ignored when `closed`.
         #[serde(default)]
         values: Vec<Vec<String>>,
+        /// Text typed into each question's "other" row, in order. Ignored when `closed`.
+        #[serde(default)]
+        others: Vec<String>,
         #[serde(default)]
         closed: bool,
     },
@@ -387,6 +390,9 @@ pub struct ChoiceQuestion {
     pub multi: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selected: Vec<String>,
+    /// The user's own answer, typed instead of (or, on a multi pick, beside) the options.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub other: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -702,6 +708,7 @@ mod tests {
             message_id: "1".into(),
             answers: Vec::new(),
             values: vec![vec!["id".into(), "pw".into()]],
+            others: Vec::new(),
             closed: false,
         };
         let line = req.to_line().unwrap();

@@ -2056,6 +2056,28 @@ button.choice-option:disabled {
   font-weight: 650;
   line-height: 1;
 }
+.choice-other {
+  align-items: center;
+  cursor: text;
+}
+.choice-other-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-lg);
+  line-height: 1.35;
+}
+.choice-other-input::placeholder {
+  color: var(--faint);
+}
+.choice-other-input:disabled {
+  cursor: default;
+}
 .choice-option.is-on .choice-badge {
   background: var(--working);
   color: var(--on-ink);

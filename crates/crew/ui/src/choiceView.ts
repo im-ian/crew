@@ -18,3 +18,16 @@ export function answeredOptionView(options: ChoiceOption[], option: ChoiceOption
   const i = options.findIndex((item) => item.id === option.id);
   return optionView(option, i < 0 ? 0 : i, shortLabels(options));
 }
+
+
+// The letter after the options, skipping any a short label already uses as
+// its badge, so a typed answer never looks like one of the options.
+export function otherBadge(options: ChoiceOption[]): string {
+  const short = shortLabels(options);
+  const taken = new Set(options.map((o, i) => optionView(o, i, short).badge));
+  for (let k = 0; k < 26; k++) {
+    const letter = String.fromCharCode(65 + ((options.length + k) % 26));
+    if (!taken.has(letter)) return letter;
+  }
+  return "+";
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answeredOptionView } from "./choiceView";
+import { answeredOptionView, otherBadge } from "./choiceView";
 import type { ChoiceOption } from "./types";
 
 const options: ChoiceOption[] = [
@@ -23,5 +23,16 @@ describe("answeredOptionView", () => {
     ];
     const view = answeredOptionView(short, short[1]);
     expect(view.badge).toBe("나");
+  });
+});
+
+describe("otherBadge", () => {
+  it("takes the letter after the options", () => {
+    expect(otherBadge(options)).toBe("D");
+  });
+
+  it("skips a letter a short label already shows", () => {
+    const short: ChoiceOption[] = ["C", "D", "E"].map((label) => ({ id: label, label }));
+    expect(otherBadge(short)).toBe("F");
   });
 });

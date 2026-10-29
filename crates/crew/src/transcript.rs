@@ -1045,6 +1045,7 @@ pub fn resolve_choice(
     choice_id: &str,
     answers: &[Vec<String>],
     values: &[Vec<String>],
+    others: &[String],
     closed: bool,
 ) -> Option<ChoiceCard> {
     let mut updated: Option<ChoiceCard> = None;
@@ -1062,7 +1063,7 @@ pub fn resolve_choice(
                 if m.from != agent && key != agent {
                     continue;
                 }
-                crate::choice::apply_answers(card, answers, values, closed);
+                crate::choice::apply_answers(card, answers, values, others, closed);
                 updated = Some(card.clone());
                 emit_rows.push((key.clone(), m.clone()));
                 dirty = true;
@@ -1106,7 +1107,7 @@ pub fn close_pending_choices(agent: &str) -> Vec<String> {
         })
         .collect();
     for id in &ids {
-        let _ = resolve_choice(agent, id, &[], &[], true);
+        let _ = resolve_choice(agent, id, &[], &[], &[], true);
     }
     ids
 }
@@ -2815,7 +2816,7 @@ Severity must be one of: bug.";
         let card = last.choice.as_ref().expect("choice");
         assert_eq!(card.questions[0].question, "어느 쪽을 고를래?");
         assert_eq!(card.questions[0].options.len(), 3);
-        let resolved = resolve_choice(&agent, &card.id, &[vec!["C".into()]], &[], false).unwrap();
+        let resolved = resolve_choice(&agent, &card.id, &[vec!["C".into()]], &[], &[], false).unwrap();
         assert_eq!(resolved.state, crate::protocol::ChoiceState::Answered);
         assert_eq!(
             crate::choice::format_answer(&resolved),
@@ -3124,7 +3125,7 @@ Severity must be one of: bug.";
             &agent,
             &card.id,
             &[],
-            &[vec!["ada".into(), "s3cret".into()]],
+            &[vec!["ada".into(), "s3cret".into()]], &[],
             false,
         )
         .unwrap();

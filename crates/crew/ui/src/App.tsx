@@ -313,8 +313,8 @@ export function App() {
           }
           onSendQueued={(id) => void crew.sendQueued(id)}
           queuePick={queuePick}
-          onAnswerChoice={(agentId, messageId, answers, values, closed) =>
-            crew.answerChoice(agentId, messageId, answers, values, closed)
+          onAnswerChoice={(agentId, messageId, answers, values, others, closed) =>
+            crew.answerChoice(agentId, messageId, answers, values, others, closed)
           }
           highlightId={crew.highlightId}
           onHighlightDone={crew.clearHighlight}
