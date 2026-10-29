@@ -4038,6 +4038,23 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
     // A sentence like "진행할까요?" is a normal reply, not a card.
 }
 
+/// `id` answered, and its CLI may stay up a while: the exit after `result`, or
+/// a task it put in the background. What waited on that answer goes now: the
+/// bot that asked, and the tells this turn ran. Lines sent to `id` still wait
+/// for the exit, since the next turn resumes the session the CLI is writing.
+/// `turn_ended` at the exit finds the wake spent and nothing left to release.
+pub(crate) fn turn_answered(id: &str) {
+    wake_asker(id);
+    release(take_followers(id));
+}
+
+/// The CLI started another reply on its own after the one it was asked for.
+/// Nobody asked for it, so it answers in the bot's own chat, not a side chat.
+pub(crate) fn turn_reopened(id: &str) {
+    take_origin(id);
+    crate::transcript::set_peer(id, None);
+}
+
 /// `id`'s turn is over: wake the bot waiting on its answer, and stop tagging
 /// the rows that come after with the bot that asked for the turn.
 pub(crate) fn turn_ended(id: &str) {
@@ -5290,7 +5307,7 @@ cat <<'EOF'
 EOF
 exec sleep 5"#,
             );
-            send_agent(&bot, "go").unwrap();
+            send_agent(&bot, "search-in-background").unwrap();
             let deadline = Instant::now() + Duration::from_secs(5);
             while !crate::transcript::messages(&bot)
                 .iter()
@@ -5330,7 +5347,7 @@ exec sleep 5"#,
                     armed.display()
                 ),
             );
-            send_agent(&bot, "go").unwrap();
+            send_agent(&bot, "search-in-background").unwrap();
             eventually(Duration::from_secs(5), "the CLI never started", || {
                 armed.exists()
             });
@@ -6315,6 +6332,57 @@ exec sleep 1"#,
                 agent_busy(&bot).unwrap_or(false)
             });
             interrupt_turn(&bot).unwrap();
+            for id in [&bot, &builder] {
+                wait_idle(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// Claude stays up past `result` while a task it put in the background
+    /// runs, then answers again on its own. The tell goes out at `result`, the
+    /// bot shows working until the CLI is done, and the later answer is a reply
+    /// of its own instead of being dropped.
+    #[test]
+    fn a_background_task_does_not_hold_the_tell() {
+        paths::testing::with_home("tell-background", || {
+            let [bot, builder] = ["lead", "worker"].map(test_id);
+            let body = r#"case "$last" in *search-in-background*)
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"s1"}' '{"type":"assistant","message":{"content":[{"type":"text","text":"맡겼어요"}]}}' '{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"t1"}]}'
+sleep 0.5
+printf '%s\n' '{"type":"result","subtype":"success","result":"맡겼어요"}'
+sleep 4
+printf '%s\n' '{"type":"system","subtype":"background_tasks_changed","tasks":[]}' '{"type":"system","subtype":"init","session_id":"s1"}' '{"type":"assistant","message":{"content":[{"type":"text","text":"검색도 끝났어요"}]}}' '{"type":"result","subtype":"success","result":"검색도 끝났어요"}'
+;; esac"#;
+            // Both bots run the one script; only the lead's prompt matches.
+            fake_bot_running(&bot, body);
+            fake_bot_running(&builder, body);
+            wait_idle(&bot);
+            send_agent(&bot, "search-in-background").unwrap();
+            eventually(Duration::from_secs(3), "the turn did not start", || {
+                told(&bot, "맡겼어요")
+            });
+            tell_agent(&bot, &builder, "구현해줘").unwrap();
+            assert!(!told(&builder, "구현해줘"), "the tell went out mid-turn");
+            eventually(
+                Duration::from_secs(3),
+                "the tell waited on the background task",
+                || told(&builder, "구현해줘"),
+            );
+            let shown = |id: &str| {
+                list_agents()
+                    .into_iter()
+                    .find(|a| a.id == id)
+                    .map(|a| a.status)
+            };
+            assert_eq!(shown(&bot), Some(AgentStatus::Working));
+            eventually(
+                Duration::from_secs(10),
+                "the later answer was dropped",
+                || told(&bot, "검색도 끝났어요"),
+            );
+            wait_idle(&bot);
+            assert_eq!(shown(&bot), Some(AgentStatus::Idle));
             for id in [&bot, &builder] {
                 wait_idle(id);
                 remove_agent(id).unwrap();
