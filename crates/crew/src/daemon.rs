@@ -222,7 +222,7 @@ fn pending_handoffs() -> &'static Mutex<HashMap<String, Vec<PendingHandoff>>> {
 }
 
 fn enqueue_handoff(peer: &str, from: &str, text: &str, row: Option<&str>) {
-    let text = crate::protocol::clip_chars(text.trim(), crate::protocol::HANDOFF_CLIP);
+    let text = crate::protocol::clip_middle(text.trim(), crate::protocol::HANDOFF_CLIP);
     if text.is_empty() || peer == from {
         return;
     }
