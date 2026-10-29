@@ -1089,7 +1089,6 @@ fn submit_delivery_then(
     then: &mut VecDeque<SerialJob>,
 ) -> anyhow::Result<()> {
     if targeting::relay_exhausted(&origin) {
-        note_relay_stop(id, &origin);
         anyhow::bail!(
             "relay limit reached after {} bot-to-bot hops; waiting for the user",
             targeting::MAX_RELAY_HOPS
@@ -1179,16 +1178,6 @@ fn steer_delivery(
     note_parked(id, parked_ids(id));
     pump_inbox_inner(id);
     Ok(())
-}
-
-/// Say once, where the user is looking, that a bot-to-bot chain was cut short.
-fn note_relay_stop(id: &str, origin: &TurnOrigin) {
-    let line = if crate::paths::locale() == "en" {
-        "Bots kept handing this back and forth, so it stopped here. Say something to pick it up."
-    } else {
-        "봇끼리 계속 주고받아서 여기서 멈췄습니다. 말을 걸면 다시 이어집니다."
-    };
-    crate::transcript::push_system(id, "crew", line, None);
 }
 
 /// `id`'s turn is over: what waited on that turn goes on, and the next message
@@ -4264,8 +4253,8 @@ mod daemon_tests {
         let err = submit_delivery(id, "again?", true, None, origin)
             .expect_err("a spent chain must not start another turn");
         assert!(err.to_string().contains("relay limit"), "{err}");
-        let last = crate::transcript::messages(id);
-        assert_eq!(last.last().map(|m| m.from.as_str()), Some("crew"));
+        // The chain stops without a line in the chat.
+        assert!(crate::transcript::messages(id).is_empty());
     }
 
     #[test]
