@@ -71,6 +71,7 @@ pub fn card_from_cli(
             fields,
             multi: false,
             selected: Vec::new(),
+            other: String::new(),
         }],
         state: ChoiceState::Pending,
     })
@@ -144,6 +145,7 @@ fn format_answer_inner(card: &ChoiceCard, mask: bool) -> String {
             .selected
             .iter()
             .filter_map(|id| q.options.iter().find(|o| &o.id == id).map(option_answer))
+            .chain(Some(q.other.trim().to_string()).filter(|s| !s.is_empty()))
             .collect();
         let fields: Vec<String> = q
             .fields
@@ -182,6 +184,7 @@ pub fn apply_answers(
     card: &mut ChoiceCard,
     answers: &[Vec<String>],
     values: &[Vec<String>],
+    others: &[String],
     closed: bool,
 ) {
     if closed {
@@ -194,6 +197,15 @@ pub fn apply_answers(
             .into_iter()
             .filter(|id| q.options.iter().any(|o| &o.id == id))
             .collect();
+        // Only a question with options has the "other" row.
+        q.other = others
+            .get(i)
+            .map(|s| s.trim().to_string())
+            .filter(|_| !q.options.is_empty())
+            .unwrap_or_default();
+        if !q.multi && !q.other.is_empty() {
+            q.selected.clear();
+        }
         if !q.multi && q.selected.len() > 1 {
             q.selected.truncate(1);
         }
@@ -222,12 +234,13 @@ fn question_complete(q: &ChoiceQuestion) -> bool {
         .fields
         .iter()
         .all(|f| !f.required || !f.value.trim().is_empty());
-    let opts_ok = q.options.is_empty() || !q.selected.is_empty();
+    let opts_ok = q.options.is_empty() || !q.selected.is_empty() || !q.other.is_empty();
     fields_ok && opts_ok
 }
 
 fn question_answered(q: &ChoiceQuestion) -> bool {
     !q.selected.is_empty()
+        || !q.other.is_empty()
         || q.fields.iter().any(|f| !f.value.trim().is_empty())
         || (!q.fields.is_empty() && q.fields.iter().all(|f| !f.required))
 }
@@ -336,6 +349,7 @@ fn parse_question(v: &Value) -> Option<ChoiceQuestion> {
         fields,
         multi,
         selected: Vec::new(),
+        other: String::new(),
     })
 }
 
@@ -530,6 +544,7 @@ fn split_lettered(text: &str) -> Option<(String, ChoiceCard)> {
                 fields: Vec::new(),
                 multi: false,
                 selected: Vec::new(),
+                other: String::new(),
             }],
             state: ChoiceState::Pending,
         },
@@ -699,7 +714,7 @@ mod tests {
             r#"{"question":"어느 쪽을 고를래?","options":[{"label":"A"},{"label":"B"}]}"#,
         )
         .unwrap();
-        apply_answers(&mut card, &[vec!["nope".into()]], &[], false);
+        apply_answers(&mut card, &[vec!["nope".into()]], &[], &[], false);
         assert_eq!(card.state, ChoiceState::Pending);
     }
 
@@ -732,11 +747,45 @@ mod tests {
             r#"{"question":"어느 쪽을 고를래?","options":[{"label":"A"},{"label":"B"},{"label":"C"}]}"#,
         )
         .unwrap();
-        apply_answers(&mut card, &[vec!["C".into()]], &[], false);
+        apply_answers(&mut card, &[vec!["C".into()]], &[], &[], false);
         assert_eq!(card.state, ChoiceState::Answered);
         assert_eq!(format_answer(&card), "어느 쪽을 고를래? → C");
-        apply_answers(&mut card, &[], &[], true);
+        apply_answers(&mut card, &[], &[], &[], true);
         assert_eq!(card.state, ChoiceState::Closed);
+    }
+
+    #[test]
+    fn typed_other_answers_a_single_pick() {
+        let mut card = from_tool_detail(
+            r#"{"question":"어느 쪽을 고를래?","options":[{"label":"A"},{"label":"B"}]}"#,
+        )
+        .unwrap();
+        apply_answers(&mut card, &[vec!["A".into()]], &[], &["  직접 쓴 답 ".into()], false);
+        assert_eq!(card.state, ChoiceState::Answered);
+        assert!(card.questions[0].selected.is_empty());
+        assert_eq!(card.questions[0].other, "직접 쓴 답");
+        assert_eq!(format_answer(&card), "어느 쪽을 고를래? → 직접 쓴 답");
+    }
+
+    #[test]
+    fn typed_other_sits_beside_a_multi_pick() {
+        let mut card = from_tool_detail(
+            r#"{"question":"뭘 넣을까?","multi_select":true,"options":[{"label":"A"},{"label":"B"}]}"#,
+        )
+        .unwrap();
+        apply_answers(&mut card, &[vec!["B".into()]], &[], &["C도".into()], false);
+        assert_eq!(card.state, ChoiceState::Answered);
+        assert_eq!(format_answer(&card), "뭘 넣을까? → B, C도");
+    }
+
+    #[test]
+    fn blank_other_is_no_answer() {
+        let mut card = from_tool_detail(
+            r#"{"question":"어느 쪽?","options":[{"label":"A"},{"label":"B"}]}"#,
+        )
+        .unwrap();
+        apply_answers(&mut card, &[], &[], &["   ".into()], false);
+        assert_eq!(card.state, ChoiceState::Pending);
     }
 
     #[test]
@@ -815,6 +864,7 @@ mod tests {
             &mut card,
             &[],
             &[vec!["user".into(), "secret".into()]],
+            &[],
             false,
         );
         assert_eq!(card.state, ChoiceState::Answered);
@@ -828,10 +878,10 @@ mod tests {
     fn missing_required_input_is_not_complete() {
         let mut card =
             from_tool_detail(r#"{"question":"이름","inputs":[{"label":"이름"}]}"#).unwrap();
-        apply_answers(&mut card, &[], &[vec!["".into()]], false);
+        apply_answers(&mut card, &[], &[vec!["".into()]], &[], false);
         assert_eq!(card.state, ChoiceState::Pending);
         assert!(!is_complete(&card));
-        apply_answers(&mut card, &[], &[vec!["Ada".into()]], false);
+        apply_answers(&mut card, &[], &[vec!["Ada".into()]], &[], false);
         assert!(is_complete(&card));
         assert_eq!(format_answer(&card), "이름\n이름: Ada");
     }
@@ -841,7 +891,7 @@ mod tests {
         let mut card =
             from_tool_detail(r#"{"question":"메모","fields":[{"label":"메모","required":false}]}"#)
                 .unwrap();
-        apply_answers(&mut card, &[], &[vec!["".into()]], false);
+        apply_answers(&mut card, &[], &[vec!["".into()]], &[], false);
         assert!(is_complete(&card));
         assert_eq!(card.state, ChoiceState::Answered);
         assert_eq!(format_answer(&card), "메모");
@@ -857,6 +907,7 @@ mod tests {
             &mut card,
             &[],
             &[vec!["ada".into(), "s3cret".into()]],
+            &[],
             false,
         );
         assert_eq!(

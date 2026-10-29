@@ -593,6 +593,7 @@ mod tests {
                 options: Vec::new(),
                 inputs: Vec::new(),
                 hint: None,
+                multi: false,
             }),
             None,
             "Ask waits on a person"
@@ -663,6 +664,7 @@ mod tests {
                     options: vec!["고름".into()],
                     inputs: Vec::new(),
                     hint: None,
+                    multi: false,
                 },
                 None,
             )

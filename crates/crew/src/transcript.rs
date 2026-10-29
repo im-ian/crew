@@ -975,7 +975,10 @@ pub fn attach_choice(agent: &str, call_id: Option<&str>, mut card: ChoiceCard) -
             if let Some(id) = call_id {
                 chat.tool_ids.insert(id.to_string(), row.id.clone());
             }
-            row.clone()
+            if chat.pending_idx == Some(idx) {
+                close_at_card(chat, idx);
+            }
+            chat.messages[idx].clone()
         } else {
             let m = ChatMessage {
                 id: new_id(),
@@ -1005,6 +1008,18 @@ pub fn attach_choice(agent: &str, call_id: Option<&str>, mut card: ChoiceCard) -
     msg
 }
 
+/// The card ends the row it was asked on. The turn goes on after the answer,
+/// and what the bot says then starts a row below the card instead of growing
+/// the one above it, so the card stays where it was asked.
+fn close_at_card(chat: &mut AgentChat, idx: usize) {
+    chat.messages[idx].text = strip_crew_markers(&chat.messages[idx].text)
+        .trim_end()
+        .to_string();
+    chat.pending_idx = None;
+    chat.dirty = false;
+    chat.expecting = true;
+}
+
 pub fn set_choice(key: &str, message_id: &str, card: ChoiceCard) {
     let msg = {
         let mut map = match chats().lock() {
@@ -1030,6 +1045,7 @@ pub fn resolve_choice(
     choice_id: &str,
     answers: &[Vec<String>],
     values: &[Vec<String>],
+    others: &[String],
     closed: bool,
 ) -> Option<ChoiceCard> {
     let mut updated: Option<ChoiceCard> = None;
@@ -1047,7 +1063,7 @@ pub fn resolve_choice(
                 if m.from != agent && key != agent {
                     continue;
                 }
-                crate::choice::apply_answers(card, answers, values, closed);
+                crate::choice::apply_answers(card, answers, values, others, closed);
                 updated = Some(card.clone());
                 emit_rows.push((key.clone(), m.clone()));
                 dirty = true;
@@ -1091,7 +1107,7 @@ pub fn close_pending_choices(agent: &str) -> Vec<String> {
         })
         .collect();
     for id in &ids {
-        let _ = resolve_choice(agent, id, &[], &[], true);
+        let _ = resolve_choice(agent, id, &[], &[], &[], true);
     }
     ids
 }
@@ -2800,12 +2816,83 @@ Severity must be one of: bug.";
         let card = last.choice.as_ref().expect("choice");
         assert_eq!(card.questions[0].question, "어느 쪽을 고를래?");
         assert_eq!(card.questions[0].options.len(), 3);
-        let resolved = resolve_choice(&agent, &card.id, &[vec!["C".into()]], &[], false).unwrap();
+        let resolved = resolve_choice(&agent, &card.id, &[vec!["C".into()]], &[], &[], false).unwrap();
         assert_eq!(resolved.state, crate::protocol::ChoiceState::Answered);
         assert_eq!(
             crate::choice::format_answer(&resolved),
             "어느 쪽을 고를래? → C"
         );
+        drop_agent(&agent);
+    }
+
+    #[test]
+    fn choice_stays_where_it_was_asked() {
+        let agent = format!(
+            "ask-at-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        begin_turn(&agent);
+        let ask = |q: &str| {
+            crate::choice::card_from_cli(q, &["A".to_string(), "B".to_string()], &[], None)
+                .unwrap()
+        };
+        on_assistant_delta(&agent, "질문 전 한 줄.");
+        let first = attach_choice(&agent, None, ask("어느 쪽?"));
+        on_assistant_delta(&agent, "\n\n답을 받고 이어서.");
+        let second = attach_choice(&agent, None, ask("하나 더?"));
+        on_assistant_delta(&agent, "끝.");
+        end_turn(&agent);
+        let msgs = messages(&agent);
+        let rows: Vec<(&str, Option<&str>)> = msgs
+            .iter()
+            .map(|m| {
+                (
+                    m.text.trim(),
+                    m.choice.as_ref().map(|c| c.questions[0].question.as_str()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("질문 전 한 줄.", Some("어느 쪽?")),
+                ("답을 받고 이어서.", Some("하나 더?")),
+                ("끝.", None),
+            ]
+        );
+        assert_eq!(msgs[0].id, first.id);
+        assert_eq!(msgs[1].id, second.id);
+        drop_agent(&agent);
+    }
+
+    #[test]
+    fn codex_text_after_a_card_starts_a_new_row() {
+        let agent = format!(
+            "ask-codex-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        begin_turn(&agent);
+        set_pending_assistant(&agent, "배포에 대해 하나 물어볼게요.");
+        let card =
+            crate::choice::card_from_cli("어느 쪽?", &["A".to_string(), "B".to_string()], &[], None)
+                .unwrap();
+        attach_choice(&agent, None, card);
+        set_pending_assistant(&agent, "알겠어요, 스테이징을 되돌릴게요.");
+        end_turn(&agent);
+        let msgs = messages(&agent);
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].text, "배포에 대해 하나 물어볼게요.");
+        assert!(msgs[0].choice.is_some());
+        assert_eq!(msgs[1].text, "알겠어요, 스테이징을 되돌릴게요.");
+        assert!(msgs[1].choice.is_none());
         drop_agent(&agent);
     }
 
@@ -3038,7 +3125,7 @@ Severity must be one of: bug.";
             &agent,
             &card.id,
             &[],
-            &[vec!["ada".into(), "s3cret".into()]],
+            &[vec!["ada".into(), "s3cret".into()]], &[],
             false,
         )
         .unwrap();

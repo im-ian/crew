@@ -75,6 +75,7 @@ export const api = {
     messageId: string;
     answers: string[][];
     values?: string[][];
+    others?: string[];
     closed: boolean;
   }) =>
     invoke<void>("answer_choice", {
@@ -82,6 +83,7 @@ export const api = {
       messageId: args.messageId,
       answers: args.answers,
       values: args.values ?? [],
+      others: args.others ?? [],
       closed: args.closed,
     }),
   tellMessage: (to: string, text: string, from = "user") =>

@@ -112,6 +112,8 @@ export type ChoiceQuestion = {
   fields?: ChoiceField[];
   multi?: boolean;
   selected?: string[];
+  /** The user's own answer, typed into the "other" row. */
+  other?: string;
 };
 
 export type ChoiceCard = {

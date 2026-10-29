@@ -638,6 +638,7 @@ export function useCrew() {
     messageId: string,
     answers: string[][],
     values: string[][],
+    others: string[],
     closed: boolean,
   ) {
     try {
@@ -646,6 +647,7 @@ export function useCrew() {
         messageId,
         answers,
         values,
+        others,
         closed,
       });
       await refreshList();

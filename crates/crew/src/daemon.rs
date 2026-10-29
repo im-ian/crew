@@ -857,6 +857,7 @@ fn start_ask(
     options: Vec<String>,
     inputs: Vec<String>,
     hint: Option<String>,
+    multi: bool,
 ) -> anyhow::Result<(String, oneshot::Receiver<Event>)> {
     if !known_agent(agent) {
         anyhow::bail!("unknown agent {agent}");
@@ -864,7 +865,10 @@ fn start_ask(
     if crate::transcript::has_pending_question(agent, question) {
         anyhow::bail!("this question is already waiting for an answer");
     }
-    let card = crate::choice::card_from_cli(question, &options, &inputs, hint.as_deref())?;
+    let mut card = crate::choice::card_from_cli(question, &options, &inputs, hint.as_deref())?;
+    for q in &mut card.questions {
+        q.multi = multi && !q.options.is_empty();
+    }
     let msg = crate::transcript::attach_choice(agent, None, card);
     let Some(choice) = msg.choice.clone() else {
         anyhow::bail!("failed to open choice");
@@ -887,6 +891,7 @@ fn answer_choice(
     message_id: &str,
     answers: Vec<Vec<String>>,
     values: Vec<Vec<String>>,
+    others: Vec<String>,
     closed: bool,
 ) -> anyhow::Result<()> {
     let Some(msg) = crate::transcript::choice_by_message(agent, message_id) else {
@@ -900,7 +905,7 @@ fn answer_choice(
     }
     if !closed {
         let mut preview = card.clone();
-        crate::choice::apply_answers(&mut preview, &answers, &values, false);
+        crate::choice::apply_answers(&mut preview, &answers, &values, &others, false);
         if !crate::choice::is_complete(&preview) {
             if preview.questions.iter().any(|q| {
                 q.fields
@@ -913,7 +918,7 @@ fn answer_choice(
         }
     }
     let Some(updated) =
-        crate::transcript::resolve_choice(agent, &card.id, &answers, &values, closed)
+        crate::transcript::resolve_choice(agent, &card.id, &answers, &values, &others, closed)
     else {
         anyhow::bail!("choice not found");
     };
@@ -2778,9 +2783,10 @@ async fn handle_client(
                     options,
                     inputs,
                     hint,
+                    multi,
                 } = req
                 {
-                    match start_ask(&agent, &question, options, inputs, hint) {
+                    match start_ask(&agent, &question, options, inputs, hint, multi) {
                         Err(err) => {
                             write_event(
                                 &mut write,
@@ -2925,8 +2931,9 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             message_id,
             answers,
             values,
+            others,
             closed,
-        } => match answer_choice(&agent, &message_id, answers, values, closed) {
+        } => match answer_choice(&agent, &message_id, answers, values, others, closed) {
             Ok(()) => vec![Event::Ok],
             Err(err) => vec![Event::Error {
                 message: err.to_string(),

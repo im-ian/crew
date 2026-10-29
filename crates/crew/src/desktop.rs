@@ -141,12 +141,14 @@ fn answer_choice(
     answers: Vec<Vec<String>>,
     closed: bool,
     values: Option<Vec<Vec<String>>>,
+    others: Option<Vec<String>>,
 ) -> Result<(), String> {
     match client::rpc(Request::AnswerChoice {
         agent,
         message_id,
         answers,
         values: values.unwrap_or_default(),
+        others: others.unwrap_or_default(),
         closed,
     }) {
         Ok(Event::Ok) => Ok(()),
