@@ -446,7 +446,7 @@ export function BotFace({
   });
 
   useEffect(() => {
-    if (!lookAt || status !== "idle") return;
+    if (!lookAt || status !== "idle" || mood) return;
     const refresh = () => {
       const svg = svgRef.current;
       const point = lookRef.current;
@@ -466,7 +466,7 @@ export function BotFace({
       window.removeEventListener("scroll", refresh, true);
       window.removeEventListener("resize", refresh);
     };
-  }, [lookAt, status, shape]);
+  }, [lookAt, status, shape, mood]);
 
   useEffect(() => {
     if (mode !== "return") return;
@@ -533,7 +533,7 @@ export function BotFace({
   function onPointerLeave(e: PointerEvent<SVGSVGElement>) {
     pointerRef.current = false;
     const point = lookRef.current;
-    if (point && status === "idle" && !prefersReducedMotion()) {
+    if (point && status === "idle" && !mood && !prefersReducedMotion()) {
       followCaret(e.currentTarget, point);
       return;
     }

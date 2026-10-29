@@ -689,7 +689,7 @@ button.avatar {
   transform-origin: 50% 88%;
   animation: avatar-snooze 4.6s ease-in-out infinite;
   animation-delay: calc(var(--avatar-phase, 0) * -0.6s);
-  filter: saturate(0.8) brightness(0.92);
+  opacity: 0.88;
 }
 .avatar-face.is-exited .avatar-pill {
   transform: scaleY(0.14);
@@ -1122,7 +1122,8 @@ button.avatar {
   .work-laptop,
   .work-list .tick,
   .work-kb .key {
-    animation: none;
+    /* The look rules are more specific than this block. */
+    animation: none !important;
   }
 }
 /* ponytail: the letter span doubles as the disc that occludes the back hoop —

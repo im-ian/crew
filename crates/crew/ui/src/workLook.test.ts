@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WORK_LOOKS, claimWorkLook, pickWorkLook, releaseWorkLook } from "./workLook";
+import { WORK_LOOKS, acquireWorkLook, pickWorkLook, releaseWorkLook } from "./workLook";
 
 describe("pickWorkLook", () => {
   it("draws from every look when nothing was used before", () => {
@@ -30,31 +30,47 @@ describe("pickWorkLook", () => {
   });
 });
 
-describe("claimWorkLook", () => {
-  it("gives every face of one bot the same look during a run", () => {
+describe("acquireWorkLook", () => {
+  it("gives every working face of one bot the same look", () => {
+    const first = acquireWorkLook("bot-a", () => 0.1);
+    expect(acquireWorkLook("bot-a", () => 0.9)).toBe(first);
     releaseWorkLook("bot-a");
-    const first = claimWorkLook("bot-a", () => 0.1);
-    expect(claimWorkLook("bot-a", () => 0.9)).toBe(first);
-    expect(claimWorkLook("bot-a")).toBe(first);
+    releaseWorkLook("bot-a");
   });
 
-  it("draws again after the run ends, and not the same look", () => {
+  it("keeps the run while one face is still working", () => {
+    const first = acquireWorkLook("bot-b", () => 0.1);
+    acquireWorkLook("bot-b", () => 0.9);
     releaseWorkLook("bot-b");
-    let prev = claimWorkLook("bot-b", () => 0.3);
+    expect(acquireWorkLook("bot-b", () => 0.9)).toBe(first);
+    releaseWorkLook("bot-b");
+    releaseWorkLook("bot-b");
+  });
+
+  it("draws again once the last face is gone, and not the same look", () => {
+    let prev = acquireWorkLook("bot-c", () => 0.3);
     for (const r of [0, 0.25, 0.5, 0.75, 0.999]) {
-      releaseWorkLook("bot-b");
-      const next = claimWorkLook("bot-b", () => r);
+      releaseWorkLook("bot-c");
+      const next = acquireWorkLook("bot-c", () => r);
       expect(next).not.toBe(prev);
       prev = next;
     }
+    releaseWorkLook("bot-c");
   });
 
   it("keeps bots apart", () => {
-    releaseWorkLook("bot-c");
-    releaseWorkLook("bot-d");
-    const c = claimWorkLook("bot-c", () => 0);
-    const d = claimWorkLook("bot-d", () => 0.99);
+    const c = acquireWorkLook("bot-d", () => 0);
+    const d = acquireWorkLook("bot-e", () => 0.99);
     expect(c).not.toBe(d);
-    expect(claimWorkLook("bot-c")).toBe(c);
+    expect(acquireWorkLook("bot-d")).toBe(c);
+    releaseWorkLook("bot-d");
+    releaseWorkLook("bot-d");
+    releaseWorkLook("bot-e");
+  });
+
+  it("ignores a release that has no matching acquire", () => {
+    releaseWorkLook("bot-never");
+    expect(WORK_LOOKS).toContain(acquireWorkLook("bot-never", () => 0.4));
+    releaseWorkLook("bot-never");
   });
 });
