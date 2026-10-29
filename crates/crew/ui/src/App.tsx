@@ -9,15 +9,14 @@ import { ContextMenu, type MenuEntry } from "./components/ContextMenu";
 import { AgentPane } from "./components/AgentPane";
 import { ConnectionBanner } from "./components/ConnectionBanner";
 import { NewBotModal } from "./components/NewBotModal";
-import { NewProjectModal } from "./components/NewProjectModal";
-import { ProjectSettingsModal } from "./components/ProjectSettingsModal";
+import { NewGroupModal } from "./components/NewGroupModal";
+import { GroupSettingsModal } from "./components/GroupSettingsModal";
 import { SettingsPane } from "./components/SettingsPane";
 import { SkillsPane } from "./components/SkillsPane";
 import { ShortcutHelp } from "./components/ShortcutHelp";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
 import { railOrder } from "./groups";
-import { Folder, Layers } from "./icons";
 import { useT } from "./LocaleContext";
 import type { TFn } from "./i18n";
 import { isTypingTarget, shortcutId } from "./shortcuts";
@@ -423,18 +422,19 @@ export function App() {
         onClose={crew.closeNewBot}
         onCreate={crew.createBot}
       />
-      <NewProjectModal
-        open={crew.newProjectOpen}
-        onClose={crew.closeNewProject}
-        onPickFolder={crew.pickProjectFolder}
-        onCreate={crew.createProject}
+      <NewGroupModal
+        open={crew.newGroupOpen}
+        onClose={crew.closeNewGroup}
+        onPickFolder={crew.pickFolder}
+        onCreate={crew.createNamedGroup}
       />
-      <ProjectSettingsModal
-        open={!!crew.projectSettingsId}
-        group={crew.groups.find((g) => g.id === crew.projectSettingsId) ?? null}
-        onClose={crew.closeProjectSettings}
-        onLoad={crew.loadProjectMemory}
-        onSave={crew.saveProjectMemory}
+      <GroupSettingsModal
+        open={!!crew.groupSettingsId}
+        group={crew.groups.find((g) => g.id === crew.groupSettingsId) ?? null}
+        onClose={crew.closeGroupSettings}
+        onPickFolder={crew.pickFolder}
+        onLoad={crew.loadGroupMemory}
+        onSave={crew.saveGroupSettings}
       />
       <ContextMenu
         open={crew.ctx.open}
@@ -495,26 +495,15 @@ function menuItems(
       {
         type: "action",
         label: t("menu.newGroup"),
-        icon: <Layers size={14} />,
         onClick: () => {
           crew.hideCtx();
-          crew.createGroup();
-        },
-      },
-      {
-        type: "action",
-        label: t("menu.newProject"),
-        icon: <Folder size={14} />,
-        onClick: () => {
-          crew.hideCtx();
-          crew.openNewProject();
+          crew.openNewGroup();
         },
       },
     ];
   }
   if (ctx.kind === "group") {
     const id = ctx.id;
-    const project = id ? groups.find((g) => g.id === id) : undefined;
     const items: MenuEntry[] = [];
     if (id) {
       items.push({
@@ -536,25 +525,21 @@ function menuItems(
           if (id) setRenameId(id);
         },
       },
-    );
-    if (id && project?.path) {
-      items.push({
-        type: "action",
-        label: t("menu.projectSettings"),
-        onClick: () => {
-          crew.hideCtx();
-          crew.openProjectSettings(id);
-        },
-      });
-    }
-    items.push(
       {
         type: "action",
-        label: project?.path ? t("menu.deleteProject") : t("menu.deleteGroup"),
+        label: t("menu.groupSettings"),
+        onClick: () => {
+          crew.hideCtx();
+          if (id) crew.openGroupSettings(id);
+        },
+      },
+      {
+        type: "action",
+        label: t("menu.deleteGroup"),
         danger: true,
         onClick: () => {
           crew.hideCtx();
-          if (id) crew.openConfirm(id, project?.path ? "remove-project" : "remove-group");
+          if (id) crew.openConfirm(id, "remove-group");
         },
       },
     );
@@ -567,7 +552,6 @@ function menuItems(
     .map((g) => ({
       type: "action" as const,
       label: g.name,
-      icon: g.path ? <Folder size={14} /> : <Layers size={14} />,
       onClick: () => {
         crew.hideCtx();
         if (id) crew.moveToGroup("agent", id, g.id);

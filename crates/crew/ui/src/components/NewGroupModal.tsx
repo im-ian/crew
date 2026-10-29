@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { folderName } from "../groups";
 import { useT } from "../LocaleContext";
-import { Folder } from "../icons";
 import { Field } from "./Field";
+import { FolderPick } from "./FolderPick";
 import { Modal } from "./Modal";
 
 type Props = {
@@ -12,11 +12,10 @@ type Props = {
   onCreate: (name: string, path: string) => void;
 };
 
-export function NewProjectModal({ open, onClose, onPickFolder, onCreate }: Props) {
+export function NewGroupModal({ open, onClose, onPickFolder, onCreate }: Props) {
   const t = useT();
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
-  const [picking, setPicking] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const nameEdited = useRef(false);
 
@@ -24,47 +23,29 @@ export function NewProjectModal({ open, onClose, onPickFolder, onCreate }: Props
     if (!open) return;
     setName("");
     setPath("");
-    setPicking(false);
     nameEdited.current = false;
     const timer = window.setTimeout(() => nameRef.current?.focus(), 0);
     return () => window.clearTimeout(timer);
   }, [open]);
 
-  async function choose() {
-    if (picking) return;
-    setPicking(true);
-    try {
-      const picked = await onPickFolder();
-      if (!picked) return;
-      setPath(picked);
-      if (!nameEdited.current) setName(folderName(picked));
-    } finally {
-      setPicking(false);
-    }
-  }
-
   function submit() {
     const trimmed = name.trim();
-    const folder = path.trim();
     if (!trimmed) {
       nameRef.current?.focus();
       return;
     }
-    if (!folder) return;
-    onCreate(trimmed, folder);
+    onCreate(trimmed, path.trim());
   }
 
-  const ready = name.trim().length > 0 && path.trim().length > 0;
-
   return (
-    <Modal open={open} title={t("newProject.title")} onClose={onClose}>
+    <Modal open={open} title={t("newGroup.title")} onClose={onClose}>
       <div className="form-stack">
-        <Field label={t("field.name")} htmlFor="new-project-name">
+        <Field label={t("field.name")} htmlFor="new-group-name">
           <input
-            id="new-project-name"
+            id="new-group-name"
             ref={nameRef}
             className="textin"
-            placeholder={t("info.namePh")}
+            placeholder={t("newGroup.namePh")}
             autoComplete="off"
             value={name}
             onChange={(e) => {
@@ -79,34 +60,29 @@ export function NewProjectModal({ open, onClose, onPickFolder, onCreate }: Props
             }}
           />
         </Field>
-        <Field label={t("field.cwd")} htmlFor="new-project-path">
-          <div className="path-pick">
-            <input
-              id="new-project-path"
-              className="textin"
-              readOnly
-              placeholder={t("newProject.pathPh")}
-              title={path || undefined}
-              value={path}
-            />
-            <button
-              type="button"
-              className="ghost"
-              disabled={picking}
-              onClick={() => void choose()}
-            >
-              <Folder size={14} />
-              {t("newProject.choose")}
-            </button>
-          </div>
+        <Field label={t("field.cwd")} htmlFor="new-group-path">
+          <FolderPick
+            id="new-group-path"
+            path={path}
+            onPick={onPickFolder}
+            onChange={(picked) => {
+              setPath(picked);
+              if (picked && !nameEdited.current) setName(folderName(picked));
+            }}
+          />
         </Field>
-        <p className="apply-note">{t("newProject.hint")}</p>
+        <p className="apply-note">{t("group.folderHint")}</p>
       </div>
       <div className="actions spread">
         <button type="button" className="ghost" onClick={onClose}>
           {t("common.cancel")}
         </button>
-        <button type="button" className="primary" disabled={!ready} onClick={submit}>
+        <button
+          type="button"
+          className="primary"
+          disabled={!name.trim()}
+          onClick={submit}
+        >
           {t("common.create")}
         </button>
       </div>

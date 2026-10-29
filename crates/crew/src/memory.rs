@@ -24,13 +24,13 @@ pub fn append_shared(text: &str) -> anyhow::Result<()> {
     append_path(&paths::shared_memory_path(), text)
 }
 
-/// A project's notes. Only the user writes them, from the project settings.
-pub fn read_project(group_id: &str) -> String {
-    read_path(&paths::project_memory_path(group_id))
+/// A group's notes. Only the user writes them, from the group settings.
+pub fn read_group(group_id: &str) -> String {
+    read_path(&paths::group_memory_path(group_id))
 }
 
-pub fn write_project(group_id: &str, text: &str) -> anyhow::Result<()> {
-    let path = paths::project_memory_path(group_id);
+pub fn write_group(group_id: &str, text: &str) -> anyhow::Result<()> {
+    let path = paths::group_memory_path(group_id);
     if text.trim().is_empty() {
         let _ = fs::remove_file(path);
         return Ok(());
@@ -38,15 +38,15 @@ pub fn write_project(group_id: &str, text: &str) -> anyhow::Result<()> {
     write_path(&path, text)
 }
 
-pub fn remove_project(group_id: &str) {
-    let _ = fs::remove_file(paths::project_memory_path(group_id));
+pub fn remove_group(group_id: &str) {
+    let _ = fs::remove_file(paths::group_memory_path(group_id));
 }
 
-/// The project `agent_id` sits in and its notes, when it has any.
-pub fn project_for(agent_id: &str) -> Option<(String, String)> {
+/// The group `agent_id` sits in and its notes, when it has any.
+pub fn group_for(agent_id: &str) -> Option<(String, String)> {
     let groups = crate::groups::load().ok()?;
     let group = crate::groups::group_of(&groups, agent_id)?;
-    let notes = read_project(&group.id);
+    let notes = read_group(&group.id);
     if notes.trim().is_empty() {
         return None;
     }
@@ -218,29 +218,29 @@ mod tests {
     }
 
     #[test]
-    fn project_notes_follow_the_bots_project() {
+    fn group_notes_follow_the_bots_group() {
         with_home_dir(|| {
             let groups = vec![crate::groups::SidebarGroup {
                 id: "g1".into(),
                 name: "app".into(),
                 collapsed: false,
                 items: vec!["agent:alpha".into()],
-                path: Some("/tmp/app".into()),
+                path: None,
             }];
             crate::groups::save(&groups).unwrap();
-            assert_eq!(project_for("alpha"), None);
-            write_project("g1", "ship on fridays").unwrap();
-            assert_eq!(read_project("g1"), "ship on fridays");
+            assert_eq!(group_for("alpha"), None);
+            write_group("g1", "ship on fridays").unwrap();
+            assert_eq!(read_group("g1"), "ship on fridays");
             assert_eq!(
-                project_for("alpha"),
+                group_for("alpha"),
                 Some(("app".into(), "ship on fridays".into()))
             );
-            assert_eq!(project_for("beta"), None);
-            write_project("g1", "  ").unwrap();
-            assert!(!paths::project_memory_path("g1").exists());
-            write_project("g1", "again").unwrap();
-            remove_project("g1");
-            assert_eq!(project_for("alpha"), None);
+            assert_eq!(group_for("beta"), None);
+            write_group("g1", "  ").unwrap();
+            assert!(!paths::group_memory_path("g1").exists());
+            write_group("g1", "again").unwrap();
+            remove_group("g1");
+            assert_eq!(group_for("alpha"), None);
         });
     }
 

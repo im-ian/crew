@@ -59,28 +59,29 @@ export function folderName(path: string): string {
   return (cut >= 0 ? trimmed.slice(cut + 1) : trimmed).trim();
 }
 
-/** Working folder a project imposes. Blank is the same as none. */
-export function projectCwd(
+/** Working folder a group gives its bots. Blank is the same as none. */
+export function groupCwd(
   group: { path?: string | null } | null | undefined,
 ): string | null {
   const path = group?.path?.trim() ?? "";
   return path || null;
 }
 
-/** A bot sits in one place. A folder makes that place a project. */
-export function splitPlace(
-  groups: { id: string; path?: string | null }[],
-  id: string | null | undefined,
-): { groupId: string; projectId: string } {
-  if (!id) return { groupId: "", projectId: "" };
-  const found = groups.find((g) => g.id === id);
-  if (!found) return { groupId: "", projectId: "" };
-  if (projectCwd(found)) return { groupId: "", projectId: found.id };
-  return { groupId: found.id, projectId: "" };
+/** Give a group a working folder, or take it away with a blank one. */
+export function setGroupFolder(layout: RailLayout, id: string, path: string): RailLayout {
+  const folder = path.trim();
+  return {
+    groups: layout.groups.map((g) => {
+      if (g.id !== id) return g;
+      if (folder) return { ...g, path: folder };
+      return { id: g.id, name: g.name, collapsed: g.collapsed, items: g.items };
+    }),
+    ungrouped: layout.ungrouped,
+  };
 }
 
 function persistedGroup(g: Group): Group {
-  const path = projectCwd(g);
+  const path = groupCwd(g);
   if (!path) {
     if (g.path == null) return g;
     return { id: g.id, name: g.name, collapsed: g.collapsed, items: g.items };

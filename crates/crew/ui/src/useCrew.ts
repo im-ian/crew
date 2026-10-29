@@ -21,6 +21,7 @@ import { loadNotify } from "./notifyPref";
 import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
 import {
   adoptNewGroups,
+  groupCwd,
   groupIdOf,
   itemKey,
   layoutChanged,
@@ -28,8 +29,9 @@ import {
   moveItem,
   newGroupId,
   normalizeGroups,
-  projectCwd,
+  parseItemKey,
   pruneLayout,
+  setGroupFolder,
   toPersist,
   UNGROUPED_ID,
   uniqueGroupName,
@@ -79,8 +81,8 @@ export function useCrew() {
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [newBotOpen, setNewBotOpen] = useState(false);
   const [newBotPlace, setNewBotPlace] = useState<string | null>(null);
-  const [newProjectOpen, setNewProjectOpen] = useState(false);
-  const [projectSettingsId, setProjectSettingsId] = useState<string | null>(null);
+  const [newGroupOpen, setNewGroupOpen] = useState(false);
+  const [groupSettingsId, setGroupSettingsId] = useState<string | null>(null);
   const [toast, setToast] = useState({ text: "", show: false });
   const [ctx, setCtx] = useState<Ctx>({
     open: false,
@@ -101,10 +103,10 @@ export function useCrew() {
   const faceSave = useRef(Promise.resolve());
   const paneOpenRef = useRef(paneOpen);
   paneOpenRef.current = paneOpen;
-  const newProjectOpenRef = useRef(newProjectOpen);
-  newProjectOpenRef.current = newProjectOpen;
-  const projectSettingsRef = useRef(projectSettingsId);
-  projectSettingsRef.current = projectSettingsId;
+  const newGroupOpenRef = useRef(newGroupOpen);
+  newGroupOpenRef.current = newGroupOpen;
+  const groupSettingsRef = useRef(groupSettingsId);
+  groupSettingsRef.current = groupSettingsId;
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
   const listAgents = useRef(newestOnly(api.listAgents)).current;
@@ -313,15 +315,15 @@ export function useCrew() {
     setPendingRenameId(id);
   }
 
-  function openNewProject() {
-    setNewProjectOpen(true);
+  function openNewGroup() {
+    setNewGroupOpen(true);
   }
 
-  function closeNewProject() {
-    setNewProjectOpen(false);
+  function closeNewGroup() {
+    setNewGroupOpen(false);
   }
 
-  async function pickProjectFolder(): Promise<string | null> {
+  async function pickFolder(): Promise<string | null> {
     try {
       return await api.pickFolder();
     } catch (err) {
@@ -330,54 +332,70 @@ export function useCrew() {
     }
   }
 
-  function createProject(name: string, path: string) {
+  /** A folder is optional. With one, it becomes the working folder of the group's bots. */
+  function createNamedGroup(name: string, path: string) {
     const trimmed = name.trim();
-    const folder = path.trim();
-    if (!trimmed || !folder) return;
+    if (!trimmed) return;
     const current = groupsRef.current;
     const id = newGroupId(current.groups.map((g) => g.id));
+    const created: Group = {
+      id,
+      name: uniqueGroupName(current.groups, trimmed),
+      collapsed: false,
+      items: [],
+    };
+    const folder = path.trim();
+    if (folder) created.path = folder;
     persistLayout({
-      groups: [
-        ...current.groups,
-        {
-          id,
-          name: uniqueGroupName(current.groups, trimmed),
-          collapsed: false,
-          items: [],
-          path: folder,
-        },
-      ],
+      groups: [...current.groups, created],
       ungrouped: current.ungrouped,
     });
-    setNewProjectOpen(false);
+    setNewGroupOpen(false);
   }
 
-  function openProjectSettings(id: string) {
-    setProjectSettingsId(id);
+  function openGroupSettings(id: string) {
+    setGroupSettingsId(id);
   }
 
-  function closeProjectSettings() {
-    setProjectSettingsId(null);
+  function closeGroupSettings() {
+    setGroupSettingsId(null);
   }
 
-  async function loadProjectMemory(id: string) {
+  async function loadGroupMemory(id: string) {
     try {
-      return await api.getProjectMemory(id);
+      return await api.getGroupMemory(id);
     } catch (err) {
       showError(err);
       return "";
     }
   }
 
-  async function saveProjectMemory(id: string, text: string): Promise<boolean> {
+  /** A new folder becomes the working folder of the bots already inside, as
+      if each had just moved in. Clearing it leaves their folders alone. */
+  async function saveGroupSettings(
+    id: string,
+    fields: { path: string; memory: string },
+  ): Promise<boolean> {
+    const before = groupsRef.current.groups.find((g) => g.id === id);
+    if (!before) return false;
     try {
-      await api.setProjectMemory(id, text);
-      showToast(t("memory.saved"));
-      return true;
+      await api.setGroupMemory(id, fields.memory);
     } catch (err) {
       showError(err);
       return false;
     }
+    const folder = fields.path.trim();
+    if (folder !== (groupCwd(before) ?? "")) {
+      persistLayout(setGroupFolder(groupsRef.current, id, folder));
+      if (folder) {
+        for (const key of before.items) {
+          const item = parseItemKey(key);
+          if (item?.kind === "agent") pinCwd(item.id, folder);
+        }
+      }
+    }
+    showToast(t("memory.saved"));
+    return true;
   }
 
   function renameGroup(id: string, name: string) {
@@ -415,8 +433,8 @@ export function useCrew() {
     );
     persistLayout(moveItem(current, itemKey(kind, id), groupId, beforeKey, visual));
     if (kind !== "agent" || !groupId || groupId === fromId) return;
-    const dest = projectCwd(current.groups.find((g) => g.id === groupId));
-    const prev = projectCwd(current.groups.find((g) => g.id === fromId));
+    const dest = groupCwd(current.groups.find((g) => g.id === groupId));
+    const prev = groupCwd(current.groups.find((g) => g.id === fromId));
     if (dest && dest !== prev) pinCwd(id, dest);
   }
 
@@ -830,7 +848,7 @@ export function useCrew() {
           setSelected(null);
           setMessages([]);
         }
-      } else if (kind === "remove-group" || kind === "remove-project") {
+      } else if (kind === "remove-group") {
         removeGroup(id);
         await refreshList();
         await refreshMessages();
@@ -871,7 +889,6 @@ export function useCrew() {
     shape: string | null;
     color: string | null;
     groupId: string | null;
-    projectId: string | null;
   }) {
     const name = args.name.trim();
     if (!name) {
@@ -884,19 +901,11 @@ export function useCrew() {
       return;
     }
     const model = args.model.trim();
-    const project = args.projectId
-      ? groupsRef.current.groups.find(
-          (g) => g.id === args.projectId && projectCwd(g),
-        )
+    const group = args.groupId
+      ? groupsRef.current.groups.find((g) => g.id === args.groupId)
       : undefined;
-    const group =
-      project || !args.groupId
-        ? undefined
-        : groupsRef.current.groups.find(
-            (g) => g.id === args.groupId && !projectCwd(g),
-          );
-    const placeId = project?.id ?? group?.id ?? null;
-    const cwd = project ? projectCwd(project) : null;
+    const placeId = group?.id ?? null;
+    const cwd = groupCwd(group);
     try {
       const id = await api.addAgent({
         name,
@@ -1064,14 +1073,14 @@ export function useCrew() {
     function onKey(e: KeyboardEvent) {
       if (e.defaultPrevented) return;
       if (e.key !== "Escape") return;
-      if (newProjectOpenRef.current) {
+      if (newGroupOpenRef.current) {
         e.preventDefault();
-        setNewProjectOpen(false);
+        setNewGroupOpen(false);
         return;
       }
-      if (projectSettingsRef.current) {
+      if (groupSettingsRef.current) {
         e.preventDefault();
-        setProjectSettingsId(null);
+        setGroupSettingsId(null);
         return;
       }
       closeConfirm();
@@ -1189,8 +1198,8 @@ export function useCrew() {
     confirmKind,
     newBotOpen,
     newBotPlace,
-    newProjectOpen,
-    projectSettingsId,
+    newGroupOpen,
+    groupSettingsId,
     toast,
     ctx,
     groups,
@@ -1209,14 +1218,14 @@ export function useCrew() {
     openNewBot,
     closeNewBot,
     createBot,
-    openNewProject,
-    closeNewProject,
-    pickProjectFolder,
-    createProject,
-    openProjectSettings,
-    closeProjectSettings,
-    loadProjectMemory,
-    saveProjectMemory,
+    openNewGroup,
+    closeNewGroup,
+    pickFolder,
+    createNamedGroup,
+    openGroupSettings,
+    closeGroupSettings,
+    loadGroupMemory,
+    saveGroupSettings,
     cloneBot,
     showCtx,
     showCreateMenu,

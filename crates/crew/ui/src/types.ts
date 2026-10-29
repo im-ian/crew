@@ -6,14 +6,14 @@ export type PaneTab = "info" | "routines" | "memory";
 /** How saving an edit to a waiting message ended. "gone": it went out first. */
 export type EditResult = "saved" | "gone" | "failed";
 export type CtxKind = Kind | "group" | "create";
-export type ConfirmKind = "reset" | "remove" | "remove-group" | "remove-project";
+export type ConfirmKind = "reset" | "remove" | "remove-group";
 
 export type Group = {
   id: string;
   name: string;
   collapsed: boolean;
   items: string[];
-  /** Folder this project is bound to. Ordinary groups leave it unset. */
+  /** Working folder for the group's bots. A group need not have one. */
   path?: string;
 };
 export type CliKind =

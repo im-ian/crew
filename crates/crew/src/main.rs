@@ -615,7 +615,7 @@ fn run_share(cmd: ShareCmd) -> anyhow::Result<()> {
             if let Some(id) = &id {
                 print!(
                     "{}",
-                    crate::config::project_memory_section(crate::memory::project_for(id).as_ref())
+                    crate::config::group_memory_section(crate::memory::group_for(id).as_ref())
                 );
             }
             Ok(())

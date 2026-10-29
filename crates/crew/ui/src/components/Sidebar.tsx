@@ -18,7 +18,7 @@ import { mentionRuns, mentionText } from "../mentions";
 import { numberDuplicateNames } from "../rail";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
-import { ChevronDown, Ellipsis, Folder, Layers, Plus, Settings } from "../icons";
+import { ChevronDown, Ellipsis, Plus, Settings } from "../icons";
 
 const RAIL_DEFAULT = 232;
 const RAIL_MIN = 176;
@@ -93,7 +93,7 @@ type DragGeom = {
 type RailDrag = DragGeom &
   (
     | { kind: "item"; key: string; item: RailItem }
-    | { kind: "group"; key: string; groupName: string; collapsed: boolean; project: boolean }
+    | { kind: "group"; key: string; groupName: string; collapsed: boolean }
   );
 
 const DRAG_THRESHOLD = 6;
@@ -638,7 +638,6 @@ export function Sidebar({
         key: group.id,
         groupName: group.name,
         collapsed: group.collapsed,
-        project: Boolean(group.path),
         x: e.clientX,
         y: e.clientY,
         grabX: e.clientX - rect.left,
@@ -873,7 +872,6 @@ export function Sidebar({
                     <span className="group-toggle" aria-hidden>
                       <ChevronDown className="group-chevron" size={14} />
                     </span>
-                    <PlaceMark project={drag.project} />
                     <span className="group-name">{drag.groupName}</span>
                   </div>
                 ) : (
@@ -960,30 +958,26 @@ function GroupHead({
         <ChevronDown className="group-chevron" size={14} />
       </button>
       {renaming ? (
-        <>
-          <PlaceMark project={Boolean(group.path)} />
-          <input
-            ref={inputRef}
-            className="group-name-input"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                commit();
-              } else if (e.key === "Escape") {
-                e.preventDefault();
-                onCancelRename();
-              }
-            }}
-          />
-        </>
+        <input
+          ref={inputRef}
+          className="group-name-input"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              onCancelRename();
+            }
+          }}
+        />
       ) : (
         <>
           <button type="button" className="group-name" onClick={onToggle}>
-            <PlaceMark project={Boolean(group.path)} />
             <span className="group-name-text">{group.name}</span>
           </button>
           <button
@@ -1003,14 +997,6 @@ function GroupHead({
         </>
       )}
     </div>
-  );
-}
-
-function PlaceMark({ project, size = 13 }: { project: boolean; size?: number }) {
-  return (
-    <span className="group-mark">
-      {project ? <Folder size={size} /> : <Layers size={size} />}
-    </span>
   );
 }
 
