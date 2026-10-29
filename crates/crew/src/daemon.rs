@@ -1789,11 +1789,14 @@ fn advance_serial(start: &str) {
 }
 
 /// What waited on a turn that is over: the tells the bot ran, and the
-/// teammates its message named with the rest of any chain. Each line goes
-/// one at a time, and neither waits on the other.
+/// teammates its message named with the rest of any chain. The named go one
+/// at a time, in the order the message wrote them. Each tell the bot ran is
+/// work it handed out, so they all start now and none waits on another.
 fn release(jobs: VecDeque<SerialJob>) {
     let (own, named): (VecDeque<_>, VecDeque<_>) = jobs.into_iter().partition(|job| job.own);
-    run_chain(own);
+    for job in own {
+        run_chain(VecDeque::from([job]));
+    }
     run_chain(named);
 }
 
@@ -6333,6 +6336,46 @@ exec sleep 1"#,
             });
             interrupt_turn(&bot).unwrap();
             for id in [&bot, &builder] {
+                wait_idle(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// A bot that hands work to three teammates starts all three. The second
+    /// does not wait for the first one's turn to end.
+    #[test]
+    fn the_tells_a_bot_ran_start_together() {
+        paths::testing::with_home("tell-fan-out", || {
+            let [bot, a, b, c] = ["lead", "fan-a", "fan-b", "fan-c"].map(test_id);
+            let body = "case \"$last\" in *slow*) exec sleep 5 ;; *first*) sleep 0.5 ;; esac";
+            for id in [&bot, &a, &b, &c] {
+                fake_bot_running(id, body);
+            }
+            for id in [&bot, &a, &b, &c] {
+                wait_idle(id);
+            }
+            send_agent(&bot, "first").unwrap();
+            eventually(Duration::from_secs(3), "the turn did not start", || {
+                agent_busy(&bot).unwrap_or(false)
+            });
+            tell_agent(&bot, &a, "slow 첫째 일").unwrap();
+            tell_agent(&bot, &b, "둘째 일").unwrap();
+            tell_agent(&bot, &c, "셋째 일").unwrap();
+            eventually(Duration::from_secs(3), "the first tell did not go", || {
+                told(&a, "slow 첫째 일")
+            });
+            eventually(
+                Duration::from_secs(3),
+                "the other tells waited on the first",
+                || told(&b, "둘째 일") && told(&c, "셋째 일"),
+            );
+            assert!(
+                agent_busy(&a).unwrap_or(false),
+                "the first turn ended early"
+            );
+            interrupt_turn(&a).unwrap();
+            for id in [&bot, &a, &b, &c] {
                 wait_idle(id);
                 remove_agent(id).unwrap();
             }
