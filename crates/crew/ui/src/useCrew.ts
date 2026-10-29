@@ -737,19 +737,6 @@ export function useCrew() {
     }
   }
 
-  async function saveShared(text: string, base: string): Promise<boolean> {
-    try {
-      if (await api.setSharedMemory(text, base)) {
-        showToast(t("memory.saved"));
-        return true;
-      }
-      showToast(t("memory.sharedChanged"));
-    } catch (err) {
-      showError(err);
-    }
-    return false;
-  }
-
   async function saveMemory(text: string, base: string): Promise<boolean> {
     const id = selectedRef.current.id;
     if (!id || selectedRef.current.kind !== "agent") return false;
@@ -1204,7 +1191,6 @@ export function useCrew() {
     loadMemory,
     saveMemory,
     loadShared,
-    saveShared,
     showError,
   };
 }

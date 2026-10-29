@@ -1396,6 +1396,9 @@ button.msg-avatar {
 textarea.textin.memory {
   min-height: 120px;
 }
+textarea.textin.memory[readonly] {
+  color: var(--muted);
+}
 .sys {
   align-self: center;
   max-width: 80%;

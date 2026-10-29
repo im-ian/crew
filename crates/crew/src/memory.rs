@@ -20,14 +20,6 @@ pub fn write_shared(text: &str) -> anyhow::Result<()> {
     write_path(&paths::shared_memory_path(), text)
 }
 
-pub fn write_shared_if_unchanged(base: &str, text: &str) -> anyhow::Result<bool> {
-    if read_shared() != base {
-        return Ok(false);
-    }
-    write_shared(text)?;
-    Ok(true)
-}
-
 pub fn append_shared(text: &str) -> anyhow::Result<()> {
     append_path(&paths::shared_memory_path(), text)
 }
@@ -191,11 +183,8 @@ mod tests {
             append_shared("also").unwrap();
             assert_eq!(read("alpha"), "mine");
             assert_eq!(read_shared(), "team\nalso\n");
-            assert!(!write_shared_if_unchanged("team", "nope").unwrap());
-            assert!(write_shared_if_unchanged("team\nalso\n", "kept").unwrap());
-            assert_eq!(read_shared(), "kept");
             remove("alpha");
-            assert_eq!(read_shared(), "kept");
+            assert_eq!(read_shared(), "team\nalso\n");
         });
     }
 

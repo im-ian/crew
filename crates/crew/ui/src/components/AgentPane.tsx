@@ -35,7 +35,6 @@ type Props = {
   onSaveMemory: (text: string, base: string) => Promise<boolean>;
   agents: AgentInfo[];
   onLoadShared: () => Promise<string>;
-  onSaveShared: (text: string, base: string) => Promise<boolean>;
 };
 
 export function AgentPane({
@@ -55,7 +54,6 @@ export function AgentPane({
   onSaveMemory,
   agents,
   onLoadShared,
-  onSaveShared,
 }: Props) {
   const t = useT();
   return (
@@ -118,7 +116,6 @@ export function AgentPane({
               onLoad={onLoadMemory}
               onSave={onSaveMemory}
               onLoadShared={onLoadShared}
-              onSaveShared={onSaveShared}
             />
           </div>
         </div>
@@ -134,7 +131,6 @@ function MemoryTab({
   onLoad,
   onSave,
   onLoadShared,
-  onSaveShared,
 }: {
   open: boolean;
   agent: AgentInfo | null;
@@ -142,7 +138,6 @@ function MemoryTab({
   onLoad: (id: string) => Promise<string>;
   onSave: (text: string, base: string) => Promise<boolean>;
   onLoadShared: () => Promise<string>;
-  onSaveShared: (text: string, base: string) => Promise<boolean>;
 }) {
   const t = useT();
   const [memory, setMemory] = useState("");
@@ -150,8 +145,6 @@ function MemoryTab({
   // The text as loaded. Save only goes through if the file still matches it.
   const base = useRef("");
   const [shared, setShared] = useState("");
-  const sharedEdited = useRef(false);
-  const sharedBase = useRef("");
   const team = agents
     .slice()
     .sort((a, b) => a.id.localeCompare(b.id))
@@ -167,12 +160,7 @@ function MemoryTab({
       setMemory(text);
     });
     setShared("");
-    sharedEdited.current = false;
-    void onLoadShared().then((text) => {
-      if (sharedEdited.current) return;
-      sharedBase.current = text;
-      setShared(text);
-    });
+    void onLoadShared().then(setShared);
   }, [open, agent?.id]);
 
   // The bot keeps its own memory, so a finished turn may have changed it.
@@ -186,13 +174,7 @@ function MemoryTab({
         setMemory(text);
       });
     }
-    if (!sharedEdited.current) {
-      void onLoadShared().then((text) => {
-        if (sharedEdited.current) return;
-        sharedBase.current = text;
-        setShared(text);
-      });
-    }
+    void onLoadShared().then(setShared);
   }, [agent?.status]);
 
   return (
@@ -230,26 +212,10 @@ function MemoryTab({
           id="pane-shared"
           className="textin memory"
           placeholder={t("memory.sharedPlaceholder")}
+          readOnly
           value={shared}
-          onChange={(e) => {
-            setShared(e.target.value);
-            sharedEdited.current = true;
-          }}
         />
       </Field>
-      <div className="actions">
-        <button
-          type="button"
-          className="primary wide"
-          onClick={async () => {
-            if (!(await onSaveShared(shared, sharedBase.current))) return;
-            sharedBase.current = shared;
-            sharedEdited.current = false;
-          }}
-        >
-          {t("common.save")}
-        </button>
-      </div>
     </div>
   );
 }

@@ -41,7 +41,6 @@
     "allow-get-memory",
     "allow-set-memory",
     "allow-get-shared-memory",
-    "allow-set-shared-memory",
     "allow-list-groups",
     "allow-set-groups",
     "allow-list-models",
