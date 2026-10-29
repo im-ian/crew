@@ -45,6 +45,7 @@ import {
   scrollForIndex,
   VIRTUAL_THRESHOLD,
 } from "../virtualThread";
+import { firstUnreadId } from "../readCursors";
 import { ChevronDown, Reply, X } from "../icons";
 import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
@@ -171,6 +172,9 @@ type Props = {
   ) => void | Promise<void>;
   highlightId?: string | null;
   onHighlightDone?: () => void;
+  /** Where the reader had got to when this chat opened, and whether its lines are in. */
+  openedRead?: { key: string; ts: number } | null;
+  ready?: boolean;
   jumpSeq?: number;
   onReply?: (target: ReplyTarget) => void;
   onJump?: (id: string) => void;
@@ -202,6 +206,8 @@ export function ChatThread({
   onAnswerChoice,
   highlightId = null,
   onHighlightDone,
+  openedRead = null,
+  ready = true,
   jumpSeq = 0,
   onReply,
   onJump,
@@ -213,7 +219,25 @@ export function ChatThread({
 }: Props) {
   const { locale } = useLocale();
   const ref = useRef<HTMLDivElement>(null);
-  const { away, sync: syncStick, jump: jumpBottom } = useStick(ref, onStick);
+  // Opening on the first unread line holds the thread there. Reaching the
+  // bottom, or any scroll that ends there, lets it follow new lines again.
+  const [resume, setResume] = useState<{
+    key: string;
+    id: string | null;
+    hold: boolean;
+  } | null>(null);
+  const holdRef = useRef(false);
+  holdRef.current = !!resume?.hold;
+  const { away, sync: syncStick, jump: jumpBottom } = useStick(ref, (at) => {
+    if (at && holdRef.current && settledRef.current) {
+      holdRef.current = false;
+      setResume((r) => (r && r.hold ? { ...r, hold: false } : r));
+    }
+    onStick(at);
+  });
+  const settledRef = useRef(false);
+  // The reader has taken the scroll over: stop putting the divider back.
+  const movedRef = useRef(false);
   const visible = visibleMessages(messages, showTools, selected);
   const all = threadRows(visible, agents);
   // A bot that has only talked with other bots has no conversation here: the
@@ -272,6 +296,27 @@ export function ChatThread({
   if (openedAt.current.key !== chatKey) {
     openedAt.current = { key: chatKey, at: Date.now() };
   }
+  const resumeId = resume?.key === chatKey ? resume.id : null;
+  const resumeHold = resume?.key === chatKey && resume.hold && !!resumeId;
+  // Once per chat, when its own lines are in.
+  useLayoutEffect(() => {
+    if (!ready || !selected) return;
+    if (resume?.key === chatKey) return;
+    if (openedRead?.key !== chatKey) return;
+    settledRef.current = false;
+    movedRef.current = false;
+    const id = firstUnreadId(
+      rows.map((row) => ({
+        id: rowKey(row),
+        ts: rowTs(row),
+        mine:
+          row.kind === "msg" &&
+          (row.msg.role === "user" || row.msg.from === "user"),
+      })),
+      openedRead.ts,
+    );
+    setResume({ key: chatKey, id, hold: !!id });
+  }, [ready, chatKey, openedRead, rows.length]);
   const writtenAt = new Map(rows.map((row) => [rowKey(row), rowTs(row)]));
   const arrive = useArriving(
     [
@@ -334,8 +379,9 @@ export function ChatThread({
   offsetsRef.current = offsets;
   flowLenRef.current = flow.length;
   rowsLenRef.current = rows.length;
-  const followBottom = stick && !unpinned && !highlightId;
-  const focusIndex = virtual ? indexOfRow(flow, highlightId) : -1;
+  const followBottom = stick && !unpinned && !highlightId && !resumeHold;
+  const focusId = highlightId ?? (resumeHold ? resumeId : null);
+  const focusIndex = virtual ? indexOfRow(flow, focusId) : -1;
   const flowTotal = offsets[flow.length] ?? 0;
   const win = virtual
     ? flowWindow({
@@ -417,7 +463,7 @@ export function ChatThread({
 
   useEffect(() => {
     const el = ref.current;
-    if (el && stick && !highlightId) el.scrollTop = el.scrollHeight;
+    if (el && stick && !highlightId && !resumeHold) el.scrollTop = el.scrollHeight;
     syncStick();
   }, [
     messages,
@@ -428,12 +474,13 @@ export function ChatThread({
     highlightId,
     showTools,
     heightRev,
+    resumeHold,
   ]);
 
   // The entrance grows the row after this commit. Follow it to the bottom
   // unless the reader has already moved up.
   useLayoutEffect(() => {
-    if (!stick || highlightId || arrive.size === 0) return;
+    if (!stick || highlightId || resumeHold || arrive.size === 0) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const el = ref.current;
     if (!el) return;
@@ -452,7 +499,7 @@ export function ChatThread({
     locked = el.scrollTop;
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [arrive, stick, highlightId]);
+  }, [arrive, stick, highlightId, resumeHold]);
 
   // A measured row above the viewport would shove what the reader is looking
   // at. Move scrollTop by the same amount before paint. Stuck to the bottom,
@@ -485,7 +532,7 @@ export function ChatThread({
   // the reader back.
   const focusReady = focusIndex >= 0;
   useLayoutEffect(() => {
-    if (!virtual || !highlightId || focusIndex < 0) return;
+    if (!virtual || !focusId || focusIndex < 0) return;
     const el = ref.current;
     if (!el) return;
     const top = scrollForIndex(
@@ -497,7 +544,7 @@ export function ChatThread({
     if (Math.abs(el.scrollTop - top) > 1) el.scrollTop = top;
     setScrollTop(top);
     if (el.clientHeight > 0) setViewport(el.clientHeight);
-  }, [highlightId, focusReady, virtual]);
+  }, [focusId, focusReady, virtual]);
 
   // Bring the hit on screen. `messages` is a dependency because the row may
   // not be mounted yet when the id arrives.
@@ -511,6 +558,21 @@ export function ChatThread({
     if (!el) return;
     el.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [highlightId, messages]);
+
+  // Open on the divider: the first line the reader has not seen at the top.
+  // Once there, a scroll that reaches the bottom is the reader's own.
+  useLayoutEffect(() => {
+    if (!resumeHold || highlightId || movedRef.current) return;
+    const root = ref.current;
+    const el = root?.querySelector("[data-resume-divider]");
+    if (!root || !(el instanceof HTMLElement)) return;
+    const top =
+      el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop;
+    root.scrollTop = Math.max(0, top - 8);
+    // A thread that still ends in view has nothing below to hold for.
+    settledRef.current = true;
+    syncStick();
+  }, [resumeHold, resumeId, highlightId, virtual, heightRev]);
 
   // Expiry is its own effect on its own clock. Sharing the one above meant a
   // streaming thread re-armed the timer on every tick, so a flashed note never
@@ -634,9 +696,14 @@ export function ChatThread({
         start={start}
       >
         {time ? <ThreadTime ts={time.ts} label={time.label} /> : null}
+        {resumeId === id ? <NewFromHere /> : null}
         {node}
       </MsgSlot>
     );
+  }
+
+  function takeOver() {
+    movedRef.current = true;
   }
 
   function onThreadScroll() {
@@ -656,7 +723,7 @@ export function ChatThread({
       unpinnedRef.current = true;
       setUnpinned(true);
     }
-    const follow = atBottom && stickRef.current && !highlightId;
+    const follow = atBottom && stickRef.current && !highlightId && !holdRef.current;
     const next = flowWindow({
       count: flowLenRef.current,
       scrollTop: nextTop,
@@ -679,7 +746,15 @@ export function ChatThread({
 
   return (
     <div className="thread-wrap">
-      <div className="thread" ref={ref} onScroll={onThreadScroll}>
+      <div
+        className="thread"
+        ref={ref}
+        onScroll={onThreadScroll}
+        onWheel={takeOver}
+        onPointerDown={takeOver}
+        onTouchMove={takeOver}
+        onKeyDown={takeOver}
+      >
         {virtual ? (
           flow.length > 0 ? (
             <div className="thread-window" style={{ height: flowTotal }}>
@@ -2044,6 +2119,15 @@ function ReplyQuote({
       <span className="reply-quote-who">{quoteWho(reply.from, agents, t)}</span>
       <span className="reply-quote-text">{reply.snippet}</span>
     </button>
+  );
+}
+
+function NewFromHere() {
+  const t = useT();
+  return (
+    <div className="thread-new" data-resume-divider role="separator">
+      <span>{t("thread.newFromHere")}</span>
+    </div>
   );
 }
 

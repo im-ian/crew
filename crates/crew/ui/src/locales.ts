@@ -124,6 +124,7 @@ export const KO = {
   "composer.editSave": "수정 저장",
 
   "thread.jumpBottom": "맨 아래로",
+  "thread.newFromHere": "새 메시지",
   "thread.startChat": "메시지를 보내 대화를 시작하세요",
   "thread.pickChat": "대화를 선택하세요",
   "thread.routineFrom": "루틴 · {from}",
@@ -425,6 +426,7 @@ export const EN: { [K in MessageKey]: string } = {
   "composer.editSave": "Save edit",
 
   "thread.jumpBottom": "Jump to bottom",
+  "thread.newFromHere": "New messages",
   "thread.startChat": "Send a message to start the chat",
   "thread.pickChat": "Select a chat",
   "thread.routineFrom": "Routine · {from}",
