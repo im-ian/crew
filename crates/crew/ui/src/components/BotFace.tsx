@@ -16,6 +16,8 @@ type Props = {
   title?: string;
   status?: AgentStatus | null;
   id?: string | null;
+  /** A held expression. It replaces what `status` would show and stops the eyes following. */
+  mood?: FaceMood | null;
   /** Client point the idle face follows. Pointer aim wins while the cursor is on the face. */
   lookAt?: { x: number; y: number } | null;
 };
@@ -151,7 +153,48 @@ function Eyes({ cx, cy }: { cx: number; cy: number }) {
   );
 }
 
-type Mood = "idle" | "working" | "blocked" | "exited" | "happy";
+/** Expressions a caller can hold on a face, apart from the four statuses. */
+export type FaceMood = "happy" | "success" | "failure" | "question";
+
+/** A mark over the head's upper right. Its halo keeps it readable where it crosses the body. */
+function QuestionMark({ color }: { color: string }) {
+  const hook = "M-4.2 -5.2C-4.2 -9.4 4.2 -9.4 4.2 -4.8C4.2 -1.8 0 -1.6 0 2";
+  return (
+    <g className="avatar-mark" transform="translate(53 8) scale(1.25)">
+      <g className="avatar-mark-pop">
+        <g className="avatar-mark-halo" fill="none" stroke="var(--bg)" strokeWidth="6.4" strokeLinecap="round">
+          <path d={hook} />
+          <path d="M0 7.6V7.7" />
+        </g>
+        <g fill="none" stroke={color} strokeWidth="2.8" strokeLinecap="round">
+          <path d={hook} />
+          <path d="M0 7.6V7.7" />
+        </g>
+      </g>
+    </g>
+  );
+}
+
+/** Two Zs that float up from the head's upper right while the bot is down. */
+function SleepMarks({ color }: { color: string }) {
+  const z = "M-3.2 -3.4H3.2L-3.2 3.4H3.2";
+  return (
+    <g className="avatar-zzz" transform="translate(51 12)">
+      {[0, 1].map((i) => (
+        <g key={i} className="avatar-z">
+          <g fill="none" stroke="var(--bg)" strokeWidth="5.6" strokeLinecap="round" strokeLinejoin="round">
+            <path d={z} />
+          </g>
+          <g fill="none" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d={z} />
+          </g>
+        </g>
+      ))}
+    </g>
+  );
+}
+
+type Mood = "idle" | "working" | "blocked" | "exited" | FaceMood;
 
 function liveMood(status?: AgentStatus | null): Mood | null {
   if (
@@ -316,9 +359,19 @@ function applyGaze(
 
 type GazeMode = "idle" | "track" | "return";
 
-export function BotFace({ shape, color, className, title, status, id, lookAt = null }: Props) {
+export function BotFace({
+  shape,
+  color,
+  className,
+  title,
+  status,
+  id,
+  mood = null,
+  lookAt = null,
+}: Props) {
   const eyes = eyesAt(shape);
-  const live = useHappy(status) ? "happy" : liveMood(status);
+  const happy = useHappy(status);
+  const live: Mood | null = mood ?? (happy ? "happy" : liveMood(status));
   const svgRef = useRef<SVGSVGElement>(null);
   const gazeRef = useRef<{ x: number; y: number } | null>(null);
   const settledRef = useRef(false);
@@ -371,6 +424,7 @@ export function BotFace({ shape, color, className, title, status, id, lookAt = n
     const follow =
       !pointerRef.current &&
       !!lookAt &&
+      !mood &&
       status === "idle" &&
       !prefersReducedMotion();
     if (follow) {
@@ -524,6 +578,8 @@ export function BotFace({ shape, color, className, title, status, id, lookAt = n
       <g transform={shapeFit(shape)}>
         <Eyes cx={eyes.x} cy={eyes.y} />
       </g>
+      {live === "question" ? <QuestionMark color={color} /> : null}
+      {live === "exited" ? <SleepMarks color={color} /> : null}
     </svg>
   );
 }
