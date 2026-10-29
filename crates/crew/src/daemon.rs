@@ -4246,8 +4246,8 @@ mod daemon_tests {
         let err = submit_delivery(id, "again?", true, None, origin)
             .expect_err("a spent chain must not start another turn");
         assert!(err.to_string().contains("relay limit"), "{err}");
-        let last = crate::transcript::messages(id);
-        assert_eq!(last.last().map(|m| m.from.as_str()), Some("crew"));
+        // The chain stops without a line in the chat.
+        assert!(crate::transcript::messages(id).is_empty());
     }
 
     #[test]
