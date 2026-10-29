@@ -24,7 +24,8 @@ pub fn append_shared(text: &str) -> anyhow::Result<()> {
     append_path(&paths::shared_memory_path(), text)
 }
 
-/// A group's notes. Only the user writes them, from the group settings.
+/// A group's notes. The user edits them in the group settings, and a bot in
+/// the group with `crew group memory`.
 pub fn read_group(group_id: &str) -> String {
     read_path(&paths::group_memory_path(group_id))
 }
@@ -38,19 +39,29 @@ pub fn write_group(group_id: &str, text: &str) -> anyhow::Result<()> {
     write_path(&path, text)
 }
 
+/// Writes `text` only if the notes still read `base`, so the settings dialog
+/// can't drop a note a bot added while it was open.
+pub fn write_group_if_unchanged(group_id: &str, base: &str, text: &str) -> anyhow::Result<bool> {
+    if read_group(group_id) != base {
+        return Ok(false);
+    }
+    write_group(group_id, text)?;
+    Ok(true)
+}
+
+pub fn append_group(group_id: &str, text: &str) -> anyhow::Result<()> {
+    append_path(&paths::group_memory_path(group_id), text)
+}
+
 pub fn remove_group(group_id: &str) {
     let _ = fs::remove_file(paths::group_memory_path(group_id));
 }
 
-/// The group `agent_id` sits in and its notes, when it has any.
+/// The group `agent_id` sits in and its notes, blank while it has none.
 pub fn group_for(agent_id: &str) -> Option<(String, String)> {
     let groups = crate::groups::load().ok()?;
     let group = crate::groups::group_of(&groups, agent_id)?;
-    let notes = read_group(&group.id);
-    if notes.trim().is_empty() {
-        return None;
-    }
-    Some((group.name.clone(), notes))
+    Some((group.name.clone(), read_group(&group.id)))
 }
 
 fn read_path(path: &Path) -> String {
@@ -228,7 +239,7 @@ mod tests {
                 path: None,
             }];
             crate::groups::save(&groups).unwrap();
-            assert_eq!(group_for("alpha"), None);
+            assert_eq!(group_for("alpha"), Some(("app".into(), String::new())));
             write_group("g1", "ship on fridays").unwrap();
             assert_eq!(read_group("g1"), "ship on fridays");
             assert_eq!(
@@ -238,9 +249,12 @@ mod tests {
             assert_eq!(group_for("beta"), None);
             write_group("g1", "  ").unwrap();
             assert!(!paths::group_memory_path("g1").exists());
-            write_group("g1", "again").unwrap();
+            append_group("g1", "bot note").unwrap();
+            assert!(!write_group_if_unchanged("g1", "", "user edit").unwrap());
+            assert!(write_group_if_unchanged("g1", "bot note\n", "both").unwrap());
+            assert_eq!(read_group("g1"), "both");
             remove_group("g1");
-            assert_eq!(group_for("alpha"), None);
+            assert!(read_group("g1").is_empty());
         });
     }
 

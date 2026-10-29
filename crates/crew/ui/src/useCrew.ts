@@ -354,7 +354,7 @@ export function useCrew() {
     // The group is there either way; a memory that fails to save can be
     // written again from its settings.
     if (memory.trim()) {
-      void api.setGroupMemory(id, memory).catch((err) => showError(err));
+      void api.setGroupMemory(id, memory, "").catch((err) => showError(err));
     }
   }
 
@@ -379,12 +379,18 @@ export function useCrew() {
       if each had just moved in. Clearing it leaves their folders alone. */
   async function saveGroupSettings(
     id: string,
-    fields: { path: string; memory: string },
+    fields: { path: string; memory: string; base: string },
   ): Promise<boolean> {
     const before = groupsRef.current.groups.find((g) => g.id === id);
     if (!before) return false;
     try {
-      await api.setGroupMemory(id, fields.memory);
+      // Untouched notes are not written, so a bot's note since then stays and
+      // a folder change still goes through.
+      const same = fields.memory === fields.base;
+      if (!same && !(await api.setGroupMemory(id, fields.memory, fields.base))) {
+        showToast(t("groupSettings.changed"));
+        return false;
+      }
     } catch (err) {
       showError(err);
       return false;

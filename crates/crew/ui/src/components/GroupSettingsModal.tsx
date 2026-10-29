@@ -11,7 +11,10 @@ type Props = {
   onClose: () => void;
   onPickFolder: () => Promise<string | null>;
   onLoad: (id: string) => Promise<string>;
-  onSave: (id: string, fields: { path: string; memory: string }) => Promise<boolean>;
+  onSave: (
+    id: string,
+    fields: { path: string; memory: string; base: string },
+  ) => Promise<boolean>;
 };
 
 export function GroupSettingsModal({
@@ -27,6 +30,8 @@ export function GroupSettingsModal({
   const [memory, setMemory] = useState("");
   const [busy, setBusy] = useState(false);
   const edited = useRef(false);
+  // The notes as loaded. A bot may add to them while the dialog is open.
+  const base = useRef("");
 
   useEffect(() => {
     if (!open || !group) return;
@@ -34,8 +39,11 @@ export function GroupSettingsModal({
     setMemory("");
     setBusy(false);
     edited.current = false;
+    base.current = "";
     void onLoad(group.id).then((text) => {
-      if (!edited.current) setMemory(text);
+      if (edited.current) return;
+      base.current = text;
+      setMemory(text);
     });
   }, [open, group?.id]);
 
@@ -43,7 +51,7 @@ export function GroupSettingsModal({
     if (!group || busy) return;
     setBusy(true);
     try {
-      if (await onSave(group.id, { path, memory })) onClose();
+      if (await onSave(group.id, { path, memory, base: base.current })) onClose();
     } finally {
       setBusy(false);
     }

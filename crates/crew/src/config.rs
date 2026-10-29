@@ -945,7 +945,7 @@ pub fn team_rules(agent: &AgentConfig, _roster: &[AgentConfig]) -> String {
         agent.display_name()
     ));
     s.push_str(
-        "Shared memory is current on every turn. A `[crew system]` note that starts with `Shared memory` holds the live teammate list and your live name, plus the notes every bot shares. That note replaces any teammate list in these instructions, including after a compact. Use the note. To read it, run `crew share show`. To add a note for every bot, run `crew share append <<'EOF'` with one short line, then `EOF`. To replace the shared notes, run `crew share show`, then `crew share set <<'EOF'` with the notes only, then `EOF`. Crew writes the teammate list, so `crew share set` does not change it. Do not copy the teammate list into your own memory. Do not save secrets there. When you sit in a group that has notes, the note also holds a `# Group memory` section; only the user edits it, in the app.\n",
+        "Shared memory is current on every turn. A `[crew system]` note that starts with `Shared memory` holds the live teammate list and your live name, plus the notes every bot shares. That note replaces any teammate list in these instructions, including after a compact. Use the note. To read it, run `crew share show`. To add a note for every bot, run `crew share append <<'EOF'` with one short line, then `EOF`. To replace the shared notes, run `crew share show`, then `crew share set <<'EOF'` with the notes only, then `EOF`. Crew writes the teammate list, so `crew share set` does not change it. Do not copy the teammate list into your own memory. Do not save secrets there. When you sit in a group, the note also holds a `# Group memory` section for that group. To add to it, run `crew group memory append <<'EOF'` with one short line, then `EOF`. To replace it, run `crew group memory show`, then `crew group memory set <<'EOF'` with the whole new notes, then `EOF`.\n",
     );
     s.push_str(
         "A teammate is written `@<id>`, and Crew shows it as their name. To name a teammate in your reply, write `@<id>` too; that only shows their name and sends nothing. When the user writes one, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, so after `crew tell`, end your turn. Do not wait, sleep, or check for the reply.\n",
@@ -1041,17 +1041,15 @@ pub fn shared_memory_body(agent: Option<&AgentConfig>, roster: &[AgentConfig], n
 }
 
 /// The group a bot sits in, as a section of the shared memory note. Empty
-/// when the group has no notes.
+/// for a bot in no group.
 pub fn group_memory_section(group: Option<&(String, String)>) -> String {
     let Some((name, notes)) = group else {
         return String::new();
     };
     let notes = notes.trim();
-    if notes.is_empty() {
-        return String::new();
-    }
+    let notes = if notes.is_empty() { "(none)" } else { notes };
     format!(
-        "# Group memory ({name})\nThe user keeps these notes for the group you are in. Only the user edits them.\n{notes}\n"
+        "# Group memory ({name})\nNotes every bot in the group you are in shares.\n{notes}\n"
     )
 }
 
@@ -2303,6 +2301,8 @@ mod tests {
         assert!(rules.contains("Without `--headless`, an unknown command stays a terminal"));
         assert!(rules.contains("prints `ok <id>`"));
         assert!(rules.contains("crew group add --name"));
+        assert!(rules.contains("crew group memory append <<'EOF'"));
+        assert!(rules.contains("crew group memory set <<'EOF'"));
         assert!(rules.contains("repeating `--bot <id>`"));
         assert!(rules.contains("`crew group list` prints each group's id, name, and bots"));
         assert!(rules.contains("Do not only claim you created a bot or a group"));

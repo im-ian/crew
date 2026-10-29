@@ -3879,6 +3879,8 @@ mod tests {
                 path: Some("/tmp/app".into()),
             }])
             .unwrap();
+            let empty = shared_note_for_turn("hi", &alpha, &roster).unwrap();
+            assert!(empty.ends_with("# Group memory (app)\nNotes every bot in the group you are in shares.\n(none)\n"), "{empty}");
             crate::memory::write_group("g1", "ship on fridays").unwrap();
             let note = shared_note_for_turn("hi", &alpha, &roster).unwrap();
             assert!(note.contains("# Group memory (app)\n"), "{note}");

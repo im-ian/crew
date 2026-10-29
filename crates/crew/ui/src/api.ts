@@ -158,8 +158,8 @@ export const api = {
     invoke<boolean>("set_memory", { agent, text, base }),
   getSharedMemory: () => invoke<string>("get_shared_memory"),
   getGroupMemory: (group: string) => invoke<string>("get_group_memory", { group }),
-  setGroupMemory: (group: string, text: string) =>
-    invoke<void>("set_group_memory", { group, text }),
+  setGroupMemory: (group: string, text: string, base: string) =>
+    invoke<boolean>("set_group_memory", { group, text, base }),
   listGroups: () => invoke<Group[]>("list_groups"),
   setGroups: (groups: Group[]) => invoke<void>("set_groups", { groups }),
   searchCrew: (query: string) => invoke<SearchHit[]>("search_crew", { query }),

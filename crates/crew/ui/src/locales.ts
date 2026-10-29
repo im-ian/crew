@@ -234,7 +234,8 @@ export const KO = {
   "group.folderHint": "폴더는 없어도 됩니다. 고르면 그룹 안 봇의 작업 폴더가 됩니다.",
   "groupSettings.title": "그룹 설정",
   "groupSettings.memoryLabel": "그룹 메모리",
-  "groupSettings.memoryNote": "이 그룹 안 봇들이 매 턴 함께 보는 메모입니다. 봇은 읽기만 하고, 여기서만 고칩니다.",
+  "groupSettings.memoryNote": "이 그룹 안 봇들이 매 턴 함께 보는 메모입니다. 봇이 직접 고치기도 합니다.",
+  "groupSettings.changed": "그사이 봇이 그룹 메모리를 바꿔 저장하지 않았습니다. 고친 내용을 복사해 두고 그룹 설정을 다시 여세요.",
   "groupSettings.memoryPh": "이 그룹의 규칙, 경로, 결정",
 
   "face.random": "랜덤",
@@ -530,7 +531,8 @@ export const EN: { [K in MessageKey]: string } = {
   "group.folderHint": "A folder is optional. If you pick one, bots in the group use it as their working folder.",
   "groupSettings.title": "Group settings",
   "groupSettings.memoryLabel": "Group memory",
-  "groupSettings.memoryNote": "Notes every bot in this group sees on every turn. Bots only read them; edit them here.",
+  "groupSettings.memoryNote": "Notes every bot in this group sees on every turn. The bots edit them too.",
+  "groupSettings.changed": "A bot changed the group memory meanwhile, so this wasn’t saved. Copy your edit, then reopen Group settings.",
   "groupSettings.memoryPh": "Rules, paths, and decisions for this group",
 
   "face.random": "Random",

@@ -221,13 +221,15 @@ fn get_group_memory(group: String) -> Result<String, String> {
     Ok(crate::memory::read_group(group))
 }
 
+/// `base` is the notes the dialog loaded. False means a bot changed them since
+/// and nothing was written.
 #[tauri::command]
-fn set_group_memory(group: String, text: String) -> Result<(), String> {
+fn set_group_memory(group: String, text: String, base: String) -> Result<bool, String> {
     let group = group.trim();
     if group.is_empty() {
         return Err("group is required".into());
     }
-    crate::memory::write_group(group, &text).map_err(|e| e.to_string())
+    crate::memory::write_group_if_unchanged(group, &base, &text).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
