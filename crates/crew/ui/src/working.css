@@ -1,0 +1,12 @@
+/* Layout for the working-look page. The looks themselves live in styles.css. */
+.pg-face { flex-shrink: 0; }
+.pg-face .avatar { width: var(--avatar); height: var(--avatar); }
+.pg-draw { max-width: 720px; }
+.pg-draw-row { display: flex; gap: 20px; align-items: center; }
+.pg-draw-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.pg-draw-info p { margin: 0; color: var(--muted); font-size: 12.5px; }
+.pg-seen { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.pg-seen b { padding: 2px 8px; border-radius: 99px; background: var(--btn); color: var(--ink); font-weight: 500; }
+.pg-seen b:last-child { background: var(--working); color: #fff; }
+.pg-note { margin: 14px 0 0; color: var(--muted); font-size: 12.5px; }
+.cat-sizes { padding-bottom: 16px; }

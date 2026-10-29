@@ -1,7 +1,9 @@
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import { avatarColor, avatarPhase, initialOf, resolveFace } from "../avatar";
 import type { AgentStatus } from "../types";
+import { useWorkLook, type WorkLook } from "../workLook";
 import { BotFace } from "./BotFace";
+import { WorkProps } from "./WorkProps";
 
 type Props = {
   id?: string | null;
@@ -19,6 +21,8 @@ type Props = {
   onClick?: (e: MouseEvent) => void;
   /** Client point an idle face follows. */
   lookAt?: { x: number; y: number } | null;
+  /** Holds one working look. Only the catalog pages set it, the app draws one itself. */
+  workLook?: WorkLook | null;
 };
 
 function faceStatus(
@@ -72,6 +76,7 @@ export function Avatar({
   as = "div",
   onClick,
   lookAt = null,
+  workLook = null,
 }: Props) {
   const [broken, setBroken] = useState(false);
   useEffect(() => {
@@ -81,6 +86,8 @@ export function Avatar({
   const showFace = !showImg && !letter;
   const face = showFace ? resolveFace(id, shape, color) : null;
   const live = faceStatus(status, badge);
+  const drawn = useWorkLook(live === "working", id);
+  const look = live === "working" ? (workLook ?? drawn) : null;
   const letterBg = id ? avatarColor(id) : "#3a3a3c";
   const cls = [
     "avatar",
@@ -109,9 +116,11 @@ export function Avatar({
           shape={face.shape}
           color={face.color}
           status={live}
+          look={look}
           lookAt={lookAt}
         />
       ) : null}
+      {face && look ? <WorkProps look={look} /> : null}
       {!showFace ? (
         <span className="avatar-letter">{letter || initialOf(name)}</span>
       ) : null}

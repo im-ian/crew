@@ -8,6 +8,7 @@ import {
 import { avatarPhase, type AvatarShape } from "../avatar";
 import { EXTRA_BOXES, EXTRA_INKS, extraFace } from "../faceGeometry";
 import type { AgentStatus } from "../types";
+import type { WorkLook } from "../workLook";
 
 type Props = {
   shape: AvatarShape;
@@ -18,6 +19,8 @@ type Props = {
   id?: string | null;
   /** A held expression. It replaces what `status` would show and stops the eyes following. */
   mood?: FaceMood | null;
+  /** How the face works while `status` is working. The props live in WorkProps. */
+  look?: WorkLook | null;
   /** Client point the idle face follows. Pointer aim wins while the cursor is on the face. */
   lookAt?: { x: number; y: number } | null;
 };
@@ -367,6 +370,7 @@ export function BotFace({
   status,
   id,
   mood = null,
+  look = null,
   lookAt = null,
 }: Props) {
   const eyes = eyesAt(shape);
@@ -551,6 +555,7 @@ export function BotFace({
   const cls = [
     "avatar-face",
     live ? `is-${live}` : "",
+    live === "working" && look ? `look-${look}` : "",
     mode === "track" ? "is-tracking" : "",
     mode === "return" ? "is-gaze-return" : "",
     className,
