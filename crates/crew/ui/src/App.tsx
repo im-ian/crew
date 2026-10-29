@@ -10,6 +10,7 @@ import { AgentPane } from "./components/AgentPane";
 import { ConnectionBanner } from "./components/ConnectionBanner";
 import { NewBotModal } from "./components/NewBotModal";
 import { NewProjectModal } from "./components/NewProjectModal";
+import { ProjectSettingsModal } from "./components/ProjectSettingsModal";
 import { SettingsPane } from "./components/SettingsPane";
 import { SkillsPane } from "./components/SkillsPane";
 import { ShortcutHelp } from "./components/ShortcutHelp";
@@ -258,6 +259,7 @@ export function App() {
         onCreateMenu={crew.showCreateMenu}
         onAgentCtx={(e, id) => crew.showCtx(e, id, "agent")}
         onGroupCtx={(e, id) => crew.showCtx(e, id, "group")}
+        onGroupMenu={crew.showGroupMenu}
         onToggleGroup={crew.toggleGroup}
         onRenameGroup={crew.renameGroup}
         onRenameDone={finishRename}
@@ -427,6 +429,13 @@ export function App() {
         onPickFolder={crew.pickProjectFolder}
         onCreate={crew.createProject}
       />
+      <ProjectSettingsModal
+        open={!!crew.projectSettingsId}
+        group={crew.groups.find((g) => g.id === crew.projectSettingsId) ?? null}
+        onClose={crew.closeProjectSettings}
+        onLoad={crew.loadProjectMemory}
+        onSave={crew.saveProjectMemory}
+      />
       <ContextMenu
         open={crew.ctx.open}
         x={crew.ctx.x}
@@ -527,6 +536,18 @@ function menuItems(
           if (id) setRenameId(id);
         },
       },
+    );
+    if (id && project?.path) {
+      items.push({
+        type: "action",
+        label: t("menu.projectSettings"),
+        onClick: () => {
+          crew.hideCtx();
+          crew.openProjectSettings(id);
+        },
+      });
+    }
+    items.push(
       {
         type: "action",
         label: project?.path ? t("menu.deleteProject") : t("menu.deleteGroup"),

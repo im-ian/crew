@@ -363,6 +363,13 @@ pub fn memory_path(agent_id: &str) -> PathBuf {
     memory_dir().join(format!("{}.md", safe_agent_id(agent_id)))
 }
 
+/// Notes the user keeps for one sidebar project, by group id.
+pub fn project_memory_path(group_id: &str) -> PathBuf {
+    home_dir()
+        .join("project-memory")
+        .join(format!("{}.md", safe_agent_id(group_id)))
+}
+
 /// Whole or not at all, for a file another process may read mid-write. One
 /// temp name per write, since daemon threads write too.
 pub fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {

@@ -198,9 +198,36 @@ fn list_groups() -> Result<Vec<SidebarGroup>, String> {
     crate::groups::load().map_err(|e| e.to_string())
 }
 
+/// A project that leaves the sidebar takes its notes with it.
 #[tauri::command]
 fn set_groups(groups: Vec<SidebarGroup>) -> Result<(), String> {
-    crate::groups::save(&groups).map_err(|e| e.to_string())
+    let before = crate::groups::load().unwrap_or_default();
+    crate::groups::save(&groups).map_err(|e| e.to_string())?;
+    for gone in before
+        .iter()
+        .filter(|old| !groups.iter().any(|g| g.id == old.id))
+    {
+        crate::memory::remove_project(&gone.id);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_project_memory(group: String) -> Result<String, String> {
+    let group = group.trim();
+    if group.is_empty() {
+        return Err("group is required".into());
+    }
+    Ok(crate::memory::read_project(group))
+}
+
+#[tauri::command]
+fn set_project_memory(group: String, text: String) -> Result<(), String> {
+    let group = group.trim();
+    if group.is_empty() {
+        return Err("group is required".into());
+    }
+    crate::memory::write_project(group, &text).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -862,6 +889,8 @@ pub fn run() -> anyhow::Result<()> {
             get_memory,
             set_memory,
             get_shared_memory,
+            get_project_memory,
+            set_project_memory,
             list_groups,
             set_groups,
             list_models,

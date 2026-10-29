@@ -241,11 +241,11 @@ fn shared_note_for_turn(
     if crate::daemon::is_slash_command(prompt) {
         return None;
     }
-    Some(crate::config::shared_memory_note(
-        agent,
-        roster,
-        &crate::memory::read_shared(),
-    ))
+    let mut note = crate::config::shared_memory_note(agent, roster, &crate::memory::read_shared());
+    note.push_str(&crate::config::project_memory_section(
+        crate::memory::project_for(&agent.id).as_ref(),
+    ));
+    Some(note)
 }
 
 /// Drop the CLI session so the next turn opens a new one. Refused mid-turn:
@@ -3870,6 +3870,21 @@ mod tests {
             let path = shared_note_for_turn("/Users/me/shot.png 이거 봐줘", &alpha, &roster)
                 .expect("a path still gets the live list");
             assert!(path.contains("beta — Beta"));
+            assert!(!note.contains("Project memory"));
+            crate::groups::save(&[crate::groups::SidebarGroup {
+                id: "g1".into(),
+                name: "app".into(),
+                collapsed: false,
+                items: vec!["agent:alpha".into()],
+                path: Some("/tmp/app".into()),
+            }])
+            .unwrap();
+            crate::memory::write_project("g1", "ship on fridays").unwrap();
+            let note = shared_note_for_turn("hi", &alpha, &roster).unwrap();
+            assert!(note.contains("# Project memory (app)\n"), "{note}");
+            assert!(note.ends_with("ship on fridays\n"), "{note}");
+            let beta_note = shared_note_for_turn("hi", &roster[1], &roster).unwrap();
+            assert!(!beta_note.contains("Project memory"));
         });
     }
 

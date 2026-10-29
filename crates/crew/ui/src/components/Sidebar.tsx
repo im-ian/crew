@@ -257,6 +257,7 @@ type Props = {
   onCreateMenu: (e: MouseEvent) => void;
   onAgentCtx: (e: MouseEvent, id: string) => void;
   onGroupCtx: (e: MouseEvent, id: string) => void;
+  onGroupMenu: (e: MouseEvent, id: string) => void;
   onToggleGroup: (id: string) => void;
   onRenameGroup: (id: string, name: string) => void;
   onRenameDone: () => void;
@@ -321,6 +322,7 @@ export function Sidebar({
   onCreateMenu,
   onAgentCtx,
   onGroupCtx,
+  onGroupMenu,
   onToggleGroup,
   onRenameGroup,
   onRenameDone,
@@ -742,6 +744,7 @@ export function Sidebar({
                     }}
                     onCancelRename={onRenameDone}
                     onContextMenu={(e) => onGroupCtx(e, group.id)}
+                    onMenu={(e) => onGroupMenu(e, group.id)}
                   />
                   {hidden ? null : showEmpty ? (
                     <div className="empty-rail" data-rail-empty="1">
@@ -894,6 +897,7 @@ function GroupHead({
   onRename,
   onCancelRename,
   onContextMenu,
+  onMenu,
   onPointerDown,
 }: {
   group: Group;
@@ -904,6 +908,7 @@ function GroupHead({
   onRename: (name: string) => void;
   onCancelRename: () => void;
   onContextMenu: (e: MouseEvent) => void;
+  onMenu: (e: MouseEvent) => void;
   onPointerDown?: (e: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
   const t = useT();
@@ -976,10 +981,26 @@ function GroupHead({
           />
         </>
       ) : (
-        <button type="button" className="group-name" onClick={onToggle}>
-          <PlaceMark project={Boolean(group.path)} />
-          <span className="group-name-text">{group.name}</span>
-        </button>
+        <>
+          <button type="button" className="group-name" onClick={onToggle}>
+            <PlaceMark project={Boolean(group.path)} />
+            <span className="group-name-text">{group.name}</span>
+          </button>
+          <button
+            type="button"
+            className="group-more"
+            title={t("sidebar.groupMenu")}
+            aria-label={t("sidebar.groupMenu")}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onMenu(e);
+            }}
+          >
+            <Ellipsis size={14} />
+          </button>
+        </>
       )}
     </div>
   );
