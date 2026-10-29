@@ -5310,7 +5310,7 @@ cat <<'EOF'
 EOF
 exec sleep 5"#,
             );
-            send_agent(&bot, "search-in-background").unwrap();
+            send_agent(&bot, "go").unwrap();
             let deadline = Instant::now() + Duration::from_secs(5);
             while !crate::transcript::messages(&bot)
                 .iter()
@@ -5350,7 +5350,7 @@ exec sleep 5"#,
                     armed.display()
                 ),
             );
-            send_agent(&bot, "search-in-background").unwrap();
+            send_agent(&bot, "go").unwrap();
             eventually(Duration::from_secs(5), "the CLI never started", || {
                 armed.exists()
             });
