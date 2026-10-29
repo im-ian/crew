@@ -1436,6 +1436,11 @@ button.sys-routine:focus-visible {
   width: min(560px, 100%);
   max-width: min(560px, calc(100% - 42px));
 }
+/* A card with short options should not shrink to the width of its letters.
+   An answered or closed card is one short line, so it may. */
+.channel-msg:has(.choice-card.is-pending) {
+  min-width: min(400px, calc(100% - 42px));
+}
 .channel-who {
   margin: 0 0 var(--space-4) var(--space-2);
   border: 0;
@@ -1955,7 +1960,12 @@ button.sys-note:focus-visible {
 }
 .choice-card {
   margin-top: var(--space-8);
-  width: min(100%, 440px);
+  /* max-content tells the message how wide the options want to be; the
+     clamp below then fills the message up to 560px. A bare percentage width
+     counts as nothing there, so long options stayed at the minimum. */
+  width: max-content;
+  min-width: min(100%, 560px);
+  max-width: min(100%, 560px);
   border: 1px solid var(--line);
   border-radius: var(--radius-xl);
   background: var(--elevated);
@@ -2032,14 +2042,16 @@ button.sys-note:focus-visible {
   color: var(--ink);
   cursor: pointer;
 }
-button.choice-option:hover:not(:disabled) {
-  background: var(--hover);
+button.choice-option:hover:not(:disabled),
+.choice-other:focus-within {
+  background: color-mix(in srgb, var(--working) 10%, var(--elevated));
 }
 button.choice-option:disabled {
   cursor: default;
 }
-.choice-option.is-on {
-  background: var(--hover);
+.choice-option.is-on,
+button.choice-option.is-on:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--working) 16%, var(--elevated));
 }
 .choice-badge {
   flex: none;
@@ -2081,6 +2093,45 @@ button.choice-option:disabled {
 .choice-option.is-on .choice-badge {
   background: var(--working);
   color: var(--on-ink);
+}
+/* Hover tints the row and lifts the badge; a press sinks it; a pick pops it. */
+.choice-option {
+  transition: background-color var(--dur) var(--ease);
+}
+.choice-badge {
+  transition:
+    transform var(--dur) var(--ease-out),
+    background-color var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+button.choice-option:hover:not(:disabled) .choice-badge,
+.choice-other:focus-within .choice-badge {
+  transform: scale(1.08);
+}
+button.choice-option:active:not(:disabled) .choice-badge {
+  transform: scale(0.9);
+  transition-duration: var(--dur-fast);
+}
+/* Only while the card is open: an answered multi pick keeps its list, and a
+   remount would pop every badge in the history again. */
+.choice-card.is-pending .choice-option.is-on .choice-badge {
+  animation: choice-pop 0.32s var(--ease-out);
+}
+@keyframes choice-pop {
+  0% { transform: scale(0.8); }
+  55% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .choice-badge {
+    transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+  }
+  button.choice-option:hover:not(:disabled) .choice-badge,
+  button.choice-option:active:not(:disabled) .choice-badge,
+  .choice-other:focus-within .choice-badge {
+    transform: none;
+  }
+  .choice-card.is-pending .choice-option.is-on .choice-badge { animation: none; }
 }
 .choice-copy {
   display: flex;
