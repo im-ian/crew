@@ -62,7 +62,7 @@ export function NewGroupModal({ open, onClose, onPickFolder, onCreate }: Props) 
             }}
           />
         </Field>
-        <Field label={t("field.cwd")} htmlFor="new-group-path" hint={t("group.folderHint")}>
+        <Field label={t("group.folderLabel")} htmlFor="new-group-path" hint={t("group.folderHint")}>
           <FolderPick
             id="new-group-path"
             path={path}

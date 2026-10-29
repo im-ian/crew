@@ -61,7 +61,7 @@ export function GroupSettingsModal({
     <Modal open={open} title={t("groupSettings.title")} onClose={onClose}>
       <div className="form-stack">
         <p className="apply-note">{group?.name}</p>
-        <Field label={t("field.cwd")} htmlFor="group-path" hint={t("group.folderHint")}>
+        <Field label={t("group.folderLabel")} htmlFor="group-path" hint={t("group.folderHint")}>
           <FolderPick id="group-path" path={path} onPick={onPickFolder} onChange={setPath} />
         </Field>
         <Field
