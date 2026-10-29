@@ -61,6 +61,7 @@ enum Cmd {
         /// Sender id. Defaults to $CREW_AGENT_ID, else `user`
         #[arg(long)]
         from: Option<String>,
+        /// Message. Read from stdin when left out, so a heredoc works too
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         message: Vec<String>,
     },
@@ -697,12 +698,17 @@ fn memory_agent(flag: Option<String>, rest: &mut Vec<String>) -> anyhow::Result<
 }
 
 fn memory_body(text: Vec<String>) -> anyhow::Result<String> {
+    args_or_stdin(text, "memory")
+}
+
+/// The words after the command, or stdin when there are none.
+fn args_or_stdin(text: Vec<String>, what: &str) -> anyhow::Result<String> {
     if !text.is_empty() {
         return Ok(text.join(" "));
     }
     use std::io::{self, IsTerminal, Read};
     if io::stdin().is_terminal() {
-        anyhow::bail!("memory needs text (args or stdin)");
+        anyhow::bail!("{what} needs text (args or stdin)");
     }
     let mut buf = String::new();
     io::stdin().read_to_string(&mut buf)?;
@@ -766,7 +772,10 @@ fn run_tell(to: String, from: Option<String>, message: Vec<String>) -> anyhow::R
     if to.is_empty() {
         anyhow::bail!("tell needs a recipient");
     }
-    let text = message.join(" ");
+    // `crew memory` and `crew share` read a heredoc, and bots hand `crew tell`
+    // one too. Without this the message came out empty.
+    let text = args_or_stdin(message, "tell")?;
+    let text = text.trim_end_matches('\n').to_string();
     if text.trim().is_empty() {
         anyhow::bail!("tell needs a message");
     }
