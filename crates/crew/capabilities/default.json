@@ -41,6 +41,8 @@
     "allow-get-memory",
     "allow-set-memory",
     "allow-get-shared-memory",
+    "allow-get-project-memory",
+    "allow-set-project-memory",
     "allow-list-groups",
     "allow-set-groups",
     "allow-list-models",

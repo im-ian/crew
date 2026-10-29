@@ -612,6 +612,12 @@ fn run_share(cmd: ShareCmd) -> anyhow::Result<()> {
                 "{}",
                 crate::config::shared_memory_body(agent, &cfg.agents, &crate::memory::read_shared())
             );
+            if let Some(id) = &id {
+                print!(
+                    "{}",
+                    crate::config::project_memory_section(crate::memory::project_for(id).as_ref())
+                );
+            }
             Ok(())
         }
         ShareCmd::Set { text } => {

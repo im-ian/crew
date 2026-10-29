@@ -474,6 +474,25 @@ button.linkish {
 }
 .group-name:hover { color: var(--ink); }
 .group-name:hover .group-mark { color: var(--ink); }
+/* Shown while the head is hovered, so a resting rail stays quiet. */
+.group-more {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 4px;
+  opacity: 0;
+}
+.group-head:hover .group-more,
+.group-more:focus-visible { opacity: 1; }
+.group-more:hover { background: var(--hover); color: var(--muted); }
+.group-more:active { transform: scale(0.9); }
 .group-name-input {
   flex: 1;
   min-width: 0;
@@ -4539,6 +4558,7 @@ textarea.textin.skill-body {
   .head-action:active,
   .sheet-close:active,
   .group-toggle:active,
+  .group-more:active,
   .composer-box button[type="submit"]:not(:disabled):hover,
   .composer-box button[type="submit"]:not(:disabled):active,
   button.who-btn:active,

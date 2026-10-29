@@ -249,6 +249,12 @@
           "markdownDescription": "Enables the get_messages command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_project_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-project-memory",
+          "markdownDescription": "Enables the get_project_memory command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_shared_memory command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-shared-memory",
@@ -429,6 +435,12 @@
           "markdownDescription": "Enables the set_notifications command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_project_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-project-memory",
+          "markdownDescription": "Enables the set_project_memory command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_routine_enabled command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-routine-enabled",
@@ -523,6 +535,12 @@
           "type": "string",
           "const": "deny-get-messages",
           "markdownDescription": "Denies the get_messages command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_project_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-project-memory",
+          "markdownDescription": "Denies the get_project_memory command without any pre-configured scope."
         },
         {
           "description": "Denies the get_shared_memory command without any pre-configured scope.",
@@ -703,6 +721,12 @@
           "type": "string",
           "const": "deny-set-notifications",
           "markdownDescription": "Denies the set_notifications command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_project_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-project-memory",
+          "markdownDescription": "Denies the set_project_memory command without any pre-configured scope."
         },
         {
           "description": "Denies the set_routine_enabled command without any pre-configured scope.",

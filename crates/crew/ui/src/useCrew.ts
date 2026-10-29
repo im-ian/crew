@@ -80,6 +80,7 @@ export function useCrew() {
   const [newBotOpen, setNewBotOpen] = useState(false);
   const [newBotPlace, setNewBotPlace] = useState<string | null>(null);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [projectSettingsId, setProjectSettingsId] = useState<string | null>(null);
   const [toast, setToast] = useState({ text: "", show: false });
   const [ctx, setCtx] = useState<Ctx>({
     open: false,
@@ -102,6 +103,8 @@ export function useCrew() {
   paneOpenRef.current = paneOpen;
   const newProjectOpenRef = useRef(newProjectOpen);
   newProjectOpenRef.current = newProjectOpen;
+  const projectSettingsRef = useRef(projectSettingsId);
+  projectSettingsRef.current = projectSettingsId;
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
   const listAgents = useRef(newestOnly(api.listAgents)).current;
@@ -255,6 +258,18 @@ export function useCrew() {
     });
   }
 
+  /** The "..." on a folder head opens the same menu as a right click, under it. */
+  function showGroupMenu(e: MouseEvent, id: string) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setCtx({
+      open: true,
+      x: Math.round(r.left),
+      y: Math.round(r.bottom + 4),
+      id,
+      kind: "group",
+    });
+  }
+
   function persistLayout(next: RailLayout) {
     const layout = {
       groups: next.groups.filter((g) => g.id !== UNGROUPED_ID),
@@ -335,6 +350,34 @@ export function useCrew() {
       ungrouped: current.ungrouped,
     });
     setNewProjectOpen(false);
+  }
+
+  function openProjectSettings(id: string) {
+    setProjectSettingsId(id);
+  }
+
+  function closeProjectSettings() {
+    setProjectSettingsId(null);
+  }
+
+  async function loadProjectMemory(id: string) {
+    try {
+      return await api.getProjectMemory(id);
+    } catch (err) {
+      showError(err);
+      return "";
+    }
+  }
+
+  async function saveProjectMemory(id: string, text: string): Promise<boolean> {
+    try {
+      await api.setProjectMemory(id, text);
+      showToast(t("memory.saved"));
+      return true;
+    } catch (err) {
+      showError(err);
+      return false;
+    }
   }
 
   function renameGroup(id: string, name: string) {
@@ -1026,6 +1069,11 @@ export function useCrew() {
         setNewProjectOpen(false);
         return;
       }
+      if (projectSettingsRef.current) {
+        e.preventDefault();
+        setProjectSettingsId(null);
+        return;
+      }
       closeConfirm();
       closePane();
       closeNewBot();
@@ -1142,6 +1190,7 @@ export function useCrew() {
     newBotOpen,
     newBotPlace,
     newProjectOpen,
+    projectSettingsId,
     toast,
     ctx,
     groups,
@@ -1164,9 +1213,14 @@ export function useCrew() {
     closeNewProject,
     pickProjectFolder,
     createProject,
+    openProjectSettings,
+    closeProjectSettings,
+    loadProjectMemory,
+    saveProjectMemory,
     cloneBot,
     showCtx,
     showCreateMenu,
+    showGroupMenu,
     hideCtx,
     createGroup,
     renameGroup,

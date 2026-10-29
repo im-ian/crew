@@ -90,6 +90,14 @@ pub fn add_group(
     Ok(created)
 }
 
+/// The folder `agent_id` sits in. Loose bots have none.
+pub fn group_of<'a>(groups: &'a [SidebarGroup], agent_id: &str) -> Option<&'a SidebarGroup> {
+    let key = format!("agent:{agent_id}");
+    groups
+        .iter()
+        .find(|g| g.id != UNGROUPED_ID && g.items.iter().any(|item| item == &key))
+}
+
 fn unique_group_name(groups: &[SidebarGroup], base: &str) -> String {
     let taken: std::collections::HashSet<&str> = groups.iter().map(|g| g.name.as_str()).collect();
     if !taken.contains(base) {
@@ -246,6 +254,29 @@ mod tests {
         assert!(raw.contains("/tmp/app"));
         let _ = fs::remove_file(&path);
         let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn group_of_skips_loose_bots() {
+        let groups = vec![
+            SidebarGroup {
+                id: UNGROUPED_ID.into(),
+                name: String::new(),
+                collapsed: false,
+                items: vec!["agent:loose".into()],
+                path: None,
+            },
+            SidebarGroup {
+                id: "g1".into(),
+                name: "app".into(),
+                collapsed: false,
+                items: vec!["agent:a1".into()],
+                path: Some("/tmp/app".into()),
+            },
+        ];
+        assert_eq!(group_of(&groups, "a1").map(|g| g.id.as_str()), Some("g1"));
+        assert!(group_of(&groups, "loose").is_none());
+        assert!(group_of(&groups, "a").is_none());
     }
 
     #[test]
