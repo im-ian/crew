@@ -63,3 +63,16 @@ export function unreadKeys(
   }
   return out;
 }
+
+/**
+ * The first line written after the reader last looked, for a "new from here"
+ * divider. Their own lines are not news to them. No cursor means the chat was
+ * never read, and nothing is marked.
+ */
+export function firstUnreadId(
+  rows: readonly { id: string; ts: number; mine: boolean }[],
+  readAt: number,
+): string | null {
+  if (readAt <= 0) return null;
+  return rows.find((r) => !r.mine && r.ts > readAt)?.id ?? null;
+}

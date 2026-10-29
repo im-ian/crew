@@ -128,6 +128,17 @@ export function useCrew() {
     [readMap, agents, selectedKind, selected],
   );
 
+  // Where the reader had got to when this chat opened. Taken before the
+  // effect below moves the cursor to the end.
+  const [openedRead, setOpenedRead] = useState<{ key: string; ts: number } | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!selected) return;
+    const key = itemKey(selectedKind, selected);
+    setOpenedRead({ key, ts: readMap[key] ?? 0 });
+  }, [selected, selectedKind]);
+
   useEffect(() => {
     if (!selected) return;
     const ts = currentAgent?.last_ts || 0;
@@ -1132,6 +1143,7 @@ export function useCrew() {
     selectedKind,
     messages,
     messagesFor,
+    openedRead,
     query,
     setQuery,
     unread,

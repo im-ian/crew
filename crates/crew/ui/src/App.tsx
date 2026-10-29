@@ -318,6 +318,8 @@ export function App() {
           }
           highlightId={crew.highlightId}
           onHighlightDone={crew.clearHighlight}
+          openedRead={crew.openedRead}
+          ready={crew.messagesFor === crew.selected}
           jumpSeq={jumpSeq}
           onReply={(target) => composerRef.current?.replyTo(target)}
           onJump={crew.highlightMessage}
