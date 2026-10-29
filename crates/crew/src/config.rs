@@ -951,7 +951,7 @@ pub fn team_rules(agent: &AgentConfig, _roster: &[AgentConfig]) -> String {
         "A teammate is written `@<id>`, and Crew shows it as their name. To name a teammate in your reply, write `@<id>` too; that only shows their name and sends nothing. When the user writes one, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, so after `crew tell`, end your turn. Do not wait, sleep, or check for the reply.\n",
     );
     s.push_str(
-        "When one message asks for several pieces of work that do not depend on each other, hand them to your CLI's own subagents (Claude's Agent tool, grok's spawn_subagent, agy's invoke_subagent) and run them in parallel where your CLI can, instead of doing them one after another. Work that needs an earlier step's result waits for that step. A CLI without subagents does the work itself. Subagents are not teammates: a teammate gets work only through `crew tell`. When the subagents are done, answer once with what they found together.\n",
+        "When one message asks for several pieces of work that do not depend on each other, hand them to your CLI's own subagents (Claude's Agent tool, grok's spawn_subagent, agy's invoke_subagent) and run them in parallel where your CLI can, instead of doing them one after another. Work that needs an earlier step's result waits for that step. A CLI without subagents does the work itself. Subagents are not teammates: a teammate gets work only through `crew tell`. Their reports may come back one at a time. Until the last one is in, a reply only says which are still running, and keeps what came back for the end. When the subagents are done, answer once with what they found together.\n",
     );
     s.push_str(
         "To change your display name, actually run `crew agent set --name \"New Name\"` (id defaults to CREW_AGENT_ID). Do not only claim you renamed yourself.\n",
@@ -963,7 +963,7 @@ pub fn team_rules(agent: &AgentConfig, _roster: &[AgentConfig]) -> String {
         "To schedule recurring work, actually run `crew routine add --name \"...\" --schedule \"0 8 * * 1-5\" --prompt \"...\"`. Turn the user's words into 5-field cron yourself: numbers only, minute hour day month weekday (0 = Sunday), local time. If the day or time is unclear, ask with `crew ask` first. `crew routine list` shows yours; change one with `crew routine edit|remove|pause|resume <name>` (`crew routine --help`). Each prints your routines with their next run; tell the user the schedule and next run it shows. That creates a Crew routine, not a chat reminder.\n",
     );
     s.push_str(
-        "When you are asked to do work, say first, in one or two short sentences, how you will go about it, before you run a tool. While you work, add a short line when a step is done, you find something that changes the plan, or the work runs long. Finish with the result. Each of these lines starts after a blank line, so it is a balloon of its own. Judge the size first: a small task, or anything you can answer right away, gets just the answer, with no plan or progress lines.\n",
+        "When you are asked to do work, say first, in one or two short sentences, how you will go about it, before you run a tool. As you go, keep the user in the loop the way a colleague at the next desk would: a short line on what you are on now, what just finished, or what changed your plan, so they can follow along without asking. Keep each to one line; what you found goes in the result. Finish with the result. Write every line in the language the user wrote in. Each of these lines starts after a blank line, so it is a balloon of its own. Judge the size first: a small task, or anything you can answer right away, gets just the answer, with no plan or progress lines.\n",
     );
     s.push_str(
         "In a paragraph of your reply, start each sentence on a new line, with no blank line between them; a blank line starts a new chat balloon. Keep list items, options, tables, headings and code as they are.\n",
@@ -2289,6 +2289,8 @@ mod tests {
         let rules = team_rules(&alpha, &[alpha.clone()]);
         assert!(rules.contains("how you will go about it, before you run a tool"));
         assert!(rules.contains("Finish with the result."));
+        assert!(rules.contains("keep the user in the loop"));
+        assert!(rules.contains("in the language the user wrote in"));
         assert!(rules.contains("gets just the answer, with no plan or progress lines"));
     }
 
@@ -2301,6 +2303,7 @@ mod tests {
         assert!(rules.contains("subagents"));
         assert!(rules.contains("in parallel"));
         assert!(rules.contains("Subagents are not teammates"));
+        assert!(rules.contains("only says which are still running"));
     }
 
     #[test]
