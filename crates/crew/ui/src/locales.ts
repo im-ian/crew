@@ -95,6 +95,7 @@ export const KO = {
   "sidebar.expand": "펼치기",
   "sidebar.collapse": "접기",
   "sidebar.groupMenu": "더 보기",
+  "sidebar.groupNewBot": "이 그룹에 새 봇",
   "sidebar.draft": "작성 중",
 
   "header.pickChat": "대화를 선택하세요",
@@ -390,6 +391,7 @@ export const EN: { [K in MessageKey]: string } = {
   "sidebar.expand": "Expand",
   "sidebar.collapse": "Collapse",
   "sidebar.groupMenu": "More",
+  "sidebar.groupNewBot": "New bot in this group",
   "sidebar.draft": "Draft",
 
   "header.pickChat": "Select a chat",

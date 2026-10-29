@@ -259,6 +259,7 @@ export function App() {
         onAgentCtx={(e, id) => crew.showCtx(e, id, "agent")}
         onGroupCtx={(e, id) => crew.showCtx(e, id, "group")}
         onGroupMenu={crew.showGroupMenu}
+        onGroupNewBot={crew.openNewBot}
         onToggleGroup={crew.toggleGroup}
         onRenameGroup={crew.renameGroup}
         onRenameDone={finishRename}
@@ -505,17 +506,6 @@ function menuItems(
   if (ctx.kind === "group") {
     const id = ctx.id;
     const items: MenuEntry[] = [];
-    if (id) {
-      items.push({
-        type: "action",
-        label: t("menu.newBot"),
-        onClick: () => {
-          crew.hideCtx();
-          crew.openNewBot(id);
-        },
-      });
-      items.push({ type: "sep" });
-    }
     items.push(
       {
         type: "action",

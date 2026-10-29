@@ -467,7 +467,8 @@ button.linkish {
   text-overflow: ellipsis;
 }
 .group-name:hover { color: var(--ink); }
-/* Shown while the head is hovered, so a resting rail stays quiet. */
+/* "+" and "..." on a folder head. Shown while the head is hovered, so a
+   resting rail stays quiet. */
 .group-more {
   width: 20px;
   height: 20px;
