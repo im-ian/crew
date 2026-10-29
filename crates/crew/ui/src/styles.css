@@ -2349,9 +2349,20 @@ button.sys-note:focus-visible {
 .choice-steps {
   display: grid;
 }
+/* A tall step scrolls inside the card instead of stretching every step. */
 .choice-steps > .choice-q {
   grid-area: 1 / 1;
   border-top: 0;
+  max-height: 360px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Its title and close button stay in view while it scrolls. */
+.choice-steps > .choice-q > .choice-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--elevated);
 }
 .choice-steps > .choice-q.is-away {
   visibility: hidden;
@@ -2374,11 +2385,12 @@ button.sys-note:focus-visible {
   display: flex;
   flex-direction: column;
 }
+/* The question, and its answer on the line below. */
 .choice-sum-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-10);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
   width: 100%;
   margin: 0;
   border: 0;
@@ -2395,20 +2407,15 @@ button.sys-note:focus-visible {
   background: color-mix(in srgb, var(--chip) 45%, transparent);
 }
 .choice-sum-q {
-  min-width: 0;
-  overflow: hidden;
   color: var(--muted);
   font-size: var(--text-md);
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  line-height: 1.35;
 }
 .choice-sum-a {
-  max-width: 220px;
-  overflow: hidden;
   font-size: var(--text-md);
   font-weight: 600;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 .choice-sum-row.is-missing .choice-sum-a {
   color: var(--faint);
