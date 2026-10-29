@@ -951,6 +951,9 @@ pub fn team_rules(agent: &AgentConfig, _roster: &[AgentConfig]) -> String {
         "A teammate is written `@<id>`, and Crew shows it as their name. To name a teammate in your reply, write `@<id>` too; that only shows their name and sends nothing. When the user writes one, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, so after `crew tell`, end your turn. Do not wait, sleep, or check for the reply.\n",
     );
     s.push_str(
+        "When one message asks for several pieces of work that do not depend on each other, hand them to your CLI's own subagents (Claude's Agent tool, grok's spawn_subagent, agy's invoke_subagent) and run them in parallel where your CLI can, instead of doing them one after another. Work that needs an earlier step's result waits for that step. A CLI without subagents does the work itself. Subagents are not teammates: a teammate gets work only through `crew tell`. When the subagents are done, answer once with what they found together.\n",
+    );
+    s.push_str(
         "To change your display name, actually run `crew agent set --name \"New Name\"` (id defaults to CREW_AGENT_ID). Do not only claim you renamed yourself.\n",
     );
     s.push_str(
@@ -2274,6 +2277,17 @@ mod tests {
         assert_eq!(with_mention_hint(quoted, "alpha", &roster), quoted);
         let body_mention = "[crew reply:1-2 from:alice]\nhello\n\nask @beta";
         assert!(with_mention_hint(body_mention, "alpha", &roster).contains("[crew system]"));
+    }
+
+    /// Several independent jobs in one message go to the CLI's own subagents,
+    /// side by side, and those are not teammates.
+    #[test]
+    fn team_rules_hand_independent_work_to_subagents() {
+        let alpha = AgentConfig::new("alpha".into(), "Alpha".into(), vec!["claude".into()], None);
+        let rules = team_rules(&alpha, &[alpha.clone()]);
+        assert!(rules.contains("subagents"));
+        assert!(rules.contains("in parallel"));
+        assert!(rules.contains("Subagents are not teammates"));
     }
 
     #[test]
