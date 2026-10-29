@@ -857,6 +857,7 @@ fn start_ask(
     options: Vec<String>,
     inputs: Vec<String>,
     hint: Option<String>,
+    multi: bool,
 ) -> anyhow::Result<(String, oneshot::Receiver<Event>)> {
     if !known_agent(agent) {
         anyhow::bail!("unknown agent {agent}");
@@ -864,7 +865,10 @@ fn start_ask(
     if crate::transcript::has_pending_question(agent, question) {
         anyhow::bail!("this question is already waiting for an answer");
     }
-    let card = crate::choice::card_from_cli(question, &options, &inputs, hint.as_deref())?;
+    let mut card = crate::choice::card_from_cli(question, &options, &inputs, hint.as_deref())?;
+    for q in &mut card.questions {
+        q.multi = multi && !q.options.is_empty();
+    }
     let msg = crate::transcript::attach_choice(agent, None, card);
     let Some(choice) = msg.choice.clone() else {
         anyhow::bail!("failed to open choice");
@@ -2779,9 +2783,10 @@ async fn handle_client(
                     options,
                     inputs,
                     hint,
+                    multi,
                 } = req
                 {
-                    match start_ask(&agent, &question, options, inputs, hint) {
+                    match start_ask(&agent, &question, options, inputs, hint, multi) {
                         Err(err) => {
                             write_event(
                                 &mut write,

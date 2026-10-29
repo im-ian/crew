@@ -1675,6 +1675,9 @@ function ChoiceCard({
             {hint && card.state !== "closed" ? (
               <MdBody className="choice-hint md" text={hint} agents={[]} />
             ) : null}
+            {q.multi && open && (q.options || []).length ? (
+              <div className="choice-multi">{t("thread.choiceMulti")}</div>
+            ) : null}
             {showFields ? (
               <div className="choice-fields">
                 {fields.map((f, fi) => {

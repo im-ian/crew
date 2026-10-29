@@ -181,6 +181,9 @@ pub enum Request {
         inputs: Vec<String>,
         #[serde(default)]
         hint: Option<String>,
+        /// Let the user pick more than one option.
+        #[serde(default)]
+        multi: bool,
     },
     /// Pick, fill, or dismiss a pending choice card.
     AnswerChoice {
@@ -654,6 +657,7 @@ mod tests {
             options: vec!["A".into(), "B".into(), "C".into()],
             inputs: Vec::new(),
             hint: None,
+            multi: false,
         };
         let line = req.to_line().unwrap();
         assert!(line.contains("\"type\":\"ask\""));
@@ -665,7 +669,9 @@ mod tests {
                 options,
                 inputs,
                 hint,
+                multi,
             } => {
+                assert!(!multi);
                 assert_eq!(agent, "alpha");
                 assert_eq!(question, "어느 쪽을 고를래?");
                 assert_eq!(options, vec!["A", "B", "C"]);
@@ -689,6 +695,7 @@ mod tests {
             options: Vec::new(),
             inputs: vec!["아이디".into(), "비밀번호".into()],
             hint: Some("이 계정으로 로그인해주세요.".into()),
+            multi: false,
         };
         let line = req.to_line().unwrap();
         let back: Request = serde_json::from_str(&line).unwrap();

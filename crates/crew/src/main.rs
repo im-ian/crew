@@ -74,6 +74,9 @@ enum Cmd {
         inputs: Vec<String>,
         #[arg(long)]
         hint: Option<String>,
+        /// Let the user pick more than one option
+        #[arg(long)]
+        multi: bool,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         rest: Vec<String>,
     },
@@ -322,8 +325,9 @@ fn run() -> anyhow::Result<()> {
             options,
             inputs,
             hint,
+            multi,
             rest,
-        }) => run_ask(question, options, inputs, hint, rest),
+        }) => run_ask(question, options, inputs, hint, multi, rest),
         Some(Cmd::Snapshot { agent }) => {
             client::ensure_daemon()?;
             client::print_event(client::rpc(Request::Snapshot { agent })?)
@@ -725,10 +729,13 @@ fn run_ask(
     mut options: Vec<String>,
     inputs: Vec<String>,
     hint: Option<String>,
+    multi: bool,
     rest: Vec<String>,
 ) -> anyhow::Result<()> {
     connect_for_tell()?;
     let agent = require_agent_id(None, "ask")?;
+    let mut rest = rest;
+    let multi = take_late_multi(&mut rest) || multi;
     let question = match question.and_then(empty_to_none) {
         Some(q) => {
             options.extend(rest);
@@ -750,7 +757,16 @@ fn run_ask(
         options,
         inputs,
         hint: hint.and_then(empty_to_none),
+        multi,
     })?)
+}
+
+/// `crew ask "Q" A B --multi`: after the first plain argument clap keeps the
+/// flag as one more option, so it is taken back out here.
+fn take_late_multi(rest: &mut Vec<String>) -> bool {
+    let before = rest.len();
+    rest.retain(|a| a != "--multi");
+    rest.len() != before
 }
 
 fn run_tell(to: String, from: Option<String>, message: Vec<String>) -> anyhow::Result<()> {
@@ -1078,12 +1094,28 @@ mod tests {
                 inputs,
                 hint,
                 rest,
+                ..
             }) => {
                 assert_eq!(question.as_deref(), Some("어느 쪽을 고를래?"));
                 assert_eq!(options, vec!["A", "B", "C"]);
                 assert!(inputs.is_empty());
                 assert!(hint.is_none());
                 assert!(rest.is_empty());
+            }
+            _ => panic!("expected ask"),
+        }
+        match parse_ok(&["crew", "ask", "--multi", "-q", "뭘 넣을까?", "-o", "A", "-o", "B"]).cmd {
+            Some(Cmd::Ask { multi, options, .. }) => {
+                assert!(multi);
+                assert_eq!(options, vec!["A", "B"]);
+            }
+            _ => panic!("expected ask"),
+        }
+        match parse_ok(&["crew", "ask", "뭘 넣을까?", "A", "B", "--multi"]).cmd {
+            Some(Cmd::Ask { multi, mut rest, .. }) => {
+                assert!(!multi);
+                assert!(take_late_multi(&mut rest));
+                assert_eq!(rest, vec!["뭘 넣을까?", "A", "B"]);
             }
             _ => panic!("expected ask"),
         }
@@ -1120,6 +1152,7 @@ mod tests {
                 inputs,
                 hint,
                 rest,
+                ..
             }) => {
                 assert_eq!(question.as_deref(), Some("로그인"));
                 assert!(options.is_empty());

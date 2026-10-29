@@ -966,7 +966,7 @@ pub fn team_rules(agent: &AgentConfig, _roster: &[AgentConfig]) -> String {
         "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew system]` / `[crew handoff from:…]` / `[crew reply:…]` are real messages. A `[crew reply:…]` line is the user answering an earlier message; the next line is the quote, then their new text. A handoff is a teammate's finished reply; do not crew tell them that same text back.\n",
     );
     s.push_str(
-        "To ask the human user in this chat to pick, actually run `crew ask --question \"어느 쪽을 고를래?\" --option A --option B --option C`. To ask them to type a value, run `crew ask --question \"로그인\" --input 아이디 --input 비밀번호`. Crew shows a card and prints their answer. Never send this to a teammate. Do not crew tell the options. Do not ask the user to type the letter. This is not a substitute for `crew tell`, `crew agent set`, or `crew routine add`.\n",
+        "To ask the human user in this chat to pick, actually run `crew ask --question \"어느 쪽을 고를래?\" --option A --option B --option C`; add `--multi` when they may pick more than one. To ask them to type a value, run `crew ask --question \"로그인\" --input 아이디 --input 비밀번호`. Crew shows a card and prints their answer. Never send this to a teammate. Do not crew tell the options. Do not ask the user to type the letter. This is not a substitute for `crew tell`, `crew agent set`, or `crew routine add`.\n",
     );
     s.push_str(&format!(
         "Your memory survives chat resets. It is under `{MEMORY_HEADING}` at the end of these instructions (absent while empty); if it changes between turns, a `[crew system]` note gives you the new one, and `crew memory show` prints it now. It is your own memory: keep your notes there, not in other memory files or tools. The teammate list and notes every bot shares belong in shared memory. Keep it yourself: when you learn something later chats need (the user's name, preferences, a decision) or the user asks you to remember it, actually run `crew memory append <<'EOF'` with one short line, then `EOF`. To correct or forget something, run `crew memory show`, then `crew memory set <<'EOF'` with the whole new memory; it replaces everything. Always pass the text in a quoted heredoc like this, so the shell leaves `$` and backticks alone. A schedule is a routine, not a memory. Do not save what is already there, one-off chatter, or passwords, tokens and other secrets. Do not only claim you remembered.\n",
@@ -1391,7 +1391,7 @@ pub fn format_roster(agents: &[AgentConfig]) -> String {
         "Schedule work with `crew routine add --name \"...\" --schedule \"0 8 * * 1-5\" --prompt \"...\"` (numeric 5-field cron); see yours with `crew routine list`, change one with `crew routine edit|remove|pause|resume <name>`.\n",
     );
     out.push_str(
-        "Ask the human user to pick with `crew ask --question \"...\" --option A --option B`, or to type with `--input 아이디`. Do not use this to ask a teammate.\n\n",
+        "Ask the human user to pick with `crew ask --question \"...\" --option A --option B` (`--multi` for more than one), or to type with `--input 아이디`. Do not use this to ask a teammate.\n\n",
     );
     out.push_str("## Agents\n\n");
     if agents.is_empty() {
