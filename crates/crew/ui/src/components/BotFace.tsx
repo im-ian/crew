@@ -264,6 +264,24 @@ function gazeFromPointer(
 
 // Leave eases home. A matching duration lives on `.is-gaze-return` in styles.css.
 const GAZE_RETURN_MS = 320;
+// The caret moves in jumps (a key, a click), so its gaze glides. The pointer
+// stays transitionless so the eyes hit the same frame as the cursor.
+const GAZE_CARET_EASE =
+  "--gaze-x 0.22s cubic-bezier(0.22, 1, 0.36, 1), --gaze-y 0.22s cubic-bezier(0.22, 1, 0.36, 1)";
+
+/** Where the eyes are drawn now, whether idle drift, a return, or a track. */
+function currentGaze(svg: SVGSVGElement): { x: number; y: number } {
+  const eyes = svg.querySelector(".avatar-gaze");
+  if (!eyes) return { x: 0, y: 0 };
+  const t = getComputedStyle(eyes).transform;
+  if (!t || t === "none") return { x: 0, y: 0 };
+  try {
+    const m = new DOMMatrixReadOnly(t);
+    return { x: m.m41, y: m.m42 };
+  } catch {
+    return { x: 0, y: 0 };
+  }
+}
 
 function setGazeVar(svg: SVGSVGElement, name: string, value: string | null) {
   const current = svg.style.getPropertyValue(name);
@@ -277,7 +295,7 @@ function setGazeVar(svg: SVGSVGElement, name: string, value: string | null) {
 function applyGaze(
   svg: SVGSVGElement | null,
   g: { x: number; y: number } | null,
-  flags: { returning: boolean; settled: boolean },
+  flags: { returning: boolean; settled: boolean; ease?: boolean },
 ) {
   if (!svg) return;
   // Tracking stays transitionless so the pointer still hits the same frame.
@@ -286,7 +304,7 @@ function applyGaze(
   svg.classList.toggle("is-gaze-return", flags.returning);
   svg.classList.toggle("is-gaze-settled", flags.settled);
   if (flags.returning) svg.style.removeProperty("transition");
-  else svg.style.transition = "none";
+  else svg.style.transition = flags.ease ? GAZE_CARET_EASE : "none";
   if (g) {
     setGazeVar(svg, "--gaze-x", `${g.x}px`);
     setGazeVar(svg, "--gaze-y", `${g.y}px`);
@@ -313,12 +331,17 @@ export function BotFace({ shape, color, className, title, status, id, lookAt = n
 
   function followCaret(svg: SVGSVGElement, point: { x: number; y: number }) {
     const g = gazeToward(svg.getBoundingClientRect(), point.x, point.y, eyes);
-    gazeRef.current = g;
     if (modeRef.current !== "track") {
+      // Tracking replaces the idle drift, which would snap the eyes to the
+      // target. Start from where they are drawn, paint that once, then glide.
+      const from = currentGaze(svg);
+      applyGaze(svg, from, { returning: false, settled: settledRef.current });
+      svg.getBoundingClientRect();
       modeRef.current = "track";
       setMode("track");
     }
-    applyGaze(svg, g, { returning: false, settled: settledRef.current });
+    gazeRef.current = g;
+    applyGaze(svg, g, { returning: false, settled: settledRef.current, ease: true });
   }
 
   function releaseCaret(svg: SVGSVGElement) {
