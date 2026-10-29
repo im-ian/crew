@@ -35,7 +35,6 @@ fn main() {
             "get_memory",
             "set_memory",
             "get_shared_memory",
-            "set_shared_memory",
             "list_groups",
             "set_groups",
             "list_models",

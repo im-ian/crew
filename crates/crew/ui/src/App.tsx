@@ -395,7 +395,6 @@ export function App() {
           onSaveMemory={crew.saveMemory}
           agents={crew.agents}
           onLoadShared={crew.loadShared}
-          onSaveShared={crew.saveShared}
         />
         {peek && crew.currentAgent ? (
           <PeekRoom
