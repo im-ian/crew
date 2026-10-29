@@ -1532,8 +1532,6 @@ function ChoiceCard({
   const questions = card.questions || [];
   const pending = card.state === "pending";
   const hasFields = questions.some((q) => (q.fields || []).length > 0);
-  const needsSubmit =
-    questions.length > 1 || questions.some((q) => q.multi) || hasFields;
   const [picks, setPicks] = useState<string[][]>(() =>
     questions.map((q) => q.selected || []),
   );
@@ -1556,12 +1554,9 @@ function ChoiceCard({
       return [id];
     });
     setPicks(next);
-    // One answer per single pick: an option replaces what was typed.
-    const nextOthers = multi
-      ? others
-      : others.map((v, i) => (i === qi ? "" : v));
-    setOthers(nextOthers);
-    if (!needsSubmit && !multi) void send(next, values, nextOthers, false);
+    // One answer per single pick: an option replaces what was typed. Picking
+    // only selects; the answer goes out on the submit button.
+    if (!multi) setOthers(others.map((v, i) => (i === qi ? "" : v)));
   }
 
   function setOther(qi: number, next: string) {
@@ -1795,7 +1790,7 @@ function ChoiceCard({
           </div>
         );
       })}
-      {open && needsSubmit && onAnswer ? (
+      {open && onAnswer ? (
         <div className={"choice-foot" + (hasFields ? " is-form" : "")}>
           <button
             type="button"
