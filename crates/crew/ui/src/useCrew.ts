@@ -891,6 +891,12 @@ export function useCrew() {
   async function cloneBot(id: string) {
     try {
       const newId = await api.cloneAgent(id, null);
+      // Read before the list refresh: the copy lands in the original's group,
+      // right after it.
+      const fromGroup = groupsRef.current.groups.find((g) =>
+        g.items.includes(itemKey("agent", id)),
+      );
+      const after = fromGroup?.items[fromGroup.items.indexOf(itemKey("agent", id)) + 1];
       selectedRef.current = { id: newId, kind: "agent" };
       setSelected(newId);
       setSelectedKind("agent");
@@ -898,6 +904,9 @@ export function useCrew() {
       setMessages([]);
       closePane();
       await refreshList();
+      if (fromGroup && groupsRef.current.groups.some((g) => g.id === fromGroup.id)) {
+        moveToGroup("agent", newId, fromGroup.id, after);
+      }
       await refreshMessages();
     } catch (err) {
       showError(err);
