@@ -1728,11 +1728,13 @@ function ChoiceCard({
         // Per question, not per option: "A" beside "백오프" as a badge reads as
         // two kinds of answer.
         const short = shortLabels(q.options || []);
+        // Closing ends the whole card, so it sits once, on the first question.
+        const first = qi === 0;
         return (
           <div className="choice-q" key={q.question + qi}>
             <div className="choice-head">
               <div className="choice-title">{header}</div>
-              {open && onAnswer && !hasFields ? (
+              {first && open && onAnswer && !hasFields ? (
                 <button
                   type="button"
                   className="choice-x"
@@ -1743,7 +1745,7 @@ function ChoiceCard({
                   <X size={14} />
                 </button>
               ) : null}
-              {card.state === "closed" ? (
+              {first && card.state === "closed" ? (
                 <span className="choice-closed">{t("thread.choiceClosed")}</span>
               ) : null}
             </div>

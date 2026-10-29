@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgMatches, Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 
 mod avatar;
 mod choice;
@@ -31,7 +31,7 @@ use config::{
     empty_to_none, parse_hex_color, resolve_add_cmd, write_roster, AgentCli, AgentConfig,
     AvatarShape, Config, Effort, Routine,
 };
-use protocol::{Event, Request};
+use protocol::{AskQuestion, Event, Request};
 
 #[derive(Parser)]
 #[command(name = "crew", about = "Local multi-agent crew (desktop)", version)]
@@ -65,19 +65,26 @@ enum Cmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         message: Vec<String>,
     },
-    /// Ask the human user to pick or type in this chat; print their answer
+    /// Ask the human user to pick or type in this chat; print their answer.
+    /// Repeat --question for more questions on one card: each --option,
+    /// --input, --hint and --multi belongs to the --question before it
     Ask {
         #[arg(short, long)]
-        question: Option<String>,
+        question: Vec<String>,
         #[arg(short, long = "option")]
         options: Vec<String>,
         #[arg(short = 'i', long = "input")]
         inputs: Vec<String>,
         #[arg(long)]
-        hint: Option<String>,
+        hint: Vec<String>,
         /// Let the user pick more than one option
-        #[arg(long)]
-        multi: bool,
+        #[arg(
+            long,
+            num_args = 0,
+            default_missing_value = "true",
+            action = clap::ArgAction::Append
+        )]
+        multi: Vec<bool>,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         rest: Vec<String>,
     },
@@ -326,7 +333,8 @@ fn main() {
 }
 
 fn run() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
     match cli.cmd {
         None => desktop::run(),
         Some(Cmd::Daemon) => {
@@ -345,14 +353,10 @@ fn run() -> anyhow::Result<()> {
             })?)
         }
         Some(Cmd::Tell { to, from, message }) => run_tell(to, from, message),
-        Some(Cmd::Ask {
-            question,
-            options,
-            inputs,
-            hint,
-            multi,
-            rest,
-        }) => run_ask(question, options, inputs, hint, multi, rest),
+        Some(Cmd::Ask { .. }) => {
+            let ask = matches.subcommand_matches("ask").expect("ask matches");
+            run_ask(ask_questions(ask)?)
+        }
         Some(Cmd::Snapshot { agent }) => {
             client::ensure_daemon()?;
             client::print_event(client::rpc(Request::Snapshot { agent })?)
@@ -761,41 +765,111 @@ fn connect_for_tell() -> anyhow::Result<()> {
     }
 }
 
-fn run_ask(
-    question: Option<String>,
-    mut options: Vec<String>,
-    inputs: Vec<String>,
-    hint: Option<String>,
-    multi: bool,
-    rest: Vec<String>,
-) -> anyhow::Result<()> {
+fn run_ask(asks: Vec<AskQuestion>) -> anyhow::Result<()> {
     connect_for_tell()?;
     let agent = require_agent_id(None, "ask")?;
-    let mut rest = rest;
-    let multi = take_late_multi(&mut rest) || multi;
-    let question = match question.and_then(empty_to_none) {
-        Some(q) => {
-            options.extend(rest);
-            q
-        }
-        None => {
-            let mut rest = rest;
-            if rest.is_empty() {
-                anyhow::bail!("ask needs a question");
-            }
-            let q = rest.remove(0);
-            options.extend(rest);
-            q
-        }
-    };
+    let mut asks = asks.into_iter();
+    let first = asks.next().expect("ask_questions returns at least one");
     client::print_event(client::rpc(Request::Ask {
         agent,
-        question,
-        options,
-        inputs,
-        hint: hint.and_then(empty_to_none),
-        multi,
+        question: first.question,
+        options: first.options,
+        inputs: first.inputs,
+        hint: first.hint,
+        multi: first.multi,
+        more: asks.collect(),
     })?)
+}
+
+/// The questions of one `crew ask`, in the order they were typed. Each
+/// `--option`, `--input`, `--hint` and `--multi` belongs to the `--question`
+/// before it, or to the first one when it comes before them all.
+///
+/// The older form `crew ask "Q" A B --multi` still works: without a
+/// `--question` the first plain argument is the question, the rest its options.
+fn ask_questions(m: &ArgMatches) -> anyhow::Result<Vec<AskQuestion>> {
+    enum Part {
+        Question(String),
+        Option(String),
+        Input(String),
+        Hint(String),
+        Multi,
+    }
+    fn indexed(m: &ArgMatches, id: &str) -> Vec<(usize, String)> {
+        match (m.indices_of(id), m.get_many::<String>(id)) {
+            (Some(at), Some(values)) => at.zip(values.cloned()).collect(),
+            _ => Vec::new(),
+        }
+    }
+    let mut parts: Vec<(usize, Part)> = Vec::new();
+    let typed: [(&str, fn(String) -> Part); 4] = [
+        ("question", Part::Question),
+        ("options", Part::Option),
+        ("inputs", Part::Input),
+        ("hint", Part::Hint),
+    ];
+    for (id, part) in typed {
+        parts.extend(indexed(m, id).into_iter().map(|(i, v)| (i, part(v))));
+    }
+    // Appended, so each question keeps the index of its own `--multi`.
+    if let Some(at) = m.indices_of("multi") {
+        parts.extend(at.map(|i| (i, Part::Multi)));
+    }
+    parts.sort_by_key(|(i, _)| *i);
+
+    let mut asks: Vec<AskQuestion> = Vec::new();
+    for (_, part) in parts {
+        if let Part::Question(q) = part {
+            // Flags typed before the first question belong to it.
+            if asks.len() == 1 && asks[0].question.is_empty() {
+                asks[0].question = q;
+            } else {
+                asks.push(AskQuestion {
+                    question: q,
+                    ..AskQuestion::default()
+                });
+            }
+            continue;
+        }
+        if asks.is_empty() {
+            asks.push(AskQuestion::default());
+        }
+        let ask = asks.last_mut().expect("one ask");
+        match part {
+            Part::Option(v) => ask.options.push(v),
+            Part::Input(v) => ask.inputs.push(v),
+            Part::Hint(v) => ask.hint = empty_to_none(v),
+            Part::Multi => ask.multi = true,
+            Part::Question(_) => unreachable!(),
+        }
+    }
+
+    let mut rest: Vec<String> = m
+        .get_many::<String>("rest")
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect();
+    let multi = take_late_multi(&mut rest);
+    if !rest.is_empty() || multi {
+        if asks.is_empty() {
+            asks.push(AskQuestion::default());
+        }
+        let ask = if asks[0].question.trim().is_empty() {
+            &mut asks[0]
+        } else {
+            asks.last_mut().expect("one ask")
+        };
+        if ask.question.trim().is_empty() && !rest.is_empty() {
+            ask.question = rest.remove(0);
+        }
+        ask.options.extend(rest);
+        ask.multi |= multi;
+    }
+    if asks.is_empty() || asks.iter().any(|a| a.question.trim().is_empty()) {
+        anyhow::bail!("ask needs a question");
+    }
+    Ok(asks)
 }
 
 /// `crew ask "Q" A B --multi`: after the first plain argument clap keeps the
@@ -1152,96 +1226,109 @@ mod tests {
         Cli::try_parse_from(args).expect("parse")
     }
 
+    fn asks(args: &[&str]) -> anyhow::Result<Vec<AskQuestion>> {
+        let m = Cli::command().try_get_matches_from(args).expect("parse");
+        ask_questions(m.subcommand_matches("ask").expect("ask"))
+    }
+
+    fn ask(question: &str, options: &[&str]) -> AskQuestion {
+        AskQuestion {
+            question: question.into(),
+            options: options.iter().map(|s| s.to_string()).collect(),
+            ..AskQuestion::default()
+        }
+    }
+
     #[test]
     fn ask_flags_and_trailing_args() {
-        match parse_ok(&[
-            "crew",
-            "ask",
-            "--question",
-            "어느 쪽을 고를래?",
-            "--option",
-            "A",
-            "--option",
-            "B",
-            "--option",
-            "C",
+        let got = asks(&[
+            "crew", "ask", "--question", "어느 쪽을 고를래?", "--option", "A", "--option", "B",
+            "--option", "C",
         ])
-        .cmd
-        {
-            Some(Cmd::Ask {
-                question,
-                options,
-                inputs,
-                hint,
-                rest,
-                ..
-            }) => {
-                assert_eq!(question.as_deref(), Some("어느 쪽을 고를래?"));
-                assert_eq!(options, vec!["A", "B", "C"]);
-                assert!(inputs.is_empty());
-                assert!(hint.is_none());
-                assert!(rest.is_empty());
-            }
-            _ => panic!("expected ask"),
-        }
-        match parse_ok(&["crew", "ask", "--multi", "-q", "뭘 넣을까?", "-o", "A", "-o", "B"]).cmd {
-            Some(Cmd::Ask { multi, options, .. }) => {
-                assert!(multi);
-                assert_eq!(options, vec!["A", "B"]);
-            }
-            _ => panic!("expected ask"),
-        }
-        match parse_ok(&["crew", "ask", "뭘 넣을까?", "A", "B", "--multi"]).cmd {
-            Some(Cmd::Ask { multi, mut rest, .. }) => {
-                assert!(!multi);
-                assert!(take_late_multi(&mut rest));
-                assert_eq!(rest, vec!["뭘 넣을까?", "A", "B"]);
-            }
-            _ => panic!("expected ask"),
-        }
-        match parse_ok(&["crew", "ask", "어느 쪽을 고를래?", "A", "B", "C"]).cmd {
-            Some(Cmd::Ask {
-                question,
-                options,
-                rest,
-                ..
-            }) => {
-                assert!(question.is_none());
-                assert!(options.is_empty());
-                assert_eq!(rest, vec!["어느 쪽을 고를래?", "A", "B", "C"]);
-            }
-            _ => panic!("expected ask"),
-        }
-        match parse_ok(&[
-            "crew",
-            "ask",
-            "--question",
-            "로그인",
-            "--hint",
-            "이 계정으로 로그인해주세요.",
-            "--input",
-            "아이디",
-            "--input",
-            "비밀번호",
+        .unwrap();
+        assert_eq!(got, vec![ask("어느 쪽을 고를래?", &["A", "B", "C"])]);
+
+        let got = asks(&["crew", "ask", "--multi", "-q", "뭘 넣을까?", "-o", "A", "-o", "B"]).unwrap();
+        assert_eq!(
+            got,
+            vec![AskQuestion {
+                multi: true,
+                ..ask("뭘 넣을까?", &["A", "B"])
+            }]
+        );
+
+        let got = asks(&["crew", "ask", "뭘 넣을까?", "A", "B", "--multi"]).unwrap();
+        assert_eq!(
+            got,
+            vec![AskQuestion {
+                multi: true,
+                ..ask("뭘 넣을까?", &["A", "B"])
+            }]
+        );
+
+        let got = asks(&["crew", "ask", "어느 쪽을 고를래?", "A", "B", "C"]).unwrap();
+        assert_eq!(got, vec![ask("어느 쪽을 고를래?", &["A", "B", "C"])]);
+
+        let got = asks(&[
+            "crew", "ask", "--question", "로그인", "--hint", "이 계정으로 로그인해주세요.",
+            "--input", "아이디", "--input", "비밀번호",
         ])
-        .cmd
-        {
-            Some(Cmd::Ask {
-                question,
-                options,
-                inputs,
-                hint,
-                rest,
-                ..
-            }) => {
-                assert_eq!(question.as_deref(), Some("로그인"));
-                assert!(options.is_empty());
-                assert_eq!(inputs, vec!["아이디", "비밀번호"]);
-                assert_eq!(hint.as_deref(), Some("이 계정으로 로그인해주세요."));
-                assert!(rest.is_empty());
-            }
-            _ => panic!("expected ask"),
-        }
+        .unwrap();
+        assert_eq!(
+            got,
+            vec![AskQuestion {
+                question: "로그인".into(),
+                inputs: vec!["아이디".into(), "비밀번호".into()],
+                hint: Some("이 계정으로 로그인해주세요.".into()),
+                ..AskQuestion::default()
+            }]
+        );
+
+        assert!(asks(&["crew", "ask"]).is_err());
+        assert!(asks(&["crew", "ask", "-o", "A", "-o", "B"]).is_err());
+    }
+
+    #[test]
+    fn ask_multi_belongs_to_its_own_question() {
+        let got = asks(&[
+            "crew", "ask", "-q", "1", "--multi", "-o", "A", "-o", "B", "-q", "2", "-o", "A",
+            "-o", "B", "-q", "3", "-o", "A", "-o", "B", "--multi",
+        ])
+        .unwrap();
+        let multi: Vec<bool> = got.iter().map(|a| a.multi).collect();
+        assert_eq!(multi, vec![true, false, true]);
+    }
+
+    #[test]
+    fn ask_takes_many_questions_in_order() {
+        let got = asks(&[
+            "crew", "ask",
+            "-q", "9개 브랜치를 머지해도 될까요?", "-o", "네", "-o", "아니요",
+            "-q", "#125~#127은 어떻게 할까요?", "--hint", "지금은 결과 없음으로 끝나요.",
+            "-o", "이대로 머지", "-o", "규칙을 추정해서 넣기",
+            "-q", "어느 스키마를 추가할까요?", "--multi", "-o", "48", "-o", "36", "-o", "56",
+            "-q", "브랜치 이름", "-i", "이름",
+        ])
+        .unwrap();
+        assert_eq!(
+            got,
+            vec![
+                ask("9개 브랜치를 머지해도 될까요?", &["네", "아니요"]),
+                AskQuestion {
+                    hint: Some("지금은 결과 없음으로 끝나요.".into()),
+                    ..ask("#125~#127은 어떻게 할까요?", &["이대로 머지", "규칙을 추정해서 넣기"])
+                },
+                AskQuestion {
+                    multi: true,
+                    ..ask("어느 스키마를 추가할까요?", &["48", "36", "56"])
+                },
+                AskQuestion {
+                    question: "브랜치 이름".into(),
+                    inputs: vec!["이름".into()],
+                    ..AskQuestion::default()
+                },
+            ]
+        );
     }
 
     #[test]

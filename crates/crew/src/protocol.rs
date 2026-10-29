@@ -184,6 +184,9 @@ pub enum Request {
         /// Let the user pick more than one option.
         #[serde(default)]
         multi: bool,
+        /// More questions on the same card, answered with one submit.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        more: Vec<AskQuestion>,
     },
     /// Pick, fill, or dismiss a pending choice card.
     AnswerChoice {
@@ -376,6 +379,20 @@ pub struct ChoiceField {
 
 fn serde_true() -> bool {
     true
+}
+
+/// One question of a `crew ask` card, as the CLI took it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AskQuestion {
+    pub question: String,
+    #[serde(default)]
+    pub options: Vec<String>,
+    #[serde(default)]
+    pub inputs: Vec<String>,
+    #[serde(default)]
+    pub hint: Option<String>,
+    #[serde(default)]
+    pub multi: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -658,9 +675,11 @@ mod tests {
             inputs: Vec::new(),
             hint: None,
             multi: false,
+            more: Vec::new(),
         };
         let line = req.to_line().unwrap();
         assert!(line.contains("\"type\":\"ask\""));
+        assert!(!line.contains("more"), "one question sends what an older daemon reads");
         let back: Request = serde_json::from_str(&line).unwrap();
         match back {
             Request::Ask {
@@ -670,8 +689,10 @@ mod tests {
                 inputs,
                 hint,
                 multi,
+                more,
             } => {
                 assert!(!multi);
+                assert!(more.is_empty());
                 assert_eq!(agent, "alpha");
                 assert_eq!(question, "어느 쪽을 고를래?");
                 assert_eq!(options, vec!["A", "B", "C"]);
@@ -683,9 +704,12 @@ mod tests {
         let old = r#"{"type":"ask","agent":"alpha","question":"Q","options":["A","B"]}"#;
         let back: Request = serde_json::from_str(old).unwrap();
         match back {
-            Request::Ask { inputs, hint, .. } => {
+            Request::Ask {
+                inputs, hint, more, ..
+            } => {
                 assert!(inputs.is_empty());
                 assert!(hint.is_none());
+                assert!(more.is_empty());
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -696,13 +720,25 @@ mod tests {
             inputs: vec!["아이디".into(), "비밀번호".into()],
             hint: Some("이 계정으로 로그인해주세요.".into()),
             multi: false,
+            more: vec![AskQuestion {
+                question: "어느 서버?".into(),
+                options: vec!["dev".into(), "prod".into()],
+                multi: true,
+                ..AskQuestion::default()
+            }],
         };
         let line = req.to_line().unwrap();
         let back: Request = serde_json::from_str(&line).unwrap();
         match back {
-            Request::Ask { inputs, hint, .. } => {
+            Request::Ask {
+                inputs, hint, more, ..
+            } => {
                 assert_eq!(inputs, vec!["아이디", "비밀번호"]);
                 assert_eq!(hint.as_deref(), Some("이 계정으로 로그인해주세요."));
+                assert_eq!(more.len(), 1);
+                assert_eq!(more[0].question, "어느 서버?");
+                assert_eq!(more[0].options, vec!["dev", "prod"]);
+                assert!(more[0].multi);
             }
             other => panic!("unexpected {other:?}"),
         }

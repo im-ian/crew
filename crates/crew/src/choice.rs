@@ -1,7 +1,7 @@
 use anyhow::bail;
 use serde_json::Value;
 
-use crate::protocol::{ChoiceCard, ChoiceField, ChoiceOption, ChoiceQuestion, ChoiceState};
+use crate::protocol::{AskQuestion, ChoiceCard, ChoiceField, ChoiceOption, ChoiceQuestion, ChoiceState};
 
 pub fn is_ask_tool(name: &str) -> bool {
     let lower = name.trim().replace('-', "_").to_ascii_lowercase();
@@ -33,47 +33,72 @@ pub fn card_from_cli(
     inputs: &[String],
     hint: Option<&str>,
 ) -> anyhow::Result<ChoiceCard> {
-    let question = question.trim();
+    card_from_asks(&[AskQuestion {
+        question: question.to_string(),
+        options: options.to_vec(),
+        inputs: inputs.to_vec(),
+        hint: hint.map(str::to_string),
+        multi: false,
+    }])
+}
+
+/// One card for every question `crew ask` was given, so the user answers them
+/// together.
+pub fn card_from_asks(asks: &[AskQuestion]) -> anyhow::Result<ChoiceCard> {
+    if asks.is_empty() {
+        bail!("ask needs a question");
+    }
+    let questions = asks
+        .iter()
+        .map(question_from_cli)
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    Ok(ChoiceCard {
+        id: String::new(),
+        questions,
+        state: ChoiceState::Pending,
+    })
+}
+
+fn question_from_cli(ask: &AskQuestion) -> anyhow::Result<ChoiceQuestion> {
+    let question = ask.question.trim();
     if question.is_empty() {
         bail!("ask needs a question");
     }
     let mut opts = Vec::new();
-    for (i, raw) in options.iter().enumerate() {
+    for (i, raw) in ask.options.iter().enumerate() {
         let Some(opt) = parse_cli_option(raw, i) else {
             bail!("ask option is empty");
         };
         opts.push(opt);
     }
     let mut fields = Vec::new();
-    for (i, raw) in inputs.iter().enumerate() {
+    for (i, raw) in ask.inputs.iter().enumerate() {
         let Some(field) = parse_cli_input(raw, i) else {
             bail!("ask input is empty");
         };
         fields.push(field);
     }
     if opts.len() == 1 {
-        bail!("ask needs at least two --option values");
+        bail!("ask needs at least two --option values: {question}");
     }
     if opts.is_empty() && fields.is_empty() {
-        bail!("ask needs --input or at least two --option values");
+        bail!("ask needs --input or at least two --option values: {question}");
     }
-    let hint = hint
+    let hint = ask
+        .hint
+        .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
-    Ok(ChoiceCard {
-        id: String::new(),
-        questions: vec![ChoiceQuestion {
-            question: question.to_string(),
-            header: None,
-            hint,
-            options: opts,
-            fields,
-            multi: false,
-            selected: Vec::new(),
-            other: String::new(),
-        }],
-        state: ChoiceState::Pending,
+    Ok(ChoiceQuestion {
+        question: question.to_string(),
+        header: None,
+        hint,
+        multi: ask.multi && !opts.is_empty(),
+        options: opts,
+        fields,
+        selected: Vec::new(),
+        other: String::new(),
     })
 }
 
@@ -844,6 +869,55 @@ mod tests {
         assert!(q.fields[1].required);
         assert!(card_from_cli("Q", &[], &[], None).is_err());
         assert!(card_from_cli("Q", &[], &["".into()], None).is_err());
+    }
+
+    #[test]
+    fn many_cli_questions_are_one_card_answered_together() {
+        let ask = |q: &str, options: &[&str], multi: bool| AskQuestion {
+            question: q.into(),
+            options: options.iter().map(|s| s.to_string()).collect(),
+            multi,
+            ..AskQuestion::default()
+        };
+        let mut card = card_from_asks(&[
+            ask("머지해도 될까요?", &["네", "아니요"], false),
+            ask("어느 스키마?", &["48", "36", "56"], true),
+            AskQuestion {
+                question: "브랜치 이름".into(),
+                inputs: vec!["이름".into()],
+                multi: true,
+                ..AskQuestion::default()
+            },
+        ])
+        .unwrap();
+        assert_eq!(card.questions.len(), 3);
+        assert!(!card.questions[0].multi);
+        assert!(card.questions[1].multi);
+        assert!(!card.questions[2].multi, "a form has nothing to pick");
+
+        // One answer is not enough: the card waits for all of them.
+        apply_answers(&mut card, &[vec!["A".into()]], &[], &[], false);
+        assert_eq!(card.state, ChoiceState::Pending);
+        apply_answers(
+            &mut card,
+            &[vec!["A".into()], vec!["A".into(), "C".into()], vec![]],
+            &[vec![], vec![], vec!["main".into()]],
+            &[],
+            false,
+        );
+        assert_eq!(card.state, ChoiceState::Answered);
+        assert_eq!(
+            format_answer(&card),
+            "머지해도 될까요? → 네\n어느 스키마? → 48, 56\n브랜치 이름\n이름: main"
+        );
+
+        let err = card_from_asks(&[
+            ask("머지해도 될까요?", &["네", "아니요"], false),
+            ask("어느 스키마?", &["48"], false),
+        ])
+        .unwrap_err();
+        assert!(err.to_string().contains("어느 스키마?"), "{err}");
+        assert!(card_from_asks(&[]).is_err());
     }
 
     #[test]

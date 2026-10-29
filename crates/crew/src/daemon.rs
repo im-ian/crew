@@ -19,7 +19,7 @@ use crate::cron;
 use crate::headless::{self, HeadlessSession};
 use crate::interrupt::UserSendAction;
 use crate::paths;
-use crate::protocol::{AgentInfo, AgentStatus, ChatMessage, Event, Request, Role};
+use crate::protocol::{AgentInfo, AgentStatus, AskQuestion, ChatMessage, Event, Request, Role};
 use crate::pty_agent::{self, PtySession};
 use crate::targeting::{self, TurnOrigin};
 
@@ -853,21 +853,14 @@ fn drop_ask(choice_id: &str) {
 
 fn start_ask(
     agent: &str,
-    question: &str,
-    options: Vec<String>,
-    inputs: Vec<String>,
-    hint: Option<String>,
-    multi: bool,
+    asks: &[AskQuestion],
 ) -> anyhow::Result<(String, oneshot::Receiver<Event>)> {
     if !known_agent(agent) {
         anyhow::bail!("unknown agent {agent}");
     }
-    if crate::transcript::has_pending_question(agent, question) {
+    let card = crate::choice::card_from_asks(asks)?;
+    if crate::transcript::has_pending_question(agent, &card.questions[0].question) {
         anyhow::bail!("this question is already waiting for an answer");
-    }
-    let mut card = crate::choice::card_from_cli(question, &options, &inputs, hint.as_deref())?;
-    for q in &mut card.questions {
-        q.multi = multi && !q.options.is_empty();
     }
     let msg = crate::transcript::attach_choice(agent, None, card);
     let Some(choice) = msg.choice.clone() else {
@@ -2773,9 +2766,18 @@ async fn handle_client(
                     inputs,
                     hint,
                     multi,
+                    more,
                 } = req
                 {
-                    match start_ask(&agent, &question, options, inputs, hint, multi) {
+                    let first = AskQuestion {
+                        question,
+                        options,
+                        inputs,
+                        hint,
+                        multi,
+                    };
+                    let asks: Vec<AskQuestion> = std::iter::once(first).chain(more).collect();
+                    match start_ask(&agent, &asks) {
                         Err(err) => {
                             write_event(
                                 &mut write,
