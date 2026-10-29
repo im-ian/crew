@@ -1,4 +1,4 @@
-import type { ChoiceOption } from "./types";
+import type { ChoiceOption, ChoiceQuestion } from "./types";
 
 export function shortLabels(options: ChoiceOption[]): boolean {
   return options.every((o) => (o.label || "").trim().length <= 3);
@@ -30,4 +30,53 @@ export function otherBadge(options: ChoiceOption[]): string {
     if (!taken.has(letter)) return letter;
   }
   return "+";
+}
+
+/** Whether one question has what the card needs before it can be sent. */
+export function questionDone(
+  q: ChoiceQuestion,
+  picks: string[] = [],
+  values: string[] = [],
+  other = "",
+): boolean {
+  const fieldsOk = (q.fields || []).every(
+    (f, fi) => f.required === false || (values[fi] || "").trim() !== "",
+  );
+  const optsOk = !(q.options || []).length || picks.length > 0 || other.trim() !== "";
+  return fieldsOk && optsOk;
+}
+
+/** Whether the user gave this question anything at all. */
+export function questionTouched(
+  q: ChoiceQuestion,
+  picks: string[] = [],
+  values: string[] = [],
+  other = "",
+): boolean {
+  const fields = q.fields || [];
+  return (
+    picks.length > 0 ||
+    other.trim() !== "" ||
+    values.some((v) => v.trim() !== "") ||
+    (fields.length > 0 && fields.every((f) => f.required === false))
+  );
+}
+
+/** One question's answer as one line, for the summary card. Secrets stay hidden. */
+export function answerSummary(
+  q: ChoiceQuestion,
+  picks: string[] = [],
+  values: string[] = [],
+  other = "",
+): string {
+  const parts = (q.options || [])
+    .filter((o) => picks.includes(o.id))
+    .map((o) => (o.label || "").trim() || o.id);
+  if (other.trim()) parts.push(other.trim());
+  (q.fields || []).forEach((f, fi) => {
+    const v = (values[fi] || "").trim();
+    if (!v) return;
+    parts.push(`${f.label}: ${f.secret ? "••••••" : v}`);
+  });
+  return parts.join(", ");
 }

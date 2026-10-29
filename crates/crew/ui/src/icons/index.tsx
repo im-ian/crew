@@ -152,6 +152,22 @@ export function ChevronDown(props: Props) {
   );
 }
 
+export function ChevronLeft(props: Props) {
+  return (
+    <Icon {...props}>
+      <path d="m15 18-6-6 6-6" />
+    </Icon>
+  );
+}
+
+export function ChevronRight(props: Props) {
+  return (
+    <Icon {...props}>
+      <path d="m9 18 6-6-6-6" />
+    </Icon>
+  );
+}
+
 export function Pencil(props: Props) {
   return (
     <Icon {...props}>
