@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answerSummary, answeredOptionView, otherBadge, questionDone, questionTouched } from "./choiceView";
+import { answerSummary, answeredOptionView, otherBadge, questionDone } from "./choiceView";
 import type { ChoiceOption } from "./types";
 
 const options: ChoiceOption[] = [
@@ -44,22 +44,21 @@ describe("questionDone", () => {
     options: [],
     fields: [
       { id: "a", label: "아이디", value: "" },
-      { id: "b", label: "메모", value: "", required: false },
+      { id: "b", label: "메모", value: "" },
     ],
   };
 
-  it("needs a pick or a typed answer when there are options", () => {
+  it("counts a pick or a typed answer", () => {
     expect(questionDone(pick)).toBe(false);
     expect(questionDone(pick, ["A"])).toBe(true);
     expect(questionDone(pick, [], [], "  나중에  ")).toBe(true);
     expect(questionDone(pick, [], [], "   ")).toBe(false);
   });
 
-  it("needs only the required fields", () => {
-    expect(questionDone(form, [], ["", "메모만"])).toBe(false);
+  it("counts any filled box, since none is required", () => {
+    expect(questionDone(form)).toBe(false);
+    expect(questionDone(form, [], ["", "메모만"])).toBe(true);
     expect(questionDone(form, [], ["ian", ""])).toBe(true);
-    expect(questionTouched(form, [], ["", "메모만"])).toBe(true);
-    expect(questionTouched(pick)).toBe(false);
   });
 });
 

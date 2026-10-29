@@ -42,7 +42,6 @@ import {
   otherBadge,
   answerSummary,
   questionDone,
-  questionTouched,
   shortLabels,
 } from "../choiceView";
 import { routineSwitchName } from "../routineNote";
@@ -1720,17 +1719,8 @@ function ChoiceCard({
     );
   }
 
-  function complete(nextPicks = picks, nextValues = values, nextOthers = others) {
-    const allOk = questions.every((_, qi) => done(qi, nextPicks, nextValues, nextOthers));
-    const any = questions.some((q, qi) =>
-      questionTouched(q, nextPicks[qi], nextValues[qi], nextOthers[qi]),
-    );
-    return allOk && any;
-  }
-
   function submit() {
     if (!open || !onAnswer) return;
-    if (!complete()) return;
     void send(picks, values, others, false);
   }
 
@@ -1818,16 +1808,10 @@ function ChoiceCard({
         {showFields ? (
           <div className="choice-fields">
             {fields.map((f, fi) => {
-              const required = f.required !== false;
               const id = `${card.id}-${qi}-${f.id || fi}`;
               return (
                 <label className="choice-field" key={f.id || fi} htmlFor={id}>
-                  <span className="choice-field-label">
-                    {f.label}
-                    {required ? (
-                      <span className="choice-req"> *</span>
-                    ) : null}
-                  </span>
+                  <span className="choice-field-label">{f.label}</span>
                   <input
                     id={id}
                     className="textin choice-input"
@@ -2009,7 +1993,6 @@ function ChoiceCard({
                 <button
                   type="button"
                   className="choice-submit"
-                  disabled={!complete()}
                   onClick={submit}
                 >
                   {t("thread.choiceSubmit")}
@@ -2039,7 +2022,6 @@ function ChoiceCard({
           <button
             type="button"
             className="choice-submit"
-            disabled={!complete()}
             onClick={submit}
           >
             {t(hasFields ? "thread.choiceContinue" : "thread.choiceSubmit")}

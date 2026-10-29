@@ -101,7 +101,6 @@ export type ChoiceField = {
   label: string;
   value?: string;
   secret?: boolean;
-  required?: boolean;
 };
 
 export type ChoiceQuestion = {

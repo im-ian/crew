@@ -373,12 +373,6 @@ pub struct ChoiceField {
     pub value: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub secret: bool,
-    #[serde(default = "serde_true")]
-    pub required: bool,
-}
-
-fn serde_true() -> bool {
-    true
 }
 
 /// One question of a `crew ask` card, as the CLI took it.

@@ -896,20 +896,6 @@ fn answer_choice(
     if card.state != crate::protocol::ChoiceState::Pending {
         anyhow::bail!("choice already resolved");
     }
-    if !closed {
-        let mut preview = card.clone();
-        crate::choice::apply_answers(&mut preview, &answers, &values, &others, false);
-        if !crate::choice::is_complete(&preview) {
-            if preview.questions.iter().any(|q| {
-                q.fields
-                    .iter()
-                    .any(|f| f.required && f.value.trim().is_empty())
-            }) {
-                anyhow::bail!("missing input");
-            }
-            anyhow::bail!("nothing selected");
-        }
-    }
     let Some(updated) =
         crate::transcript::resolve_choice(agent, &card.id, &answers, &values, &others, closed)
     else {

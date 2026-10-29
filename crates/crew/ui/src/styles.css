@@ -2411,7 +2411,7 @@ button.sys-note:focus-visible {
   text-overflow: ellipsis;
 }
 .choice-sum-row.is-missing .choice-sum-a {
-  color: var(--blocked);
+  color: var(--faint);
   font-weight: 500;
 }
 @media (prefers-reduced-motion: reduce) {
@@ -2634,10 +2634,6 @@ button.choice-option:active:not(:disabled) .choice-badge {
   font-weight: 500;
   color: var(--ink);
   line-height: 1.3;
-}
-.choice-req {
-  color: var(--blocked);
-  font-weight: 650;
 }
 .choice-input {
   background: var(--bg);

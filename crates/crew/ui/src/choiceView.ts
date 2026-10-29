@@ -32,34 +32,18 @@ export function otherBadge(options: ChoiceOption[]): string {
   return "+";
 }
 
-/** Whether one question has what the card needs before it can be sent. */
+/**
+ * Whether the user gave this question anything. Nothing is required: a card
+ * can go back with questions left blank, and they read as no answer.
+ */
 export function questionDone(
   q: ChoiceQuestion,
   picks: string[] = [],
   values: string[] = [],
   other = "",
 ): boolean {
-  const fieldsOk = (q.fields || []).every(
-    (f, fi) => f.required === false || (values[fi] || "").trim() !== "",
-  );
-  const optsOk = !(q.options || []).length || picks.length > 0 || other.trim() !== "";
-  return fieldsOk && optsOk;
-}
-
-/** Whether the user gave this question anything at all. */
-export function questionTouched(
-  q: ChoiceQuestion,
-  picks: string[] = [],
-  values: string[] = [],
-  other = "",
-): boolean {
-  const fields = q.fields || [];
-  return (
-    picks.length > 0 ||
-    other.trim() !== "" ||
-    values.some((v) => v.trim() !== "") ||
-    (fields.length > 0 && fields.every((f) => f.required === false))
-  );
+  const picked = (q.options || []).length > 0 && (picks.length > 0 || other.trim() !== "");
+  return picked || values.some((v) => v.trim() !== "");
 }
 
 /** One question's answer as one line, for the summary card. Secrets stay hidden. */
