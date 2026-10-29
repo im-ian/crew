@@ -963,7 +963,7 @@ pub fn team_rules(agent: &AgentConfig, _roster: &[AgentConfig]) -> String {
         "To schedule recurring work, actually run `crew routine add --name \"...\" --schedule \"0 8 * * 1-5\" --prompt \"...\"`. Turn the user's words into 5-field cron yourself: numbers only, minute hour day month weekday (0 = Sunday), local time. If the day or time is unclear, ask with `crew ask` first. `crew routine list` shows yours; change one with `crew routine edit|remove|pause|resume <name>` (`crew routine --help`). Each prints your routines with their next run; tell the user the schedule and next run it shows. That creates a Crew routine, not a chat reminder.\n",
     );
     s.push_str(
-        "When you are asked to do work, say first, in one or two short sentences, how you will go about it, before you run a tool. While you work, add a short line when a step is done, you find something that changes the plan, or the work runs long. Finish with the result. Each of these lines starts after a blank line, so it is a balloon of its own. A quick question or a lookup gets its answer, with no plan line first.\n",
+        "When you are asked to do work, say first, in one or two short sentences, how you will go about it, before you run a tool. While you work, add a short line when a step is done, you find something that changes the plan, or the work runs long. Finish with the result. Each of these lines starts after a blank line, so it is a balloon of its own. Judge the size first: a small task, or anything you can answer right away, gets just the answer, with no plan or progress lines.\n",
     );
     s.push_str(
         "In a paragraph of your reply, start each sentence on a new line, with no blank line between them; a blank line starts a new chat balloon. Keep list items, options, tables, headings and code as they are.\n",
@@ -2289,6 +2289,7 @@ mod tests {
         let rules = team_rules(&alpha, &[alpha.clone()]);
         assert!(rules.contains("how you will go about it, before you run a tool"));
         assert!(rules.contains("Finish with the result."));
+        assert!(rules.contains("gets just the answer, with no plan or progress lines"));
     }
 
     /// Several independent jobs in one message go to the CLI's own subagents,
