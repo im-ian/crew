@@ -1916,6 +1916,28 @@ fn agent_interrupted(id: &str) -> bool {
     }
 }
 
+/// Bots whose last turn ended in an error with nothing said. A turn clears its
+/// bot at the start, so this only ever names the latest turn.
+fn failed_turns() -> &'static Mutex<HashSet<String>> {
+    static FAILED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    FAILED.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Record how `id`'s turn ended, or `false` when a new one starts.
+pub fn note_turn_failed(id: &str, failed: bool) {
+    if let Ok(mut set) = failed_turns().lock() {
+        if failed {
+            set.insert(id.to_string());
+        } else {
+            set.remove(id);
+        }
+    }
+}
+
+fn turn_failed(id: &str) -> bool {
+    failed_turns().lock().is_ok_and(|set| set.contains(id))
+}
+
 fn last_status() -> &'static Mutex<HashMap<String, AgentStatus>> {
     static LAST: OnceLock<Mutex<HashMap<String, AgentStatus>>> = OnceLock::new();
     LAST.get_or_init(|| Mutex::new(HashMap::new()))
@@ -3137,6 +3159,8 @@ fn list_agents() -> Vec<AgentInfo> {
                 preview: None,
                 last_ts: 0,
                 headless: cfg.is_some_and(|c| c.headless),
+                failed: false,
+                asking: false,
             }
         })
         .collect();
@@ -3144,6 +3168,8 @@ fn list_agents() -> Vec<AgentInfo> {
     for a in &mut list {
         a.preview = crate::transcript::preview(&a.id);
         a.last_ts = crate::transcript::last_ts(&a.id);
+        a.failed = turn_failed(&a.id);
+        a.asking = crate::transcript::has_pending_choice(&a.id);
     }
     list
 }
@@ -3643,6 +3669,7 @@ fn remove_agent(id: &str) -> anyhow::Result<()> {
     crate::transcript::drop_agent(id);
     crate::memory::remove(id);
     forget_auto_approve(id);
+    note_turn_failed(id, false);
     save_state()?;
     inject_roster_update(None);
     Ok(())
@@ -5273,6 +5300,94 @@ mod daemon_tests {
                 next.contains("their answer"),
                 "it rides the next prompt: {next}"
             );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// The window draws a bot's face from the list, so a turn that errored and
+    /// said nothing has to show there, and only until the next turn starts.
+    #[test]
+    fn a_turn_that_errors_without_a_word_is_marked_failed() {
+        paths::testing::with_home("turn-failed", || {
+            let bot = test_id("failed");
+            fake_bot(
+                &bot,
+                r#"{"type":"result","subtype":"error_during_execution","is_error":true,"result":"boom"}"#,
+            );
+            send_agent(&bot, "go").unwrap();
+            wait_idle(&bot);
+            let info = list_agents().into_iter().find(|a| a.id == bot).unwrap();
+            assert!(info.failed, "the failed turn went unmarked");
+            assert_eq!(info.status, AgentStatus::Idle);
+            remove_agent(&bot).unwrap();
+            assert!(
+                !turn_failed(&bot),
+                "a removed bot left its failure behind"
+            );
+        });
+    }
+
+    #[test]
+    fn a_turn_that_answers_is_not_marked_failed_and_clears_an_old_failure() {
+        paths::testing::with_home("turn-ok", || {
+            let bot = test_id("ok");
+            fake_bot(
+                &bot,
+                r#"{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"done"}"#,
+            );
+            note_turn_failed(&bot, true);
+            send_agent(&bot, "go").unwrap();
+            wait_idle(&bot);
+            let info = list_agents().into_iter().find(|a| a.id == bot).unwrap();
+            assert!(!info.failed, "an answered turn kept the old failure");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A stop is the user's choice, not a failure.
+    #[test]
+    fn a_stopped_turn_is_not_marked_failed() {
+        paths::testing::with_home("turn-stopped", || {
+            let bot = test_id("stopped");
+            fake_bot_running(&bot, "exec sleep 5");
+            send_agent(&bot, "go").unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+            interrupt_turn(&bot).unwrap();
+            wait_idle(&bot);
+            assert!(!turn_failed(&bot));
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// The face leans in while a card waits, so the list has to say so, and stop
+    /// saying so once it is answered.
+    #[test]
+    fn the_list_says_when_a_question_card_is_waiting() {
+        paths::testing::with_home("asking", || {
+            let bot = test_id("asking");
+            fake_bot(&bot, "");
+            let asking = |bot: &str| {
+                list_agents()
+                    .into_iter()
+                    .find(|a| a.id == bot)
+                    .map(|a| a.asking)
+                    .unwrap()
+            };
+            assert!(!asking(&bot));
+            let ask = AskQuestion {
+                question: "어느 쪽으로 갈까요?".into(),
+                options: vec!["A".into(), "B".into()],
+                ..AskQuestion::default()
+            };
+            let (choice_id, _rx) = start_ask(&bot, &[ask]).unwrap();
+            assert!(asking(&bot), "an open card went unnoticed");
+            let msg = crate::transcript::messages(&bot)
+                .into_iter()
+                .find(|m| m.choice.as_ref().is_some_and(|c| c.id == choice_id))
+                .unwrap();
+            answer_choice(&bot, &msg.id, vec![vec!["A".into()]], vec![], vec![], false).unwrap();
+            assert!(!asking(&bot), "an answered card still counted");
             remove_agent(&bot).unwrap();
         });
     }

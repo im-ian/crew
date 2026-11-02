@@ -811,6 +811,18 @@ fn same_pending_question(
     !want.is_empty() && want.iter().all(|t| have.iter().any(|h| h == t))
 }
 
+/// A card is open and waiting for the user's answer.
+pub fn has_pending_choice(agent: &str) -> bool {
+    let Ok(map) = chats().lock() else {
+        return false;
+    };
+    map.get(agent).is_some_and(|chat| {
+        chat.messages
+            .iter()
+            .any(|m| m.choice.as_ref().is_some_and(|c| c.state == ChoiceState::Pending))
+    })
+}
+
 /// The user already has this question open, so another ask must not add a card.
 pub fn has_pending_question(agent: &str, question: &str) -> bool {
     let want = question.trim();
