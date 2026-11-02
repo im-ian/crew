@@ -61,6 +61,33 @@ describe("plan usage", () => {
     expect(usageColumns(some).map((c) => c.label)).toEqual(["5h", "주간"]);
   });
 
+  it("lists Codex and Antigravity too, in a fixed order", () => {
+    expect(usageClis([bot("agy"), bot("codex"), bot("grok"), bot("claude")])).toEqual(["claude", "codex", "grok", "agy"]);
+  });
+
+  it("keeps each Antigravity model pool for the details", () => {
+    const rows = usageRows(
+      [
+        {
+          cli: "agy",
+          weekly: { usedPercent: 25 },
+          groups: [
+            { name: "Gemini Models", window: { usedPercent: 25 } },
+            { name: "Claude and GPT models", window: { usedPercent: 0 } },
+          ],
+        },
+      ],
+      NOW,
+      t,
+    );
+    expect(rows[0].label).toBe("Antigravity");
+    expect(rows[0].cells.map((c) => c.percent)).toEqual([25]);
+    expect(rows[0].groups.map((g) => [g.name, g.cell.percent])).toEqual([
+      ["Gemini Models", 25],
+      ["Claude and GPT models", 0],
+    ]);
+  });
+
   it("leaves out a CLI with no window", () => {
     expect(usageRows([{ cli: "grok", fiveHour: null, weekly: null }], NOW, t)).toEqual([]);
   });

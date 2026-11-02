@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocale } from "../LocaleContext";
 import { api } from "../api";
-import type { TFn } from "../i18n";
+import type { MessageKey, TFn } from "../i18n";
 import { Gauge } from "../icons";
 import {
   agoLabel,
@@ -204,17 +204,24 @@ export function PlanUsageDetail({
     <div className="plan-usage-detail">
       {rows.map((row) => {
         const ago = agoLabel(row.capturedAt, now, t);
-        const source = row.cli === "claude" ? t("usage.source.claude") : t("usage.source.grok");
+        const source = t(`usage.source.${row.cli}` as MessageKey);
         return (
           <section key={row.cli} className="plan-usage-card">
             <div className="plan-usage-card-head">
               <strong>{row.label}</strong>
               {ago ? <span>{t("usage.readAt", { ago })}</span> : null}
             </div>
-            {row.cells.map((cell) => (
-              <div key={cell.key} className={cell.warn ? "plan-usage-line warn" : "plan-usage-line"}>
+            {(row.groups.length
+              ? row.groups.map((g) => ({ key: g.name, name: g.name, cell: g.cell }))
+              : row.cells.map((cell) => ({
+                  key: cell.key,
+                  name: t(cell.key === "fiveHour" ? "usage.fiveHourLong" : "usage.weeklyLong"),
+                  cell,
+                }))
+            ).map(({ key, name, cell }) => (
+              <div key={key} className={cell.warn ? "plan-usage-line warn" : "plan-usage-line"}>
                 <div className="plan-usage-line-top">
-                  <span>{t(cell.key === "fiveHour" ? "usage.fiveHourLong" : "usage.weeklyLong")}</span>
+                  <span>{name}</span>
                   <span className="plan-usage-big">{cell.stale ? "—" : t("usage.used", { percent: cell.percent })}</span>
                 </div>
                 <span className="plan-usage-meter" aria-hidden="true">

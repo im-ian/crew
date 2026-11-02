@@ -74,6 +74,8 @@ export type PlanUsage = {
   fiveHour?: PlanWindow | null;
   weekly?: PlanWindow | null;
   capturedAt?: number | null;
+  /** Separate pools inside one plan, each with its own weekly window. */
+  groups?: { name: string; window: PlanWindow }[];
 };
 
 export type AgentInfo = {

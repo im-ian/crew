@@ -3,8 +3,13 @@ import type { AgentInfo, PlanUsage, PlanWindow } from "./types";
 import { cliFromCmd } from "./options";
 
 /** CLIs whose plan Crew can read, in the order the sidebar lists them. */
-const READABLE = ["claude", "grok"] as const;
-const LABELS: Record<string, string> = { claude: "Claude", grok: "Grok" };
+const READABLE = ["claude", "codex", "grok", "agy"] as const;
+const LABELS: Record<string, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  grok: "Grok",
+  agy: "Antigravity",
+};
 
 /** A window this full shows as a warning. */
 export const WARN_PERCENT = 80;
@@ -35,6 +40,8 @@ export type UsageRow = {
   cells: UsageCell[];
   /** Unix seconds when the numbers were read. */
   capturedAt: number | null;
+  /** Separate pools inside the plan, each with its own weekly window, for the details. */
+  groups: { name: string; cell: UsageCell }[];
 };
 
 /** How long until `resetsAt`, as the shortest unit that is not zero. */
@@ -79,18 +86,16 @@ export function usageRows(usage: PlanUsage[], nowMs: number, t: TFn): UsageRow[]
     if (!u) continue;
     const label = LABELS[cli];
     const cells: UsageCell[] = [];
-    const add = (key: UsageCell["key"], w: PlanWindow | null | undefined) => {
-      if (!w) return;
+    const cell = (key: UsageCell["key"], w: PlanWindow, name: string): UsageCell => {
       const percent = Math.min(100, Math.max(0, Math.round(w.usedPercent)));
       const stale = !!w.resetsAt && w.resetsAt * 1000 <= nowMs;
       const until = untilLabel(w.resetsAt, nowMs, t);
-      const name = t(key === "fiveHour" ? "usage.fiveHourLong" : "usage.weeklyLong");
       const title = stale
         ? t("usage.titleStale", { cli: label, name })
         : until
           ? t("usage.titleResets", { cli: label, name, percent, until })
           : t("usage.title", { cli: label, name, percent });
-      cells.push({
+      return {
         key,
         label: t(key === "fiveHour" ? "usage.fiveHour" : "usage.weekly"),
         percent,
@@ -99,11 +104,16 @@ export function usageRows(usage: PlanUsage[], nowMs: number, t: TFn): UsageRow[]
         stale,
         warn: !stale && percent >= WARN_PERCENT,
         title,
-      });
+      };
+    };
+    const add = (key: UsageCell["key"], w: PlanWindow | null | undefined) => {
+      if (!w) return;
+      cells.push(cell(key, w, t(key === "fiveHour" ? "usage.fiveHourLong" : "usage.weeklyLong")));
     };
     add("fiveHour", u.fiveHour);
     add("weekly", u.weekly);
-    if (cells.length) rows.push({ cli, label, cells, capturedAt: u.capturedAt ?? null });
+    const groups = (u.groups ?? []).map((g) => ({ name: g.name, cell: cell("weekly", g.window, g.name) }));
+    if (cells.length) rows.push({ cli, label, cells, capturedAt: u.capturedAt ?? null, groups });
   }
   return rows;
 }
