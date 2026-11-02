@@ -1889,7 +1889,7 @@ button.channel-who:hover {
   word-break: break-word;
 }
 button.sys-note {
-  border: 1px solid color-mix(in srgb, var(--muted) 35%, transparent);
+  border: 0;
   background: transparent;
   font: inherit;
   font-size: 12.5px;
@@ -1898,7 +1898,6 @@ button.sys-note {
 }
 button.sys-note:hover,
 button.sys-note:focus-visible {
-  border-color: transparent;
   background: var(--hover);
   color: var(--ink);
   outline: none;
