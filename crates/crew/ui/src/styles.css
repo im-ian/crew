@@ -1190,8 +1190,11 @@ button.avatar {
   8%, 74% { stroke-dashoffset: 0; opacity: 1; }
   86%, 100% { stroke-dashoffset: 12; opacity: 0; }
 }
-/* Text sits right beside a list row's face, so its list paper stays small and close. */
-.rail-row .work-list { left: 76%; width: 42%; }
+/* A small face has a neighbour a few pixels away, a list row's text or the next
+   face, so its list paper stays small and close. */
+@container (max-width: 40px) {
+  .work-list { left: 76%; top: 38%; width: 42%; }
+}
 .work-kb {
   left: 2%;
   width: 96%;
