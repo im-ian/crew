@@ -50,3 +50,17 @@ export function numberDuplicateNames<T extends Named>(items: T[]): void {
       });
   }
 }
+
+/** Width of the rail when it shows only faces. */
+export const RAIL_FOLDED = 72;
+
+/**
+ * Dragging the rail edge below this folds the rail to its faces, and dragging
+ * a folded rail past it opens it again. It sits between the folded width and
+ * the open floor, so the edge has to travel before the rail jumps either way.
+ */
+export const RAIL_FOLD_AT = 124;
+
+export function foldsAt(px: number): boolean {
+  return Number.isFinite(px) && px < RAIL_FOLD_AT;
+}

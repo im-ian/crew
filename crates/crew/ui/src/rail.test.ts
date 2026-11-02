@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { numberDuplicateNames, type Named } from "./rail";
+import {
+  foldsAt,
+  numberDuplicateNames,
+  RAIL_FOLD_AT,
+  RAIL_FOLDED,
+  type Named,
+} from "./rail";
 
 function items(...triples: Array<[string, string, string?]>): Named[] {
   return triples.map(([id, name, kind = "agent"]) => ({ id, name, kind }));
@@ -75,5 +81,15 @@ describe("numberDuplicateNames", () => {
     list[1].name = "죠르디";
     numberDuplicateNames(list);
     expect(list.map((i) => i.ordinal)).toEqual([undefined, undefined]);
+  });
+});
+
+describe("foldsAt", () => {
+  it("folds only below the threshold", () => {
+    expect(foldsAt(RAIL_FOLDED)).toBe(true);
+    expect(foldsAt(RAIL_FOLD_AT - 1)).toBe(true);
+    expect(foldsAt(RAIL_FOLD_AT)).toBe(false);
+    expect(foldsAt(232)).toBe(false);
+    expect(foldsAt(Number.NaN)).toBe(false);
   });
 });
