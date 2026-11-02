@@ -1,7 +1,7 @@
 use anyhow::bail;
 use serde_json::Value;
 
-use crate::protocol::{ChoiceCard, ChoiceField, ChoiceOption, ChoiceQuestion, ChoiceState};
+use crate::protocol::{AskQuestion, ChoiceCard, ChoiceField, ChoiceOption, ChoiceQuestion, ChoiceState};
 
 pub fn is_ask_tool(name: &str) -> bool {
     let lower = name.trim().replace('-', "_").to_ascii_lowercase();
@@ -33,47 +33,72 @@ pub fn card_from_cli(
     inputs: &[String],
     hint: Option<&str>,
 ) -> anyhow::Result<ChoiceCard> {
-    let question = question.trim();
+    card_from_asks(&[AskQuestion {
+        question: question.to_string(),
+        options: options.to_vec(),
+        inputs: inputs.to_vec(),
+        hint: hint.map(str::to_string),
+        multi: false,
+    }])
+}
+
+/// One card for every question `crew ask` was given, so the user answers them
+/// together.
+pub fn card_from_asks(asks: &[AskQuestion]) -> anyhow::Result<ChoiceCard> {
+    if asks.is_empty() {
+        bail!("ask needs a question");
+    }
+    let questions = asks
+        .iter()
+        .map(question_from_cli)
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    Ok(ChoiceCard {
+        id: String::new(),
+        questions,
+        state: ChoiceState::Pending,
+    })
+}
+
+fn question_from_cli(ask: &AskQuestion) -> anyhow::Result<ChoiceQuestion> {
+    let question = ask.question.trim();
     if question.is_empty() {
         bail!("ask needs a question");
     }
     let mut opts = Vec::new();
-    for (i, raw) in options.iter().enumerate() {
+    for (i, raw) in ask.options.iter().enumerate() {
         let Some(opt) = parse_cli_option(raw, i) else {
             bail!("ask option is empty");
         };
         opts.push(opt);
     }
     let mut fields = Vec::new();
-    for (i, raw) in inputs.iter().enumerate() {
+    for (i, raw) in ask.inputs.iter().enumerate() {
         let Some(field) = parse_cli_input(raw, i) else {
             bail!("ask input is empty");
         };
         fields.push(field);
     }
     if opts.len() == 1 {
-        bail!("ask needs at least two --option values");
+        bail!("ask needs at least two --option values: {question}");
     }
     if opts.is_empty() && fields.is_empty() {
-        bail!("ask needs --input or at least two --option values");
+        bail!("ask needs --input or at least two --option values: {question}");
     }
-    let hint = hint
+    let hint = ask
+        .hint
+        .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
-    Ok(ChoiceCard {
-        id: String::new(),
-        questions: vec![ChoiceQuestion {
-            question: question.to_string(),
-            header: None,
-            hint,
-            options: opts,
-            fields,
-            multi: false,
-            selected: Vec::new(),
-            other: String::new(),
-        }],
-        state: ChoiceState::Pending,
+    Ok(ChoiceQuestion {
+        question: question.to_string(),
+        header: None,
+        hint,
+        multi: ask.multi && !opts.is_empty(),
+        options: opts,
+        fields,
+        selected: Vec::new(),
+        other: String::new(),
     })
 }
 
@@ -125,9 +150,12 @@ fn parse_cli_input(raw: &str, i: usize) -> Option<ChoiceField> {
         label: label.to_string(),
         value: value.to_string(),
         secret: looks_secret(label),
-        required: true,
     })
 }
+
+/// What a question the user left blank reads as to the bot, so it knows the
+/// question was skipped rather than lost.
+const NO_ANSWER: &str = "(no answer)";
 
 pub fn format_answer(card: &ChoiceCard) -> String {
     format_answer_inner(card, false)
@@ -150,7 +178,7 @@ fn format_answer_inner(card: &ChoiceCard, mask: bool) -> String {
         let fields: Vec<String> = q
             .fields
             .iter()
-            .filter(|f| f.required || !f.value.trim().is_empty())
+            .filter(|f| !f.value.trim().is_empty())
             .map(|f| {
                 let value = if mask && f.secret {
                     "••••••"
@@ -161,10 +189,7 @@ fn format_answer_inner(card: &ChoiceCard, mask: bool) -> String {
             })
             .collect();
         if labels.is_empty() && fields.is_empty() {
-            if q.fields.is_empty() {
-                continue;
-            }
-            lines.push(q.question.clone());
+            lines.push(format!("{} → {NO_ANSWER}", q.question));
             continue;
         }
         if fields.is_empty() {
@@ -217,32 +242,9 @@ pub fn apply_answers(
             }
         }
     }
-    if is_complete(card) {
-        card.state = ChoiceState::Answered;
-    }
-}
-
-pub fn is_complete(card: &ChoiceCard) -> bool {
-    if card.questions.is_empty() {
-        return false;
-    }
-    card.questions.iter().all(question_complete) && card.questions.iter().any(question_answered)
-}
-
-fn question_complete(q: &ChoiceQuestion) -> bool {
-    let fields_ok = q
-        .fields
-        .iter()
-        .all(|f| !f.required || !f.value.trim().is_empty());
-    let opts_ok = q.options.is_empty() || !q.selected.is_empty() || !q.other.is_empty();
-    fields_ok && opts_ok
-}
-
-fn question_answered(q: &ChoiceQuestion) -> bool {
-    !q.selected.is_empty()
-        || !q.other.is_empty()
-        || q.fields.iter().any(|f| !f.value.trim().is_empty())
-        || (!q.fields.is_empty() && q.fields.iter().all(|f| !f.required))
+    // Nothing on a card is required: what the user left blank goes back as
+    // no answer, and the bot can ask again.
+    card.state = ChoiceState::Answered;
 }
 
 /// Question + options as plain lines, for a peer who cannot click the card.
@@ -394,13 +396,11 @@ fn parse_json_field(v: &Value, i: usize) -> Option<ChoiceField> {
     let secret = v.get("secret").and_then(Value::as_bool).unwrap_or(false)
         || typed_secret
         || looks_secret(label);
-    let required = v.get("required").and_then(Value::as_bool).unwrap_or(true);
     Some(ChoiceField {
         id: field_id(i),
         label: label.to_string(),
         value,
         secret,
-        required,
     })
 }
 
@@ -709,13 +709,15 @@ mod tests {
     }
 
     #[test]
-    fn apply_empty_answers_stays_pending() {
+    fn an_unknown_pick_goes_back_as_no_answer() {
         let mut card = from_tool_detail(
             r#"{"question":"어느 쪽을 고를래?","options":[{"label":"A"},{"label":"B"}]}"#,
         )
         .unwrap();
         apply_answers(&mut card, &[vec!["nope".into()]], &[], &[], false);
-        assert_eq!(card.state, ChoiceState::Pending);
+        assert_eq!(card.state, ChoiceState::Answered);
+        assert!(card.questions[0].selected.is_empty());
+        assert_eq!(format_answer(&card), "어느 쪽을 고를래? → (no answer)");
     }
 
     #[test]
@@ -785,7 +787,8 @@ mod tests {
         )
         .unwrap();
         apply_answers(&mut card, &[], &[], &["   ".into()], false);
-        assert_eq!(card.state, ChoiceState::Pending);
+        assert_eq!(card.state, ChoiceState::Answered);
+        assert_eq!(format_answer(&card), "어느 쪽? → (no answer)");
     }
 
     #[test]
@@ -841,9 +844,62 @@ mod tests {
         assert_eq!(q.fields[1].label, "비밀번호");
         assert_eq!(q.fields[1].value, "ChangeMe123!");
         assert!(q.fields[1].secret);
-        assert!(q.fields[1].required);
         assert!(card_from_cli("Q", &[], &[], None).is_err());
         assert!(card_from_cli("Q", &[], &["".into()], None).is_err());
+    }
+
+    #[test]
+    fn many_cli_questions_are_one_card_answered_together() {
+        let ask = |q: &str, options: &[&str], multi: bool| AskQuestion {
+            question: q.into(),
+            options: options.iter().map(|s| s.to_string()).collect(),
+            multi,
+            ..AskQuestion::default()
+        };
+        let mut card = card_from_asks(&[
+            ask("머지해도 될까요?", &["네", "아니요"], false),
+            ask("어느 스키마?", &["48", "36", "56"], true),
+            AskQuestion {
+                question: "브랜치 이름".into(),
+                inputs: vec!["이름".into()],
+                multi: true,
+                ..AskQuestion::default()
+            },
+        ])
+        .unwrap();
+        assert_eq!(card.questions.len(), 3);
+        assert!(!card.questions[0].multi);
+        assert!(card.questions[1].multi);
+        assert!(!card.questions[2].multi, "a form has nothing to pick");
+
+        // Skipped questions go back as no answer.
+        let mut partial = card.clone();
+        apply_answers(&mut partial, &[vec!["A".into()]], &[], &[], false);
+        assert_eq!(partial.state, ChoiceState::Answered);
+        assert_eq!(
+            format_answer(&partial),
+            "머지해도 될까요? → 네\n어느 스키마? → (no answer)\n브랜치 이름 → (no answer)"
+        );
+        apply_answers(
+            &mut card,
+            &[vec!["A".into()], vec!["A".into(), "C".into()], vec![]],
+            &[vec![], vec![], vec!["main".into()]],
+            &[],
+            false,
+        );
+        assert_eq!(card.state, ChoiceState::Answered);
+        assert_eq!(
+            format_answer(&card),
+            "머지해도 될까요? → 네\n어느 스키마? → 48, 56\n브랜치 이름\n이름: main"
+        );
+
+        let err = card_from_asks(&[
+            ask("머지해도 될까요?", &["네", "아니요"], false),
+            ask("어느 스키마?", &["48"], false),
+        ])
+        .unwrap_err();
+        assert!(err.to_string().contains("어느 스키마?"), "{err}");
+        assert!(card_from_asks(&[]).is_err());
     }
 
     #[test]
@@ -875,26 +931,29 @@ mod tests {
     }
 
     #[test]
-    fn missing_required_input_is_not_complete() {
+    fn a_blank_answer_still_goes_back() {
         let mut card =
             from_tool_detail(r#"{"question":"이름","inputs":[{"label":"이름"}]}"#).unwrap();
         apply_answers(&mut card, &[], &[vec!["".into()]], &[], false);
-        assert_eq!(card.state, ChoiceState::Pending);
-        assert!(!is_complete(&card));
+        assert_eq!(card.state, ChoiceState::Answered);
+        assert_eq!(format_answer(&card), "이름 → (no answer)");
+
+        let mut card =
+            from_tool_detail(r#"{"question":"이름","inputs":[{"label":"이름"}]}"#).unwrap();
         apply_answers(&mut card, &[], &[vec!["Ada".into()]], &[], false);
-        assert!(is_complete(&card));
         assert_eq!(format_answer(&card), "이름\n이름: Ada");
     }
 
     #[test]
-    fn optional_empty_fields_are_complete() {
-        let mut card =
-            from_tool_detail(r#"{"question":"메모","fields":[{"label":"메모","required":false}]}"#)
+    fn an_older_required_flag_is_ignored() {
+        let card =
+            from_tool_detail(r#"{"question":"메모","fields":[{"label":"메모","required":true}]}"#)
                 .unwrap();
-        apply_answers(&mut card, &[], &[vec!["".into()]], &[], false);
-        assert!(is_complete(&card));
-        assert_eq!(card.state, ChoiceState::Answered);
-        assert_eq!(format_answer(&card), "메모");
+        let line = serde_json::to_string(&card).unwrap();
+        assert!(!line.contains("required"));
+        let old = r#"{"id":"a","label":"메모","required":true}"#;
+        let field: ChoiceField = serde_json::from_str(old).unwrap();
+        assert_eq!(field.label, "메모");
     }
 
     #[test]

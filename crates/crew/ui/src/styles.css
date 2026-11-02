@@ -2319,6 +2319,113 @@ button.sys-note:focus-visible {
 .choice-q + .choice-q {
   border-top: 1px solid var(--line);
 }
+/* Several questions: the rest of the stack shows as card edges below the
+   front one, each a little narrower and fainter. */
+.choice-stack {
+  position: relative;
+  margin-top: var(--space-8);
+  padding-bottom: calc(var(--behind, 0) * 6px);
+}
+.choice-stack[data-behind="1"] { --behind: 1; }
+.choice-stack[data-behind="2"] { --behind: 2; }
+.choice-stack > .choice-card {
+  position: relative;
+  z-index: 3;
+  margin-top: 0;
+}
+.choice-layer {
+  position: absolute;
+  inset: 0 0 calc(var(--behind, 0) * 6px);
+  z-index: calc(3 - var(--layer));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--elevated);
+  opacity: calc(1 - var(--layer) * 0.3);
+  transform: translateY(calc(var(--layer) * 6px)) scaleX(calc(1 - var(--layer) * 0.04));
+  transition: transform var(--dur) var(--ease-out), opacity var(--dur) var(--ease);
+}
+/* One grid cell for every step: the cell takes the largest, so the card
+   holds its size while the hidden ones keep their place. */
+.choice-steps {
+  display: grid;
+}
+/* A tall step scrolls inside the card instead of stretching every step. */
+.choice-steps > .choice-q {
+  grid-area: 1 / 1;
+  border-top: 0;
+  max-height: 360px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Its title and close button stay in view while it scrolls. */
+.choice-steps > .choice-q > .choice-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--elevated);
+}
+.choice-steps > .choice-q.is-away {
+  visibility: hidden;
+}
+.choice-q.is-turn-next {
+  animation: choice-turn-next 0.22s var(--ease-out);
+}
+.choice-q.is-turn-prev {
+  animation: choice-turn-prev 0.22s var(--ease-out);
+}
+@keyframes choice-turn-next {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes choice-turn-prev {
+  from { opacity: 0; transform: translateX(-16px); }
+  to { opacity: 1; transform: none; }
+}
+.choice-summary {
+  display: flex;
+  flex-direction: column;
+}
+/* The question, and its answer on the line below. */
+.choice-sum-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  padding: var(--space-10) var(--space-12);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease);
+}
+.choice-sum-row:hover {
+  background: color-mix(in srgb, var(--chip) 45%, transparent);
+}
+.choice-sum-q {
+  color: var(--muted);
+  font-size: var(--text-md);
+  line-height: 1.35;
+}
+.choice-sum-a {
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.choice-sum-row.is-missing .choice-sum-a {
+  color: var(--faint);
+  font-weight: 500;
+}
+@media (prefers-reduced-motion: reduce) {
+  .choice-q.is-turn-next,
+  .choice-q.is-turn-prev { animation: none; }
+  .choice-layer { transition: none; }
+}
 .choice-head {
   display: flex;
   align-items: center;
@@ -2535,10 +2642,6 @@ button.choice-option:active:not(:disabled) .choice-badge {
   color: var(--ink);
   line-height: 1.3;
 }
-.choice-req {
-  color: var(--blocked);
-  font-weight: 650;
-}
 .choice-input {
   background: var(--bg);
 }
@@ -2555,6 +2658,66 @@ button.choice-option:active:not(:disabled) .choice-badge {
 }
 .choice-foot.is-form {
   justify-content: flex-start;
+}
+.choice-foot.is-steps {
+  align-items: center;
+  justify-content: flex-start;
+}
+.choice-step {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: var(--space-6) var(--space-8);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-md);
+  cursor: pointer;
+}
+.choice-step:hover:not(:disabled) {
+  background: var(--chip);
+}
+.choice-step:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+.choice-step.is-next {
+  background: var(--chip);
+}
+.choice-step.is-next:hover {
+  background: var(--chip-hover);
+}
+.choice-dots {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  gap: var(--space-6);
+}
+.choice-dot {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  border: 1.5px solid var(--faint);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  transition: transform var(--dur) var(--ease-out), background-color var(--dur) var(--ease);
+}
+.choice-dot.is-done {
+  border-color: var(--working);
+  background: var(--working);
+}
+.choice-dot.is-here {
+  transform: scale(1.35);
+  border-color: var(--ink);
+}
+.choice-dot.is-here.is-done {
+  border-color: var(--working);
+}
+.choice-dot.is-summary {
+  border-radius: 2px;
 }
 .choice-submit {
   border: 0;

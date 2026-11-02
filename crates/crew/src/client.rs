@@ -594,6 +594,7 @@ mod tests {
                 inputs: Vec::new(),
                 hint: None,
                 multi: false,
+                more: Vec::new(),
             }),
             None,
             "Ask waits on a person"
@@ -665,6 +666,7 @@ mod tests {
                     inputs: Vec::new(),
                     hint: None,
                     multi: false,
+                    more: Vec::new(),
                 },
                 None,
             )

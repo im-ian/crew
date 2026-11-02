@@ -1,4 +1,4 @@
-import type { ChoiceOption } from "./types";
+import type { ChoiceOption, ChoiceQuestion } from "./types";
 
 export function shortLabels(options: ChoiceOption[]): boolean {
   return options.every((o) => (o.label || "").trim().length <= 3);
@@ -30,4 +30,37 @@ export function otherBadge(options: ChoiceOption[]): string {
     if (!taken.has(letter)) return letter;
   }
   return "+";
+}
+
+/**
+ * Whether the user gave this question anything. Nothing is required: a card
+ * can go back with questions left blank, and they read as no answer.
+ */
+export function questionDone(
+  q: ChoiceQuestion,
+  picks: string[] = [],
+  values: string[] = [],
+  other = "",
+): boolean {
+  const picked = (q.options || []).length > 0 && (picks.length > 0 || other.trim() !== "");
+  return picked || values.some((v) => v.trim() !== "");
+}
+
+/** One question's answer as one line, for the summary card. Secrets stay hidden. */
+export function answerSummary(
+  q: ChoiceQuestion,
+  picks: string[] = [],
+  values: string[] = [],
+  other = "",
+): string {
+  const parts = (q.options || [])
+    .filter((o) => picks.includes(o.id))
+    .map((o) => (o.label || "").trim() || o.id);
+  if (other.trim()) parts.push(other.trim());
+  (q.fields || []).forEach((f, fi) => {
+    const v = (values[fi] || "").trim();
+    if (!v) return;
+    parts.push(`${f.label}: ${f.secret ? "••••••" : v}`);
+  });
+  return parts.join(", ");
 }

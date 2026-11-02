@@ -1,4 +1,14 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type RefObject,
+  type WheelEvent as ReactWheelEvent,
+} from "react";
 import { ARRIVE_MS, OPEN_SLACK_MS, playArrive, useArriving } from "../arrive";
 import { useLocale, useT } from "../LocaleContext";
 import type { TFn } from "../i18n";
@@ -8,6 +18,7 @@ import type {
   AgentInfo,
   ChatMessage,
   ChoiceCard as ChoiceCardData,
+  ChoiceQuestion,
   Kind,
 } from "../types";
 import { resolveFace } from "../avatar";
@@ -25,7 +36,14 @@ import {
   toolSummary,
   type ThreadRow,
 } from "../tools";
-import { answeredOptionView, optionView, otherBadge, shortLabels } from "../choiceView";
+import {
+  answeredOptionView,
+  optionView,
+  otherBadge,
+  answerSummary,
+  questionDone,
+  shortLabels,
+} from "../choiceView";
 import { routineSwitchName } from "../routineNote";
 import { queueActions, shownInThread, userLineAppearance } from "../sendGate";
 import { isSelfMentionDelivery } from "../mentions";
@@ -46,7 +64,7 @@ import {
   VIRTUAL_THRESHOLD,
 } from "../virtualThread";
 import { firstUnreadId } from "../readCursors";
-import { ChevronDown, Reply, X } from "../icons";
+import { ChevronDown, ChevronLeft, ChevronRight, Reply, X } from "../icons";
 import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
 import { MdBody } from "./MdBody";
@@ -1591,6 +1609,12 @@ function ApprovalCard({
   );
 }
 
+/** Card edges shown behind the question in front. */
+const STACK_BEHIND = 2;
+/** Trackpad travel for one turn, and the rest before the next one. */
+const SWIPE_FAR = 60;
+const SWIPE_REST_MS = 550;
+
 function ChoiceCard({
   card,
   onAnswer,
@@ -1618,6 +1642,45 @@ function ChoiceCard({
   );
   const [sent, setSent] = useState(false);
   const open = pending && !sent;
+  // Several questions are a stack: one in front, the rest as card edges
+  // behind it, and a summary of every answer last. The card holds the size
+  // of its largest step, so nothing moves as it turns. Answered, the card
+  // lists them all again.
+  const stacked = open && questions.length > 1;
+  const [step, setStep] = useState(0);
+  const [turn, setTurn] = useState<"next" | "prev" | null>(null);
+  const total = questions.length + 1;
+  const onSummary = step === questions.length;
+  const swipe = useRef({ swept: 0, until: 0 });
+
+  function go(next: number) {
+    if (next === step || next < 0 || next >= total) return;
+    setTurn(next > step ? "next" : "prev");
+    setStep(next);
+  }
+
+  // A two-finger swipe on a trackpad turns one step per gesture. Fingers
+  // moving left bring the next one, as it comes in from the right.
+  function onStackWheel(e: ReactWheelEvent) {
+    if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+    const s = swipe.current;
+    if (Date.now() < s.until) return;
+    s.swept += e.deltaX;
+    if (Math.abs(s.swept) < SWIPE_FAR) return;
+    go(step + (s.swept > 0 ? 1 : -1));
+    s.swept = 0;
+    s.until = Date.now() + SWIPE_REST_MS;
+  }
+
+  function done(qi: number, nextPicks = picks, nextValues = values, nextOthers = others) {
+    return questionDone(questions[qi], nextPicks[qi], nextValues[qi], nextOthers[qi]);
+  }
+
+  // Enter in a text box: on to the next card, or send a single question.
+  function enter() {
+    if (stacked) go(step + 1);
+    else submit();
+  }
 
   function toggle(qi: number, id: string, multi: boolean) {
     if (!open || !onAnswer) return;
@@ -1656,34 +1719,8 @@ function ChoiceCard({
     );
   }
 
-  function complete(nextPicks = picks, nextValues = values, nextOthers = others) {
-    const allOk = questions.every((q, qi) => {
-      const fields = q.fields || [];
-      const fieldOk = fields.every((f, fi) => {
-        if (f.required === false) return true;
-        return (nextValues[qi]?.[fi] || "").trim() !== "";
-      });
-      const optOk =
-        !(q.options || []).length ||
-        (nextPicks[qi] || []).length > 0 ||
-        (nextOthers[qi] || "").trim() !== "";
-      return fieldOk && optOk;
-    });
-    const any = questions.some((_, qi) => {
-      const fields = questions[qi].fields || [];
-      return (
-        (nextPicks[qi] || []).length > 0 ||
-        (nextOthers[qi] || "").trim() !== "" ||
-        (nextValues[qi] || []).some((v) => v.trim()) ||
-        (fields.length > 0 && fields.every((f) => f.required === false))
-      );
-    });
-    return allOk && any;
-  }
-
   function submit() {
     if (!open || !onAnswer) return;
-    if (!complete()) return;
     void send(picks, values, others, false);
   }
 
@@ -1702,178 +1739,289 @@ function ChoiceCard({
     }
   }
 
-  return (
-    <div className={"choice-card is-" + card.state}>
-      {questions.map((q, qi) => {
-        const header = (q.header || q.question || "").trim();
-        const hint =
-          (q.hint || "").trim() ||
-          (q.header &&
-          q.question &&
-          q.header.trim() !== q.question.trim()
-            ? q.question.trim()
-            : "");
-        const selected = pending ? picks[qi] || [] : q.selected || [];
-        const fields = q.fields || [];
-        const fieldValues = values[qi] || fields.map((f) => f.value || "");
-        const showFields = fields.length > 0 && card.state !== "closed";
-        const showList =
-          (q.options || []).length > 0 &&
-          (open ||
-            (card.state === "answered" && (q.multi || questions.length > 1)));
-        const picked = (q.options || []).filter((o) => selected.includes(o.id));
-        const other = pending ? others[qi] || "" : q.other || "";
-        // Below the options: an answer the bot did not list.
-        const badge = otherBadge(q.options || []);
-        // Per question, not per option: "A" beside "백오프" as a badge reads as
-        // two kinds of answer.
-        const short = shortLabels(q.options || []);
-        return (
-          <div className="choice-q" key={q.question + qi}>
-            <div className="choice-head">
-              <div className="choice-title">{header}</div>
-              {open && onAnswer && !hasFields ? (
+  const closeButton = (
+    <button
+      type="button"
+      className="choice-x"
+      title={t("thread.choiceClose")}
+      aria-label={t("thread.choiceClose")}
+      onClick={() => void send(picks, values, others, true)}
+    >
+      <X size={14} />
+    </button>
+  );
+
+  // In a stack every step keeps its place; only the one in front shows.
+  function stepClass(i: number) {
+    if (!stacked) return "";
+    if (i !== step) return " is-away";
+    return turn ? " is-turn-" + turn : "";
+  }
+  function awayProps(i: number) {
+    const away = stacked && i !== step;
+    return { inert: away, "aria-hidden": away || undefined };
+  }
+
+  function renderQuestion(q: ChoiceQuestion, qi: number) {
+    const header = (q.header || q.question || "").trim();
+    const hint =
+      (q.hint || "").trim() ||
+      (q.header &&
+      q.question &&
+      q.header.trim() !== q.question.trim()
+        ? q.question.trim()
+        : "");
+    const selected = pending ? picks[qi] || [] : q.selected || [];
+    const fields = q.fields || [];
+    const fieldValues = values[qi] || fields.map((f) => f.value || "");
+    const showFields = fields.length > 0 && card.state !== "closed";
+    const showList =
+      (q.options || []).length > 0 &&
+      (open ||
+        (card.state === "answered" && (q.multi || questions.length > 1)));
+    const picked = (q.options || []).filter((o) => selected.includes(o.id));
+    const other = pending ? others[qi] || "" : q.other || "";
+    // Below the options: an answer the bot did not list.
+    const badge = otherBadge(q.options || []);
+    // Per question, not per option: "A" beside "백오프" as a badge reads as
+    // two kinds of answer.
+    const short = shortLabels(q.options || []);
+    // Closing ends the whole card, so it sits once: on the first
+    // question, or on the one in front of the stack. A stack keeps it up
+    // here even with text boxes, since its foot holds Back and Next.
+    const first = stacked || qi === 0;
+    return (
+      <div className={"choice-q" + stepClass(qi)} key={q.question + qi} {...awayProps(qi)}>
+        <div className="choice-head">
+          <div className="choice-title">{header}</div>
+          {first && open && onAnswer && (stacked || !hasFields) ? closeButton : null}
+          {first && card.state === "closed" ? (
+            <span className="choice-closed">{t("thread.choiceClosed")}</span>
+          ) : null}
+        </div>
+        {hint && card.state !== "closed" ? (
+          <MdBody className="choice-hint md" text={hint} agents={[]} />
+        ) : null}
+        {q.multi && open && (q.options || []).length ? (
+          <div className="choice-multi">{t("thread.choiceMulti")}</div>
+        ) : null}
+        {showFields ? (
+          <div className="choice-fields">
+            {fields.map((f, fi) => {
+              const id = `${card.id}-${qi}-${f.id || fi}`;
+              return (
+                <label className="choice-field" key={f.id || fi} htmlFor={id}>
+                  <span className="choice-field-label">{f.label}</span>
+                  <input
+                    id={id}
+                    className="textin choice-input"
+                    type={f.secret ? "password" : "text"}
+                    value={fieldValues[fi] || ""}
+                    disabled={!open || !onAnswer}
+                    autoComplete="off"
+                    onChange={(e) => setField(qi, fi, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" || e.nativeEvent.isComposing) {
+                        return;
+                      }
+                      e.preventDefault();
+                      enter();
+                    }}
+                  />
+                </label>
+              );
+            })}
+          </div>
+        ) : null}
+        {showList ? (
+          <div className="choice-list">
+            {(q.options || []).map((o, oi) => {
+              const view = optionView(o, oi, short);
+              const on = selected.includes(o.id);
+              return (
                 <button
                   type="button"
-                  className="choice-x"
-                  title={t("thread.choiceClose")}
-                  aria-label={t("thread.choiceClose")}
-                  onClick={() => void send(picks, values, others, true)}
+                  key={o.id}
+                  className={"choice-option" + (on ? " is-on" : "")}
+                  disabled={!open || !onAnswer}
+                  onClick={() => toggle(qi, o.id, !!q.multi)}
                 >
-                  <X size={14} />
-                </button>
-              ) : null}
-              {card.state === "closed" ? (
-                <span className="choice-closed">{t("thread.choiceClosed")}</span>
-              ) : null}
-            </div>
-            {hint && card.state !== "closed" ? (
-              <MdBody className="choice-hint md" text={hint} agents={[]} />
-            ) : null}
-            {q.multi && open && (q.options || []).length ? (
-              <div className="choice-multi">{t("thread.choiceMulti")}</div>
-            ) : null}
-            {showFields ? (
-              <div className="choice-fields">
-                {fields.map((f, fi) => {
-                  const required = f.required !== false;
-                  const id = `${card.id}-${qi}-${f.id || fi}`;
-                  return (
-                    <label className="choice-field" key={f.id || fi} htmlFor={id}>
-                      <span className="choice-field-label">
-                        {f.label}
-                        {required ? (
-                          <span className="choice-req"> *</span>
-                        ) : null}
-                      </span>
-                      <input
-                        id={id}
-                        className="textin choice-input"
-                        type={f.secret ? "password" : "text"}
-                        value={fieldValues[fi] || ""}
-                        disabled={!open || !onAnswer}
-                        autoComplete="off"
-                        onChange={(e) => setField(qi, fi, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key !== "Enter" || e.nativeEvent.isComposing) {
-                            return;
-                          }
-                          e.preventDefault();
-                          submit();
-                        }}
-                      />
-                    </label>
-                  );
-                })}
-              </div>
-            ) : null}
-            {showList ? (
-              <div className="choice-list">
-                {(q.options || []).map((o, oi) => {
-                  const view = optionView(o, oi, short);
-                  const on = selected.includes(o.id);
-                  return (
-                    <button
-                      type="button"
-                      key={o.id}
-                      className={"choice-option" + (on ? " is-on" : "")}
-                      disabled={!open || !onAnswer}
-                      onClick={() => toggle(qi, o.id, !!q.multi)}
-                    >
-                      <span className="choice-badge">{view.badge}</span>
-                      {view.title || view.sub ? (
-                        <span className="choice-copy">
-                          {view.title ? (
-                            <span className="choice-label">{view.title}</span>
-                          ) : null}
-                          {view.sub ? (
-                            <span className="choice-desc">{view.sub}</span>
-                          ) : null}
-                        </span>
-                      ) : null}
-                    </button>
-                  );
-                })}
-                {open || other.trim() ? (
-                  <label
-                    className={
-                      "choice-option choice-other" + (other.trim() ? " is-on" : "")
-                    }
-                  >
-                    <span className="choice-badge">{badge}</span>
-                    <input
-                      className="choice-other-input"
-                      type="text"
-                      value={other}
-                      placeholder={t("thread.choiceOther")}
-                      disabled={!open || !onAnswer}
-                      autoComplete="off"
-                      onChange={(e) => setOther(qi, e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key !== "Enter" || e.nativeEvent.isComposing) {
-                          return;
-                        }
-                        e.preventDefault();
-                        submit();
-                      }}
-                    />
-                  </label>
-                ) : null}
-              </div>
-            ) : picked.length || other.trim() ? (
-              <div className="choice-picked">
-                {picked.map((o) => {
-                  const view = answeredOptionView(q.options || [], o);
-                  return (
-                    <div className="choice-option is-on" key={o.id}>
-                      <span className="choice-badge">{view.badge}</span>
-                      {view.title ? (
-                        <span className="choice-copy">
-                          <span className="choice-label">{view.title}</span>
-                        </span>
-                      ) : null}
-                    </div>
-                  );
-                })}
-                {other.trim() ? (
-                  <div className="choice-option is-on">
-                    <span className="choice-badge">{badge}</span>
+                  <span className="choice-badge">{view.badge}</span>
+                  {view.title || view.sub ? (
                     <span className="choice-copy">
-                      <span className="choice-label">{other.trim()}</span>
+                      {view.title ? (
+                        <span className="choice-label">{view.title}</span>
+                      ) : null}
+                      {view.sub ? (
+                        <span className="choice-desc">{view.sub}</span>
+                      ) : null}
                     </span>
-                  </div>
-                ) : null}
+                  ) : null}
+                </button>
+              );
+            })}
+            {open || other.trim() ? (
+              <label
+                className={
+                  "choice-option choice-other" + (other.trim() ? " is-on" : "")
+                }
+              >
+                <span className="choice-badge">{badge}</span>
+                <input
+                  className="choice-other-input"
+                  type="text"
+                  value={other}
+                  placeholder={t("thread.choiceOther")}
+                  disabled={!open || !onAnswer}
+                  autoComplete="off"
+                  onChange={(e) => setOther(qi, e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" || e.nativeEvent.isComposing) {
+                      return;
+                    }
+                    e.preventDefault();
+                    enter();
+                  }}
+                />
+              </label>
+            ) : null}
+          </div>
+        ) : picked.length || other.trim() ? (
+          <div className="choice-picked">
+            {picked.map((o) => {
+              const view = answeredOptionView(q.options || [], o);
+              return (
+                <div className="choice-option is-on" key={o.id}>
+                  <span className="choice-badge">{view.badge}</span>
+                  {view.title ? (
+                    <span className="choice-copy">
+                      <span className="choice-label">{view.title}</span>
+                    </span>
+                  ) : null}
+                </div>
+              );
+            })}
+            {other.trim() ? (
+              <div className="choice-option is-on">
+                <span className="choice-badge">{badge}</span>
+                <span className="choice-copy">
+                  <span className="choice-label">{other.trim()}</span>
+                </span>
               </div>
             ) : null}
           </div>
-        );
-      })}
+        ) : null}
+      </div>
+    );
+  }
+
+  if (stacked) {
+    const behind = Math.min(total - 1 - step, STACK_BEHIND);
+    const summary = (
+      <div className={"choice-q" + stepClass(questions.length)} key="summary" {...awayProps(questions.length)}>
+        <div className="choice-head">
+          <div className="choice-title">{t("thread.choiceSummary")}</div>
+          {onAnswer ? closeButton : null}
+        </div>
+        <div className="choice-summary">
+          {questions.map((q, qi) => {
+            const ok = done(qi);
+            return (
+              <button
+                type="button"
+                key={q.question + qi}
+                className={"choice-sum-row" + (ok ? "" : " is-missing")}
+                onClick={() => go(qi)}
+              >
+                <span className="choice-sum-q">{(q.header || q.question || "").trim()}</span>
+                <span className="choice-sum-a">
+                  {ok
+                    ? answerSummary(q, picks[qi], values[qi], others[qi])
+                    : t("thread.choiceUnanswered")}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+    return (
+      <div className="choice-stack" data-behind={behind} onWheel={onStackWheel}>
+        {Array.from({ length: behind }, (_, i) => (
+          <div className="choice-layer" key={i} style={{ "--layer": i + 1 } as CSSProperties} />
+        ))}
+        <div className="choice-card is-pending">
+          <div className="choice-steps">
+            {questions.map(renderQuestion)}
+            {summary}
+          </div>
+          {onAnswer ? (
+            <div className="choice-foot is-steps">
+              <button
+                type="button"
+                className="choice-step"
+                disabled={step === 0}
+                onClick={() => go(step - 1)}
+              >
+                <ChevronLeft size={14} />
+                {t("thread.choicePrev")}
+              </button>
+              <div className="choice-dots">
+                {Array.from({ length: total }, (_, i) => {
+                  const isSummary = i === questions.length;
+                  return (
+                    <button
+                      type="button"
+                      key={i}
+                      className={
+                        "choice-dot" +
+                        (i === step ? " is-here" : "") +
+                        (isSummary ? " is-summary" : done(i) ? " is-done" : "")
+                      }
+                      aria-label={
+                        isSummary
+                          ? t("thread.choiceSummary")
+                          : t("thread.choiceStep", { n: i + 1, total: questions.length })
+                      }
+                      aria-current={i === step ? "step" : undefined}
+                      onClick={() => go(i)}
+                    />
+                  );
+                })}
+              </div>
+              {onSummary ? (
+                <button
+                  type="button"
+                  className="choice-submit"
+                  onClick={submit}
+                >
+                  {t("thread.choiceSubmit")}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="choice-step is-next"
+                  onClick={() => go(step + 1)}
+                >
+                  {t(step === questions.length - 1 ? "thread.choiceReview" : "thread.choiceNext")}
+                  <ChevronRight size={14} />
+                </button>
+              )}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={"choice-card is-" + card.state}>
+      {questions.map(renderQuestion)}
       {open && onAnswer ? (
         <div className={"choice-foot" + (hasFields ? " is-form" : "")}>
           <button
             type="button"
             className="choice-submit"
-            disabled={!complete()}
             onClick={submit}
           >
             {t(hasFields ? "thread.choiceContinue" : "thread.choiceSubmit")}
