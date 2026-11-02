@@ -170,7 +170,7 @@ pub fn last_ts(key: &str) -> u64 {
     };
     chat.messages
         .iter()
-        .filter(|m| is_for_user(m))
+        .filter(|m| is_news(m))
         .map(|m| m.ts)
         .max()
         .unwrap_or(0)
@@ -181,6 +181,17 @@ pub fn last_ts(key: &str) -> u64 {
 /// on the user.
 fn is_for_user(msg: &ChatMessage) -> bool {
     msg.peer.is_none() || msg.choice.is_some() || msg.approval.is_some()
+}
+
+/// Something the user would come back to read. A tool call is work, not a
+/// message, and the thread hides it by default; a subagent's note is folded
+/// away too. Either one lit the unread dot on a chat with nothing new in it.
+/// A card on a tool call still waits on the user.
+fn is_news(msg: &ChatMessage) -> bool {
+    if !is_for_user(msg) || is_subagent_note(msg) {
+        return false;
+    }
+    msg.kind != Some(MessageKind::Tool) || msg.choice.is_some() || msg.approval.is_some()
 }
 
 /// The bot that asked for the turn starting here, or None for the user's own
@@ -222,13 +233,7 @@ pub fn preview(agent: &str) -> Option<String> {
 /// has not gone out, so the line before it stays. A reply in a side chat was
 /// not said here.
 fn preview_line(msg: &ChatMessage) -> Option<String> {
-    if msg.queued || !is_for_user(msg) {
-        return None;
-    }
-    if msg.kind == Some(MessageKind::Tool) && msg.choice.is_none() && msg.approval.is_none() {
-        return None;
-    }
-    if is_subagent_note(msg) {
+    if msg.queued || !is_news(msg) {
         return None;
     }
     let shown = crate::rows::display_text(msg);
@@ -2003,6 +2008,24 @@ mod tests {
         assert_eq!(last_ts(&agent), msg.ts);
         assert!(msg.ts > 0);
         drop_agent(&agent);
+    }
+
+    /// A bot at work only runs tools. Nothing it said is new, so the dot stays
+    /// off until a card on one of those calls waits on the user.
+    #[test]
+    fn a_tool_call_alone_leaves_the_chat_read() {
+        crate::paths::testing::with_home("tool-read", || {
+            let agent = "tool-read";
+            let seen = push_user(agent, "user", "hi");
+            std::thread::sleep(Duration::from_millis(5));
+            let tool = push_tool(agent, Some("c1"), "Bash", "{\"command\":\"ls\"}");
+            assert!(tool.ts > seen.ts);
+            assert_eq!(last_ts(agent), seen.ts, "a tool call is not news");
+
+            set_approval(agent, &tool.id, ApprovalState::Pending);
+            assert_eq!(last_ts(agent), tool.ts, "a card waiting on the user is news");
+            drop_agent(agent);
+        });
     }
 
     /// 빵셔틀 only answered 가위바위보. That answer is 가위바위보's news, so
