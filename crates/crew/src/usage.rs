@@ -1,8 +1,10 @@
 //! How much of each CLI's plan is used, for the sidebar. Claude reports it on
 //! every turn (`rate_limit_event`), so the daemon keeps the last one it saw.
-//! Grok writes its weekly credits to its own log, and Codex its windows to
-//! each session file, which are read as is. Antigravity prints a report on
-//! `agy -p /usage`, which is run at most every few minutes.
+//! Grok writes its weekly credits to its own log when it fetches them. That
+//! line is often older than the last two megabytes, so the search walks back,
+//! and a reading already seen is kept when the log has nothing newer. Codex
+//! writes its windows to each session file, which are read as is. Antigravity
+//! prints a report on `agy -p /usage`, which is run at most every few minutes.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -149,18 +151,110 @@ fn claude_config_dir() -> Option<PathBuf> {
     env_dir("CLAUDE_CONFIG_DIR").or_else(|| user_home().map(|h| h.join(".claude")))
 }
 
-/// Grok logs its weekly credits each time it fetches them.
+/// Grok logs its weekly credits when it fetches them. Headless runs often
+/// never fetch, so the last line can sit far behind the end of the log.
 fn grok_usage() -> Option<PlanUsage> {
     let root = env_dir("GROK_HOME").or_else(|| user_home().map(|h| h.join(".grok")))?;
-    let text = read_tail(&root.join("logs").join("unified.jsonl"), GROK_TAIL_BYTES)?;
+    let path = root.join("logs").join("unified.jsonl");
+    let len = fs::metadata(&path).ok()?.len();
+    let kept = read_grok_kept();
+    if let Some(text) = read_range(&path, len.saturating_sub(GROK_TAIL_BYTES), len) {
+        if let Some(usage) = newest_billing(&text) {
+            write_grok_kept(&usage, len);
+            return Some(usage);
+        }
+    }
+    // The tail is the only place a fetch can land while this process is
+    // polling. A fetch during a long gap can sit further back.
+    let stale_tail = kept
+        .as_ref()
+        .is_some_and(|k| len >= k.log_bytes && len - k.log_bytes <= GROK_TAIL_BYTES);
+    if !stale_tail {
+        if let Some(usage) = scan_grok_log(&path, len) {
+            write_grok_kept(&usage, len);
+            return Some(usage);
+        }
+    }
+    let kept = kept?;
+    if len < kept.log_bytes {
+        return None;
+    }
+    if len != kept.log_bytes {
+        write_grok_kept(&kept.usage, len);
+    }
+    Some(kept.usage)
+}
+
+/// What Crew last read, plus how far through the log that search went.
+#[derive(Serialize, Deserialize)]
+struct GrokKept {
+    #[serde(flatten)]
+    usage: PlanUsage,
+    log_bytes: u64,
+}
+
+fn grok_store() -> PathBuf {
+    crate::paths::home_dir().join("plan-usage-grok.json")
+}
+
+fn read_grok_kept() -> Option<GrokKept> {
+    let text = fs::read_to_string(grok_store()).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+fn write_grok_kept(usage: &PlanUsage, log_bytes: u64) {
+    let Ok(text) = serde_json::to_string(&GrokKept {
+        usage: usage.clone(),
+        log_bytes,
+    }) else {
+        return;
+    };
+    let path = grok_store();
+    let tmp = path.with_extension("json.tmp");
+    if fs::write(&tmp, text).is_ok() {
+        let _ = fs::rename(&tmp, &path);
+    }
+}
+
+fn newest_billing(text: &str) -> Option<PlanUsage> {
     text.lines()
         .rev()
-        .filter(|line| line.contains("billing: fetched credits config"))
+        .filter(|line| line.contains(GROK_BILLING))
         .find_map(|line| parse_grok_line(&serde_json::from_str(line).ok()?))
 }
 
-/// The log grows by megabytes; the last fetch is near its end.
+/// Newest credits line in the last `GROK_SCAN_MAX` bytes. Chunks overlap so a
+/// line that crosses a boundary is still whole in the next chunk.
+fn scan_grok_log(path: &Path, len: u64) -> Option<PlanUsage> {
+    let mut end = len;
+    let mut covered = 0u64;
+    while end > 0 && covered < GROK_SCAN_MAX {
+        let start = end.saturating_sub(GROK_TAIL_BYTES);
+        let from = if end == len {
+            start
+        } else {
+            start.saturating_sub(GROK_OVERLAP)
+        };
+        let text = read_range(path, from, end)?;
+        if let Some(usage) = newest_billing(&text) {
+            return Some(usage);
+        }
+        covered += end - start;
+        if start == 0 {
+            break;
+        }
+        end = start;
+    }
+    None
+}
+
+const GROK_BILLING: &str = "billing: fetched credits config";
+/// First look is the tail. A fetch during normal use lands here.
 const GROK_TAIL_BYTES: u64 = 2 * 1024 * 1024;
+/// How far back a cold read walks when the tail has no fetch.
+const GROK_SCAN_MAX: u64 = 32 * 1024 * 1024;
+/// A credits line is under a kilobyte. This covers one split across a chunk.
+const GROK_OVERLAP: u64 = 8 * 1024;
 
 fn parse_grok_line(v: &Value) -> Option<PlanUsage> {
     let config = v.pointer("/ctx/config")?;
@@ -402,6 +496,28 @@ fn read_tail(path: &Path, max: u64) -> Option<String> {
     Some(String::from_utf8_lossy(&buf).into_owned())
 }
 
+/// Bytes in `[start, end)`. A start in the middle of a line leaves that line short.
+fn read_range(path: &Path, start: u64, end: u64) -> Option<String> {
+    let mut file = fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let end = end.min(len);
+    if start >= end {
+        return Some(String::new());
+    }
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = vec![0u8; (end - start) as usize];
+    let mut filled = 0;
+    while filled < buf.len() {
+        match file.read(&mut buf[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(_) => return None,
+        }
+    }
+    buf.truncate(filled);
+    Some(String::from_utf8_lossy(&buf).into_owned())
+}
+
 /// `2026-11-02T00:33:32.018044+00:00` or `…Z`, to Unix seconds. Only UTC
 /// offsets of whole hours and minutes are read, which is all these logs write.
 fn parse_utc(s: &str) -> Option<i64> {
@@ -518,6 +634,78 @@ mod tests {
         let v = json!({"ctx": {"config": {"creditUsagePercent": 5.0,
             "currentPeriod": {"type": "USAGE_PERIOD_TYPE_MONTHLY"}}}});
         assert!(parse_grok_line(&v).is_none());
+    }
+
+    fn grok_credits_line(percent: f64) -> String {
+        format!(
+            r#"{{"ts":"2026-10-29T03:18:22.175Z","msg":"billing: fetched credits config","ctx":{{"config":{{"creditUsagePercent":{percent},"currentPeriod":{{"type":"USAGE_PERIOD_TYPE_WEEKLY","end":"2026-11-09T00:33:32Z"}}}}}}}}"#
+        )
+    }
+
+    fn write_log(dir: &Path, body: &[u8]) {
+        let path = dir.join("logs").join("unified.jsonl");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
+    }
+
+    /// The credits line is older than the two-megabyte tail, which is how a
+    /// headless run looks after the last fetch.
+    #[test]
+    fn a_grok_credits_line_behind_the_tail_is_still_read() {
+        crate::paths::testing::with_home("grok-behind", || {
+            let root = crate::paths::home_dir().join("grok");
+            let mut body = grok_credits_line(42.0).into_bytes();
+            body.push(b'\n');
+            body.extend(std::iter::repeat(b'x').take((GROK_TAIL_BYTES + 64) as usize));
+            write_log(&root, &body);
+            std::env::set_var("GROK_HOME", &root);
+            let used = grok_usage().unwrap().weekly.unwrap().used_percent;
+            std::env::remove_var("GROK_HOME");
+            assert_eq!(used, 42.0);
+        });
+    }
+
+    /// Once seen, the reading stays after the line has left the log. A newer
+    /// fetch that is itself behind the tail replaces it.
+    #[test]
+    fn a_seen_grok_reading_is_kept_and_a_later_one_replaces_it() {
+        crate::paths::testing::with_home("grok-kept", || {
+            let root = crate::paths::home_dir().join("grok");
+            let mut body = grok_credits_line(42.0).into_bytes();
+            body.push(b'\n');
+            body.extend(std::iter::repeat(b'x').take((GROK_TAIL_BYTES + 64) as usize));
+            write_log(&root, &body);
+            std::env::set_var("GROK_HOME", &root);
+            assert_eq!(grok_usage().unwrap().weekly.unwrap().used_percent, 42.0);
+
+            // The fetch line is gone, and the new bytes are still inside one tail.
+            write_log(
+                &root,
+                &vec![b'y'; (body.len() + 100).max((GROK_TAIL_BYTES + 32) as usize)],
+            );
+            assert_eq!(grok_usage().unwrap().weekly.unwrap().used_percent, 42.0);
+
+            let gap = vec![b'\n'; (GROK_TAIL_BYTES + 128) as usize];
+            let mut next = gap.clone();
+            next.extend(grok_credits_line(7.0).into_bytes());
+            next.push(b'\n');
+            next.extend(gap);
+            // Larger than the kept watermark by more than one tail, with the
+            // new fetch before that tail.
+            let watermark = fs::metadata(root.join("logs").join("unified.jsonl"))
+                .unwrap()
+                .len();
+            if (next.len() as u64) < watermark + GROK_TAIL_BYTES + 1 {
+                next.extend(
+                    std::iter::repeat(b'\n')
+                        .take((watermark + GROK_TAIL_BYTES + 1 - next.len() as u64) as usize),
+                );
+            }
+            write_log(&root, &next);
+            let used = grok_usage().unwrap().weekly.unwrap().used_percent;
+            std::env::remove_var("GROK_HOME");
+            assert_eq!(used, 7.0);
+        });
     }
 
     #[test]
