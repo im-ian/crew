@@ -1195,7 +1195,8 @@ button.avatar {
 .work-kb {
   left: 2%;
   width: 96%;
-  bottom: -38%;
+  /* Over the face's lower edge, hanging no further than a list row's padding (a quarter of the 32px box). */
+  bottom: -15%;
 }
 .work-kb svg { display: block; width: 100%; overflow: visible; }
 .work-kb .key {
