@@ -195,6 +195,12 @@ fn get_snapshot(agent: String) -> Result<SnapshotView, String> {
     }
 }
 
+/// How much of each named CLI's plan is used. Reads files, so off the main thread.
+#[tauri::command(async)]
+fn plan_usage(clis: Vec<String>) -> Vec<crate::usage::PlanUsage> {
+    crate::usage::snapshot(&clis)
+}
+
 #[tauri::command]
 fn list_groups() -> Result<Vec<SidebarGroup>, String> {
     crate::groups::load().map_err(|e| e.to_string())
@@ -901,6 +907,7 @@ pub fn run() -> anyhow::Result<()> {
             remove_group_memory,
             list_groups,
             set_groups,
+            plan_usage,
             list_models,
             search_crew,
             list_skills,

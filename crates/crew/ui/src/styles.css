@@ -325,6 +325,101 @@ html.peek-resizing * {
 .rail-foot .icon-btn {
   color: var(--muted);
 }
+.rail-foot { gap: var(--space-4); }
+.plan-usage-btn { position: relative; }
+.plan-usage-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--blocked);
+}
+.plan-usage-pop {
+  position: fixed;
+  z-index: 30;
+  width: 220px;
+  padding: var(--space-8) var(--space-10, 10px);
+  background: var(--menu);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+.plan-usage-pop .plan-usage { padding: 0; }
+.plan-usage-empty { margin: 0; font-size: 12px; color: var(--muted); }
+.dialog.plan-usage-modal h3 { margin-bottom: var(--space-16); }
+.plan-usage-detail { display: flex; flex-direction: column; gap: var(--space-12, 12px); }
+.plan-usage-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-12, 12px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.plan-usage-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+}
+.plan-usage-card-head strong { font-size: 14px; color: var(--ink); }
+.plan-usage-line { display: flex; flex-direction: column; gap: var(--space-4); font-size: 12px; color: var(--muted); }
+.plan-usage-line-top { display: flex; justify-content: space-between; align-items: baseline; }
+.plan-usage-big { font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.plan-usage-line .plan-usage-meter { height: 6px; border-radius: 3px; }
+.plan-usage-line.warn .plan-usage-big { color: var(--blocked); }
+.plan-usage-line.warn .plan-usage-meter > span { background: var(--blocked); }
+.plan-usage-line-sub { font-size: 11px; color: var(--faint); min-height: 1em; }
+.plan-usage-source, .plan-usage-note { margin: 0; font-size: 11px; color: var(--faint); }
+.plan-usage {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: minmax(0, auto) repeat(var(--plan-cols), minmax(0, 1fr));
+  column-gap: var(--space-8);
+  row-gap: var(--space-4);
+  padding: var(--space-8) var(--rail-pad) 0;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.plan-usage-row { display: contents; }
+.plan-usage-head > span { font-size: 10px; opacity: 0.8; }
+.plan-usage-cli {
+  color: var(--ink);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 72px;
+}
+.plan-usage-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+}
+.plan-usage-num { white-space: nowrap; }
+.plan-usage-meter {
+  position: relative;
+  width: 100%;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.plan-usage-meter > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--muted);
+}
+.plan-usage-cell.warn { color: var(--blocked); }
+.plan-usage-cell.warn .plan-usage-meter > span { background: var(--blocked); }
 .rail-foot .icon-btn:hover { color: var(--ink); }
 .settings-action {
   display: block;

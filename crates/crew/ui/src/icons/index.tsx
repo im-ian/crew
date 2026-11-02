@@ -64,6 +64,15 @@ export function Settings(props: Props) {
   );
 }
 
+export function Gauge(props: Props) {
+  return (
+    <Icon {...props}>
+      <path d="m12 14 4-4" />
+      <path d="M3.34 19a10 10 0 1 1 17.32 0" />
+    </Icon>
+  );
+}
+
 export function Plus(props: Props) {
   return (
     <Icon {...props}>

@@ -65,6 +65,19 @@ export type FocusTarget = {
   name?: string;
 };
 
+/** One limit window. `resetsAt` is Unix seconds. */
+export type PlanWindow = { usedPercent: number; resetsAt?: number | null };
+
+/** How much of a CLI's plan is used. A window it does not have right now is null. */
+export type PlanUsage = {
+  cli: string;
+  fiveHour?: PlanWindow | null;
+  weekly?: PlanWindow | null;
+  capturedAt?: number | null;
+  /** Separate pools inside one plan, each with its own weekly window. */
+  groups?: { name: string; window: PlanWindow }[];
+};
+
 export type AgentInfo = {
   id: string;
   name: string;
