@@ -40,6 +40,7 @@ fn main() {
             "remove_group_memory",
             "list_groups",
             "set_groups",
+            "plan_usage",
             "list_models",
             "search_crew",
             "list_skills",

@@ -859,6 +859,7 @@ fn spawn_and_stream(
                 }
                 if cli == CliKind::Claude {
                     note_claude_background(&v, &mut state);
+                    crate::usage::note_claude_event(&v);
                     for note in claude_subagent_notes(&v, &mut state) {
                         crate::transcript::push_subagent(
                             &session.id,

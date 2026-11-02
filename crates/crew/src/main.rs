@@ -24,6 +24,7 @@ mod skills;
 mod targeting;
 mod tool_card;
 mod transcript;
+mod usage;
 #[cfg(debug_assertions)]
 mod ui_dev;
 

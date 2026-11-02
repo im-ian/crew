@@ -46,6 +46,7 @@
     "allow-remove-group-memory",
     "allow-list-groups",
     "allow-set-groups",
+    "allow-plan-usage",
     "allow-list-models",
     "allow-search-crew",
     "allow-list-skills",

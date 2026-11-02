@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plan-usage"
+description = "Enables the plan_usage command without any pre-configured scope."
+commands.allow = ["plan_usage"]
+
+[[permission]]
+identifier = "deny-plan-usage"
+description = "Denies the plan_usage command without any pre-configured scope."
+commands.deny = ["plan_usage"]
