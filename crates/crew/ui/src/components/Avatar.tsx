@@ -1,6 +1,7 @@
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import { avatarColor, avatarPhase, initialOf, resolveFace } from "../avatar";
 import type { AgentStatus } from "../types";
+import { useBotSignal } from "../botSignals";
 import { useWorkLook, type WorkLook } from "../workLook";
 import { BotFace } from "./BotFace";
 import { WorkProps } from "./WorkProps";
@@ -87,7 +88,9 @@ export function Avatar({
   const face = showFace ? resolveFace(id, shape, color) : null;
   const live = faceStatus(status, badge);
   const drawn = useWorkLook(live === "working", id);
-  const look = live === "working" ? (workLook ?? drawn) : null;
+  const signal = useBotSignal(id);
+  // A bot waiting on an answer is not busy, so it sets its tools down.
+  const look = live === "working" && !signal.asking ? (workLook ?? drawn) : null;
   const letterBg = id ? avatarColor(id) : "#3a3a3c";
   const cls = [
     "avatar",
@@ -117,6 +120,7 @@ export function Avatar({
           color={face.color}
           status={live}
           look={look}
+          signal={signal}
           lookAt={lookAt}
         />
       ) : null}

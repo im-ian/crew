@@ -18,6 +18,7 @@ import {
 import { openPendingOnFocus } from "./focusChat";
 import { useT } from "./LocaleContext";
 import { loadNotify } from "./notifyPref";
+import { publishBotSignals } from "./botSignals";
 import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
 import {
   adoptNewGroups,
@@ -530,6 +531,8 @@ export function useCrew() {
       sel = list[0]?.id ?? null;
     }
     selectedRef.current = { id: sel, kind: "agent" };
+    // Before the list state, so a face sees its status and signal together.
+    publishBotSignals(list);
     setAgents(list);
     if (groupsLoaded.current) {
       const pruned = pruneLayout(groupsRef.current, list);
