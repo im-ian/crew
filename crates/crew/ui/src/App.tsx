@@ -27,6 +27,7 @@ import {
   saveThemePref,
   type ThemePref,
 } from "./theme";
+import { loadChatWidth, saveChatWidth } from "./chatWidth";
 import { loadDelivery, saveDelivery } from "./deliveryPref";
 import { loadShowTools, saveShowTools } from "./tools";
 import { waitingEdit, waitingIds } from "./queuePick";
@@ -47,6 +48,7 @@ export function App() {
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [theme, setTheme] = useState<ThemePref>(loadThemePref);
   const [showTools, setShowTools] = useState(loadShowTools);
+  const [chatWidth, setChatWidth] = useState(loadChatWidth);
   const [delivery, setDelivery] = useState(loadDelivery);
   const [jumpSeq, setJumpSeq] = useState(0);
   const [queuePick, setQueuePick] = useState<string | null>(null);
@@ -270,7 +272,13 @@ export function App() {
         searchRef={searchRef}
         onOpenSettings={() => setSettingsOpen(true)}
       />
-      <main className={peekOpen ? "has-peek" : undefined}>
+      <main
+        className={
+          [peekOpen && "has-peek", chatWidth === "narrow" && "narrow-chat"]
+            .filter(Boolean)
+            .join(" ") || undefined
+        }
+      >
         <div className="titlebar-align" data-tauri-drag-region />
         {/* `connected` starts null — not checked yet, which is not a failure. */}
         <ConnectionBanner
@@ -449,6 +457,11 @@ export function App() {
         open={settingsOpen}
         theme={theme}
         onTheme={setTheme}
+        chatWidth={chatWidth}
+        onChatWidth={(width) => {
+          setChatWidth(width);
+          saveChatWidth(width);
+        }}
         showTools={showTools}
         onShowTools={(show) => {
           setShowTools(show);

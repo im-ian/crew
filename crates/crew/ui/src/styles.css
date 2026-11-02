@@ -1455,6 +1455,60 @@ button.avatar {
 .empty-rail[data-rail-empty="1"] {
   text-align: center;
 }
+/* The folded rail: faces only, every label moves to the hover title. Rows
+   carry their own `.compact` so the drag ghost, portalled out of the rail,
+   folds with them. */
+aside.folded .search-row {
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: 0 var(--rail-pad);
+}
+/* Out of sight but still focusable, so ⌘K reaches it and opens the rail. */
+aside.folded .search-row .search {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+aside.folded .search-row .icon-btn {
+  width: var(--control-h);
+  height: var(--control-h);
+  color: var(--muted);
+}
+aside.folded .search-row .icon-btn:hover { color: var(--ink); }
+aside.folded .rail-foot {
+  flex-direction: column;
+}
+aside.folded .empty-rail {
+  /* "Drop here" has no room; the strip stays as a drop target. */
+  font-size: 0;
+  min-height: var(--space-12);
+  padding: 0;
+}
+.group-head.compact {
+  justify-content: center;
+  padding: var(--space-6) 0 var(--space-4);
+}
+.group-head.compact .group-name,
+.group-head.compact .group-more {
+  display: none;
+}
+.rail-row.compact {
+  grid-template-columns: 32px;
+  justify-content: center;
+}
+.rail-row.compact .rail-row-text { display: none; }
+.rail-row.compact .unread-dot {
+  right: auto;
+  left: calc(50% + 9px);
+  top: 5px;
+  margin-top: 0;
+  box-shadow: 0 0 0 2px var(--rail);
+}
+.rail-row.compact.active .unread-dot { box-shadow: 0 0 0 2px var(--active); }
+.rail-row.compact:hover .unread-dot { box-shadow: 0 0 0 2px var(--hover); }
 main {
   --peek-w: clamp(320px, 42%, 480px);
   display: grid;
@@ -1469,6 +1523,18 @@ main {
    percentages resolve against main's width, so the two always agree. */
 main.has-peek {
   padding-right: var(--peek-w);
+}
+/* The narrow view caps the text column, not the room: the gutter grows past the
+   usual pad, so the scrollbar and the side panel stay where they were. The
+   percentage resolves against the room's width at each use. */
+main.narrow-chat {
+  --chat-gutter: max(var(--content-pad), calc((100% - 960px) / 2));
+}
+main.narrow-chat > header,
+main.narrow-chat > .composer,
+main.narrow-chat > .thread-wrap > .thread {
+  padding-left: var(--chat-gutter);
+  padding-right: var(--chat-gutter);
 }
 .update-banner-slot,
 .conn-banner-slot {

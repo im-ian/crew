@@ -15,16 +15,17 @@ import { groupOrderChanges, itemKey, parseItemKey } from "../groups";
 import type { AgentInfo, Group, Kind, SearchHit } from "../types";
 import { listStamp } from "../clock";
 import { mentionRuns, mentionText } from "../mentions";
-import { numberDuplicateNames } from "../rail";
+import { foldsAt, numberDuplicateNames, RAIL_FOLDED } from "../rail";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
 import { PlanUsageButton } from "./PlanUsageBar";
-import { ChevronDown, Ellipsis, Plus, Settings } from "../icons";
+import { ChevronDown, Ellipsis, Plus, Search, Settings } from "../icons";
 
 const RAIL_DEFAULT = 232;
 const RAIL_MIN = 176;
 const RAIL_MAX = 480;
 const RAIL_KEY = "crew.rail-w";
+const FOLD_KEY = "crew.rail-folded";
 
 function clampRail(px: number, vw = window.innerWidth): number {
   const max = Math.max(RAIL_MIN, Math.min(RAIL_MAX, Math.floor(vw * 0.5)));
@@ -46,6 +47,22 @@ function loadRail(): number {
 function saveRail(px: number) {
   try {
     localStorage.setItem(RAIL_KEY, String(px));
+  } catch {
+    /* private mode / quota */
+  }
+}
+
+function loadFolded(): boolean {
+  try {
+    return localStorage.getItem(FOLD_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+function saveFolded(on: boolean) {
+  try {
+    localStorage.setItem(FOLD_KEY, on ? "on" : "off");
   } catch {
     /* private mode / quota */
   }
@@ -374,18 +391,39 @@ export function Sidebar({
   const searching = !!query.trim();
   const empty = !all.length;
 
-  const [preferredRail, setPreferredRail] = useState(() => {
-    const w = loadRail();
-    applyRail(clampRail(w));
-    return w;
-  });
+  // Folding keeps the open width, so opening the rail again lands where it was.
+  const [folded, setFoldedState] = useState(loadFolded);
+  const [preferredRail, setPreferredRail] = useState(loadRail);
   const [viewW, setViewW] = useState(() => window.innerWidth);
   const railW = clampRail(preferredRail, viewW);
-  const dragRail = useRef<{ startX: number; startW: number } | null>(null);
+  const shownW = folded ? RAIL_FOLDED : railW;
+  const dragRail = useRef<{
+    startX: number;
+    startW: number;
+    /** The open width before the drag, kept if the drag ends folded. */
+    startPref: number;
+    startFolded: boolean;
+  } | null>(null);
+  const foldedRef = useRef(folded);
+  foldedRef.current = folded;
 
   useLayoutEffect(() => {
-    applyRail(railW);
-  }, [railW]);
+    applyRail(shownW);
+  }, [shownW]);
+
+  function setFolded(on: boolean, persist: boolean) {
+    setFoldedState(on);
+    if (persist) saveFolded(on);
+    // The folded rail has no field to show a filter in, so it lists every bot.
+    if (on && query) onQuery("");
+  }
+
+  // A group name being edited needs the open rail to be readable.
+  useEffect(() => {
+    if (folded && renamingId && groups.some((g) => g.id === renamingId)) {
+      setFolded(false, true);
+    }
+  }, [folded, renamingId, groups]);
 
   useEffect(() => {
     function onWin() {
@@ -398,6 +436,7 @@ export function Sidebar({
   function setRail(next: number, persist: boolean) {
     const stored = clampRail(next);
     setPreferredRail(stored);
+    setFolded(false, persist);
     if (persist) saveRail(stored);
   }
 
@@ -406,18 +445,26 @@ export function Sidebar({
     e.preventDefault();
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
-    dragRail.current = { startX: e.clientX, startW: railW };
+    dragRail.current = {
+      startX: e.clientX,
+      startW: shownW,
+      startPref: preferredRail,
+      startFolded: folded,
+    };
     document.documentElement.classList.add("rail-resizing");
   }
 
   function onRailPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
     const drag = dragRail.current;
     if (!drag) return;
-    setRail(drag.startW + (e.clientX - drag.startX), false);
+    const next = drag.startW + (e.clientX - drag.startX);
+    if (foldsAt(next)) setFolded(true, false);
+    else setRail(next, false);
   }
 
   function onRailPointerUp(e: ReactPointerEvent<HTMLDivElement>) {
-    if (!dragRail.current) return;
+    const drag = dragRail.current;
+    if (!drag) return;
     dragRail.current = null;
     document.documentElement.classList.remove("rail-resizing");
     try {
@@ -425,20 +472,28 @@ export function Sidebar({
     } catch {
       /* already released */
     }
+    // Passing the floor on the way to folding clamped the width to it; an
+    // open rail that ends folded opens again at the width it had.
+    const keep = foldedRef.current && !drag.startFolded;
     setPreferredRail((w) => {
-      saveRail(w);
-      return w;
+      const next = keep ? drag.startPref : w;
+      saveRail(next);
+      return next;
     });
+    saveFolded(foldedRef.current);
   }
 
   function onRailKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
     const step = e.shiftKey ? 32 : 16;
     if (e.key === "ArrowLeft") {
       e.preventDefault();
-      setRail(preferredRail - step, true);
+      if (folded) return;
+      if (railW <= RAIL_MIN) setFolded(true, true);
+      else setRail(preferredRail - step, true);
     } else if (e.key === "ArrowRight") {
       e.preventDefault();
-      setRail(preferredRail + step, true);
+      if (folded) setFolded(false, true);
+      else setRail(preferredRail + step, true);
     } else if (e.key === "Home") {
       e.preventDefault();
       setRail(RAIL_MIN, true);
@@ -653,9 +708,11 @@ export function Sidebar({
   }
 
   return (
-    <aside>
+    <aside className={folded ? "folded" : undefined}>
       <div className="drag-top" data-tauri-drag-region />
       <div className="search-row">
+        {/* A folded rail keeps the field in the tree so ⌘K can still reach
+            it; focusing it opens the rail. */}
         <input
           ref={searchRef}
           className="search"
@@ -666,7 +723,26 @@ export function Sidebar({
           spellCheck={false}
           value={query}
           onChange={(e) => onQuery(e.target.value)}
+          tabIndex={folded ? -1 : undefined}
+          onFocus={() => {
+            if (folded) setFolded(false, true);
+          }}
         />
+        {folded ? (
+          <button
+            type="button"
+            className="icon-btn search-open"
+            title={t("sidebar.searchTitle")}
+            aria-label={t("sidebar.search")}
+            onClick={(e) =>
+              e.currentTarget.parentElement
+                ?.querySelector<HTMLInputElement>(".search")
+                ?.focus()
+            }
+          >
+            <Search />
+          </button>
+        ) : null}
         <button
           type="button"
           className="icon-btn"
@@ -681,7 +757,7 @@ export function Sidebar({
           <Plus />
         </button>
       </div>
-      {searchHits.length ? (
+      {searchHits.length && !folded ? (
         <div className="search-hits">
           {searchHits.slice(0, 12).map((hit) => (
             <button
@@ -726,6 +802,7 @@ export function Sidebar({
                 >
                   <GroupHead
                     group={group}
+                    compact={folded}
                     renaming={renamingId === group.id}
                     searching={searching}
                     dropInto={
@@ -758,6 +835,7 @@ export function Sidebar({
                       <ItemRow
                         key={item.key}
                         item={item}
+                        compact={folded}
                         agents={agents}
                         active={selectedKind === item.kind && selected === item.id}
                         unread={unread.includes(item.key)}
@@ -791,6 +869,7 @@ export function Sidebar({
                   <ItemRow
                     key={item.key}
                     item={item}
+                    compact={folded}
                     agents={agents}
                     active={selectedKind === item.kind && selected === item.id}
                     unread={unread.includes(item.key)}
@@ -835,9 +914,9 @@ export function Sidebar({
         role="separator"
         aria-orientation="vertical"
         aria-label={t("sidebar.resize")}
-        aria-valuemin={RAIL_MIN}
+        aria-valuemin={RAIL_FOLDED}
         aria-valuemax={RAIL_MAX}
-        aria-valuenow={railW}
+        aria-valuenow={shownW}
         tabIndex={0}
         onPointerDown={onRailPointerDown}
         onPointerMove={onRailPointerMove}
@@ -872,7 +951,11 @@ export function Sidebar({
               >
                 {drag.kind === "group" ? (
                   <div
-                    className={"group-head" + (drag.collapsed ? " collapsed" : "")}
+                    className={
+                      "group-head" +
+                      (drag.collapsed ? " collapsed" : "") +
+                      (folded ? " compact" : "")
+                    }
                   >
                     <span className="group-toggle" aria-hidden>
                       <ChevronDown className="group-chevron" size={14} />
@@ -880,7 +963,7 @@ export function Sidebar({
                     <span className="group-name">{drag.groupName}</span>
                   </div>
                 ) : (
-                  <ItemRow item={drag.item} agents={agents} ghost />
+                  <ItemRow item={drag.item} agents={agents} compact={folded} ghost />
                 )}
               </div>
             </>,
@@ -893,6 +976,7 @@ export function Sidebar({
 
 function GroupHead({
   group,
+  compact,
   renaming,
   searching,
   dropInto,
@@ -905,6 +989,8 @@ function GroupHead({
   onPointerDown,
 }: {
   group: Group;
+  /** The folded rail: the chevron alone, the name on hover. */
+  compact?: boolean;
   renaming: boolean;
   searching: boolean;
   dropInto?: boolean;
@@ -944,10 +1030,11 @@ function GroupHead({
       className={
         "group-head" +
         (!searching && group.collapsed ? " collapsed" : "") +
-        (dropInto ? " drop-into" : "")
+        (dropInto ? " drop-into" : "") +
+        (compact ? " compact" : "")
       }
       data-rail-group-head={group.id}
-      title={group.path || undefined}
+      title={compact ? group.name : group.path || undefined}
       onPointerDown={onPointerDown}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -958,7 +1045,13 @@ function GroupHead({
       <button
         type="button"
         className="group-toggle"
-        title={group.collapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+        title={
+          compact
+            ? group.name
+            : group.collapsed
+              ? t("sidebar.expand")
+              : t("sidebar.collapse")
+        }
         aria-label={group.collapsed ? t("sidebar.expand") : t("sidebar.collapse")}
         onClick={onToggle}
       >
@@ -1024,6 +1117,7 @@ function GroupHead({
 function ItemRow({
   item,
   agents,
+  compact,
   active,
   unread,
   drafting,
@@ -1035,6 +1129,8 @@ function ItemRow({
 }: {
   item: RailItem;
   agents: AgentInfo[];
+  /** The folded rail: the face alone, the name on hover. */
+  compact?: boolean;
   active?: boolean;
   unread?: boolean;
   drafting?: boolean;
@@ -1103,9 +1199,12 @@ function ItemRow({
       {unread ? <span className="unread-dot" aria-hidden /> : null}
     </>
   );
+  const label =
+    (item.ordinal ? `${item.name} #${item.ordinal}` : item.name) +
+    (drafting ? ` · ${t("sidebar.draft")}` : "");
   if (ghost) {
     return (
-      <div className="rail-row" aria-hidden>
+      <div className={"rail-row" + (compact ? " compact" : "")} aria-hidden>
         {inner}
       </div>
     );
@@ -1115,11 +1214,14 @@ function ItemRow({
       type="button"
       className={
         "rail-row" +
+        (compact ? " compact" : "") +
         (active ? " active" : "") +
         (unread ? " unread" : "") +
         (dragging ? " dragging" : "")
       }
       data-rail-row={item.key}
+      title={compact ? label : undefined}
+      aria-label={compact ? label : undefined}
       onClick={onSelect}
       onContextMenu={(e) => {
         e.preventDefault();

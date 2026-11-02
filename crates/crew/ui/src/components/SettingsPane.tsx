@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { useLocale, useT } from "../LocaleContext";
 import type { Locale } from "../i18n";
+import type { ChatWidth } from "../chatWidth";
 import type { Delivery } from "../deliveryPref";
 import { loadNotify, saveNotify } from "../notifyPref";
 import type { ThemePref } from "../theme";
@@ -14,6 +15,8 @@ type Props = {
   open: boolean;
   theme: ThemePref;
   onTheme: (theme: ThemePref) => void;
+  chatWidth: ChatWidth;
+  onChatWidth: (width: ChatWidth) => void;
   showTools: boolean;
   onShowTools: (show: boolean) => void;
   delivery: Delivery;
@@ -33,6 +36,8 @@ export function SettingsPane({
   open,
   theme,
   onTheme,
+  chatWidth,
+  onChatWidth,
   showTools,
   onShowTools,
   delivery,
@@ -72,6 +77,21 @@ export function SettingsPane({
             <Seg value={theme} options={themes} onChange={onTheme} />
           </Field>
           <p className="apply-note">{themeNote}</p>
+          <Field label={t("settings.chatWidth")}>
+            <Seg
+              value={chatWidth}
+              options={[
+                { value: "full", label: t("settings.chatWidth.full") },
+                { value: "narrow", label: t("settings.chatWidth.narrow") },
+              ]}
+              onChange={onChatWidth}
+            />
+          </Field>
+          <p className="apply-note">
+            {chatWidth === "narrow"
+              ? t("settings.chatWidth.note.narrow")
+              : t("settings.chatWidth.note.full")}
+          </p>
           <Field label={t("settings.language")}>
             <Seg value={locale} options={LANGS} onChange={setLocale} />
           </Field>
