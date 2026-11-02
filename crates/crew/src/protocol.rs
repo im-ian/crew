@@ -302,6 +302,13 @@ pub struct AgentInfo {
     /// Unknown command that chats, instead of a long-lived terminal.
     #[serde(default, skip_serializing_if = "is_false")]
     pub headless: bool,
+    /// The last turn ended in an error and had nothing to say. It stays until
+    /// the next turn starts, so a window opened later still knows.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub failed: bool,
+    /// A question card is open and waiting for the user.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub asking: bool,
 }
 
 fn is_false(v: &bool) -> bool {

@@ -97,6 +97,10 @@ export type AgentInfo = {
   last_ts?: number;
   /** Unknown command that chats. A terminal stub leaves this unset. */
   headless?: boolean;
+  /** The last turn ended in an error with nothing said. Clears when the next turn starts. */
+  failed?: boolean;
+  /** A question card is open and waiting for the user. */
+  asking?: boolean;
 };
 
 export type MessageKind = "sent" | "received" | "routine" | "handoff" | "tool";

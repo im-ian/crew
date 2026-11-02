@@ -7,6 +7,7 @@ import {
 } from "react";
 import { avatarPhase, type AvatarShape } from "../avatar";
 import { EXTRA_BOXES, EXTRA_INKS, extraFace } from "../faceGeometry";
+import { afterglowOf, type BotSignal } from "../botSignals";
 import type { AgentStatus } from "../types";
 import type { WorkLook } from "../workLook";
 
@@ -21,6 +22,8 @@ type Props = {
   mood?: FaceMood | null;
   /** How the face works while `status` is working. The props live in WorkProps. */
   look?: WorkLook | null;
+  /** What the bot's list entry says beyond its status: a failed turn, an open question. */
+  signal?: BotSignal | null;
   /** Client point the idle face follows. Pointer aim wins while the cursor is on the face. */
   lookAt?: { x: number; y: number } | null;
 };
@@ -211,20 +214,31 @@ function liveMood(status?: AgentStatus | null): Mood | null {
   return null;
 }
 
-const HAPPY_MS = 1600;
-
-function useHappy(status?: AgentStatus | null): boolean {
+/**
+ * The face a bot wears for a moment when a run ends: a smile for a quick one, a
+ * dance for a long one, a droop for one that failed. It goes as soon as the bot
+ * starts something else.
+ */
+function useAfterglow(
+  status: AgentStatus | null | undefined,
+  signal: BotSignal | null | undefined,
+): "happy" | "success" | "failure" | null {
   const prev = useRef(status);
-  const [happy, setHappy] = useState(false);
+  const [glow, setGlow] = useState<"happy" | "success" | "failure" | null>(null);
   useEffect(() => {
     const was = prev.current;
     prev.current = status;
-    if (was !== "working" || status !== "idle") return;
-    setHappy(true);
-    const t = setTimeout(() => setHappy(false), HAPPY_MS);
+    if (status !== "idle") {
+      setGlow(null);
+      return;
+    }
+    if (was !== "working") return;
+    const { kind, ms } = afterglowOf(signal ?? undefined);
+    setGlow(kind);
+    const t = setTimeout(() => setGlow(null), ms);
     return () => clearTimeout(t);
   }, [status]);
-  return happy;
+  return glow;
 }
 
 const GAZE_X = 4.6;
@@ -371,11 +385,15 @@ export function BotFace({
   id,
   mood = null,
   look = null,
+  signal = null,
   lookAt = null,
 }: Props) {
   const eyes = eyesAt(shape);
-  const happy = useHappy(status);
-  const live: Mood | null = mood ?? (happy ? "happy" : liveMood(status));
+  const glow = useAfterglow(status, signal);
+  const asking = !!signal?.asking && status !== "exited";
+  const live: Mood | null = mood ?? (asking ? "question" : (glow ?? liveMood(status)));
+  // A held face has its own eyes, so the caret does not steer them.
+  const held = !!mood || asking || glow === "success" || glow === "failure";
   const svgRef = useRef<SVGSVGElement>(null);
   const gazeRef = useRef<{ x: number; y: number } | null>(null);
   const settledRef = useRef(false);
@@ -428,7 +446,7 @@ export function BotFace({
     const follow =
       !pointerRef.current &&
       !!lookAt &&
-      !mood &&
+      !held &&
       status === "idle" &&
       !prefersReducedMotion();
     if (follow) {
@@ -446,7 +464,7 @@ export function BotFace({
   });
 
   useEffect(() => {
-    if (!lookAt || status !== "idle" || mood) return;
+    if (!lookAt || status !== "idle" || held) return;
     const refresh = () => {
       const svg = svgRef.current;
       const point = lookRef.current;
@@ -466,7 +484,7 @@ export function BotFace({
       window.removeEventListener("scroll", refresh, true);
       window.removeEventListener("resize", refresh);
     };
-  }, [lookAt, status, shape, mood]);
+  }, [lookAt, status, shape, held]);
 
   useEffect(() => {
     if (mode !== "return") return;
@@ -533,7 +551,7 @@ export function BotFace({
   function onPointerLeave(e: PointerEvent<SVGSVGElement>) {
     pointerRef.current = false;
     const point = lookRef.current;
-    if (point && status === "idle" && !mood && !prefersReducedMotion()) {
+    if (point && status === "idle" && !held && !prefersReducedMotion()) {
       followCaret(e.currentTarget, point);
       return;
     }
