@@ -464,6 +464,9 @@ pub fn kick(
         inner.seq += 1;
         inner.generation
     };
+    // Cleared here, not on the turn's thread: a stop or a failed spawn that
+    // lands first must not leave the last turn's failure on this one.
+    crate::daemon::note_turn_failed(&session.id, false);
     crate::daemon::emit_agent_frame(&session.id);
     let thread_session = session.clone();
     if let Err(err) = std::thread::Builder::new()
@@ -501,7 +504,6 @@ fn run_turn(
         }
     }
     let mut turn = crate::transcript::begin_turn(&session.id);
-    crate::daemon::note_turn_failed(&session.id, false);
 
     let program = cfg.binary_name();
     let stored = session
@@ -590,7 +592,8 @@ fn run_turn(
     }
 
     // A turn that errored and said nothing is the one the user should see failed.
-    // A stop never gets here: it went stale above.
+    // A stop never gets here: it went stale above. The first-output watch goes
+    // stale too, and marks its own failure.
     let failed;
     match result {
         Ok(outcome) => {

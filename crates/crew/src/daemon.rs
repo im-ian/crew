@@ -690,6 +690,8 @@ pub(crate) fn halt_unheard(id: &str, flight: headless::InFlight) {
     clear_serial_after(id);
     take_wake(id);
     requeue_unanswered(id, flight);
+    // The turn went stale, so run_turn never marks it. A bot that never spoke failed.
+    note_turn_failed(id, true);
     finish_halted_turn(id);
     crate::transcript::push_system(id, "crew", unheard_line(), None);
 }
@@ -720,6 +722,7 @@ fn park_unheard_again(id: &str, flight: headless::InFlight) {
     clear_serial_after(id);
     take_wake(id);
     requeue_unanswered(id, flight);
+    note_turn_failed(id, true);
     finish_halted_turn(id);
     let line = unheard_line();
     let said = crate::transcript::messages(id)
@@ -5016,6 +5019,7 @@ mod daemon_tests {
             });
             assert_eq!(queued_text(&bot), ["하나"]);
             assert!(!agent_busy(&bot).unwrap(), "the stall left the bot working");
+            assert!(turn_failed(&bot), "a CLI that never answered went unmarked");
             std::thread::sleep(Duration::from_millis(300));
             assert_eq!(
                 fs::read_to_string(&log).unwrap().matches("하나").count(),
