@@ -18,6 +18,7 @@ import { mentionRuns, mentionText } from "../mentions";
 import { numberDuplicateNames } from "../rail";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
+import { PlanUsageButton } from "./PlanUsageBar";
 import { ChevronDown, Ellipsis, Plus, Settings } from "../icons";
 
 const RAIL_DEFAULT = 232;
@@ -826,6 +827,7 @@ export function Sidebar({
           >
             <Settings />
           </button>
+          <PlanUsageButton agents={agents} />
         </div>
       ) : null}
       <div
