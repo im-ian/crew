@@ -1470,6 +1470,18 @@ main {
 main.has-peek {
   padding-right: var(--peek-w);
 }
+/* The narrow view caps the text column, not the room: the gutter grows past the
+   usual pad, so the scrollbar and the side panel stay where they were. The
+   percentage resolves against the room's width at each use. */
+main.narrow-chat {
+  --chat-gutter: max(var(--content-pad), calc((100% - 960px) / 2));
+}
+main.narrow-chat > header,
+main.narrow-chat > .composer,
+main.narrow-chat > .thread-wrap > .thread {
+  padding-left: var(--chat-gutter);
+  padding-right: var(--chat-gutter);
+}
 .update-banner-slot,
 .conn-banner-slot {
   min-height: 0;
