@@ -473,10 +473,6 @@ export function App() {
           saveDelivery(mode);
         }}
         onClose={() => setSettingsOpen(false)}
-        onOpenShortcuts={() => {
-          setSettingsOpen(false);
-          setHelpOpen(true);
-        }}
         onOpenSkills={() => {
           setSettingsOpen(false);
           setSkillsOpen(true);
