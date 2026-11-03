@@ -6,17 +6,26 @@ import {
   type ReactNode,
 } from "react";
 import {
-  AVATAR_SHAPES,
+  AVATAR_SHAPE_GROUPS,
   AVATAR_SWATCHES,
   normalizeHex,
   randomFace,
   resolveFace,
   type AvatarShape,
+  type ShapeGroupKey,
 } from "../avatar";
 import { Pencil } from "../icons";
+import type { MessageKey } from "../i18n";
 import { useT } from "../LocaleContext";
 import { usePopover } from "../usePopover";
 import { BotFace } from "./BotFace";
+
+const GROUP_LABEL: Record<ShapeGroupKey, MessageKey> = {
+  shapes: "face.group.shapes",
+  things: "face.group.things",
+  pixel: "face.group.pixel",
+  nature: "face.group.nature",
+};
 
 type Props = {
   id?: string | null;
@@ -187,19 +196,26 @@ export function FacePicker({
         aria-label={t("field.shape")}
         ref={shapeRow}
       >
-          {AVATAR_SHAPES.map((s) => (
-            <button
-              key={s}
-              type="button"
-              role="option"
-              aria-selected={resolved.shape === s}
-              className={"shape-pick" + (resolved.shape === s ? " on" : "")}
-              title={s}
-              onClick={() => onShape(s)}
-            >
-              <BotFace shape={s} color={preview} />
-            </button>
-          ))}
+        {AVATAR_SHAPE_GROUPS.map((group) => (
+          <div className="shape-group" key={group.key}>
+            <div className="shape-group-head">{t(GROUP_LABEL[group.key])}</div>
+            <div className="shape-grid">
+              {group.shapes.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  role="option"
+                  aria-selected={resolved.shape === s}
+                  className={"shape-pick" + (resolved.shape === s ? " on" : "")}
+                  title={s}
+                  onClick={() => onShape(s)}
+                >
+                  <BotFace shape={s} color={preview} />
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
       <div className="color-pane">
         <div className="color-swatches">

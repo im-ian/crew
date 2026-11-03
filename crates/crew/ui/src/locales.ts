@@ -288,6 +288,10 @@ export const KO = {
   "groupSettings.changed": "봇이 먼저 고쳐서 저장하지 않았습니다. 내용을 복사한 뒤 다시 여세요.",
   "groupSettings.memoryPh": "이 그룹의 규칙, 경로, 결정",
 
+  "face.group.shapes": "도형",
+  "face.group.things": "사물",
+  "face.group.pixel": "픽셀",
+  "face.group.nature": "자연",
   "face.random": "랜덤",
   "face.randomAria": "랜덤 조합",
   "face.colorCode": "색상 코드",
@@ -635,6 +639,10 @@ export const EN: { [K in MessageKey]: string } = {
   "groupSettings.changed": "A bot edited it first, so this wasn’t saved. Copy your text and reopen.",
   "groupSettings.memoryPh": "Rules, paths, and decisions for this group",
 
+  "face.group.shapes": "Shapes",
+  "face.group.things": "Things",
+  "face.group.pixel": "Pixel",
+  "face.group.nature": "Nature",
   "face.random": "Random",
   "face.randomAria": "Random mix",
   "face.colorCode": "Color code",
