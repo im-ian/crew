@@ -95,6 +95,7 @@ function RemoteCard({
           {r.connected ? t("sidebar.remoteConnected") : t("sidebar.remoteDisconnected")}
         </span>
       </div>
+      {r.error ? <p className="field-hint field-error remote-card-error">{r.error}</p> : null}
       <dl className="remote-facts">
         <dt>{t("remote.url")}</dt>
         <dd>{r.url}</dd>

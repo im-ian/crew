@@ -4935,6 +4935,9 @@ button.mention-chip:active {
   gap: var(--space-8);
   margin-bottom: var(--space-12);
 }
+.remote-card-error {
+  margin: calc(var(--space-4) * -1) 0 var(--space-12);
+}
 .remote-card-alias {
   color: var(--ink);
   font-size: var(--text-xl);

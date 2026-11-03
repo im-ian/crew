@@ -148,6 +148,8 @@ export type RemoteInfo = {
   delegates: string[];
   trusted: RemoteAccount[];
   blocked: RemoteAccount[];
+  /** Why this PC stopped trying to connect: same account elsewhere, or removed. */
+  error?: string | null;
 };
 
 export type TeamMemory = { text: string; version: number };
