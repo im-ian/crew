@@ -1040,6 +1040,44 @@ button.avatar {
     transition: none;
   }
 }
+/* Moving parts of the sun and moon faces (faceArt.ts). They turn slowly and breathe
+   so they are never mistaken for the working hoop. */
+.cel-spin,
+.cel-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.cel-spin {
+  animation: cel-spin 26s linear infinite;
+  animation-delay: calc(var(--avatar-phase, 0) * -3s);
+}
+.cel-pulse {
+  animation: cel-pulse 3.4s ease-in-out infinite;
+  animation-delay: calc(var(--avatar-phase, 0) * -0.4s);
+}
+.cel-dark {
+  opacity: 0.16;
+  animation: cel-dark 6s ease-in-out infinite;
+  animation-delay: calc(var(--avatar-phase, 0) * -0.7s);
+}
+.cel-crater {
+  opacity: 0.13;
+  animation: cel-crater 7s ease-in-out infinite;
+}
+.cel-crater:nth-of-type(2) { animation-delay: -2.3s; }
+.cel-crater:nth-of-type(3) { animation-delay: -4.6s; }
+@keyframes cel-spin { to { transform: rotate(360deg); } }
+@keyframes cel-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+@keyframes cel-dark { 0%, 100% { opacity: 0.12; } 50% { opacity: 0.26; } }
+@keyframes cel-crater { 0%, 100% { opacity: 0.09; } 50% { opacity: 0.2; } }
+@media (prefers-reduced-motion: reduce) {
+  .cel-spin,
+  .cel-pulse,
+  .cel-dark,
+  .cel-crater {
+    animation: none;
+  }
+}
 /* Working looks. WorkProps draws the props over the avatar box and BotFace adds
    `look-*`, so the face keeps its size. The gaze rules yield while the pointer
    is on the face, so hover still steers the eyes. */

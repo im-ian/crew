@@ -20,19 +20,123 @@ export const AVATAR_SHAPES = [
   "clam-shell",
   "gem",
   "sunny",
-  "cookie",
   "ghostish",
   "clover",
   "burst",
   "flower",
-  "puffy",
-  "puffy-diamond",
   "pixel-circle",
   "pixel-triangle",
   "bun",
+  "crystal",
+  "octagon",
+  "shield",
+  "crown",
+  "cup",
+  "trash",
+  "bulb",
+  "umbrella",
+  "bell",
+  "pixel-heart",
+  "pixel-star",
+  "pixel-diamond",
+  "pixel-ghost",
+  "sun",
+  "crescent",
+  "first-quarter",
+  "full-moon",
+  "last-quarter",
+  "waning-crescent",
+  "blossom",
+  "snowflake",
+  "mushroom",
 ] as const;
 
-export type AvatarShape = (typeof AVATAR_SHAPES)[number];
+// Faces a bot may already carry, but the picker no longer offers. They still
+// draw and still count as valid, so saved faces keep their shape.
+export const LEGACY_SHAPES = ["cookie", "puffy", "puffy-diamond"] as const;
+
+export type AvatarShape =
+  | (typeof AVATAR_SHAPES)[number]
+  | (typeof LEGACY_SHAPES)[number];
+
+export type ShapeGroupKey = "shapes" | "things" | "pixel" | "nature";
+
+/** How the picker lays the shapes out. Every shape in AVATAR_SHAPES sits in one group. */
+export const AVATAR_SHAPE_GROUPS: {
+  key: ShapeGroupKey;
+  shapes: readonly (typeof AVATAR_SHAPES)[number][];
+}[] = [
+  {
+    key: "shapes",
+    shapes: [
+      "circle",
+      "oval",
+      "rounded-square",
+      "square",
+      "pill",
+      "semi-circle",
+      "arch",
+      "teardrop",
+      "crystal",
+      "triangle",
+      "diamond",
+      "pentagon",
+      "hexagon",
+      "octagon",
+      "slanted",
+      "arrow",
+      "gem",
+      "fan",
+      "clam-shell",
+    ],
+  },
+  {
+    key: "things",
+    shapes: [
+      "heart",
+      "star",
+      "burst",
+      "cloud",
+      "ghostish",
+      "bun",
+      "shield",
+      "crown",
+      "cup",
+      "trash",
+      "bulb",
+      "umbrella",
+      "bell",
+    ],
+  },
+  {
+    key: "pixel",
+    shapes: [
+      "pixel-circle",
+      "pixel-triangle",
+      "pixel-heart",
+      "pixel-star",
+      "pixel-diamond",
+      "pixel-ghost",
+    ],
+  },
+  {
+    key: "nature",
+    shapes: [
+      "sun",
+      "sunny",
+      "crescent",
+      "first-quarter",
+      "full-moon",
+      "last-quarter",
+      "waning-crescent",
+      "blossom",
+      "flower",
+      "clover",
+      "snowflake",
+      "mushroom",
+    ],
+  },
+];
 
 export const AVATAR_SWATCHES = [
   "#ff8a3d",
@@ -93,7 +197,11 @@ export function initialOf(name: string | undefined | null): string {
 }
 
 export function isAvatarShape(s: string | null | undefined): s is AvatarShape {
-  return !!s && (AVATAR_SHAPES as readonly string[]).includes(s);
+  return (
+    !!s &&
+    ((AVATAR_SHAPES as readonly string[]).includes(s) ||
+      (LEGACY_SHAPES as readonly string[]).includes(s))
+  );
 }
 
 export function normalizeHex(input: string | null | undefined): string | null {
