@@ -546,6 +546,19 @@ def renamed_member(w):
     settled(w)
 
 
+def profile_follows(w):
+    a, b, c = w["A"], w["B"], w["C"]
+    seen = lambda n: next(m for m in n.remote()["members"] if m["name"] == "A")
+    looks = lambda n: (seen(n).get("role"), seen(n).get("avatar_color"))
+    c.stop()
+    a.cli("agent", "set", a.rep, "--role", "새 역할", "--color", "#ff8800")
+    wait(lambda: looks(b) == ("새 역할", "#ff8800"), 10, "B sees A's new look")
+    c.start()
+    wait(lambda: w.connected(c), 30, "C back online")
+    wait(lambda: looks(c) == ("새 역할", "#ff8800"), 10, "C sees it after waking")
+    settled(w)
+
+
 def tell_expires(w):
     a, c = w["A"], w["C"]
     w.stop_router()
@@ -622,6 +635,7 @@ SCENARIOS = [
     ("A가 주인에게 물어보는 중 C가 취소", cancel_while_owner_is_asked),
     ("A가 꺼진 동안 라우터 재시작", router_restarts_while_a_is_off),
     ("관리자가 B 이름을 바꿈", renamed_member),
+    ("A가 대표 봇 역할·색을 바꿈 (B 바로, 꺼져 있던 C는 켜질 때)", profile_follows),
     ("보관 기간이 지나 만료", tell_expires),
     ("같은 계정을 두 곳에서", same_account_twice),
     ("관리자가 F를 내보냄", kicked_member),
