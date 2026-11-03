@@ -152,6 +152,21 @@ export type RemoteInfo = {
 
 export type TeamMemory = { text: string; version: number };
 
+/** What the add-remote dialog hands back: the sign-up and the bot's AI. */
+export type RemoteJoin = {
+  url: string;
+  alias: string;
+  name: string;
+  invite: string | null;
+  role: string | null;
+  cli: CliKind;
+  model: string;
+  effort: string;
+  cmd: string;
+  shape: string | null;
+  color: string | null;
+};
+
 export type MessageKind = "sent" | "received" | "routine" | "handoff" | "tool";
 export type ApprovalState = "pending" | "allowed" | "denied";
 export type ChoiceState = "pending" | "answered" | "closed";

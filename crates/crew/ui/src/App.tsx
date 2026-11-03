@@ -10,6 +10,7 @@ import { AgentPane } from "./components/AgentPane";
 import { ConnectionBanner } from "./components/ConnectionBanner";
 import { NewBotModal } from "./components/NewBotModal";
 import { NewGroupModal } from "./components/NewGroupModal";
+import { RemoteAddModal } from "./components/RemoteAddModal";
 import { GroupSettingsModal } from "./components/GroupSettingsModal";
 import { SettingsPane } from "./components/SettingsPane";
 import { SkillsPane } from "./components/SkillsPane";
@@ -475,6 +476,12 @@ export function App() {
         onPickFolder={crew.pickFolder}
         onCreate={crew.createNamedGroup}
       />
+      <RemoteAddModal
+        open={crew.remoteAddOpen}
+        aliases={crew.remotes.map((r) => r.alias)}
+        onClose={crew.closeRemoteAdd}
+        onJoin={crew.joinRemote}
+      />
       <GroupSettingsModal
         open={!!crew.groupSettingsId}
         group={crew.groups.find((g) => g.id === crew.groupSettingsId) ?? null}
@@ -546,6 +553,14 @@ function menuItems(
         onClick: () => {
           crew.hideCtx();
           crew.openNewGroup();
+        },
+      },
+      {
+        type: "action",
+        label: t("menu.addRemote"),
+        onClick: () => {
+          crew.hideCtx();
+          crew.openRemoteAdd();
         },
       },
     ];

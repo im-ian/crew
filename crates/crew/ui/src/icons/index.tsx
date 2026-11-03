@@ -279,3 +279,12 @@ export function Keyboard(props: Props) {
     </Icon>
   );
 }
+
+/** Spun by `.spin` while a check is out. */
+export function LoaderCircle(props: Props) {
+  return (
+    <Icon {...props}>
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </Icon>
+  );
+}

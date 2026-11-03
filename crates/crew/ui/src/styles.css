@@ -5167,6 +5167,41 @@ textarea.textin.skill-body {
 .apply-note.is-error {
   color: var(--blocked);
 }
+/* A field's own refusal, in its hint slot so the form does not shift. */
+.field-error { color: var(--blocked); }
+/* Address and port side by side; a port is five digits at most. */
+.remote-address {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  gap: var(--space-10);
+}
+.remote-address .textin:disabled { opacity: 0.5; }
+.dialog p.remote-server {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  color: var(--ink);
+  font-weight: 600;
+}
+.remote-server-url {
+  color: var(--faint);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+.busy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+}
+.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spin { animation-duration: 2.4s; }
+}
 .empty-routines {
   color: var(--muted);
   font-size: var(--text-md);
