@@ -7,7 +7,10 @@ import { useLayoutEffect, useRef, type RefObject } from "react";
  */
 export type OrbitRoll = { rot: number; k: number; r: number };
 
-/** The hoop at rest, the way it is drawn before the first roll and without motion. */
+/**
+ * The hoop at rest, the way it is drawn before the first roll and without motion.
+ * Keep it in step with the `--orbit-*` initial values in styles.css.
+ */
 export const ORBIT_REST: OrbitRoll = { rot: 0, k: 0.42, r: 0.15 };
 
 const between = (rand: () => number, lo: number, hi: number) => lo + rand() * (hi - lo);
@@ -45,6 +48,11 @@ function reducedMotion(): boolean {
   return typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 }
 
+/** The next hoop, read against the motion preference each time so a change takes hold. */
+function pick(rand: () => number): OrbitRoll {
+  return reducedMotion() ? ORBIT_REST : rollOrbit(rand);
+}
+
 /**
  * A working face joins its bot's hoop. The first face of a bot rolls it and keeps
  * rolling it; the last one out stops. Returns the way out.
@@ -56,17 +64,15 @@ export function attachOrbit(
 ): () => void {
   let s = shared.get(key);
   if (!s) {
-    s = { roll: reducedMotion() ? ORBIT_REST : rollOrbit(rand), els: new Set(), timer: null };
+    s = { roll: pick(rand), els: new Set(), timer: null };
     shared.set(key, s);
-    if (!reducedMotion()) {
-      const hold = s;
-      const tick = () => {
-        hold.roll = rollOrbit(rand);
-        for (const e of hold.els) write(e, hold.roll);
-        hold.timer = setTimeout(tick, nextRollMs(rand));
-      };
+    const hold = s;
+    const tick = () => {
+      hold.roll = pick(rand);
+      for (const e of hold.els) write(e, hold.roll);
       hold.timer = setTimeout(tick, nextRollMs(rand));
-    }
+    };
+    hold.timer = setTimeout(tick, nextRollMs(rand));
   }
   s.els.add(el);
   write(el, s.roll);
@@ -93,7 +99,11 @@ export function useOrbitRoll(
   useLayoutEffect(() => {
     const el = ref.current;
     if (!active || !el) return;
+    // A face that joins starts on the hoop the others are on, not gliding to it from rest.
+    el.style.transition = "none";
     const off = attachOrbit(key, el);
+    void el.offsetWidth;
+    el.style.removeProperty("transition");
     return () => {
       off();
       for (const name of ["--orbit-rot", "--orbit-k", "--orbit-r"]) el.style.removeProperty(name);

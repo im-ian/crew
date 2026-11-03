@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { avatarColor, avatarPhase, initialOf, resolveFace } from "../avatar";
 import type { AgentStatus } from "../types";
 import { useBotSignal } from "../botSignals";
@@ -96,9 +96,9 @@ export function Avatar({
   const drawn = useWorkLook(live === "working", id);
   const signal = useBotSignal(id);
   const root = useRef<HTMLElement | null>(null);
-  const setRoot = (el: HTMLElement | null) => {
+  const setRoot = useCallback((el: HTMLElement | null) => {
     root.current = el;
-  };
+  }, []);
   // Two satellites on a hoop that tilts to a new angle every few seconds.
   useOrbitRoll(live === "working", id, root);
   // A bot waiting on an answer is not busy, so it sets its tools down.

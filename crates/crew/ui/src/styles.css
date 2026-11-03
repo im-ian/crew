@@ -1296,7 +1296,8 @@ button.avatar {
    orbitRoll.ts writes --orbit-rot (the plane's turn), --orbit-k (how flat it looks)
    and --orbit-r (how far out it sits) on the avatar, and the avatar glides to each.
    A bead is as tall as it is wide divided by --orbit-k, so the flattening renders it
-   round. Without a roll the registered defaults give the plain tilted hoop. */
+   round. Without a roll the registered defaults give the plain tilted hoop; keep them
+   in step with ORBIT_REST in orbitRoll.ts. */
 @property --orbit-rot {
   syntax: "<angle>";
   inherits: true;
@@ -1385,6 +1386,8 @@ button.avatar {
     animation: none;
   }
   .avatar-orbit.is-back { display: none; }
+  /* the second satellite is only offset by a delay, so at rest it would sit on the first */
+  .avatar-orbit.is-working i + i { display: none; }
   /* back copy is hidden, so the front one carries the whole ring */
   .avatar-orbit.is-front u { clip-path: none; }
 }

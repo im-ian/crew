@@ -41,37 +41,44 @@ describe("nextRollMs", () => {
 });
 
 describe("attachOrbit", () => {
+  // Every face is let go after its test, so a failed assertion cannot leave a bot
+  // and its timer registered for the next one.
+  const live: (() => void)[] = [];
+  const join = (key: string, e: ReturnType<typeof el>, rand?: () => number) => {
+    const off = attachOrbit(key, e, rand);
+    live.push(off);
+    return off;
+  };
   beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    live.splice(0).forEach((off) => off());
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
 
   it("hands the face a hoop at once and a new one every few seconds", () => {
     const a = el();
-    const off = attachOrbit("bot-a", a, seq(0.5, 0.5, 0.5, 0, 0, 0, 0, 0, 0, 0, 0, 0));
+    join("bot-a", a, seq(0.5, 0.5, 0.5, 0, 0, 0, 0, 0, 0, 0, 0, 0));
     expect(a.props.get("--orbit-rot")).toBe("0deg");
     expect(a.props.get("--orbit-k")).toBe("0.46");
     vi.advanceTimersByTime(5000);
     expect(a.props.get("--orbit-rot")).toBe("-85deg");
-    off();
   });
 
   it("gives every face of a bot the same hoop", () => {
     const a = el();
     const b = el();
-    const offA = attachOrbit("bot-b", a);
-    const offB = attachOrbit("bot-b", b);
+    join("bot-b", a);
+    join("bot-b", b);
     expect(b.props.get("--orbit-rot")).toBe(a.props.get("--orbit-rot"));
     vi.advanceTimersByTime(5000);
     expect(b.props.get("--orbit-k")).toBe(a.props.get("--orbit-k"));
     expect(b.props.get("--orbit-r")).toBe(a.props.get("--orbit-r"));
-    offA();
-    offB();
   });
 
   it("keeps rolling while one face is left, and stops when the last goes", () => {
-    const a = el();
-    const b = el();
-    const offA = attachOrbit("bot-c", a);
-    const offB = attachOrbit("bot-c", b);
+    const offA = join("bot-c", el());
+    const offB = join("bot-c", el());
     offA();
     expect(vi.getTimerCount()).toBe(1);
     offB();
@@ -80,7 +87,7 @@ describe("attachOrbit", () => {
 
   it("does not write to a face that left", () => {
     const a = el();
-    const off = attachOrbit("bot-d", a, seq(0.5, 0.2, 0.9, 0.9, 0.9, 0.9));
+    const off = join("bot-d", a, seq(0.5, 0.2, 0.9, 0.9, 0.9, 0.9));
     off();
     a.props.clear();
     vi.advanceTimersByTime(10_000);
@@ -89,21 +96,44 @@ describe("attachOrbit", () => {
 
   it("starts a fresh hoop for a bot that works again", () => {
     const a = el();
-    const first = attachOrbit("bot-e", a, seq(0.1, 0.1, 0.1));
-    first();
+    join("bot-e", a, seq(0.1, 0.1, 0.1))();
     const b = el();
-    const second = attachOrbit("bot-e", b, seq(0.9, 0.9, 0.9));
+    join("bot-e", b, seq(0.9, 0.9, 0.9));
     expect(b.props.get("--orbit-rot")).not.toBe(a.props.get("--orbit-rot"));
-    second();
   });
 
   it("keeps different bots apart", () => {
     const a = el();
     const b = el();
-    const offA = attachOrbit("bot-f", a, seq(0.1, 0.1, 0.1, 0.1, 0.1, 0.1));
-    const offB = attachOrbit("bot-g", b, seq(0.9, 0.9, 0.9, 0.9, 0.9, 0.9));
+    join("bot-f", a, seq(0.1, 0.1, 0.1, 0.1, 0.1, 0.1));
+    join("bot-g", b, seq(0.9, 0.9, 0.9, 0.9, 0.9, 0.9));
     expect(a.props.get("--orbit-rot")).not.toBe(b.props.get("--orbit-rot"));
-    offA();
-    offB();
+  });
+
+  it("holds the plain hoop under reduced motion", () => {
+    vi.stubGlobal("window", { matchMedia: () => ({ matches: true }) });
+    const a = el();
+    join("bot-h", a);
+    expect(a.props.get("--orbit-rot")).toBe("0deg");
+    expect(a.props.get("--orbit-k")).toBe("0.42");
+    expect(a.props.get("--orbit-r")).toBe("0.15");
+    vi.advanceTimersByTime(20_000);
+    expect(a.props.get("--orbit-rot")).toBe("0deg");
+    expect(a.props.get("--orbit-k")).toBe("0.42");
+  });
+
+  it("follows a change of the motion preference while the bot works", () => {
+    let reduced = false;
+    vi.stubGlobal("window", { matchMedia: () => ({ matches: reduced }) });
+    const a = el();
+    join("bot-i", a, seq(0.9, 0.9, 0.9));
+    expect(a.props.get("--orbit-rot")).not.toBe("0deg");
+    reduced = true;
+    vi.advanceTimersByTime(5000);
+    expect(a.props.get("--orbit-rot")).toBe("0deg");
+    expect(a.props.get("--orbit-k")).toBe("0.42");
+    reduced = false;
+    vi.advanceTimersByTime(5000);
+    expect(a.props.get("--orbit-rot")).not.toBe("0deg");
   });
 });
