@@ -112,3 +112,21 @@ export function keepChoiceDraft(id: string, questions: ChoiceQuestion[], draft: 
 export function dropChoiceDraft(id: string) {
   drafts.delete(id);
 }
+
+/** Two options are one click each, so "select all" only shows from three up. */
+export function offersSelectAll(q: ChoiceQuestion): boolean {
+  return !!q.multi && (q.options || []).length > 2;
+}
+
+/** Whether every option of the question is picked. */
+export function allPicked(options: ChoiceOption[], row: string[] = []): boolean {
+  return options.length > 0 && options.every((o) => row.includes(o.id));
+}
+
+/**
+ * The picks after "select all": every option in their order, or none once
+ * all are already on. A typed "other" answer is not an option, so it stays.
+ */
+export function toggleAll(options: ChoiceOption[], row: string[] = []): string[] {
+  return allPicked(options, row) ? [] : options.map((o) => o.id);
+}

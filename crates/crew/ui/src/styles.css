@@ -2847,6 +2847,9 @@ button.choice-option:active:not(:disabled) .choice-badge {
    remount would pop every badge in the history again. */
 .choice-card.is-pending .choice-option.is-on .choice-badge {
   animation: choice-pop 0.32s var(--ease-out);
+  /* Select all sets --pop-i on each row, so the badges pop top down. */
+  animation-delay: calc(var(--pop-i, 0) * 30ms);
+  animation-fill-mode: backwards;
 }
 @keyframes choice-pop {
   0% { transform: scale(0.8); }
@@ -2900,10 +2903,34 @@ button.choice-option:active:not(:disabled) .choice-badge {
   color: var(--ink);
 }
 .choice-multi {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
   padding: 0 var(--space-12) var(--space-10);
   color: var(--muted);
   font-size: var(--text-sm);
   line-height: 1.4;
+}
+/* "Select all" at the end of the multi hint. The negative margin takes back its
+   padding, so the hover pill grows around the words without moving them and
+   the right edge lines up with the close button. */
+.choice-all {
+  flex: none;
+  margin: -3px -8px -3px 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  padding: 3px 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.choice-all:hover {
+  color: var(--working);
+  background: color-mix(in srgb, var(--working) 14%, transparent);
 }
 .choice-fields {
   display: flex;
