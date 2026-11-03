@@ -34,6 +34,11 @@ case "$line" in
     "{crew}" tell {helper} "sub ${{line#*DELEGATE }}" >/dev/null 2>&1
     echo "HANDED $line" ;;
   *SLOW*) sleep 3; echo "ACK $line" ;;
+  *FAIL*) exit 3 ;;
+  *HANG*) sleep 60 ;;
+  *ASK*)
+    "{crew}" ask --question "Proceed?" --option yes --option no >/dev/null 2>&1
+    echo "ASKED $line" ;;
   *) echo "ACK $line" ;;
 esac
 """
@@ -97,8 +102,13 @@ class Node:
         )
         return out.stdout + out.stderr
 
-    def add_bot(self, name, root, helper="nobody"):
+    def add_bot(self, name, root, helper="nobody", program=None):
+        """`program` names the file, so Crew reads it as that CLI: a `grok`
+        bot gets the first-output watch a custom command does not."""
         path = os.path.join(root, f"{self.name}-{name}.sh")
+        if program:
+            os.makedirs(os.path.join(root, f"{self.name}-bin"), exist_ok=True)
+            path = os.path.join(root, f"{self.name}-bin", program)
         with open(path, "w") as f:
             f.write(BOT.format(crew=self.crew, helper=helper))
         os.chmod(path, 0o755)
@@ -116,6 +126,8 @@ class Node:
         return self.rpc({"type": "remote_list"})["remotes"][0]
 
     def rid(self, other):
+        if other.account:
+            return f"{ALIAS}/{other.account}"
         for m in self.remote()["members"]:
             if m["name"] == other.name:
                 return f"{ALIAS}/{m['account']}"
@@ -169,32 +181,31 @@ def together(*fns):
 class World:
     def __init__(self, crew, router):
         self.root = tempfile.mkdtemp(prefix="crew-remote-e2e-")
-        rlog = open(os.path.join(self.root, "router.log"), "w")
-        self.router = subprocess.Popen(
-            [router, "serve", "--listen", f"127.0.0.1:{PORT}",
-             "--data", os.path.join(self.root, "router"), "--title", "E2E"],
-            stdout=rlog, stderr=rlog,
-        )
-        time.sleep(0.8)
+        self.crew = crew
+        self.router_bin = router
+        self.router = None
+        self.start_router()
         self.nodes = {}
-        for name in "ABCDEF":
+        for name in "ABCDEFG":
             n = Node(name, self.root, crew)
             n.start()
             helper = None
             if name == "A":
                 helper = n.add_bot("Helper", self.root)
                 self.helper = helper
-            n.rep = n.add_bot(f"Rep{name}", self.root, helper or "nobody")
+            # G's representative is read as grok, so a silent one is caught.
+            program = "grok" if name == "G" else None
+            n.rep = n.add_bot(f"Rep{name}", self.root, helper or "nobody", program)
             r = n.rpc({"type": "remote_join", "url": f"ws://127.0.0.1:{PORT}",
                        "alias": ALIAS, "name": name, "bot": n.rep})
             assert r["type"] == "ok", r
             self.nodes[name] = n
         a = self.nodes["A"]
-        wait(lambda: len(a.remote()["members"]) == 5, 10, "everyone online")
+        wait(lambda: len(a.remote()["members"]) == 6, 10, "everyone online")
         for n in self.nodes.values():
             n.account = n.rpc({"type": "remote_list"})["remotes"][0]["account"]
         # A..D trust each other. E and F are new to everyone.
-        team = [self.nodes[k] for k in "ABCD"]
+        team = [self.nodes[k] for k in "ABCDG"]
         for n in team:
             n.rpc({"type": "remote_set", "alias": ALIAS,
                    "trusted": [m.account for m in team if m is not n]})
@@ -203,11 +214,36 @@ class World:
     def __getitem__(self, k):
         return self.nodes[k]
 
+    def start_router(self, *extra):
+        rlog = open(os.path.join(self.root, "router.log"), "a")
+        self.router = subprocess.Popen(
+            [self.router_bin, "serve", "--listen", f"127.0.0.1:{PORT}",
+             "--data", os.path.join(self.root, "router"), "--title", "E2E", *extra],
+            stdout=rlog, stderr=rlog,
+        )
+        time.sleep(0.8)
+
+    def stop_router(self):
+        self.router.terminate()
+        self.router.wait(5)
+
+    def admin(self, *args):
+        out = subprocess.run(
+            [self.router_bin, *args, "--data", os.path.join(self.root, "router")],
+            capture_output=True, text=True,
+        )
+        return out.stdout + out.stderr
+
+    def connected(self, node):
+        try:
+            return node.remote()["connected"]
+        except Exception:
+            return False
+
     def close(self):
         for n in self.nodes.values():
             n.stop()
-        self.router.terminate()
-        self.router.wait(5)
+        self.stop_router()
 
 
 def tell(src, dst, text, as_bot=False):
@@ -405,6 +441,163 @@ def sender_cancels_a_queued_one(w):
     settled(w)
 
 
+def outbox_survives_a_restart(w):
+    a, b = w["A"], w["B"]
+    w.stop_router()
+    wait(lambda: not w.connected(a), 10, "A sees the router gone")
+    tell(a, b, "E1")
+    a.stop()
+    a.start()
+    w.start_router()
+    got(a, b, "E1", 45)
+    settled(w, 45)
+
+
+def big_attachments_refused(w):
+    a, b = w["A"], w["B"]
+    up = os.path.join(a.home, "uploads")
+    os.makedirs(up, exist_ok=True)
+    paths = []
+    for i in range(2):
+        path = os.path.join(up, f"big{i}.bin")
+        with open(path, "wb") as f:
+            f.write(os.urandom(16 * 1024 * 1024))
+        paths.append(path)
+    r = a.rpc({"type": "tell", "from": "user", "to": a.rid(b), "text": "E2 " + " ".join(paths)})
+    assert r["type"] == "error" and "30MB" in r["message"], r
+    assert w.connected(a), "A lost the router"
+    tell(a, b, "E2-one " + paths[0])
+    # B answers its last line, which names the file it got.
+    wait(lambda: has(a.texts(a.rid(b)), "big0.bin"), 40, "B answers about the file")
+    received = os.path.join(b.home, "uploads", "remote", ALIAS)
+    assert any(f.endswith("big0.bin") for _, _, fs in os.walk(received) for f in fs), "B has no file"
+    settled(w)
+
+
+def cli_fails(w):
+    a, c = w["A"], w["C"]
+    tell(c, a, "FAIL E5")
+    wait(lambda: system_says(c, a, "마치지 못했", "could not finish"), 15, "C hears it failed")
+    settled(w)
+
+
+def silent_cli(w):
+    c, g = w["C"], w["G"]
+    tell(c, g, "HANG E4")
+    wait(lambda: system_says(c, g, "응답하지 않아", "did not respond"), 50, "C hears G is silent")
+    tell(c, g, "E4-next")
+    wait(lambda: any(m["text"] == "E4-next" and not m.get("queued") for m in g.messages(g.rep)),
+         50, "G starts the next one")
+    settled(w, 50)
+
+
+def owner_talks_over(w):
+    a, c = w["A"], w["C"]
+    tell(c, a, "SLOW E6")
+    wait(lambda: working(a), 10, "A working on E6")
+    assert a.rpc({"type": "send", "agent": a.rep, "text": "owner line E6", "steer": True})["type"] == "ok"
+    wait(lambda: system_says(c, a, "멈췄", "stopped"), 10, "C hears it was stopped")
+    wait(lambda: has(a.texts(a.rep), "ACK owner line E6"), 15, "A answers its owner")
+    settled(w)
+
+
+def trust_card_after_restart(w):
+    a, f = w["A"], w["F"]
+    tell(f, a, "E8")
+    wait(lambda: len(a.pending_cards()) == 1, 15, "a card on A")
+    old = a.pending_cards()[0]["id"]
+    a.stop()
+    a.start()
+    wait(lambda: [c["id"] for c in a.pending_cards()] not in ([], [old]), 30, "a fresh card")
+    assert len(a.pending_cards()) == 1, "the old card is still open"
+    a.answer(a.pending_cards()[0], "B")  # 이번만
+    got(f, a, "E8", 20)
+    settled(w)
+
+
+def cancel_while_owner_is_asked(w):
+    a, c = w["A"], w["C"]
+    tell(c, a, "ASK E9")
+    wait(lambda: len(a.pending_cards()) == 1, 15, "A's bot asks its owner")
+    assert c.rpc({"type": "interrupt", "agent": c.rid(a)})["type"] == "ok"
+    wait(lambda: system_says(c, a, "취소", "cancelled"), 10, "C sees cancelled")
+    wait(lambda: not a.pending_cards(), 10, "the question closed")
+    settled(w)
+
+
+def router_restarts_while_a_is_off(w):
+    a, c = w["A"], w["C"]
+    a.stop()
+    tell(c, a, "E10")
+    time.sleep(1)
+    w.stop_router()
+    w.start_router()
+    a.start()
+    got(c, a, "E10", 45)
+    settled(w, 45)
+
+
+def renamed_member(w):
+    b, c = w["B"], w["C"]
+    w.admin("users", "rename", "B", "Bee")
+    wait(lambda: any(m["name"] == "Bee" for m in c.remote()["members"]), 20, "C sees Bee")
+    tell(c, b, "E12")
+    got(c, b, "E12")
+    settled(w)
+
+
+def tell_expires(w):
+    a, c = w["A"], w["C"]
+    w.stop_router()
+    w.start_router("--ttl-secs", "2")
+    assert w.router.poll() is None, "this crew-router has no --ttl-secs"
+    wait(lambda: w.connected(a) and w.connected(c), 45, "back online")
+    a.stop()
+    tell(c, a, "E7")
+    wait(lambda: system_says(c, a, "지웠어요", "dropped"), 30, "C hears it expired")
+    w.stop_router()
+    w.start_router()
+    a.start()
+    time.sleep(3)
+    assert not has(a.texts(a.rep, role="system"), "E7"), "A got an expired tell"
+    settled(w, 45)
+
+
+def same_account_twice(w):
+    a = w["A"]
+    twin = Node("A2", w.root, w.crew)
+    shutil.copy(os.path.join(a.home, "remotes.json"), os.path.join(twin.home, "remotes.json"))
+    twin.start()
+    wait(lambda: a.remote().get("error"), 20, "A told it was replaced")
+    assert "다른 곳" in a.remote()["error"] or "somewhere else" in a.remote()["error"]
+    log = os.path.join(w.root, "router.log")
+    before = open(log).read().count(f"online account={a.account}")
+    time.sleep(6)
+    after = open(log).read().count(f"online account={a.account}")
+    assert after == before, f"the two kept taking turns ({after - before} sign-ins)"
+    twin.stop()
+    a.stop()
+    a.start()
+    wait(lambda: w.connected(a), 20, "A back")
+    settled(w)
+
+
+def kicked_member(w):
+    f = w["F"]
+    w.admin("users", "kick", "F")
+    wait(lambda: f.remote().get("error"), 20, "F told it was removed")
+    assert "지워졌" in f.remote()["error"] or "gone" in f.remote()["error"]
+
+
+def representative_deleted_midway(w):
+    c, d = w["C"], w["D"]
+    tell(c, d, "SLOW E11")
+    wait(lambda: working(d), 10, "D working")
+    d.cli("agent", "remove", d.rep)
+    wait(lambda: system_says(c, d, "사라졌", "left the router"), 20, "C hears D left")
+    settled(w)
+
+
 SCENARIOS = [
     ("C·D가 동시에 A에게", two_ask_a_at_once),
     ("C가 A에게 연달아 3개", one_sender_bursts),
@@ -420,6 +613,19 @@ SCENARIOS = [
     ("A 주인이 원격 일을 도중에 정지", owner_stops_a_remote_turn),
     ("C가 A가 처리 중인 일을 취소", sender_cancels_a_running_turn),
     ("C가 A에 대기 중인 일을 취소 (D 일은 계속)", sender_cancels_a_queued_one),
+    ("라우터가 꺼진 동안 보내고 A 재시작", outbox_survives_a_restart),
+    ("첨부 합 30MB 초과는 거절, 하나는 전달", big_attachments_refused),
+    ("A 대표 봇 CLI가 오류로 끝남", cli_fails),
+    ("G 대표 봇 CLI가 응답 없음", silent_cli),
+    ("A 주인이 원격 일 도중 말을 검", owner_talks_over),
+    ("승인 카드가 열린 채 A 재시작", trust_card_after_restart),
+    ("A가 주인에게 물어보는 중 C가 취소", cancel_while_owner_is_asked),
+    ("A가 꺼진 동안 라우터 재시작", router_restarts_while_a_is_off),
+    ("관리자가 B 이름을 바꿈", renamed_member),
+    ("보관 기간이 지나 만료", tell_expires),
+    ("같은 계정을 두 곳에서", same_account_twice),
+    ("관리자가 F를 내보냄", kicked_member),
+    ("D 대표 봇을 일 도중에 삭제", representative_deleted_midway),
 ]
 
 
