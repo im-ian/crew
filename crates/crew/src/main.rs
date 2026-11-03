@@ -692,6 +692,9 @@ fn remote_list_cmd() -> anyhow::Result<()> {
     for r in remotes {
         let state = if r.connected { "connected" } else { "offline" };
         println!("{} {} as {} via {} ({state})", r.alias, r.url, r.name, r.bot);
+        if let Some(error) = &r.error {
+            println!("  ! {error}");
+        }
         for m in r.members.iter().filter(|m| m.account != r.account) {
             let online = if m.online { m.status.as_str() } else { "offline" };
             println!("  {}/{} — {} ({online})", r.alias, m.account, m.name);

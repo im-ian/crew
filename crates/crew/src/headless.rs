@@ -724,11 +724,12 @@ fn run_turn(
         return;
     }
     crate::daemon::forget_prompt(&session.id);
-    // While the child is still set: once it is gone the next turn can start
-    // and take this turn's origin before `turn_ended` reads it.
-    crate::daemon::remote_turn_over(&session.id);
     // Before the idle frame goes out, so the window sees both in one look.
     crate::daemon::note_turn_failed(&session.id, failed);
+    // While the child is still set: once it is gone the next turn can start
+    // and take this turn's origin before `turn_ended` reads it. After the
+    // failure is noted, so a failed turn reaches the teammate as one.
+    crate::daemon::remote_turn_over(&session.id);
     if let Ok(mut inner) = session.inner.lock() {
         inner.child = None;
         if inner.generation == generation {

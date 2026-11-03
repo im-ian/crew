@@ -642,7 +642,7 @@ fn halt_turn(id: &str) -> anyhow::Result<()> {
     // The owner stopped a teammate's job: they hear it is over, and its
     // prompt does not come back parked at the front of the line. It was
     // theirs, not the owner's, to send again.
-    if crate::remote::is_rep(id) && crate::remote::turn_stopped(id, get_origin(id).as_ref()) {
+    if crate::remote::is_rep(id) && crate::remote::end_job(id, get_origin(id).as_ref(), "stopped") {
         forget_prompt(id);
     }
     // A stop ends the chain. The members still waiting must not answer it, and
@@ -693,9 +693,12 @@ fn unheard_line() -> &'static str {
 /// The first-output watch. The turn never spoke, so it ends like a stop and
 /// the chat says why. The prompt stays parked.
 pub(crate) fn halt_unheard(id: &str, flight: headless::InFlight) {
+    let remote = unheard_remote_job(id);
     clear_serial_after(id);
     take_wake(id);
-    requeue_unanswered(id, flight);
+    if !remote {
+        requeue_unanswered(id, flight);
+    }
     // The turn went stale, so run_turn never marks it. A bot that never spoke failed.
     note_turn_failed(id, true);
     finish_halted_turn(id);
@@ -725,9 +728,12 @@ pub(crate) fn retry_unheard(id: &str, flight: headless::InFlight) {
 
 /// The one retry was used. Leave the prompt parked and say so once.
 fn park_unheard_again(id: &str, flight: headless::InFlight) {
+    let remote = unheard_remote_job(id);
     clear_serial_after(id);
     take_wake(id);
-    requeue_unanswered(id, flight);
+    if !remote {
+        requeue_unanswered(id, flight);
+    }
     note_turn_failed(id, true);
     finish_halted_turn(id);
     let line = unheard_line();
@@ -3630,9 +3636,26 @@ pub(crate) fn remote_wake(asker: &str, from: &str, hops: u32) {
 /// A representative's turn is over: its remote job ends, or waits on a local
 /// bot it asked. Called while the turn still holds its origin.
 pub(crate) fn remote_turn_over(id: &str) {
-    if crate::remote::is_rep(id) {
-        crate::remote::turn_over(id, get_origin(id).as_ref());
+    if !crate::remote::is_rep(id) {
+        return;
     }
+    let origin = get_origin(id);
+    // An error with nothing said is not an answer: the teammate hears it failed.
+    if !(turn_failed(id) && crate::remote::end_job(id, origin.as_ref(), "failed")) {
+        crate::remote::turn_over(id, origin.as_ref());
+    }
+}
+
+/// A teammate's job the CLI never answered ends as unresponsive. Its prompt
+/// is theirs, so it does not stay parked here. `false`: park as usual.
+fn unheard_remote_job(id: &str) -> bool {
+    if crate::remote::is_rep(id)
+        && crate::remote::end_job(id, get_origin(id).as_ref(), "unresponsive")
+    {
+        forget_prompt(id);
+        return true;
+    }
+    false
 }
 
 pub(crate) fn agent_config(id: &str) -> Option<AgentConfig> {

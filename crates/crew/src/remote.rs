@@ -28,6 +28,9 @@ use crate::targeting::TurnOrigin;
 pub const PROTOCOL: u32 = 1;
 /// One attachment. The router refuses a frame over 32MB.
 const FILE_LIMIT: u64 = 25 * 1024 * 1024;
+/// The router closes a socket on a frame over 32MB. Kept under it with room
+/// for the JSON around the files, so one big frame cannot loop a reconnect.
+const FRAME_LIMIT: usize = 30 * 1024 * 1024;
 /// A custom face rides along only when it is small.
 const AVATAR_LIMIT: usize = 256 * 1024;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
@@ -91,6 +94,9 @@ pub struct RemoteInfo {
     pub delegates: Vec<String>,
     pub trusted: Vec<Peer>,
     pub blocked: Vec<Peer>,
+    /// Why this PC stopped trying to connect, when it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// What a router said about itself before anyone signed in.
@@ -158,6 +164,14 @@ struct Jobs {
     out: Vec<OutJob>,
     #[serde(default, rename = "in")]
     inbound: Vec<InJob>,
+    /// Frames written while a router was out of reach, per alias. Kept on
+    /// disk: a restart before the router is back must not lose a tell.
+    #[serde(default)]
+    outbox: HashMap<String, Vec<Value>>,
+    /// First-request cards still open, as `(bot, card id)`. Nobody waits on
+    /// them after a restart, and the tell comes again with a new card.
+    #[serde(default)]
+    cards: Vec<(String, String)>,
 }
 
 struct Link {
@@ -166,9 +180,9 @@ struct Link {
     connected: bool,
     members: Vec<Member>,
     team: (String, u64),
-    /// Frames written while the socket was down. Progress is not kept.
-    pending: Vec<Value>,
     presence: String,
+    /// Why this PC stopped trying, as the settings say it. Cleared on welcome.
+    error: Option<String>,
 }
 
 #[derive(Default)]
@@ -387,9 +401,18 @@ fn connect_error(err: &tokio_tungstenite::tungstenite::Error) -> String {
 type Ws =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
+/// What this side takes in one message. Above the router's 32MB: the
+/// library's default (16MB) refused a large attachment, dropped the socket,
+/// and the router sent the same item again on every reconnect.
+const RECEIVE_LIMIT: usize = 40 * 1024 * 1024;
+
 async fn open(url: &str) -> anyhow::Result<Ws> {
     let url = ws_url(url)?;
-    let connecting = tokio_tungstenite::connect_async(url.as_str());
+    let config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+        .max_message_size(Some(RECEIVE_LIMIT))
+        .max_frame_size(Some(RECEIVE_LIMIT));
+    let connecting =
+        tokio_tungstenite::connect_async_with_config(url.as_str(), Some(config), false);
     match tokio::time::timeout(PROBE_TIMEOUT, connecting).await {
         Err(_) => bail!(
             "{}",
@@ -550,9 +573,17 @@ pub fn start() {
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
+    // Cards from before a restart have nobody waiting on them. Answering one
+    // would go to the bot as a message; the tell comes again with a new card.
+    for (bot, card) in &jobs.cards {
+        crate::transcript::resolve_choice(bot, card, &[], &[], &[], true);
+    }
+    let mut jobs = jobs;
+    jobs.cards.clear();
     {
         let mut st = state().lock().expect("remote state");
         st.jobs = jobs;
+        save_jobs(&st);
         for cfg in configs {
             let team = fs::read_to_string(team_memory_path(&cfg.alias)).unwrap_or_default();
             st.links.insert(cfg.alias.clone(), new_link(cfg, team));
@@ -575,13 +606,43 @@ fn new_link(cfg: RemoteConfig, team: String) -> Link {
         connected: false,
         members: Vec::new(),
         team: (team, 0),
-        pending: Vec::new(),
         presence: String::new(),
+        error: None,
     }
 }
 
 fn link_cfg(alias: &str) -> Option<RemoteConfig> {
     state().lock().ok()?.links.get(alias).map(|l| l.cfg.clone())
+}
+
+/// The router turned this PC away for good: retrying would only fight it.
+#[derive(Debug)]
+struct Halt(String);
+
+impl std::fmt::Display for Halt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "router refused: {}", self.0)
+    }
+}
+
+impl std::error::Error for Halt {}
+
+/// Codes after which this PC stops trying until Crew starts again.
+fn halts(code: &str) -> bool {
+    matches!(code, "replaced" | "bad_token" | "account_gone")
+}
+
+fn halt_text(code: &str) -> String {
+    match code {
+        "replaced" => say(
+            "같은 계정이 다른 곳에서 접속해서 이 PC의 연결을 끊었어요. 이 PC에서 쓰려면 Crew를 다시 시작해 주세요.",
+            "The same account signed in somewhere else, so this PC was disconnected. Restart Crew to use it here.",
+        ),
+        _ => say(
+            "라우터에서 이 계정이 지워졌어요. 원격 봇을 다시 추가해 주세요.",
+            "This account is gone from the router. Add the remote bot again.",
+        ),
+    }
 }
 
 async fn run_link(alias: String) {
@@ -590,22 +651,31 @@ async fn run_link(alias: String) {
         let Some(cfg) = link_cfg(&alias) else {
             return;
         };
-        match session(&cfg).await {
-            Ok(()) => backoff = 1,
-            Err(err) => eprintln!("[crew] remote {alias}: {err:#}"),
-        }
+        let halted = match session(&cfg).await {
+            Ok(()) => {
+                backoff = 1;
+                None
+            }
+            Err(err) => {
+                eprintln!("[crew] remote {alias}: {err:#}");
+                err.downcast_ref::<Halt>().map(|h| halt_text(&h.0))
+            }
+        };
         let gone = {
             let mut st = state().lock().expect("remote state");
             match st.links.get_mut(&alias) {
                 Some(link) => {
                     link.connected = false;
                     link.tx = None;
+                    if halted.is_some() {
+                        link.error = halted.clone();
+                    }
                     false
                 }
                 None => true,
             }
         };
-        if gone {
+        if gone || halted.is_some() {
             return;
         }
         tokio::time::sleep(Duration::from_secs(backoff)).await;
@@ -643,8 +713,14 @@ async fn session(cfg: &RemoteConfig) -> anyhow::Result<()> {
                             Ok(v) => v,
                             Err(_) => continue,
                         };
-                        if v["type"] == "error" && !is_connected(&cfg.alias) && v["id"].is_null() {
-                            bail!("sign-in refused: {}", v["code"].as_str().unwrap_or(""));
+                        if v["type"] == "error" && v["id"].is_null() {
+                            let code = v["code"].as_str().unwrap_or("").to_string();
+                            if halts(&code) {
+                                return Err(Halt(code).into());
+                            }
+                            if !is_connected(&cfg.alias) {
+                                bail!("sign-in refused: {code}");
+                            }
                         }
                         handle_frame(&cfg.alias, v);
                     }
@@ -690,7 +766,8 @@ fn send(alias: &str, frame: Value) {
         }
     }
     if frame["type"] != "progress" {
-        link.pending.push(frame);
+        st.jobs.outbox.entry(alias.to_string()).or_default().push(frame);
+        save_jobs(&st);
     }
 }
 
@@ -782,10 +859,13 @@ fn on_welcome(alias: &str, v: &Value) {
         };
         link.connected = true;
         link.presence.clear();
+        link.error = None;
         if let Some(name) = v["name"].as_str() {
             link.cfg.name = name.to_string();
         }
-        std::mem::take(&mut link.pending)
+        let pending = st.jobs.outbox.remove(alias).unwrap_or_default();
+        save_jobs(&st);
+        pending
     };
     set_members(alias, members);
     on_team_memory(alias, &v["team_memory"]);
@@ -951,6 +1031,16 @@ pub fn tell(
     if !is_connected(&alias) && link_cfg(&alias).is_none() {
         bail!("unknown agent {to}");
     }
+    let files = attachments(text);
+    if frame_len(text, &files) > FRAME_LIMIT {
+        bail!(
+            "{}",
+            say(
+                "첨부를 합쳐 30MB가 넘어서 보낼 수 없어요. 나눠서 보내 주세요.",
+                "The attachments add up to over 30MB. Send them in parts."
+            )
+        );
+    }
     let id = new_job_id();
     let rid = remote_id(&alias, &account);
     ensure_transcript(&rid);
@@ -969,7 +1059,6 @@ pub fn tell(
         st.jobs.out.push(job);
         save_jobs(&st);
     }
-    let files = attachments(text);
     let to_name = member_name(&alias, &account);
     send(
         &alias,
@@ -1146,6 +1235,18 @@ fn on_reply(alias: &str, v: &Value) {
 fn done_text(error: &str) -> String {
     match error {
         "stopped" => say("상대가 이 일을 멈췄어요.", "They stopped this work."),
+        "unresponsive" => say(
+            "상대 PC의 CLI가 응답하지 않아 이 일을 끝내지 못했어요.",
+            "Their CLI did not respond, so this work did not finish.",
+        ),
+        "expired" => say(
+            "상대가 30일 동안 접속하지 않아 라우터가 이 요청을 지웠어요.",
+            "They did not come online in time, so the router dropped this request.",
+        ),
+        "relay_limit" => say(
+            "봇끼리 주고받은 횟수가 한도를 넘어 멈췄어요. 사람이 다시 보내 주세요.",
+            "Bots passed this along too many times. Send it again yourself.",
+        ),
         "denied" => say(
             "상대가 이 요청을 받지 않았어요.",
             "They did not take this request.",
@@ -1343,10 +1444,22 @@ async fn ask_trust(alias: String, bot: String, v: Value) {
         multi: false,
     };
     let answer = match crate::daemon::open_ask(&bot, &[ask]) {
-        Ok((_, rx)) => match rx.await {
-            Ok(Event::Answered { text }) => parse_trust(&text),
-            _ => Trust::Deny,
-        },
+        Ok((card, rx)) => {
+            let key = (bot.clone(), card);
+            if let Ok(mut st) = state().lock() {
+                st.jobs.cards.push(key.clone());
+                save_jobs(&st);
+            }
+            let answer = match rx.await {
+                Ok(Event::Answered { text }) => parse_trust(&text),
+                _ => Trust::Deny,
+            };
+            if let Ok(mut st) = state().lock() {
+                st.jobs.cards.retain(|c| c != &key);
+                save_jobs(&st);
+            }
+            answer
+        }
         Err(err) => {
             eprintln!("[crew] remote {alias}: could not ask about {name}: {err:#}");
             Trust::Deny
@@ -1437,9 +1550,14 @@ fn accept(alias: &str, bot: &str, v: Value) {
         Err(err) => {
             eprintln!("[crew] remote {alias}: could not start {bot}: {err:#}");
             drop_in(&id);
+            let error = if format!("{err:#}").contains("relay limit") {
+                "relay_limit"
+            } else {
+                "failed"
+            };
             send(
                 alias,
-                json!({"type": "done", "id": id, "ok": false, "error": "failed"}),
+                json!({"type": "done", "id": id, "ok": false, "error": error}),
             );
         }
     }
@@ -1512,11 +1630,28 @@ pub fn on_sealed(bot: &str, text: &str, origin: Option<&TurnOrigin>) {
         let j = &st.jobs.inbound[at];
         (j.alias.clone(), j.id.clone())
     };
-    let files = attachments(text);
+    let mut files = attachments(text);
+    let mut text = text.to_string();
+    if frame_len(&text, &files) > FRAME_LIMIT {
+        files.clear();
+        text.push_str(&say(
+            "\n\n(첨부가 합쳐 30MB를 넘어서 빼고 보냈어요.)",
+            "\n\n(The attachments were over 30MB together, so they were left out.)",
+        ));
+    }
     send(
         &target.0,
         json!({"type": "reply", "id": target.1, "text": text, "files": files}),
     );
+}
+
+/// About how long a frame with `text` and `files` is on the wire.
+fn frame_len(text: &str, files: &[Value]) -> usize {
+    text.len()
+        + files
+            .iter()
+            .map(|f| f["data"].as_str().map_or(0, str::len) + 256)
+            .sum::<usize>()
 }
 
 /// The representative ran `crew tell` to a local bot during a remote job: the
@@ -1610,9 +1745,10 @@ fn is_current(job: &InJob) -> bool {
     current_in(&mut st, &job.bot, Some(&origin)).is_some_and(|at| st.jobs.inbound[at].id == job.id)
 }
 
-/// The owner stopped `bot`'s turn: the teammate it was for hears so.
-/// `true` when the turn was one of theirs.
-pub fn turn_stopped(bot: &str, origin: Option<&TurnOrigin>) -> bool {
+/// `bot`'s turn ended without an answer (`error`: stopped, failed,
+/// unresponsive): the teammate it was for hears so. `true` when the turn was
+/// one of theirs.
+pub fn end_job(bot: &str, origin: Option<&TurnOrigin>, error: &str) -> bool {
     let job = {
         let Ok(mut st) = state().lock() else {
             return false;
@@ -1626,7 +1762,7 @@ pub fn turn_stopped(bot: &str, origin: Option<&TurnOrigin>) -> bool {
     };
     send(
         &job.alias,
-        json!({"type": "done", "id": job.id, "ok": false, "error": "stopped"}),
+        json!({"type": "done", "id": job.id, "ok": false, "error": error}),
     );
     true
 }
@@ -1957,6 +2093,7 @@ pub fn infos() -> Vec<RemoteInfo> {
             delegates: l.cfg.delegates.clone(),
             trusted: l.cfg.trusted.clone(),
             blocked: l.cfg.blocked.clone(),
+            error: l.error.clone(),
         })
         .collect();
     out.sort_by(|a, b| a.alias.cmp(&b.alias));
@@ -2056,6 +2193,7 @@ fn forget(alias: &str) {
         st.jobs.out.retain(|j| j.alias != alias);
         st.jobs.inbound.retain(|j| j.alias != alias);
         st.awaiting_trust.retain(|(a, _), _| a != alias);
+        st.jobs.outbox.remove(alias);
         save_configs(&st);
         save_jobs(&st);
     }
@@ -2290,6 +2428,35 @@ mod tests {
         assert_eq!(parse_trust("Just this once"), Trust::Once);
         assert_eq!(parse_trust("(no answer)"), Trust::Deny);
         assert_eq!(parse_trust("음 글쎄요"), Trust::Deny);
+    }
+
+    #[test]
+    fn every_way_a_job_ends_says_why() {
+        let codes = [
+            "denied",
+            "recipient_gone",
+            "cancelled",
+            "stopped",
+            "unresponsive",
+            "expired",
+            "relay_limit",
+            "no_such_member",
+            "rate_limited",
+            "too_large",
+        ];
+        let texts: HashSet<String> = codes.iter().map(|c| done_text(c)).collect();
+        assert_eq!(texts.len(), codes.len(), "two reasons read the same");
+        assert_eq!(done_text("failed"), done_text("anything else"));
+    }
+
+    #[test]
+    fn only_a_lost_account_stops_the_reconnects() {
+        assert!(halts("replaced"));
+        assert!(halts("bad_token"));
+        assert!(halts("account_gone"));
+        assert!(!halts("rate_limited"));
+        assert!(!halts(""));
+        assert_ne!(halt_text("replaced"), halt_text("account_gone"));
     }
 
     #[test]
