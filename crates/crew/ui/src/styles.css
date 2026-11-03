@@ -3942,6 +3942,41 @@ html.peek-resizing .peek-resize::after {
   right: auto;
   max-width: calc(100cqw - 42px - 100% - 8px + var(--content-pad));
 }
+/* This room's bot speaks from the right. The other bot stays on the left.
+   The copy chip sits on the open side, so a right-hand balloon keeps it on its left. */
+.peek-thread .row.them.own {
+  justify-content: flex-end;
+}
+.peek-thread .row.own .channel-msg,
+.peek-thread .row.own .bubble-stack {
+  align-items: flex-end;
+}
+.peek-thread .row.own .channel-who {
+  margin-left: 0;
+  margin-right: var(--space-2);
+  text-align: right;
+}
+.peek-thread .row.own .bubble.incoming.stack-first {
+  border-radius: 18px 18px 6px 18px;
+}
+.peek-thread .row.own .bubble.incoming.stack-mid {
+  border-radius: 18px 6px 6px 18px;
+}
+.peek-thread .row.own .bubble.incoming.stack-last {
+  border-radius: 18px 6px 18px 18px;
+}
+.peek-thread .row.own .bubble-stack .msg-actions {
+  right: calc(100% + 8px);
+  left: auto;
+}
+.peek-thread .row.own .bubble-stack .msg-actions::before {
+  left: 100%;
+  right: auto;
+}
+.peek-thread .row.own .bubble-row.has-actions::after {
+  right: 100%;
+  left: auto;
+}
 .peek-foot {
   display: flex;
   align-items: center;
