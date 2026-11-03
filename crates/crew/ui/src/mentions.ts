@@ -1,4 +1,12 @@
+import { remoteLabel } from "./remote";
 import type { AgentInfo } from "./types";
+
+/**
+ * The id part of a handle. A local id is ASCII; a remote bot's is
+ * `alias/account`, two of those joined by one slash. `@alpha/cli` reads as
+ * the whole `alpha/cli`, so it is not `@alpha` with a path after it.
+ */
+const HANDLE_ID = /^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)?/;
 
 const SKIP_TAGS = new Set(["CODE", "PRE", "A"]);
 const BLOCK_TAGS = new Set([
@@ -40,7 +48,13 @@ export function resolveMention(
   const lower = token.toLowerCase();
   return (
     resolveId(token, agents) ??
-    agents.find((a) => a.name === token || mentionLabel(a).toLowerCase() === lower)
+    agents.find(
+      (a) =>
+        a.name === token ||
+        mentionLabel(a).toLowerCase() === lower ||
+        // A teammate's bot typed as `alias/name`, the way the rail shows it.
+        (!!a.remote && remoteLabel(a).toLowerCase() === lower),
+    )
   );
 }
 
@@ -55,7 +69,7 @@ export function mentionsId(text: string, id: string): boolean {
   for (let i = 0; i < text.length; i++) {
     if (prevWs && text[i] === "@") {
       const raw = (text.slice(i + 1).match(/^[^\s<]+/) || [""])[0];
-      const token = (raw.match(/^[A-Za-z0-9_-]+/) || [""])[0];
+      const token = (raw.match(HANDLE_ID) || [""])[0];
       const rest = raw.slice(token.length);
       const ends = !rest || /^[^\x00-\x7f]/.test(rest) || !trimMentionPunct(rest);
       if (token === id && ends) return true;
@@ -115,10 +129,11 @@ export type MentionRun = { text: string; agent?: AgentInfo };
  * copies; only what they build from a hit differs.
  *
  * A handle is `@` and an id; names are for the screen, and the composer sends
- * them as ids (`mentionIds`). Ids are ASCII, so one ends at the first other
- * character, as long as that ends the word too: a Korean particle
- * (`@bot-x에게`) or closing punctuation (`@bot-x,`) does, the `.ai` in
- * `@claude.ai` does not. `mention_tokens` in the daemon reads it the same way.
+ * them as ids (`mentionIds`). A remote bot's id is `alias/account`. Ids are
+ * ASCII, so one ends at the first other character, as long as that ends the
+ * word too: a Korean particle (`@bot-x에게`) or closing punctuation
+ * (`@bot-x,`) does, the `.ai` in `@claude.ai` does not. `mention_tokens` in
+ * the daemon reads it the same way.
  *
  * Returns the resolved bot and how many characters of `text` it consumed.
  */
@@ -131,7 +146,7 @@ export function handleAt(
   | undefined {
   if (text[i] !== "@") return undefined;
   const raw = (text.slice(i + 1).match(/^[^\s<]+/) || [""])[0];
-  const token = (raw.match(/^[A-Za-z0-9_-]+/) || [""])[0];
+  const token = (raw.match(HANDLE_ID) || [""])[0];
   const rest = raw.slice(token.length);
   const ends = !rest || /^[^\x00-\x7f]/.test(rest) || !trimMentionPunct(rest);
   if (!token || !ends) return undefined;

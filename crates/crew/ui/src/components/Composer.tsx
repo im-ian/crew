@@ -6,6 +6,7 @@ import { api } from "../api";
 import { useT } from "../LocaleContext";
 import { mediaKind } from "../markdown";
 import { mentionIds, resolveMention, trimMentionPunct } from "../mentions";
+import { remoteLabel } from "../remote";
 import { sendSteers, type Delivery } from "../deliveryPref";
 import { composerAfterSend } from "../sendGate";
 import { stepQueuePick } from "../queuePick";
@@ -159,7 +160,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
       if (!q) return true;
       return (
         a.id.toLowerCase().includes(q) ||
-        (a.name || "").toLowerCase().includes(q)
+        (a.name || "").toLowerCase().includes(q) ||
+        (!!a.remote && remoteLabel(a).toLowerCase().includes(q))
       );
     });
     return bots.slice(0, 8);
@@ -600,7 +602,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
                   color={a.avatar_color}
                 />
                 <span className="mention-name">{a.name || a.id}</span>
-                {a.name && a.name !== a.id ? (
+                {/* A teammate's id is an account number; its router says more. */}
+                {a.remote ? (
+                  <span className="mention-id">{remoteLabel(a)}</span>
+                ) : a.name && a.name !== a.id ? (
                   <span className="mention-id">{a.id}</span>
                 ) : null}
               </button>
