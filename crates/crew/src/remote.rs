@@ -121,6 +121,10 @@ struct OutJob {
     /// The reply being written, in the remote bot's transcript here.
     #[serde(default)]
     row: Option<String>,
+    /// Replies already sealed. The words of a sealed reply can still come by
+    /// as progress, after it, and must not open a second row.
+    #[serde(default)]
+    sealed: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -955,6 +959,7 @@ pub fn tell(
         owner: owner.map(str::to_string),
         hops,
         row: None,
+        sealed: Vec::new(),
     };
     {
         let mut st = state().lock().expect("remote state");
@@ -1015,6 +1020,17 @@ fn out_job(id: &str) -> Option<OutJob> {
         .cloned()
 }
 
+/// `id`'s reply `text` is sealed: the next words open a new row.
+fn seal_out(id: &str, text: &str) {
+    if let Ok(mut st) = state().lock() {
+        if let Some(j) = st.jobs.out.iter_mut().find(|j| j.id == id) {
+            j.row = None;
+            j.sealed.push(text.to_string());
+        }
+        save_jobs(&st);
+    }
+}
+
 fn set_out_row(id: &str, row: Option<String>) {
     if let Ok(mut st) = state().lock() {
         if let Some(j) = st.jobs.out.iter_mut().find(|j| j.id == id) {
@@ -1029,7 +1045,7 @@ fn on_progress(_alias: &str, v: &Value) {
         return;
     };
     let text = v["text"].as_str().unwrap_or("").trim();
-    if text.is_empty() {
+    if text.is_empty() || job.sealed.iter().any(|s| s.trim() == text) {
         return;
     }
     let rid = remote_id(&job.alias, &job.to);
@@ -1118,7 +1134,7 @@ fn on_reply(alias: &str, v: &Value) {
             crate::transcript::push_remote_reply(&rid, &rid, &text, job.asker.clone());
         }
     }
-    set_out_row(&job.id, None);
+    seal_out(&job.id, v["text"].as_str().unwrap_or(""));
     if let Some(chat) = job.asker.as_ref().or(job.owner.as_ref()) {
         crate::daemon::remote_reply(chat, &rid, &text);
     }
@@ -1430,16 +1446,31 @@ fn current_in(st: &mut State, bot: &str, origin: Option<&TurnOrigin>) -> Option<
     let origin = origin?;
     let from = origin.from.as_str();
     let at = match split_id(from) {
-        Some((alias, account)) => st.jobs.inbound.iter().position(|j| {
-            j.bot == bot && j.alias == alias && j.from == account && j.state != InState::Waiting
-        }),
+        // A tell from a teammate names them as the one to answer. The wake
+        // with a teammate's answer to a tell of ours does not: that turn is
+        // not their job, even when they also asked us something.
+        Some((alias, account)) if origin.reply_agent.as_deref() == Some(from) => {
+            st.jobs.inbound.iter().position(|j| {
+                j.bot == bot
+                    && j.alias == alias
+                    && j.from == account
+                    && j.state != InState::Waiting
+            })
+        }
+        Some(_) => None,
         // Only a local bot's answer picks a waiting job back up. The owner
         // talking to the representative, or a routine, is not that job.
-        None if woken_by_local_bot(origin) => st
-            .jobs
-            .inbound
-            .iter()
-            .position(|j| j.bot == bot && j.state == InState::Waiting),
+        // The job this wake already picked up comes first; it is Running
+        // once a word of the turn went out.
+        None if woken_by_local_bot(origin) => {
+            let mine = |state| {
+                st.jobs
+                    .inbound
+                    .iter()
+                    .position(|j| j.bot == bot && j.state == state)
+            };
+            mine(InState::Running).or_else(|| mine(InState::Waiting))
+        }
         None => None,
     }?;
     st.jobs.inbound[at].state = InState::Running;
@@ -1488,7 +1519,8 @@ pub fn on_local_tell(bot: &str, origin: Option<&TurnOrigin>) {
 
 /// `bot`'s turn is over. Its job ends, unless it is waiting on a local bot.
 pub fn turn_over(bot: &str, origin: Option<&TurnOrigin>) {
-    let done = {
+    // Decided under the lock, sent after it: `send` takes the lock too.
+    let frame = {
         let Ok(mut st) = state().lock() else {
             return;
         };
@@ -1496,25 +1528,22 @@ pub fn turn_over(bot: &str, origin: Option<&TurnOrigin>) {
             return;
         };
         let job = &mut st.jobs.inbound[at];
-        if job.told {
+        let frame = if job.told {
             job.told = false;
             job.state = InState::Waiting;
-            let frame = (job.alias.clone(), job.id.clone());
-            save_jobs(&st);
-            send(
-                &frame.0,
-                json!({"type": "progress", "id": frame.1, "state": "working"}),
+            let frame = (
+                job.alias.clone(),
+                json!({"type": "progress", "id": job.id, "state": "working"}),
             );
-            return;
-        }
-        let job = st.jobs.inbound.remove(at);
+            frame
+        } else {
+            let job = st.jobs.inbound.remove(at);
+            (job.alias, json!({"type": "done", "id": job.id, "ok": true}))
+        };
         save_jobs(&st);
-        job
+        frame
     };
-    send(
-        &done.alias,
-        json!({"type": "done", "id": done.id, "ok": true}),
-    );
+    send(&frame.0, frame.1);
 }
 
 fn on_cancel(alias: &str, v: &Value) {

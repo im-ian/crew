@@ -639,6 +639,8 @@ fn interrupt_turn(id: &str) -> anyhow::Result<()> {
 
 /// `interrupt_turn` without starting what waits, for a steer that goes first.
 fn halt_turn(id: &str) -> anyhow::Result<()> {
+    // The owner stopped it: the teammate who asked hears it is over.
+    remote_turn_over(id);
     // A stop ends the chain. The members still waiting must not answer it, and
     // the bot that asked is not woken with what was said before the stop.
     // Cleared before the prompt is put back, so the copy on those lines is
@@ -3408,6 +3410,11 @@ fn tell_agent_origin(
     let from = from_id(from);
     ensure_accepts_turn(to)?;
     // Hold this tell until the sender is idle so it does not overlap that turn.
+    // A representative's own `crew tell` during a remote job: the job waits
+    // for that bot's answer instead of ending with this turn.
+    if allow_defer && from != "user" && from != to && crate::remote::is_rep(&from) {
+        crate::remote::on_local_tell(&from, get_origin(&from).as_ref());
+    }
     if allow_defer && from != "user" && from != to {
         let epoch = serial_epoch(&from);
         if agent_busy(&from).unwrap_or(false) {
@@ -3438,7 +3445,18 @@ fn tell_agent_origin(
     let envelope = crate::protocol::envelope(&from, text);
     let parsed = targeting::origin_from_envelope(&envelope);
     let parent = origin.or_else(|| get_origin(&from));
-    let origin = targeting::inherit_origin(parent.as_ref(), parsed);
+    let mut origin = targeting::inherit_origin(parent.as_ref(), parsed);
+    // A chain hands its answer back to the bot it started with. When that is
+    // a teammate on another PC, the local bot a representative asked answers
+    // the representative instead: it wakes, and decides what goes out.
+    if crate::remote::is_rep(&from)
+        && origin
+            .reply_agent
+            .as_deref()
+            .is_some_and(|r| crate::remote::split_id(r).is_some() && !known_agent(r))
+    {
+        origin.reply_agent = Some(from.clone());
+    }
     let msg = crate::transcript::push_system(to, &from, text, asked_by(&origin, to));
     // `to` hears this instead of the reply waiting for it from `from`, once
     // the delivery starts (`settle_handoff`).
@@ -3480,9 +3498,6 @@ fn tell_agent_origin(
                 crate::transcript::push_mention_notice(owner, &format!("to:{to}"), text);
             }
         }
-    }
-    if from != "user" && from != to && crate::remote::is_rep(&from) {
-        crate::remote::on_local_tell(&from, get_origin(&from).as_ref());
     }
     let _ = events().send(Event::Told {
         from: from.clone(),
@@ -3593,6 +3608,14 @@ pub(crate) fn remote_wake(asker: &str, from: &str, hops: u32) {
     let text = crate::protocol::handoff_envelope(from, &reply.text);
     if submit_delivery(asker, &text, true, None, wake).is_err() {
         restore_handoffs(asker, vec![reply]);
+    }
+}
+
+/// A representative's turn is over: its remote job ends, or waits on a local
+/// bot it asked. Called while the turn still holds its origin.
+pub(crate) fn remote_turn_over(id: &str) {
+    if crate::remote::is_rep(id) {
+        crate::remote::turn_over(id, get_origin(id).as_ref());
     }
 }
 
@@ -4187,6 +4210,10 @@ fn reset_agent(id: &str, drop_routines: bool) -> anyhow::Result<String> {
     crate::headless::clear_session(id);
     crate::headless::clear_recap(id);
     clear_inbox(id);
+    // Before the kill, as in `remove_agent`: a turn that had not written yet
+    // would put its prompt back, parked at the front of the cleared inbox,
+    // and every line queued after it would wait for the user.
+    forget_prompt(id);
     clear_agent_context(id);
     let new_session = open_agent(&cfg, cols, rows, true, &roster)?;
     {
@@ -4210,10 +4237,6 @@ fn known_agent(id: &str) -> bool {
         .map(|m| m.contains_key(id))
         .unwrap_or(false)
 }
-    // Before the kill, as in `remove_agent`: a turn that had not written yet
-    // would put its prompt back, parked at the front of the cleared inbox,
-    // and every line queued after it would wait for the user.
-    forget_prompt(id);
 
 fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
     if msg.role != Role::Assistant {
@@ -4247,9 +4270,7 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
 /// for the exit, since the next turn resumes the session the CLI is writing.
 /// `turn_ended` at the exit finds the wake spent and nothing left to release.
 pub(crate) fn turn_answered(id: &str) {
-    if crate::remote::is_rep(id) {
-        crate::remote::turn_over(id, get_origin(id).as_ref());
-    }
+    remote_turn_over(id);
     wake_asker(id);
     release(take_followers(id));
 }
@@ -4269,8 +4290,9 @@ pub(crate) fn turn_ended(id: &str) {
     if matches!(live_status(id), Ok(AgentStatus::Blocked)) {
         return;
     }
-    if crate::remote::is_rep(id) {
-        crate::remote::turn_over(id, get_origin(id).as_ref());
+    // A headless turn closed its remote job before it went idle.
+    if !is_headless(id) {
+        remote_turn_over(id);
     }
     wake_asker(id);
     crate::transcript::set_peer(id, None);
