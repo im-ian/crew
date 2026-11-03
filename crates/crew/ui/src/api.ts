@@ -188,6 +188,7 @@ export const api = {
   setLocale: (locale: string) => invoke<void>("set_locale", { locale }),
   setNotifications: (enabled: boolean) =>
     invoke<void>("set_notifications", { enabled }),
+  setEscapeLayer: (open: boolean) => invoke<void>("set_escape_layer", { open }),
   listModels: (cli: string) => {
     let pending = modelLists.get(cli);
     if (!pending) {

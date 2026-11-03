@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-escape-layer"
+description = "Enables the set_escape_layer command without any pre-configured scope."
+commands.allow = ["set_escape_layer"]
+
+[[permission]]
+identifier = "deny-set-escape-layer"
+description = "Denies the set_escape_layer command without any pre-configured scope."
+commands.deny = ["set_escape_layer"]

@@ -423,6 +423,12 @@
           "markdownDescription": "Enables the set_dock_badge command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_escape_layer command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-escape-layer",
+          "markdownDescription": "Enables the set_escape_layer command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_group_memory command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-group-memory",
@@ -721,6 +727,12 @@
           "type": "string",
           "const": "deny-set-dock-badge",
           "markdownDescription": "Denies the set_dock_badge command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_escape_layer command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-escape-layer",
+          "markdownDescription": "Denies the set_escape_layer command without any pre-configured scope."
         },
         {
           "description": "Denies the set_group_memory command without any pre-configured scope.",

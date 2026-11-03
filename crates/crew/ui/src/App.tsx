@@ -35,6 +35,8 @@ import { samePoint, type CaretPoint } from "./caretPoint";
 import { stopTurn } from "./sendGate";
 import { useCrew } from "./useCrew";
 import { useUpdater } from "./updater";
+import { api } from "./api";
+import { escapeLayerOpen } from "./escapeLayer";
 
 export function App() {
   const t = useT();
@@ -138,6 +140,35 @@ export function App() {
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, [theme]);
+
+  useEffect(() => {
+    let current: boolean | null = null;
+    let queued = false;
+    const sync = () => {
+      const open = escapeLayerOpen(document);
+      if (open === current) return;
+      current = open;
+      void api.setEscapeLayer(open);
+    };
+    // After this turn's DOM writes, and before the next key.
+    const schedule = () => {
+      if (queued) return;
+      queued = true;
+      queueMicrotask(() => {
+        queued = false;
+        sync();
+      });
+    };
+    schedule();
+    const obs = new MutationObserver(schedule);
+    obs.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["class", "data-popover-open"],
+    });
+    return () => obs.disconnect();
+  }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
