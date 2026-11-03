@@ -101,7 +101,56 @@ export type AgentInfo = {
   failed?: boolean;
   /** A question card is open and waiting for the user. */
   asking?: boolean;
+  /** Alias of the router a teammate's bot is on. Set only for remote bots. */
+  remote?: string;
+  /** The teammate's PC is connected to the router. */
+  remote_online?: boolean;
 };
+
+export type SignupMode = "open" | "invite" | "closed";
+
+/** What a router says about itself before anyone signs up. */
+export type RemoteServer = {
+  url: string;
+  name: string;
+  version: string;
+  protocol: number;
+  title: string;
+  signup: SignupMode;
+};
+
+/** A teammate's representative bot on a router. */
+export type RemoteMember = {
+  account: string;
+  name: string;
+  role?: string | null;
+  avatar?: string | null;
+  avatar_shape?: string | null;
+  avatar_color?: string | null;
+  online: boolean;
+  status: "idle" | "working" | "asking";
+};
+
+/** A teammate, by router account. The name is only for showing. */
+export type RemoteAccount = { account: string; name: string };
+
+/** One router this PC is signed up to. */
+export type RemoteInfo = {
+  alias: string;
+  url: string;
+  /** My representative bot's name on the router. */
+  name: string;
+  /** Id of my local representative bot. */
+  bot: string;
+  connected: boolean;
+  members: RemoteMember[];
+  /** Local bots the representative may hand work to. */
+  delegates: string[];
+  trusted: RemoteAccount[];
+  blocked: RemoteAccount[];
+};
+
+export type TeamMemory = { text: string; version: number };
 
 export type MessageKind = "sent" | "received" | "routine" | "handoff" | "tool";
 export type ApprovalState = "pending" | "allowed" | "denied";

@@ -89,6 +89,53 @@ describe("api.listModels", () => {
   });
 });
 
+describe("remote router commands", () => {
+  beforeEach(() => {
+    mocks.invoke.mockReset();
+  });
+
+  // The Rust side reads these keys by name. A renamed one is a missing
+  // argument there, so the whole shape is pinned.
+  it("sends remote_join every key, nulls included", async () => {
+    const args = {
+      url: "wss://router.example.com:7420",
+      alias: "team",
+      name: "ian",
+      invite: null,
+      cli: "claude",
+      avatar: null,
+      avatarShape: "cloud",
+      avatarColor: "#4f8cff",
+      role: null,
+    };
+    await api.remoteJoin(args);
+    expect(mocks.invoke.mock.calls[0]).toEqual(["remote_join", args]);
+  });
+
+  it("sends remote_set with the lists it leaves alone as null", async () => {
+    await api.remoteSet({ alias: "team", delegates: ["impl"], trusted: null, blocked: null });
+    expect(mocks.invoke.mock.calls[0]).toEqual([
+      "remote_set",
+      { alias: "team", delegates: ["impl"], trusted: null, blocked: null },
+    ]);
+  });
+
+  it("names the router by alias everywhere else", async () => {
+    await api.remoteProbe("ws://10.0.0.2:7420");
+    await api.remoteList();
+    await api.remoteLeave("team");
+    await api.getTeamMemory("team");
+    await api.setTeamMemory("team", "notes", 3);
+    expect(mocks.invoke.mock.calls).toEqual([
+      ["remote_probe", { url: "ws://10.0.0.2:7420" }],
+      ["remote_list"],
+      ["remote_leave", { alias: "team" }],
+      ["team_memory_get", { alias: "team" }],
+      ["team_memory_set", { alias: "team", text: "notes", version: 3 }],
+    ]);
+  });
+});
+
 describe("newestOnly", () => {
   it("drops an answer that lands after a later call's", async () => {
     const pending: Array<(v: string) => void> = [];
