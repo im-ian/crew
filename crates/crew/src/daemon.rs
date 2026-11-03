@@ -639,8 +639,12 @@ fn interrupt_turn(id: &str) -> anyhow::Result<()> {
 
 /// `interrupt_turn` without starting what waits, for a steer that goes first.
 fn halt_turn(id: &str) -> anyhow::Result<()> {
-    // The owner stopped it: the teammate who asked hears it is over.
-    remote_turn_over(id);
+    // The owner stopped a teammate's job: they hear it is over, and its
+    // prompt does not come back parked at the front of the line. It was
+    // theirs, not the owner's, to send again.
+    if crate::remote::is_rep(id) && crate::remote::turn_stopped(id, get_origin(id).as_ref()) {
+        forget_prompt(id);
+    }
     // A stop ends the chain. The members still waiting must not answer it, and
     // the bot that asked is not woken with what was said before the stop.
     // Cleared before the prompt is put back, so the copy on those lines is
@@ -3560,7 +3564,12 @@ fn tell_remote(
 
 /// A teammate's tell from another PC, for its representative `bot`. It runs
 /// like a tell from a local bot: `from` is the remote id the reply goes to.
-pub(crate) fn remote_deliver(bot: &str, from: &str, text: &str, hops: u32) -> anyhow::Result<()> {
+pub(crate) fn remote_deliver(
+    bot: &str,
+    from: &str,
+    text: &str,
+    hops: u32,
+) -> anyhow::Result<String> {
     let origin = TurnOrigin {
         from: from.to_string(),
         reply_agent: Some(from.to_string()),
@@ -3576,7 +3585,14 @@ pub(crate) fn remote_deliver(bot: &str, from: &str, text: &str, hops: u32) -> an
     ensure_accepts_turn(bot)?;
     let envelope = crate::protocol::envelope(from, text);
     let msg = crate::transcript::push_system(bot, from, text, asked_by(&origin, bot));
-    submit_delivery(bot, &envelope, true, Some(msg.id), origin)
+    submit_delivery(bot, &envelope, true, Some(msg.id.clone()), origin)?;
+    Ok(msg.id)
+}
+
+/// Take back row `row` if it still waits in `bot`'s line. `false` once its
+/// turn started, or it is gone.
+pub(crate) fn cancel_waiting(bot: &str, row: &str) -> bool {
+    cancel_queued(bot, row).is_ok()
 }
 
 /// A remote bot's sealed reply to the local bot that asked it, as a local

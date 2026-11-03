@@ -147,6 +147,9 @@ struct InJob {
     /// The representative ran `crew tell` to a local bot in this turn.
     #[serde(default)]
     told: bool,
+    /// The tell's row in the representative's chat, while it waits in line.
+    #[serde(default)]
+    row: Option<String>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -1142,6 +1145,7 @@ fn on_reply(alias: &str, v: &Value) {
 
 fn done_text(error: &str) -> String {
     match error {
+        "stopped" => say("상대가 이 일을 멈췄어요.", "They stopped this work."),
         "denied" => say(
             "상대가 이 요청을 받지 않았어요.",
             "They did not take this request.",
@@ -1413,14 +1417,23 @@ fn accept(alias: &str, bot: &str, v: Value) {
             bot: bot.to_string(),
             state: InState::Queued,
             told: false,
+            row: None,
         });
         save_jobs(&st);
     }
     match crate::daemon::remote_deliver(bot, &rid, &text, hops) {
-        Ok(()) => send(
-            alias,
-            json!({"type": "progress", "id": id, "state": "started"}),
-        ),
+        Ok(row) => {
+            if let Ok(mut st) = state().lock() {
+                if let Some(j) = st.jobs.inbound.iter_mut().find(|j| j.id == id) {
+                    j.row = Some(row);
+                }
+                save_jobs(&st);
+            }
+            send(
+                alias,
+                json!({"type": "progress", "id": id, "state": "started"}),
+            )
+        }
         Err(err) => {
             eprintln!("[crew] remote {alias}: could not start {bot}: {err:#}");
             drop_in(&id);
@@ -1560,12 +1573,62 @@ fn on_cancel(alias: &str, v: &Value) {
     let Some(job) = job else {
         return;
     };
+    // Still in line: only that line goes. A turn already on it is stopped.
+    // Anyone else's turn, running ahead of it, is left alone.
+    let queued = job
+        .row
+        .as_deref()
+        .is_some_and(|row| crate::daemon::cancel_waiting(&job.bot, row));
+    let on_it = !queued && is_current(&job);
     drop_in(id);
-    let _ = crate::daemon::stop_turn(&job.bot);
+    if on_it {
+        let _ = crate::daemon::stop_turn(&job.bot);
+    }
     send(
         alias,
         json!({"type": "done", "id": id, "ok": false, "error": "cancelled"}),
     );
+}
+
+/// `job` is what its representative's turn is on right now.
+fn is_current(job: &InJob) -> bool {
+    if job.state == InState::Waiting {
+        return false;
+    }
+    let origin = crate::daemon::turn_origin(&job.bot);
+    let Some(origin) = origin.filter(|_| {
+        matches!(
+            crate::daemon::agent_status(&job.bot),
+            Some(AgentStatus::Working | AgentStatus::Blocked)
+        )
+    }) else {
+        return false;
+    };
+    let Ok(mut st) = state().lock() else {
+        return false;
+    };
+    current_in(&mut st, &job.bot, Some(&origin)).is_some_and(|at| st.jobs.inbound[at].id == job.id)
+}
+
+/// The owner stopped `bot`'s turn: the teammate it was for hears so.
+/// `true` when the turn was one of theirs.
+pub fn turn_stopped(bot: &str, origin: Option<&TurnOrigin>) -> bool {
+    let job = {
+        let Ok(mut st) = state().lock() else {
+            return false;
+        };
+        let Some(at) = current_in(&mut st, bot, origin) else {
+            return false;
+        };
+        let job = st.jobs.inbound.remove(at);
+        save_jobs(&st);
+        job
+    };
+    send(
+        &job.alias,
+        json!({"type": "done", "id": job.id, "ok": false, "error": "stopped"}),
+    );
+    true
 }
 
 /// Live words and the representative's state, as the router's teammates see them.
