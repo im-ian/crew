@@ -18,6 +18,8 @@ import { ShortcutHelp } from "./components/ShortcutHelp";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
 import { railOrder } from "./groups";
+import { loadRemoteFolds, localAgents, remoteOrder, representing } from "./remote";
+import { copyText } from "./components/CopyButton";
 import { useT } from "./LocaleContext";
 import type { TFn } from "./i18n";
 import { isTypingTarget, shortcutId } from "./shortcuts";
@@ -250,7 +252,10 @@ export function App() {
         return;
       }
       if (id === "prev-chat" || id === "next-chat") {
-        const order = railOrder(c.groups, c.ungrouped, c.agents);
+        const order = [
+          ...railOrder(c.groups, c.ungrouped, localAgents(c.agents)),
+          ...remoteOrder(c.agents, c.remotes, loadRemoteFolds()),
+        ];
         if (!order.length) return;
         const i = order.findIndex(
           (row) => row.kind === c.selectedKind && row.id === c.selected,
@@ -280,6 +285,7 @@ export function App() {
     <div className="app">
       <Sidebar
         agents={crew.agents}
+        remotes={crew.remotes}
         groups={crew.groups}
         ungrouped={crew.ungrouped}
         selected={crew.selected}
@@ -460,6 +466,11 @@ export function App() {
       <ConfirmDialog
         open={crew.confirmOpen}
         kind={crew.confirmKind}
+        represents={
+          crew.confirmKind === "remove" && crew.confirmId
+            ? representing(crew.confirmId, crew.remotes)
+            : []
+        }
         onCancel={crew.closeConfirm}
         onConfirm={(drop) => void crew.doConfirm(drop)}
       />
@@ -598,6 +609,30 @@ function menuItems(
     return items;
   }
   const id = ctx.id;
+  const remote = crew.agents.find((a) => a.id === id && a.remote);
+  if (remote) {
+    // A teammate's bot is only talked to: nothing of it lives on this PC.
+    return [
+      {
+        type: "action",
+        label: t("menu.openChat"),
+        onClick: () => {
+          crew.hideCtx();
+          crew.selectAgent(remote.id);
+        },
+      },
+      {
+        type: "action",
+        label: t("menu.copyMention"),
+        onClick: () => {
+          crew.hideCtx();
+          void copyText("@" + remote.id).then((ok) => {
+            if (ok) crew.showToast(t("common.copied"));
+          });
+        },
+      },
+    ];
+  }
   const currentGroup = id ? crew.itemGroupId("agent", id) : null;
   const moveItems: MenuEntry[] = groups
     .filter((g) => g.id !== currentGroup)

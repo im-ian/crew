@@ -23,6 +23,7 @@ import { loadLastChat, pickOpenAgent, saveLastChat } from "./lastChat";
 import { loadNotify } from "./notifyPref";
 import { publishBotSignals, publishBotUnread } from "./botSignals";
 import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
+import { localAgents } from "./remote";
 import { useRemotes } from "./useRemotes";
 import {
   adoptNewGroups,
@@ -263,7 +264,8 @@ export function useCrew() {
 
   function openPane(id: string, tab: PaneTab) {
     const a = agentsRef.current.find((x) => x.id === id);
-    if (!a) return;
+    // A teammate's bot has no settings, routines or memory on this PC.
+    if (!a || a.remote) return;
     selectedRef.current = { id, kind: "agent" };
     setSelected(id);
     setSelectedKind("agent");
@@ -342,7 +344,7 @@ export function useCrew() {
       const visual = visibleUngroupedKeys(
         current.groups,
         current.ungrouped,
-        agentsRef.current,
+        localAgents(agentsRef.current),
       );
       const stripped = moveItem(current, key, null, null, visual);
       persistLayout({
@@ -477,12 +479,14 @@ export function useCrew() {
     groupId: string | null,
     beforeKey?: string | null,
   ) {
+    // A teammate's bot sits under its router, not in the folders.
+    if (agentsRef.current.find((a) => a.id === id)?.remote) return;
     const current = groupsRef.current;
     const fromId = groupIdOf(current.groups, kind, id);
     const visual = visibleUngroupedKeys(
       current.groups,
       current.ungrouped,
-      agentsRef.current,
+      localAgents(agentsRef.current),
     );
     persistLayout(moveItem(current, itemKey(kind, id), groupId, beforeKey, visual));
     if (kind !== "agent" || !groupId || groupId === fromId) return;
@@ -564,7 +568,7 @@ export function useCrew() {
         ? firstOpenAgent(
             groupsRef.current.groups,
             groupsRef.current.ungrouped,
-            list,
+            localAgents(list),
           )
         : null,
       ready,
@@ -584,7 +588,7 @@ export function useCrew() {
     publishBotSignals(list);
     setAgents(list);
     if (groupsLoaded.current) {
-      const pruned = pruneLayout(groupsRef.current, list);
+      const pruned = pruneLayout(groupsRef.current, localAgents(list));
       if (layoutChanged(pruned, groupsRef.current)) persistLayout(pruned);
     }
     applyOpenAgent(list);
@@ -1390,6 +1394,7 @@ export function useCrew() {
     setPaneTab,
     confirmOpen,
     confirmKind,
+    confirmId,
     newBotOpen,
     newBotPlace,
     newGroupOpen,
@@ -1456,6 +1461,7 @@ export function useCrew() {
     saveMemory,
     loadShared,
     showError,
+    showToast,
   };
 }
 

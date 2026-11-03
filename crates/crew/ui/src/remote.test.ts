@@ -9,6 +9,7 @@ import {
   normalizeRemotes,
   portOk,
   remoteLabel,
+  remoteOrder,
   remoteSections,
   representing,
   routerUrl,
@@ -165,6 +166,13 @@ describe("remote bots", () => {
     expect(sections[0].bots.map((b) => b.name)).toEqual(["amy", "zed"]);
     expect(sections[1].bots).toEqual([]);
     expect(sections[2].remote).toBeNull();
+  });
+
+  it("steps through open routers' bots after the local ones", () => {
+    expect(remoteOrder(bots, [router("team"), router("lab")], ["lab"])).toEqual([
+      { kind: "agent", id: "team/acc_1" },
+      { kind: "agent", id: "team/acc_2" },
+    ]);
   });
 
   it("finds the routers a local bot stands in for", () => {

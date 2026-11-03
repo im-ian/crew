@@ -1480,6 +1480,38 @@ button.avatar {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The router a local bot stands in for: a quiet tag after the name, so the
+   row still reads as that bot first. */
+.rep-mark {
+  flex-shrink: 0;
+  max-width: 8em;
+  margin-left: var(--space-6);
+  padding: 0 var(--space-6);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 16px;
+  align-self: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* A teammate's PC: green while it is on the router, grey while it is away. */
+.badge.remote-dot { background: var(--exited); }
+.badge.remote-dot.is-on { background: var(--idle); }
+.rail-row.is-offline .avatar { opacity: 0.5; }
+.rail-row.is-offline .agent-name-text { color: var(--muted); }
+/* The router's own link, after its alias. */
+.remote-conn {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--exited);
+}
+.remote-conn.is-on { background: var(--idle); }
+.remote-head .group-name { cursor: pointer; }
 .draft-mark {
   display: inline-flex;
   flex: none;

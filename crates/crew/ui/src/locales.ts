@@ -133,6 +133,12 @@ export const KO = {
   "sidebar.groupMenu": "더 보기",
   "sidebar.groupNewBot": "이 그룹에 새 봇",
   "sidebar.draft": "작성 중",
+  "sidebar.remoteEmpty": "아직 다른 팀원이 없어요",
+  "sidebar.remoteConnected": "연결됨",
+  "sidebar.remoteDisconnected": "연결 끊김",
+  "sidebar.represents": "{alias} 대표 봇",
+  "sidebar.online": "접속 중",
+  "sidebar.offline": "접속 안 함",
 
   "header.pickChat": "대화를 선택하세요",
   "header.botInfo": "봇 정보 ⌘I",
@@ -214,6 +220,7 @@ export const KO = {
   "confirm.reset.dropRoutines": "예약된 일도 함께 지우기",
   "confirm.remove.title": "봇을 삭제할까요?",
   "confirm.remove.body": "이 봇과 대화가 삭제됩니다.",
+  "confirm.remove.bodyRep": "이 봇과 대화가 삭제됩니다. {alias} 라우터의 대표 봇이라, 라우터의 이름도 바로 풀리고 팀원이 보낸 일은 실패로 돌아가요.",
   "confirm.removeGroup.title": "그룹을 삭제할까요?",
   "confirm.removeGroup.body": "그룹 메모리도 지워집니다. 폴더와 대화는 남습니다.",
 
@@ -229,6 +236,8 @@ export const KO = {
   "menu.moveToGroup": "그룹으로 이동",
   "menu.moveToNewGroup": "새 그룹으로 이동",
   "menu.deleteBot": "봇 삭제",
+  "menu.openChat": "대화 열기",
+  "menu.copyMention": "멘션 복사",
 
   "pane.tab.info": "봇 정보",
   "pane.tab.routines": "루틴",
@@ -513,6 +522,12 @@ export const EN: { [K in MessageKey]: string } = {
   "sidebar.groupMenu": "More",
   "sidebar.groupNewBot": "New bot in this group",
   "sidebar.draft": "Draft",
+  "sidebar.remoteEmpty": "No teammates yet",
+  "sidebar.remoteConnected": "Connected",
+  "sidebar.remoteDisconnected": "Disconnected",
+  "sidebar.represents": "Represents you on {alias}",
+  "sidebar.online": "Online",
+  "sidebar.offline": "Offline",
 
   "header.pickChat": "Select a chat",
   "header.botInfo": "Bot info ⌘I",
@@ -594,6 +609,7 @@ export const EN: { [K in MessageKey]: string } = {
   "confirm.reset.dropRoutines": "Also delete scheduled tasks",
   "confirm.remove.title": "Delete this bot?",
   "confirm.remove.body": "This bot and its chat will be deleted.",
+  "confirm.remove.bodyRep": "This bot and its chat are deleted. It represents you on {alias}, so its name there is freed at once and work teammates sent it comes back failed.",
   "confirm.removeGroup.title": "Delete this group?",
   "confirm.removeGroup.body": "Its group memory goes too. The folder and chats stay.",
 
@@ -609,6 +625,8 @@ export const EN: { [K in MessageKey]: string } = {
   "menu.moveToGroup": "Move to group",
   "menu.moveToNewGroup": "Move to new group",
   "menu.deleteBot": "Delete bot",
+  "menu.openChat": "Open chat",
+  "menu.copyMention": "Copy mention",
 
   "pane.tab.info": "Bot info",
   "pane.tab.routines": "Routines",

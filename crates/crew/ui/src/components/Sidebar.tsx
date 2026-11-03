@@ -12,10 +12,19 @@ import {
 import { createPortal } from "react-dom";
 import { useLocale, useT } from "../LocaleContext";
 import { groupOrderChanges, itemKey, parseItemKey } from "../groups";
-import type { AgentInfo, Group, Kind, SearchHit } from "../types";
+import type { AgentInfo, Group, Kind, RemoteInfo, SearchHit } from "../types";
 import { listStamp } from "../clock";
 import { mentionRuns, mentionText } from "../mentions";
 import { foldsAt, numberDuplicateNames, RAIL_FOLDED } from "../rail";
+import {
+  isOnline,
+  loadRemoteFolds,
+  localAgents,
+  remoteSections,
+  representing,
+  saveRemoteFolds,
+  type RemoteSection,
+} from "../remote";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
 import { PlanUsageButton } from "./PlanUsageBar";
@@ -262,6 +271,8 @@ function autoScrollLists(y: number) {
 
 type Props = {
   agents: AgentInfo[];
+  /** Routers this PC is on. Their bots come from `agents`, by `remote`. */
+  remotes?: RemoteInfo[];
   groups: Group[];
   ungrouped: string[];
   selected: string | null;
@@ -328,6 +339,7 @@ function orderItems(items: RailItem[], order: string[], locale: string): RailIte
 
 export function Sidebar({
   agents,
+  remotes = [],
   groups,
   ungrouped,
   selected,
@@ -357,20 +369,25 @@ export function Sidebar({
   const { locale } = useLocale();
   // Rebuilding the list numbers every duplicate name and re-sorts each group;
   // a drag re-renders this on every pointermove and none of it can change.
-  const built = useMemo(() => toItems(agents), [agents]);
-  const all = built.filter((item) =>
+  const built = useMemo(() => toItems(localAgents(agents)), [agents]);
+  const sections = useMemo(
+    () => remoteSections(agents, remotes, locale),
+    [agents, remotes, locale],
+  );
+  const hit = (item: RailItem) =>
     matches(
       [
         item.agent?.name,
         item.agent?.id,
         item.agent?.title,
         item.agent?.role,
+        item.agent?.remote,
         // The row shows resolved names, so the query has to see them too.
         mentionText(item.preview || "", agents),
       ],
       query,
-    ),
-  );
+    );
+  const all = built.filter(hit);
   const byKey = new Map(all.map((item) => [item.key, item]));
   const used = new Set<string>();
   const grouped = groups.map((group) => {
@@ -389,7 +406,19 @@ export function Sidebar({
     locale,
   );
   const searching = !!query.trim();
-  const empty = !all.length;
+  const remoteShown = sections
+    .map((section) => ({ section, items: toItems(section.bots).filter(hit) }))
+    .filter(({ items }) => !searching || items.length);
+  const empty = !all.length && !remoteShown.length;
+  const [remoteFolds, setRemoteFolds] = useState(loadRemoteFolds);
+
+  function toggleRemote(alias: string) {
+    setRemoteFolds((prev) => {
+      const next = prev.includes(alias) ? prev.filter((a) => a !== alias) : [...prev, alias];
+      saveRemoteFolds(next);
+      return next;
+    });
+  }
 
   // Folding keeps the open width, so opening the rail again lands where it was.
   const [folded, setFoldedState] = useState(loadFolded);
@@ -837,6 +866,7 @@ export function Sidebar({
                         item={item}
                         compact={folded}
                         agents={agents}
+                        represents={representing(item.id, remotes)}
                         active={selectedKind === item.kind && selected === item.id}
                         unread={unread.includes(item.key)}
                         drafting={drafting.includes(item.id)}
@@ -871,6 +901,7 @@ export function Sidebar({
                     item={item}
                     compact={folded}
                     agents={agents}
+                    represents={representing(item.id, remotes)}
                     active={selectedKind === item.kind && selected === item.id}
                     unread={unread.includes(item.key)}
                     drafting={drafting.includes(item.id)}
@@ -892,6 +923,37 @@ export function Sidebar({
                 ) : null}
               </section>
             ) : null}
+            {remoteShown.map(({ section, items }) => {
+              const hidden = !searching && remoteFolds.includes(section.alias);
+              return (
+                <section key={"remote:" + section.alias} className="rail-section grouped remote-section">
+                  <RemoteHead
+                    section={section}
+                    compact={folded}
+                    collapsed={hidden}
+                    onToggle={() => toggleRemote(section.alias)}
+                  />
+                  {hidden ? null : items.length ? (
+                    items.map((item) => (
+                      <ItemRow
+                        key={item.key}
+                        item={item}
+                        compact={folded}
+                        agents={agents}
+                        fixed
+                        active={selectedKind === item.kind && selected === item.id}
+                        unread={unread.includes(item.key)}
+                        drafting={drafting.includes(item.id)}
+                        onSelect={() => select(item)}
+                        onContextMenu={(e) => ctx(e, item)}
+                      />
+                    ))
+                  ) : folded ? null : (
+                    <div className="empty-rail">{t("sidebar.remoteEmpty")}</div>
+                  )}
+                </section>
+              );
+            })}
           </>
         )}
       </div>
@@ -1114,6 +1176,58 @@ function GroupHead({
   );
 }
 
+/** A router's head. Its rows are the router's, so nothing here moves or renames. */
+function RemoteHead({
+  section,
+  compact,
+  collapsed,
+  onToggle,
+}: {
+  section: RemoteSection;
+  compact?: boolean;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  const t = useT();
+  const connected = section.remote?.connected;
+  const state =
+    connected === undefined
+      ? ""
+      : connected
+        ? t("sidebar.remoteConnected")
+        : t("sidebar.remoteDisconnected");
+  const label = state ? `${section.alias} · ${state}` : section.alias;
+  return (
+    <div
+      className={
+        "group-head remote-head" + (collapsed ? " collapsed" : "") + (compact ? " compact" : "")
+      }
+      title={compact ? label : section.remote?.url || undefined}
+    >
+      <button
+        type="button"
+        className="group-toggle"
+        title={compact ? label : collapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+        aria-label={collapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+        onClick={onToggle}
+      >
+        <ChevronDown className="group-chevron" size={14} />
+      </button>
+      <button type="button" className="group-name" onClick={onToggle}>
+        <span className="group-name-text">{section.alias}</span>
+        {connected === undefined ? null : (
+          <span
+            className={"remote-conn" + (connected ? " is-on" : "")}
+            title={state}
+            aria-label={state}
+            role="img"
+          />
+        )}
+      </button>
+    </div>
+  );
+}
+
 function ItemRow({
   item,
   agents,
@@ -1123,12 +1237,18 @@ function ItemRow({
   drafting,
   dragging,
   ghost,
+  fixed,
+  represents = [],
   onSelect,
   onContextMenu,
   onPointerDown,
 }: {
   item: RailItem;
   agents: AgentInfo[];
+  /** Not a drop target: a teammate's row under its router. */
+  fixed?: boolean;
+  /** Routers this local bot stands in for. */
+  represents?: string[];
   /** The folded rail: the face alone, the name on hover. */
   compact?: boolean;
   active?: boolean;
@@ -1151,6 +1271,8 @@ function ItemRow({
     () => mentionRuns(item.preview || "", agents),
     [item.preview, agents],
   );
+  const remote = !!a?.remote;
+  const online = isOnline(a);
   const face = (
     <Avatar
       id={item.id}
@@ -1160,8 +1282,14 @@ function ItemRow({
       color={a?.avatar_color}
       badge={a?.status || undefined}
       status={a?.status}
+      overlay={
+        remote ? <span className={"badge remote-dot" + (online ? " is-on" : "")} /> : null
+      }
     />
   );
+  const repLabel = represents.length
+    ? t("sidebar.represents", { alias: represents.join(", ") })
+    : "";
   const inner = (
     <>
       {face}
@@ -1176,6 +1304,11 @@ function ItemRow({
             ) : null}
             {item.ordinal ? (
               <span className="name-ordinal">#{item.ordinal}</span>
+            ) : null}
+            {represents.length ? (
+              <span className="rep-mark" title={repLabel}>
+                {represents.join(" · ")}
+              </span>
             ) : null}
           </span>
           {stamp ? (
@@ -1201,6 +1334,8 @@ function ItemRow({
   );
   const label =
     (item.ordinal ? `${item.name} #${item.ordinal}` : item.name) +
+    (remote ? ` · ${online ? t("sidebar.online") : t("sidebar.offline")}` : "") +
+    (repLabel ? ` · ${repLabel}` : "") +
     (drafting ? ` · ${t("sidebar.draft")}` : "");
   if (ghost) {
     return (
@@ -1217,10 +1352,11 @@ function ItemRow({
         (compact ? " compact" : "") +
         (active ? " active" : "") +
         (unread ? " unread" : "") +
-        (dragging ? " dragging" : "")
+        (dragging ? " dragging" : "") +
+        (online ? "" : " is-offline")
       }
-      data-rail-row={item.key}
-      title={compact ? label : undefined}
+      data-rail-row={fixed ? undefined : item.key}
+      title={compact ? label : remote ? `${a?.remote}/${item.name}` : undefined}
       aria-label={compact ? label : undefined}
       onClick={onSelect}
       onContextMenu={(e) => {

@@ -156,6 +156,17 @@ export function remoteSections(
   return out;
 }
 
+/** Remote rows for ⌘[ and ⌘], after the local ones. A folded router is skipped. */
+export function remoteOrder(
+  agents: AgentInfo[],
+  remotes: RemoteInfo[],
+  folded: readonly string[],
+): { kind: "agent"; id: string }[] {
+  return remoteSections(agents, remotes)
+    .filter((s) => !folded.includes(s.alias))
+    .flatMap((s) => s.bots.map((b) => ({ kind: "agent" as const, id: b.id })));
+}
+
 /** Aliases of the routers this local bot stands in for. */
 export function representing(id: string, remotes: RemoteInfo[]): string[] {
   return remotes.filter((r) => r.bot === id).map((r) => r.alias);

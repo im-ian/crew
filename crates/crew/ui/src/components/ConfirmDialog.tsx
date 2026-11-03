@@ -8,9 +8,17 @@ type Props = {
   kind: ConfirmKind;
   onCancel: () => void;
   onConfirm: (dropRoutines: boolean) => void;
+  /** Routers the bot being removed stands in for. */
+  represents?: string[];
 };
 
-export function ConfirmDialog({ open, kind, onCancel, onConfirm }: Props) {
+export function ConfirmDialog({
+  open,
+  kind,
+  onCancel,
+  onConfirm,
+  represents = [],
+}: Props) {
   const t = useT();
   const [drop, setDrop] = useState(false);
 
@@ -26,7 +34,9 @@ export function ConfirmDialog({ open, kind, onCancel, onConfirm }: Props) {
 
   if (kind === "remove") {
     title = t("confirm.remove.title");
-    body = t("confirm.remove.body");
+    body = represents.length
+      ? t("confirm.remove.bodyRep", { alias: represents.join(", ") })
+      : t("confirm.remove.body");
     ok = t("common.delete");
     okClass = "danger";
     showToggle = false;
