@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cron;
 use crate::paths;
+use crate::worktree::Isolated;
 
 const DEFAULT_AGENTS: &str = include_str!("../../../agents.example.json");
 
@@ -727,7 +728,12 @@ impl AgentConfig {
     }
 
     pub fn spawn_cmd_with(&self, fresh_session: bool, roster: &[AgentConfig]) -> Vec<String> {
-        self.argv_with_memory(fresh_session, roster, &crate::memory::read(&self.id))
+        self.argv_with_memory(
+            fresh_session,
+            roster,
+            &crate::memory::read(&self.id),
+            None,
+        )
     }
 
     fn argv_with_memory(
@@ -735,6 +741,7 @@ impl AgentConfig {
         fresh_session: bool,
         roster: &[AgentConfig],
         memory: &str,
+        isolated: Option<&Isolated>,
     ) -> Vec<String> {
         let mut args = self.cmd.clone();
         if args.is_empty() {
@@ -745,7 +752,7 @@ impl AgentConfig {
             strip_resume_flags(&program, &mut args);
         }
         inject_model_effort(&program, &mut args, self.model.as_deref(), self.effort);
-        inject_system_prefix(&program, &mut args, self, roster, memory);
+        inject_system_prefix(&program, &mut args, self, roster, memory, isolated);
         args
     }
 
@@ -776,10 +783,22 @@ impl AgentConfig {
         roster: &[AgentConfig],
         memory: &str,
     ) -> Vec<String> {
-        let mut args = self.argv_with_memory(true, roster, memory);
+        self.turn_cmd_in(prompt, session, roster, memory, None)
+    }
+
+    /// `isolated` is set when this turn starts in the bot's own git worktree.
+    pub fn turn_cmd_in(
+        &self,
+        prompt: &str,
+        session: Option<&TurnSession>,
+        roster: &[AgentConfig],
+        memory: &str,
+        isolated: Option<&Isolated>,
+    ) -> Vec<String> {
+        let mut args = self.argv_with_memory(true, roster, memory, isolated);
         let spoken = self
             .prompt_mode()
-            .then(|| prompt_with_preamble(self, roster, memory, prompt));
+            .then(|| prompt_with_preamble(self, roster, memory, prompt, isolated));
         let prompt = spoken.as_deref().unwrap_or(prompt);
         match self.binary_name().as_str() {
             "grok" => apply_grok_turn(&mut args, prompt, session),
@@ -937,7 +956,17 @@ pub fn new_bot_ask(english: bool) -> String {
 }
 
 /// Short spawn-time prompt: identity, where the live team list lives, and how to `crew tell`.
-pub fn team_rules(agent: &AgentConfig, _roster: &[AgentConfig]) -> String {
+pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
+    team_rules_for(agent, roster, None)
+}
+
+/// `isolated` adds where this bot is working. Absent when worktree mode is off
+/// or the folder is not a git repository, so the standing prompt stays put.
+pub fn team_rules_for(
+    agent: &AgentConfig,
+    _roster: &[AgentConfig],
+    isolated: Option<&Isolated>,
+) -> String {
     let mut s = String::new();
     s.push_str(&format!(
         "You are Crew agent `{}` ({}).\n",
@@ -977,6 +1006,13 @@ pub fn team_rules(agent: &AgentConfig, _roster: &[AgentConfig]) -> String {
     s.push_str(&format!(
         "Your memory survives chat resets. It is under `{MEMORY_HEADING}` at the end of these instructions (absent while empty); if it changes between turns, a `[crew system]` note gives you the new one, and `crew memory show` prints it now. It is your own memory: keep your notes there, not in other memory files or tools. The teammate list and notes every bot shares belong in shared memory. Keep it yourself: when you learn something later chats need (the user's name, preferences, a decision) or the user asks you to remember it, actually run `crew memory append <<'EOF'` with one short line, then `EOF`. To correct or forget something, run `crew memory show`, then `crew memory set <<'EOF'` with the whole new memory; it replaces everything. Always pass the text in a quoted heredoc like this, so the shell leaves `$` and backticks alone. A schedule is a routine, not a memory. Do not save what is already there, one-off chatter, or passwords, tokens and other secrets. Do not only claim you remembered.\n",
     ));
+    if let Some(place) = isolated {
+        s.push_str(&format!(
+            "Worktree mode is on. This shell is inside your git worktree `{}`. The shared checkout is `{}`. Do every edit, commit, and command in this worktree. Do not cd to the shared checkout, and do not create another worktree unless the user asks.\n",
+            place.dir.display(),
+            place.shared.display()
+        ));
+    }
     s
 }
 
@@ -1151,8 +1187,9 @@ fn inject_system_prefix(
     agent: &AgentConfig,
     roster: &[AgentConfig],
     memory: &str,
+    isolated: Option<&Isolated>,
 ) {
-    inject_team_rules(program, args, agent, roster);
+    inject_team_rules(program, args, agent, roster, isolated);
     inject_memory(program, args, memory);
 }
 
@@ -1161,8 +1198,9 @@ fn inject_team_rules(
     args: &mut Vec<String>,
     agent: &AgentConfig,
     roster: &[AgentConfig],
+    isolated: Option<&Isolated>,
 ) {
-    let text = team_rules(agent, roster);
+    let text = team_rules_for(agent, roster, isolated);
     match program {
         "grok" => append_flag_value(args, "--rules", &text),
         "claude" => append_flag_value(args, "--append-system-prompt", &text),
@@ -1177,8 +1215,9 @@ fn prompt_with_preamble(
     roster: &[AgentConfig],
     memory: &str,
     prompt: &str,
+    isolated: Option<&Isolated>,
 ) -> String {
-    let mut body = team_rules(agent, roster);
+    let mut body = team_rules_for(agent, roster, isolated);
     let memory = memory.trim();
     if !memory.is_empty() {
         body.push_str("\n\n");
@@ -2292,6 +2331,26 @@ mod tests {
         assert!(rules.contains("keep the user in the loop"));
         assert!(rules.contains("in the language the user wrote in"));
         assert!(rules.contains("gets just the answer, with no plan or progress lines"));
+        assert!(
+            !rules.contains("Worktree mode"),
+            "the standing prompt stays the same until a turn is actually in a worktree"
+        );
+    }
+
+    #[test]
+    fn team_rules_name_the_worktree_when_the_bot_has_one() {
+        let alpha = AgentConfig::new("alpha".into(), "Alpha".into(), vec!["grok".into()], None);
+        let place = crate::worktree::Isolated {
+            dir: PathBuf::from("/tmp/crew-wt/alpha"),
+            shared: PathBuf::from("/tmp/proj"),
+        };
+        let rules = team_rules_for(&alpha, &[alpha.clone()], Some(&place));
+        assert!(rules.contains("Worktree mode is on."));
+        assert!(rules.contains("/tmp/crew-wt/alpha"));
+        assert!(rules.contains("The shared checkout is `/tmp/proj`."));
+        assert!(rules.contains("Do not cd to the shared checkout"));
+        let plain = team_rules(&alpha, &[alpha.clone()]);
+        assert!(!plain.contains("Worktree mode"));
     }
 
     /// Several independent jobs in one message go to the CLI's own subagents,

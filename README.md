@@ -93,6 +93,7 @@ xattr -dr com.apple.quarantine /Applications/Crew.app
 
 - 설정 옆 사용량 버튼에서 Claude / Grok / Codex / Antigravity 플랜의 한도 사용률을 봐요. 80%를 넘으면 빨간 점이 붙어요
 - 설정 > 일반 > 기본 AI. 새 봇 창이 이 AI로 시작하고, `⌘⇧N`은 이 AI로 지금 열린 봇의 그룹에 봇을 바로 만들어요
+- 설정 > 일반 > 워크트리에서 작업. 켜면 봇은 프로젝트의 git 워크트리에서 일하고, 공유 체크아웃은 그대로 둡니다
 - 대화 폭(전체/좁게), 얼굴만 남게 접히는 사이드바
 - 한국어 / English, 다크 / 라이트 / 시스템
 

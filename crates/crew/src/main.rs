@@ -28,6 +28,7 @@ mod targeting;
 mod tool_card;
 mod transcript;
 mod usage;
+mod worktree;
 #[cfg(debug_assertions)]
 mod ui_dev;
 

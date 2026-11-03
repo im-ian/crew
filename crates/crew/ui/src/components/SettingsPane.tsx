@@ -6,6 +6,7 @@ import type { Locale } from "../i18n";
 import type { ChatWidth } from "../chatWidth";
 import type { Delivery } from "../deliveryPref";
 import { loadNotify, saveNotify } from "../notifyPref";
+import { loadWorktree, saveWorktree } from "../worktreePref";
 import type { ThemePref } from "../theme";
 import type { UpdaterApi } from "../updater";
 import { Info, Keyboard, MessageSquare, Monitor, SlidersHorizontal } from "../icons";
@@ -54,6 +55,7 @@ export function SettingsPane({
   const t = useT();
   const { locale, setLocale } = useLocale();
   const [notify, setNotify] = useState(loadNotify);
+  const [worktree, setWorktree] = useState(loadWorktree);
   const [botDefault, setBotDefault] = useState(loadBotDefault);
 
   function changeBotDefault(next: Partial<BotDefault>) {
@@ -71,6 +73,12 @@ export function SettingsPane({
     // The daemon sends the same alerts while the window is closed.
     void api.setNotifications(notify).catch(() => {});
   }, [notify]);
+
+  useEffect(() => {
+    saveWorktree(worktree);
+    // The daemon reads this when it starts the next turn.
+    void api.setWorktree(worktree).catch(() => {});
+  }, [worktree]);
 
   const themes: { value: ThemePref; label: string }[] = [
     { value: "dark", label: t("settings.theme.dark") },
@@ -163,6 +171,25 @@ export function SettingsPane({
                 {notify
                   ? t("settings.notifications.note.on")
                   : t("settings.notifications.note.off")}
+              </p>
+              <div className="settings-notify">
+                <label className="field" htmlFor="settings-worktree">
+                  {t("settings.worktree")}
+                </label>
+                <input
+                  id="settings-worktree"
+                  type="checkbox"
+                  role="switch"
+                  className="switch"
+                  checked={worktree}
+                  title={worktree ? t("common.on") : t("common.off")}
+                  onChange={(e) => setWorktree(e.target.checked)}
+                />
+              </div>
+              <p className="apply-note">
+                {worktree
+                  ? t("settings.worktree.note.on")
+                  : t("settings.worktree.note.off")}
               </p>
               <Field label={t("settings.botDefault")}>
                 <ModelPicker
