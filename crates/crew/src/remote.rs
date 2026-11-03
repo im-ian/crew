@@ -196,6 +196,8 @@ struct State {
     /// Tells from a teammate whose first one is waiting on the owner's answer.
     awaiting_trust: HashMap<(String, String), Vec<Value>>,
     team_waiters: HashMap<String, Vec<oneshot::Sender<Result<(), String>>>>,
+    /// Renames waiting on their router, by frame id: the error code on refusal.
+    rename_waiters: HashMap<String, oneshot::Sender<Result<(), String>>>,
 }
 
 fn state() -> &'static Mutex<State> {
@@ -848,6 +850,9 @@ fn handle_frame(alias: &str, v: Value) {
         }
         "accepted" => {}
         "team_memory" => on_team_memory(alias, &v),
+        "renamed" => {
+            resolve_rename(&v, Ok(()));
+        }
         "error" => on_error(alias, &v),
         _ => {}
     }
@@ -1355,6 +1360,9 @@ fn on_error(alias: &str, v: &Value) {
     let code = v["code"].as_str().unwrap_or("");
     if code == "version_conflict" {
         resolve_team_waiters(alias, Err("conflict".into()));
+        return;
+    }
+    if resolve_rename(v, Err(code.to_string())) {
         return;
     }
     if let Some(id) = v["id"].as_str() {
@@ -1946,6 +1954,99 @@ async fn change_team_memory(alias: &str, frame: Value) -> anyhow::Result<bool> {
     }
 }
 
+fn resolve_rename(v: &Value, result: Result<(), String>) -> bool {
+    let waiter = v["id"]
+        .as_str()
+        .and_then(|id| state().lock().ok()?.rename_waiters.remove(id));
+    match waiter {
+        Some(tx) => {
+            let _ = tx.send(result);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Asks one router to give this PC's account `name`.
+async fn rename_on(alias: &str, name: &str) -> Result<(), String> {
+    if !is_connected(alias) {
+        return Err(say(
+            &format!("{alias} 라우터에 연결되어 있지 않아서 이름을 바꿀 수 없어요"),
+            &format!("Not connected to {alias}, so the name cannot change"),
+        ));
+    }
+    let id = new_job_id();
+    let (tx, rx) = oneshot::channel();
+    if let Ok(mut st) = state().lock() {
+        st.rename_waiters.insert(id.clone(), tx);
+    }
+    send(alias, json!({"type": "rename", "id": id, "name": name}));
+    let result = tokio::time::timeout(PROBE_TIMEOUT, rx).await;
+    if let Ok(mut st) = state().lock() {
+        st.rename_waiters.remove(&id);
+    }
+    let code = match result {
+        Ok(Ok(Ok(()))) => return Ok(()),
+        Ok(Ok(Err(code))) => code,
+        _ => String::new(),
+    };
+    Err(match code.as_str() {
+        "name_taken" => say(
+            &format!("{alias} 라우터에 이미 {name}이(가) 있어요"),
+            &format!("{name} is taken on {alias}"),
+        ),
+        "bad_name" => say(
+            "대표 봇 이름은 1–32자 글자·숫자·-·_만 쓸 수 있어요",
+            "A representative's name is 1–32 letters, digits, - or _",
+        ),
+        "bad_frame" => say(
+            &format!("{alias} 라우터가 이름 변경을 지원하지 않아요. 라우터를 업데이트해 주세요"),
+            &format!("{alias} cannot rename members. Update the router"),
+        ),
+        "" => say("라우터가 응답하지 않아요", "The router did not answer"),
+        other => other.to_string(),
+    })
+}
+
+/// A representative's name is its account on every router it stands in for,
+/// so they all take the new one before the bot does. One refusal puts back
+/// the ones that already took it.
+async fn rename(bot: &str, name: &str) -> Result<(), String> {
+    let links: Vec<(String, String)> = state()
+        .lock()
+        .map(|st| {
+            st.links
+                .values()
+                .filter(|l| l.cfg.bot == bot)
+                .map(|l| (l.cfg.alias.clone(), l.cfg.name.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut done: Vec<(String, String)> = Vec::new();
+    for (alias, old) in links {
+        if let Err(err) = rename_on(&alias, name).await {
+            for (alias, old) in done {
+                if rename_on(&alias, &old).await.is_ok() {
+                    set_account_name(&alias, &old);
+                }
+            }
+            return Err(err);
+        }
+        set_account_name(&alias, name);
+        done.push((alias, old));
+    }
+    Ok(())
+}
+
+fn set_account_name(alias: &str, name: &str) {
+    if let Ok(mut st) = state().lock() {
+        if let Some(link) = st.links.get_mut(alias) {
+            link.cfg.name = name.to_string();
+        }
+        save_configs(&st);
+    }
+}
+
 /// The router a bot means when it does not name one: the one it represents,
 /// or the only one.
 pub fn default_alias(bot: Option<&str>) -> Option<String> {
@@ -2326,6 +2427,19 @@ pub async fn handle(req: &Request) -> Option<Vec<Event>> {
             match join(url, alias, name.trim(), invite, bot).await {
                 Ok(()) => vec![Event::Ok],
                 Err(err) => error(format!("{err:#}")),
+            }
+        }
+        Request::SetAgent {
+            id, name: Some(name), ..
+        } if is_rep(id) => {
+            let name = name.trim();
+            let current = crate::daemon::agent_config(id).map(|c| c.name);
+            if name.is_empty() || current.as_deref() == Some(name) {
+                return None;
+            }
+            match rename(id, name).await {
+                Ok(()) => return None,
+                Err(err) => error(err),
             }
         }
         Request::RemoteList => vec![Event::Remotes { remotes: infos() }],

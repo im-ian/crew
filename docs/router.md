@@ -27,6 +27,7 @@
 | 첨부 | 라우터를 거쳐 받는 쪽 `uploads/remote/<별칭>/<보낸이>/`로 옮긴다. 파일당 25MB |
 | 팀 공용 메모 | 라우터에 하나. 매 원격 턴의 `# Team memory` 단락. `set`은 버전이 맞을 때만 |
 | 암호화 | TLS(wss)만. 라우터 운영자는 내용을 볼 수 있다 |
+| 이름 변경 | 대표 봇 이름을 바꾸면 그 봇이 대표로 있는 라우터마다 계정 이름도 바뀐다. 라우터가 하나라도 거절하면(겹침·잘못된 이름·연결 끊김) 이름은 그대로다. 보관 메시지는 계정 id를 따라가니 잃지 않는다. 아바타·역할은 바꾸는 즉시 `profile`로 다시 보낸다 |
 | 탈퇴 | 대표 봇을 지우면 라우터의 이름은 바로 풀린다. 그 계정 앞 보관 메시지는 보낸 쪽에 실패로 돌아간다 |
 | 홉 | 4홉 제한은 PC를 넘어가도 이어서 센다 |
 
@@ -68,6 +69,7 @@ WebSocket 하나(`/ws`), 프레임마다 JSON 텍스트 하나, 모두 `type` �
 | 프레임 | 뜻 |
 | --- | --- |
 | `profile {role?, avatar?, avatar_shape?, avatar_color?}` | 내 대표 봇 정보. 모두에게 `member`로 퍼진다 |
+| `rename {id, name}` | 내 계정 이름을 바꾼다. 규칙은 가입과 같다. 답으로 `renamed {id, name}` 또는 `error {id, code:"name_taken"\|"bad_name"}`. 모두에게 `member`로 퍼진다. 이 프레임을 모르는 라우터는 `error {code:"bad_frame"}`로 답한다 |
 | `presence {status}` | idle·working·asking. 모두에게 `member` |
 | `tell {id, to, text, hops, files?}` | `to`는 이름. `id`는 보낸 쪽이 만든 고유값. 답으로 `accepted {id, queued}` 또는 `error {id, code:"no_such_member"\|"rate_limited"\|"too_large"}` |
 | `progress {id, state, text?}` | 받은 쪽 → 보낸 쪽. `state`: started·working·waiting_owner·waiting_approval. `text`는 지금까지 쓴 말 전체. 보관하지 않는다 |
