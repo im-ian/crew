@@ -6,9 +6,6 @@ cd "$(dirname "$0")"
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 UI="$PWD/../../crates/crew/ui"
 
-for face in face-circle face-triangle face-cloud face-square face-teardrop; do
-  rsvg-convert -w 128 "$face.svg" > "$face.png"
-done
 
 "$CHROME" --headless=new --disable-gpu --hide-scrollbars \
   --force-device-scale-factor=2 --window-size=1600,720 \
