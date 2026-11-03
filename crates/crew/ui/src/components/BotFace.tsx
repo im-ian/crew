@@ -7,6 +7,7 @@ import {
 } from "react";
 import { avatarPhase, type AvatarShape } from "../avatar";
 import { EXTRA_BOXES, EXTRA_INKS, extraFace } from "../faceGeometry";
+import { ART_BOXES, ART_INKS, artFace } from "../faceArt";
 import { afterglowAt, type BotSignal } from "../botSignals";
 import type { AgentStatus } from "../types";
 import type { WorkLook } from "../workLook";
@@ -28,7 +29,9 @@ type Props = {
   lookAt?: { x: number; y: number } | null;
 };
 
-function eyesAt(shape: AvatarShape): { x: number; y: number } {
+function eyesAt(shape: AvatarShape): { x: number; y: number; dx?: number } {
+  const art = artFace(shape);
+  if (art) return art.eyes;
   const extra = extraFace(shape);
   if (extra) return extra.eyes;
   switch (shape) {
@@ -42,8 +45,6 @@ function eyesAt(shape: AvatarShape): { x: number; y: number } {
       return { x: 32, y: 32 };
     case "heart":
       return { x: 32, y: 30 };
-    case "star":
-      return { x: 32, y: 33 };
     case "pentagon":
       return { x: 32, y: 34 };
     default:
@@ -52,6 +53,9 @@ function eyesAt(shape: AvatarShape): { x: number; y: number } {
 }
 
 function Shape({ shape, color }: { shape: AvatarShape; color: string }) {
+  const art = artFace(shape);
+  // Static markup from faceArt.ts, painted through `currentColor`.
+  if (art) return <g color={color} dangerouslySetInnerHTML={{ __html: art.markup }} />;
   const extra = extraFace(shape);
   if (extra) return <path fill={color} d={extra.d} />;
   switch (shape) {
@@ -106,13 +110,6 @@ function Shape({ shape, color }: { shape: AvatarShape; color: string }) {
           d="M25.37 6.71Q32 1.89 38.63 6.71L55.94 19.28Q62.57 24.1 60.04 31.9L53.43 52.24Q50.9 60.04 42.7 60.04L21.3 60.04Q13.1 60.04 10.57 52.24L3.96 31.9Q1.43 24.1 8.06 19.28Z"
         />
       );
-    case "star":
-      return (
-        <path
-          fill={color}
-          d="M30.08 7.34Q32 2.72 33.92 7.34L38.58 18.53Q40.5 23.15 45.48 23.55L57.58 24.52Q62.56 24.92 58.76 28.17L49.55 36.07Q45.75 39.32 46.91 44.18L49.73 55.98Q50.89 60.84 46.62 58.24L36.27 51.91Q32 49.31 27.73 51.91L17.38 58.24Q13.11 60.84 14.27 55.98L17.09 44.18Q18.25 39.32 14.45 36.07L5.24 28.17Q1.44 24.92 6.42 24.52L18.52 23.55Q23.5 23.15 25.42 18.53Z"
-        />
-      );
     case "heart":
       return (
         <path
@@ -147,8 +144,7 @@ function Eye({ x, y, dir }: { x: number; y: number; dir: number }) {
   );
 }
 
-function Eyes({ cx, cy }: { cx: number; cy: number }) {
-  const dx = 7.2;
+function Eyes({ cx, cy, dx = 7.2 }: { cx: number; cy: number; dx?: number }) {
   return (
     <g className="avatar-gaze" fill="#fff">
       <g className="avatar-blink">
@@ -264,9 +260,9 @@ const SHAPE_BOX: Record<AvatarShape, ShapeBox> = {
   pill: { x: 2, y: 9, w: 60, h: 46 },
   diamond: { x: 3, y: 3, w: 58, h: 58 },
   pentagon: { x: 3, y: 3.96, w: 58, h: 56.08, opticalY: 2 },
-  star: { x: 3, y: 4.39, w: 58, h: 55.23, optical: 1.14, opticalY: 2.8 },
   heart: { x: 3.2, y: 3.2, w: 57.6, h: 55.6, optical: 1.12, opticalY: 1.4 },
   ...EXTRA_BOXES,
+  ...ART_BOXES,
 };
 
 // Measured ink coverage of each shape's rendered alpha mask, not a hand fudge.
@@ -282,9 +278,9 @@ const SHAPE_INK: Record<AvatarShape, number> = {
   pill: 1.006,
   diamond: 0.993,
   pentagon: 0.983,
-  star: 0.904,
   heart: 0.895,
   ...EXTRA_INKS,
+  ...ART_INKS,
 };
 
 // ponytail: scaling about the face centre is just a bigger `s`, since shapeFit
@@ -598,7 +594,7 @@ export function BotFace({
         <Shape shape={shape} color={color} />
       </g>
       <g transform={shapeFit(shape)}>
-        <Eyes cx={eyes.x} cy={eyes.y} />
+        <Eyes cx={eyes.x} cy={eyes.y} dx={eyes.dx} />
       </g>
       {live === "question" ? <QuestionMark color={color} /> : null}
       {live === "exited" ? <SleepMarks color={color} /> : null}

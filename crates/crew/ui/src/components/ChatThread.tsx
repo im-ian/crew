@@ -40,7 +40,10 @@ import {
   answeredOptionView,
   optionView,
   otherBadge,
+  allPicked,
   answerSummary,
+  offersSelectAll,
+  toggleAll,
   blankDraft,
   dropChoiceDraft,
   keepChoiceDraft,
@@ -1693,6 +1696,13 @@ function ChoiceCard({
   const [values, setValues] = useState<string[][]>(start.values);
   const [others, setOthers] = useState<string[]>(start.others);
   const [sent, setSent] = useState(false);
+  // The question whose badges just came on together, for the staggered pop.
+  const [cascade, setCascade] = useState<number | null>(null);
+  useEffect(() => {
+    if (cascade === null) return;
+    const done = window.setTimeout(() => setCascade(null), 600);
+    return () => window.clearTimeout(done);
+  }, [cascade]);
   const open = pending && !sent;
   // Several questions are a stack: one in front, the rest as card edges
   // behind it, and a summary of every answer last. The card holds the size
@@ -1741,6 +1751,7 @@ function ChoiceCard({
 
   function toggle(qi: number, id: string, multi: boolean) {
     if (!open || !onAnswer) return;
+    setCascade(null);
     const next = picks.map((row, i) => {
       if (i !== qi) return row;
       if (multi) {
@@ -1752,6 +1763,17 @@ function ChoiceCard({
     // One answer per single pick: an option replaces what was typed. Picking
     // only selects; the answer goes out on the submit button.
     if (!multi) setOthers(others.map((v, i) => (i === qi ? "" : v)));
+  }
+
+  // "Select all" on a multi question: every option, or none once all are on.
+  // The badges that come on pop one after another, top down.
+  function pickAll(qi: number) {
+    if (!open || !onAnswer) return;
+    const options = questions[qi]?.options || [];
+    const row = picks[qi] || [];
+    const next = toggleAll(options, row);
+    setPicks(picks.map((r, i) => (i === qi ? next : r)));
+    setCascade(next.length ? qi : null);
   }
 
   function setOther(qi: number, next: string) {
@@ -1831,7 +1853,11 @@ function ChoiceCard({
     const selected = pending ? picks[qi] || [] : q.selected || [];
     const fields = q.fields || [];
     const fieldValues = values[qi] || fields.map((f) => f.value || "");
-    const showFields = fields.length > 0 && card.state !== "closed";
+    // Answered, a box left blank has nothing to show: only filled ones stay.
+    const shownFields = fields
+      .map((f, fi) => ({ f, fi }))
+      .filter(({ fi }) => open || (fieldValues[fi] || "").trim());
+    const showFields = shownFields.length > 0 && card.state !== "closed";
     const showList =
       (q.options || []).length > 0 &&
       (open ||
@@ -1860,11 +1886,20 @@ function ChoiceCard({
           <MdBody className="choice-hint md" text={hint} agents={[]} />
         ) : null}
         {q.multi && open && (q.options || []).length ? (
-          <div className="choice-multi">{t("thread.choiceMulti")}</div>
+          <div className="choice-multi">
+            <span>{t("thread.choiceMulti")}</span>
+            {offersSelectAll(q) && onAnswer ? (
+              <button type="button" className="choice-all" onClick={() => pickAll(qi)}>
+                {allPicked(q.options || [], selected)
+                  ? t("thread.choiceNone")
+                  : t("thread.choiceAll")}
+              </button>
+            ) : null}
+          </div>
         ) : null}
         {showFields ? (
           <div className="choice-fields">
-            {fields.map((f, fi) => {
+            {shownFields.map(({ f, fi }) => {
               const id = `${card.id}-${qi}-${f.id || fi}`;
               return (
                 <label className="choice-field" key={f.id || fi} htmlFor={id}>
@@ -1911,6 +1946,7 @@ function ChoiceCard({
                   type="button"
                   key={o.id}
                   className={"choice-option" + (on ? " is-on" : "")}
+                  style={cascade === qi ? ({ "--pop-i": oi } as CSSProperties) : undefined}
                   disabled={!open || !onAnswer}
                   onClick={() => toggle(qi, o.id, !!q.multi)}
                 >

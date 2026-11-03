@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  allPicked,
   answerSummary,
   answeredOptionView,
   blankDraft,
   draftTouched,
   dropChoiceDraft,
   keepChoiceDraft,
+  offersSelectAll,
   otherBadge,
   questionDone,
   readChoiceDraft,
+  toggleAll,
 } from "./choiceView";
 import type { ChoiceOption, ChoiceQuestion } from "./types";
 
@@ -127,5 +130,26 @@ describe("choice drafts", () => {
     keepChoiceDraft("card-1", questions, touched);
     dropChoiceDraft("card-1");
     expect(readChoiceDraft("card-1")).toBeUndefined();
+  });
+});
+
+describe("select all", () => {
+  const three: ChoiceOption[] = [
+    { id: "A", label: "하나" },
+    { id: "B", label: "둘" },
+    { id: "C", label: "셋" },
+  ];
+
+  it("shows only on a multi question with three or more options", () => {
+    expect(offersSelectAll({ question: "q", multi: true, options: three })).toBe(true);
+    expect(offersSelectAll({ question: "q", multi: true, options: three.slice(0, 2) })).toBe(false);
+    expect(offersSelectAll({ question: "q", options: three })).toBe(false);
+  });
+
+  it("picks every option in order, then clears once all are on", () => {
+    expect(toggleAll(three, ["B"])).toEqual(["A", "B", "C"]);
+    expect(allPicked(three, ["C", "A", "B"])).toBe(true);
+    expect(toggleAll(three, ["C", "A", "B"])).toEqual([]);
+    expect(allPicked([], [])).toBe(false);
   });
 });

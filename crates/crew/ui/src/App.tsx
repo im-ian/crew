@@ -16,7 +16,7 @@ import { SettingsPane } from "./components/SettingsPane";
 import { SkillsPane } from "./components/SkillsPane";
 import { ShortcutHelp } from "./components/ShortcutHelp";
 import { Sidebar } from "./components/Sidebar";
-import { Toast } from "./components/Toast";
+import { Island } from "./components/Island";
 import { chatOrder, loadRemoteFolds, loadRemoteLayout, representing } from "./remote";
 import { copyText } from "./components/CopyButton";
 import { useT } from "./LocaleContext";
@@ -576,7 +576,17 @@ export function App() {
       />
       <SkillsPane open={skillsOpen} onClose={() => setSkillsOpen(false)} />
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
-      <Toast text={crew.toast.text} show={crew.toast.show} />
+      <Island
+        notice={crew.island}
+        visible={crew.islandOpen}
+        agents={crew.agents}
+        onOpenBot={(id) => {
+          // The bot may already be open behind a blurred window; the click answers it either way.
+          crew.closeIsland();
+          crew.selectAgent(id);
+        }}
+        onClose={crew.closeIsland}
+      />
     </div>
   );
 }

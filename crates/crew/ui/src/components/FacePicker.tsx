@@ -1,22 +1,32 @@
 import {
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import {
-  AVATAR_SHAPES,
+  AVATAR_SHAPE_GROUPS,
   AVATAR_SWATCHES,
   normalizeHex,
   randomFace,
   resolveFace,
   type AvatarShape,
+  type ShapeGroupKey,
 } from "../avatar";
 import { Pencil } from "../icons";
+import type { MessageKey } from "../i18n";
 import { useT } from "../LocaleContext";
 import { usePopover } from "../usePopover";
 import { BotFace } from "./BotFace";
+
+const GROUP_LABEL: Record<ShapeGroupKey, MessageKey> = {
+  shapes: "face.group.shapes",
+  things: "face.group.things",
+  pixel: "face.group.pixel",
+  nature: "face.group.nature",
+};
 
 type Props = {
   id?: string | null;
@@ -36,6 +46,7 @@ export function FacePicker({
   onFace,
 }: Props) {
   const t = useT();
+  const groupId = useId();
   const resolved = resolveFace(id, shape, color);
   const [hex, setHex] = useState(resolved.color);
   const preview = normalizeHex(hex) ?? resolved.color;
@@ -141,15 +152,18 @@ export function FacePicker({
   const shapeRow = useRef<HTMLDivElement>(null);
 
   // Keep the chosen shape inside this column. scrollIntoView would also
-  // scroll the sheet underneath the popover.
+  // scroll the sheet underneath the popover. A group title holds at the top of
+  // the list, so a shape counts as in view only below it.
   useLayoutEffect(() => {
     const row = shapeRow.current;
     const el = row?.querySelector<HTMLElement>(".shape-pick.on");
     if (!row || !el) return;
     const rowBox = row.getBoundingClientRect();
     const elBox = el.getBoundingClientRect();
-    if (elBox.top >= rowBox.top && elBox.bottom <= rowBox.bottom) return;
-    const delta = elBox.top - rowBox.top - (row.clientHeight - elBox.height) / 2;
+    const held = row.querySelector<HTMLElement>(".shape-group-head")?.offsetHeight ?? 0;
+    if (elBox.top >= rowBox.top + held && elBox.bottom <= rowBox.bottom) return;
+    const delta =
+      elBox.top - rowBox.top - held - (row.clientHeight - held - elBox.height) / 2;
     row.scrollTop += delta;
   }, [resolved.shape]);
 
@@ -187,19 +201,33 @@ export function FacePicker({
         aria-label={t("field.shape")}
         ref={shapeRow}
       >
-          {AVATAR_SHAPES.map((s) => (
-            <button
-              key={s}
-              type="button"
-              role="option"
-              aria-selected={resolved.shape === s}
-              className={"shape-pick" + (resolved.shape === s ? " on" : "")}
-              title={s}
-              onClick={() => onShape(s)}
-            >
-              <BotFace shape={s} color={preview} />
-            </button>
-          ))}
+        {AVATAR_SHAPE_GROUPS.map((group) => (
+          <div
+            className="shape-group"
+            key={group.key}
+            role="group"
+            aria-labelledby={`${groupId}-${group.key}`}
+          >
+            <div className="shape-group-head" id={`${groupId}-${group.key}`}>
+              {t(GROUP_LABEL[group.key])}
+            </div>
+            <div className="shape-grid">
+              {group.shapes.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  role="option"
+                  aria-selected={resolved.shape === s}
+                  className={"shape-pick" + (resolved.shape === s ? " on" : "")}
+                  title={s}
+                  onClick={() => onShape(s)}
+                >
+                  <BotFace shape={s} color={preview} />
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
       <div className="color-pane">
         <div className="color-swatches">
