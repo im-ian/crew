@@ -357,6 +357,54 @@ def delegate_while_another_asks(w):
     settled(w, 30)
 
 
+def working(node):
+    ag = [x for x in node.rpc({"type": "list"})["agents"] if x["id"] == node.rep][0]
+    return ag["status"] == "working"
+
+
+def system_says(node, other, *words):
+    return any(any(w in t for w in words) for t in node.texts(node.rid(other), role="system"))
+
+
+def owner_stops_a_remote_turn(w):
+    a, c, d = w["A"], w["C"], w["D"]
+    tell(c, a, "SLOW S1")
+    tell(d, a, "S1-D")
+    wait(lambda: working(a), 10, "A working on S1")
+    assert a.rpc({"type": "interrupt", "agent": a.rep})["type"] == "ok"
+    wait(lambda: system_says(c, a, "멈췄", "stopped"), 10, "C hears it was stopped")
+    got(d, a, "S1-D")  # the next one in line still runs
+    time.sleep(3.5)
+    assert not has(c.texts(c.rid(a)), "ACK SLOW S1"), "C got an answer after the stop"
+    settled(w)
+
+
+def sender_cancels_a_running_turn(w):
+    a, c = w["A"], w["C"]
+    tell(c, a, "SLOW S2")
+    wait(lambda: working(a), 10, "A working on S2")
+    assert c.rpc({"type": "interrupt", "agent": c.rid(a)})["type"] == "ok"
+    wait(lambda: system_says(c, a, "취소", "cancelled"), 10, "C sees cancelled")
+    wait(lambda: not working(a), 10, "A stopped S2")
+    time.sleep(3.5)
+    assert not has(c.texts(c.rid(a)), "ACK SLOW S2"), "C got an answer after cancelling"
+    settled(w)
+
+
+def sender_cancels_a_queued_one(w):
+    a, c, d = w["A"], w["C"], w["D"]
+    tell(d, a, "SLOW S3-D")
+    wait(lambda: working(a), 10, "A working on D's")
+    tell(c, a, "S3-C")
+    time.sleep(0.5)
+    assert c.rpc({"type": "interrupt", "agent": c.rid(a)})["type"] == "ok"
+    wait(lambda: system_says(c, a, "취소", "cancelled"), 10, "C sees cancelled")
+    got(d, a, "SLOW S3-D", 15)  # D's turn was not the one cancelled
+    time.sleep(1)
+    assert not has(a.texts(a.rep), "ACK S3-C"), "A ran the cancelled one"
+    settled(w)
+
+
 SCENARIOS = [
     ("C·D가 동시에 A에게", two_ask_a_at_once),
     ("C가 A에게 연달아 3개", one_sender_bursts),
@@ -369,6 +417,9 @@ SCENARIOS = [
     ("처음 보는 E·F가 동시에 (카드 2장, 허용/거절)", two_newcomers_two_cards),
     ("A 대표 봇이 로컬 봇에게 위임", delegate_then_answer),
     ("위임 중에 D가 끼어듦", delegate_while_another_asks),
+    ("A 주인이 원격 일을 도중에 정지", owner_stops_a_remote_turn),
+    ("C가 A가 처리 중인 일을 취소", sender_cancels_a_running_turn),
+    ("C가 A에 대기 중인 일을 취소 (D 일은 계속)", sender_cancels_a_queued_one),
 ]
 
 
