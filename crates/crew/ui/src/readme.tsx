@@ -2,7 +2,7 @@
 // /readme.html. The real App runs on made-up bots, so a screenshot shows the
 // app as it is. Production builds only bundle index.html, so this never ships.
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
-import type { AgentInfo, ChatMessage, Group, PlanUsage } from "./types";
+import type { AgentInfo, ChatMessage, Group, PlanUsage, RemoteInfo, RemoteServer } from "./types";
 
 const MIN = 60_000;
 const now = Date.now();
@@ -90,8 +90,48 @@ const usage: PlanUsage[] = [
 ];
 
 const shot = new URLSearchParams(location.search).get("shot") ?? "window";
+
+// `?shot=remote…`: one router with three teammates, and this PC's
+// representative bot. The other shots leave them out.
+const remoteShot = shot.startsWith("remote");
+const remotes: RemoteInfo[] = [];
+if (remoteShot) {
+  agents.push(
+    {
+      id: "rep", name: "이안", status: "idle", cmd: ["claude"], cwd: "~", avatar_shape: "flower",
+      avatar_color: "#3fbf7f", routines: [], preview: "민지 님 요청은 리뷰어에게 맡겼어요.", last_ts: at(4),
+    },
+    {
+      id: "acme/acc_k3j9x0", name: "민지", status: "working", cmd: [], cwd: "", remote: "acme", remote_online: true,
+      avatar_shape: "cloud", avatar_color: "#ff8a3d", role: "백엔드", routines: [], preview: "스키마 바꾸는 중이에요.", last_ts: at(3),
+    },
+    {
+      id: "acme/acc_p2m8q1", name: "준", status: "idle", cmd: [], cwd: "", remote: "acme", remote_online: false,
+      avatar_shape: "hexagon", avatar_color: "#5ac8fa", role: "디자인", routines: [], preview: "내일 시안 올릴게요.", last_ts: at(60 * 20),
+    },
+    {
+      id: "acme/acc_r4t6w2", name: "소라", status: "working", cmd: [], cwd: "", remote: "acme", remote_online: true,
+      asking: true, avatar_shape: "square", avatar_color: "#a57bff", routines: [], preview: "주인 확인 기다리는 중", last_ts: at(12),
+    },
+  );
+  groups[1].items.unshift("agent:rep");
+  remotes.push({
+    alias: "acme", url: "wss://router.acme.dev:7420", name: "ian", bot: "rep", connected: true,
+    members: [], delegates: ["review", "impl"],
+    trusted: [{ account: "acc_k3j9x0", name: "민지" }],
+    blocked: [{ account: "acc_zz01", name: "spam-bot" }],
+  });
+  thread["acme/acc_k3j9x0"] = [
+    { id: "x1", role: "user", from: "user", ts: at(9), text: "주문 API에 `discount` 필드 넣을 수 있을까요? 금요일 배포 전에요." },
+    { id: "x2", role: "assistant", from: "acme/acc_k3j9x0", ts: at(6), text: "네, 스키마에 넣고 마이그레이션까지 만들게요. 끝나면 PR 링크 드릴게요." },
+    { id: "x3", role: "assistant", from: "acme/acc_k3j9x0", ts: at(3), text: "마이그레이션 쓰는 중이에요. @acme/acc_p2m8q1 에게 화면 문구도 물어볼게요." },
+  ];
+}
+const probe: RemoteServer = {
+  url: "wss://router.acme.dev:7420", name: "crew-router", version: "0.1.0", protocol: 1, title: "Acme Team", signup: "invite",
+};
 // The App opens the first bot in the list.
-const first = shot === "routines" ? "brief" : "impl";
+const first = shot === "routines" ? "brief" : remoteShot ? "acme/acc_k3j9x0" : "impl";
 agents.sort((a, b) => (a.id === first ? -1 : b.id === first ? 1 : 0));
 
 localStorage.clear();
@@ -99,6 +139,7 @@ localStorage.setItem("crew.theme", "dark");
 // Only the reviewer and the server bot wait to be read.
 localStorage.setItem("crew.read", JSON.stringify({ "agent:design": now, "agent:brief": now, "agent:impl": now }));
 localStorage.setItem("crew.locale", "ko");
+if (remoteShot) localStorage.setItem("crew.last-chat", first);
 
 mockWindows("main");
 mockIPC(
@@ -123,6 +164,11 @@ mockIPC(
       case "peek_pending_focus":
       case "take_pending_focus": return null;
       case "search_crew": return [];
+      case "remote_list": return remotes;
+      case "remote_probe": return probe;
+      case "remote_join": return "rep";
+      case "team_memory_get": return { text: "- 금요일 오후에는 배포하지 않아요\n- API 스펙: docs/api.md", version: 4 };
+      case "team_memory_set": return true;
       case "plugin:app|version": return "0.4.1";
       case "plugin:updater|check": return null;
       default: return null;
@@ -152,5 +198,33 @@ when(
     if (shot === "window") when(() => document.querySelector<HTMLElement>(".note-run-head"), (el) => el.click());
     if (shot === "new-bot") key("n");
     if (shot === "routines") key("R", true);
+    if (shot === "remote-add" || shot === "remote-join") {
+      document.querySelector<HTMLElement>(".search-row .icon-btn:last-child")?.click();
+      when(
+        () => [...document.querySelectorAll<HTMLElement>(".ctx.open button")].find((b) => b.textContent === "원격 봇 추가") ?? null,
+        (el) => {
+          el.click();
+          if (shot !== "remote-join") return;
+          when(() => document.querySelector<HTMLInputElement>("#remote-address"), (input) => {
+            const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+            set?.call(input, "router.acme.dev");
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            when(
+              () => [...document.querySelectorAll<HTMLElement>(".modal.open .primary")].find((b) => b.textContent === "확인") ?? null,
+              (ok) => ok.click(),
+            );
+          });
+        },
+      );
+    }
+    if (shot === "remote-settings") {
+      key(",");
+      when(() => document.querySelector<HTMLElement>('[data-section="remote"]'), (el) => {
+        el.click();
+        // `#end` shows the bottom of the page: the team memo and Leave.
+        if (location.hash !== "#end") return;
+        setTimeout(() => document.querySelector(".settings-body")?.scrollTo(0, 9999), 300);
+      });
+    }
   },
 );
