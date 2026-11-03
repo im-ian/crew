@@ -334,6 +334,15 @@ pub fn transcripts_dir() -> PathBuf {
 }
 
 pub fn transcript_path(agent_id: &str) -> PathBuf {
+    // A bot on another PC is `<alias>/<account>`. Its file is apart from any
+    // local id that flattens to the same name.
+    if let Some((alias, account)) = agent_id.split_once('/') {
+        return transcripts_dir().join(format!(
+            "remote~{}~{}.jsonl",
+            safe_agent_id(alias),
+            safe_agent_id(account)
+        ));
+    }
     transcripts_dir().join(format!("{}.jsonl", safe_agent_id(agent_id)))
 }
 
