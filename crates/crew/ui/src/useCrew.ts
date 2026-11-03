@@ -18,7 +18,7 @@ import {
 import { openPendingOnFocus } from "./focusChat";
 import { useT } from "./LocaleContext";
 import { loadNotify } from "./notifyPref";
-import { publishBotSignals } from "./botSignals";
+import { publishBotSignals, publishBotUnread } from "./botSignals";
 import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
 import {
   adoptNewGroups,
@@ -156,6 +156,14 @@ export function useCrew() {
       return next;
     });
   }, [selected, selectedKind, currentAgent?.last_ts]);
+
+  // The faces keep a finished run's reaction going until the chat is seen.
+  useEffect(() => {
+    const keys = new Set(unread);
+    publishBotUnread(
+      agents.filter((a) => keys.has(itemKey("agent", a.id))).map((a) => a.id),
+    );
+  }, [unread, agents]);
 
   useEffect(() => {
     void api.setDockBadge(unread.length).catch(() => null);
