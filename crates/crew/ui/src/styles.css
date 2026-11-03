@@ -1690,6 +1690,7 @@ header .who-name {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.head-run.is-online { color: var(--idle); }
 .head-status {
   display: inline-flex;
   align-items: center;

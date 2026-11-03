@@ -23,7 +23,7 @@ import { loadLastChat, pickOpenAgent, saveLastChat } from "./lastChat";
 import { loadNotify } from "./notifyPref";
 import { publishBotSignals, publishBotUnread } from "./botSignals";
 import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
-import { localAgents } from "./remote";
+import { isOnline, localAgents, remoteLabel } from "./remote";
 import { useRemotes } from "./useRemotes";
 import {
   adoptNewGroups,
@@ -191,11 +191,18 @@ export function useCrew() {
     void api.setDockBadge(unread.length).catch(() => null);
   }, [unread.length]);
 
-  const placeholder = currentAgent
-    ? t("composer.placeholder.agent", {
-        name: currentAgent.name || currentAgent.id,
-      })
-    : t("composer.placeholder.generic");
+  const placeholder = !currentAgent
+    ? t("composer.placeholder.generic")
+    : currentAgent.remote
+      ? t(
+          isOnline(currentAgent)
+            ? "composer.placeholder.remote"
+            : "composer.placeholder.remoteOffline",
+          { name: remoteLabel(currentAgent) },
+        )
+      : t("composer.placeholder.agent", {
+          name: currentAgent.name || currentAgent.id,
+        });
 
   const tRef = useRef(t);
   tRef.current = t;

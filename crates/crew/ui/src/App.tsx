@@ -379,9 +379,13 @@ export function App() {
           peekFocus={peekOpen ? peek?.focus[0] ?? null : null}
           onPeek={togglePeek}
           showTools={showTools}
-          onOpenRoutines={() => {
-            if (crew.selected) crew.openRoutines(crew.selected);
-          }}
+          onOpenRoutines={
+            crew.currentAgent?.remote
+              ? undefined
+              : () => {
+                  if (crew.selected) crew.openRoutines(crew.selected);
+                }
+          }
           lookAt={
             crew.currentAgent?.status === "working" ||
             crew.currentAgent?.status === "blocked" ||
