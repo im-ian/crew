@@ -1,0 +1,405 @@
+#!/usr/bin/env python3
+"""Remote bots end to end: one crew-router and several Crew daemons on this
+machine, each with its own CREW_HOME, talking through the router.
+
+    python3 scripts/remote-e2e.py --crew target/debug/crew \
+        --router ../crew-router/target/release/crew-router
+
+Every representative is a tiny shell bot that answers `ACK <last line>`, so
+each reply carries the token it answers and a crossed reply shows. A's
+representative may hand work to a local helper: a line with `DELEGATE` makes
+it run `crew tell` to that helper and say `HANDED`.
+"""
+
+import argparse
+import json
+import os
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+PORT = 17431
+ALIAS = "lab"
+
+BOT = """#!/bin/sh
+for last; do :; done
+line=$(printf '%s\\n' "$last" | grep -v '^[[:space:]]*$' | tail -n 1)
+case "$line" in
+  *DELEGATE*)
+    "{crew}" tell {helper} "sub ${{line#*DELEGATE }}" >/dev/null 2>&1
+    echo "HANDED $line" ;;
+  *SLOW*) sleep 3; echo "ACK $line" ;;
+  *) echo "ACK $line" ;;
+esac
+"""
+
+
+class Node:
+    def __init__(self, name, root, crew):
+        self.name = name
+        self.home = os.path.join(root, name)
+        self.crew = crew
+        os.makedirs(self.home)
+        self.proc = None
+        self.rep = None
+        self.account = None
+
+    def env(self):
+        env = dict(os.environ)
+        env.pop("CREW_AGENT_ID", None)
+        env["CREW_HOME"] = self.home
+        return env
+
+    def start(self):
+        log = open(os.path.join(self.home, "daemon.out"), "a")
+        self.proc = subprocess.Popen(
+            [self.crew, "daemon"], env=self.env(), stdout=log, stderr=log
+        )
+        wait(lambda: self.ping(), 10, f"{self.name} daemon up")
+
+    def stop(self):
+        if self.proc:
+            self.proc.send_signal(signal.SIGTERM)
+            try:
+                self.proc.wait(10)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+            self.proc = None
+
+    def ping(self):
+        try:
+            return self.rpc({"type": "ping"})["type"] == "pong"
+        except OSError:
+            return False
+
+    def rpc(self, req, timeout=40):
+        s = socket.socket(socket.AF_UNIX)
+        s.settimeout(timeout)
+        s.connect(os.path.join(self.home, "crew.sock"))
+        s.sendall((json.dumps(req) + "\n").encode())
+        buf = b""
+        while b"\n" not in buf:
+            chunk = s.recv(1 << 20)
+            if not chunk:
+                break
+            buf += chunk
+        s.close()
+        return json.loads(buf.decode().split("\n")[0])
+
+    def cli(self, *args):
+        out = subprocess.run(
+            [self.crew, *args], env=self.env(), capture_output=True, text=True
+        )
+        return out.stdout + out.stderr
+
+    def add_bot(self, name, root, helper="nobody"):
+        path = os.path.join(root, f"{self.name}-{name}.sh")
+        with open(path, "w") as f:
+            f.write(BOT.format(crew=self.crew, helper=helper))
+        os.chmod(path, 0o755)
+        out = self.cli("agent", "add", "--headless", "--name", name, "--cmd", path)
+        return out.split()[1]
+
+    def messages(self, agent):
+        ev = self.rpc({"type": "messages", "agent": agent})
+        return ev.get("messages", [])
+
+    def texts(self, agent, role="assistant"):
+        return [m["text"] for m in self.messages(agent) if m["role"] == role]
+
+    def remote(self):
+        return self.rpc({"type": "remote_list"})["remotes"][0]
+
+    def rid(self, other):
+        for m in self.remote()["members"]:
+            if m["name"] == other.name:
+                return f"{ALIAS}/{m['account']}"
+        raise KeyError(other.name)
+
+    def jobs(self):
+        try:
+            with open(os.path.join(self.home, "remote-jobs.json")) as f:
+                j = json.load(f)
+            return len(j.get("out", [])) + len(j.get("in", []))
+        except FileNotFoundError:
+            return 0
+
+    def pending_cards(self):
+        return [
+            m for m in self.messages(self.rep)
+            if m.get("choice") and m["choice"]["state"] == "pending"
+        ]
+
+    def answer(self, card, option):
+        return self.rpc({
+            "type": "answer_choice", "agent": self.rep,
+            "message_id": card["id"], "answers": [[option]],
+        })
+
+
+def wait(cond, secs, what):
+    end = time.time() + secs
+    while time.time() < end:
+        try:
+            if cond():
+                return True
+        except Exception:
+            pass
+        time.sleep(0.2)
+    raise AssertionError(f"timed out: {what}")
+
+
+def has(texts, token):
+    return any(token in t for t in texts)
+
+
+def together(*fns):
+    threads = [threading.Thread(target=f) for f in fns]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+
+class World:
+    def __init__(self, crew, router):
+        self.root = tempfile.mkdtemp(prefix="crew-remote-e2e-")
+        rlog = open(os.path.join(self.root, "router.log"), "w")
+        self.router = subprocess.Popen(
+            [router, "serve", "--listen", f"127.0.0.1:{PORT}",
+             "--data", os.path.join(self.root, "router"), "--title", "E2E"],
+            stdout=rlog, stderr=rlog,
+        )
+        time.sleep(0.8)
+        self.nodes = {}
+        for name in "ABCDEF":
+            n = Node(name, self.root, crew)
+            n.start()
+            helper = None
+            if name == "A":
+                helper = n.add_bot("Helper", self.root)
+                self.helper = helper
+            n.rep = n.add_bot(f"Rep{name}", self.root, helper or "nobody")
+            r = n.rpc({"type": "remote_join", "url": f"ws://127.0.0.1:{PORT}",
+                       "alias": ALIAS, "name": name, "bot": n.rep})
+            assert r["type"] == "ok", r
+            self.nodes[name] = n
+        a = self.nodes["A"]
+        wait(lambda: len(a.remote()["members"]) == 5, 10, "everyone online")
+        for n in self.nodes.values():
+            n.account = n.rpc({"type": "remote_list"})["remotes"][0]["account"]
+        # A..D trust each other. E and F are new to everyone.
+        team = [self.nodes[k] for k in "ABCD"]
+        for n in team:
+            n.rpc({"type": "remote_set", "alias": ALIAS,
+                   "trusted": [m.account for m in team if m is not n]})
+        a.rpc({"type": "remote_set", "alias": ALIAS, "delegates": [self.helper]})
+
+    def __getitem__(self, k):
+        return self.nodes[k]
+
+    def close(self):
+        for n in self.nodes.values():
+            n.stop()
+        self.router.terminate()
+        self.router.wait(5)
+
+
+def tell(src, dst, text, as_bot=False):
+    """A fresh chain from the user, or `as_bot`: from `src`'s representative,
+    which the answer then wakes. A bot's chain carries its hops along."""
+    sender = src.rep if as_bot else "user"
+    r = src.rpc({"type": "tell", "from": sender, "to": src.rid(dst), "text": text})
+    assert r["type"] in ("told", "ok"), r
+
+
+def got(src, dst, token, secs=20):
+    """`src` holds `dst`'s answer to `token` in the remote chat."""
+    wait(lambda: has(src.texts(src.rid(dst)), f"ACK {token}"), secs,
+         f"{src.name} gets {dst.name}'s ACK {token}")
+
+
+def settled(w, secs=20):
+    wait(lambda: all(n.jobs() == 0 for n in w.nodes.values()), secs, "all jobs closed")
+
+
+# ---- scenarios ----
+
+def two_ask_a_at_once(w):
+    a, c, d = w["A"], w["C"], w["D"]
+    together(lambda: tell(c, a, "T1-C"), lambda: tell(d, a, "T1-D"))
+    got(c, a, "T1-C")
+    got(d, a, "T1-D")
+    assert not has(c.texts(c.rid(a)), "T1-D"), "C saw D's answer"
+    assert not has(d.texts(d.rid(a)), "T1-C"), "D saw C's answer"
+    settled(w)
+
+
+def one_sender_bursts(w):
+    a, c = w["A"], w["C"]
+    for i in range(3):
+        tell(c, a, f"T2-{i}")
+    for i in range(3):
+        got(c, a, f"T2-{i}")
+    order = [t for t in c.texts(c.rid(a)) if "T2-" in t]
+    assert order == [f"ACK T2-{i}" for i in range(3)], order
+    settled(w)
+
+
+def crossing_tells(w):
+    a, b = w["A"], w["B"]
+    together(lambda: tell(a, b, "T3-A", as_bot=True), lambda: tell(b, a, "T3-B", as_bot=True))
+    got(a, b, "T3-A")
+    got(b, a, "T3-B")
+    # Each woke on the other's answer. That wake is not the other's job.
+    settled(w)
+    for x, y, token in ((a, b, "T3-B"), (b, a, "T3-A")):
+        replies = [t for t in y.texts(y.rid(x)) if token in t]
+        assert replies == [f"ACK {token}"], (x.name, replies)
+
+
+def four_ask_a_at_once(w):
+    a = w["A"]
+    senders = [w[k] for k in "BCD"]
+    together(*[lambda s=s: tell(s, a, f"T4-{s.name}") for s in senders])
+    for s in senders:
+        got(s, a, f"T4-{s.name}")
+    settled(w)
+
+
+def mention_three_from_a(w):
+    a, b, c, d = w["A"], w["B"], w["C"], w["D"]
+    text = f"@{a.rid(b)} @{a.rid(c)} @{a.rid(d)} T5"
+    assert a.rpc({"type": "send", "agent": w.helper, "text": text})["type"] == "ok"
+    for s in (b, c, d):
+        wait(lambda s=s: has(a.texts(a.rid(s)), "ACK"), 20, f"A hears {s.name}")
+    handoffs = [m for m in a.messages(w.helper) if m.get("kind") == "handoff"]
+    froms = {m["from"] for m in handoffs if "T5" in m["text"]}
+    assert froms == {a.rid(b), a.rid(c), a.rid(d)}, froms
+    settled(w)
+
+
+def a_offline_two_send(w):
+    a, c, d = w["A"], w["C"], w["D"]
+    a.stop()
+    tell(c, a, "T6-C")
+    tell(d, a, "T6-D")
+    time.sleep(1)
+    a.start()
+    got(c, a, "T6-C", 30)
+    got(d, a, "T6-D", 30)
+    settled(w, 30)
+
+
+def cancel_while_offline(w):
+    a, c = w["A"], w["C"]
+    a.stop()
+    tell(c, a, "T7-cancel")
+    time.sleep(0.5)
+    assert c.rpc({"type": "interrupt", "agent": c.rid(a)})["type"] == "ok"
+    wait(lambda: any("취소" in t or "cancelled" in t
+                     for t in c.texts(c.rid(a), role="system")), 15, "C sees cancelled")
+    a.start()
+    time.sleep(3)
+    assert not has(a.texts(a.rep, role="system"), "T7-cancel"), "A ran a cancelled tell"
+    settled(w, 30)
+
+
+def newcomer_bursts_one_card(w):
+    a, e = w["A"], w["E"]
+    tell(e, a, "T8-1")
+    tell(e, a, "T8-2")
+    wait(lambda: len(a.pending_cards()) == 1, 15, "one card on A")
+    time.sleep(1)
+    assert len(a.pending_cards()) == 1, "a second card opened"
+    a.answer(a.pending_cards()[0], "B")  # 이번만
+    got(e, a, "T8-1")
+    got(e, a, "T8-2")
+    assert e.account not in [p["account"] for p in a.remote()["trusted"]]
+    settled(w)
+
+
+def two_newcomers_two_cards(w):
+    a, e, f = w["A"], w["E"], w["F"]
+    together(lambda: tell(e, a, "T9-E"), lambda: tell(f, a, "T9-F"))
+    wait(lambda: len(a.pending_cards()) == 2, 15, "two cards on A")
+    cards = a.pending_cards()
+    for card in cards:
+        q = card["choice"]["questions"][0]["question"]
+        a.answer(card, "A" if q.startswith("E") else "C")  # E 허용, F 거절
+    got(e, a, "T9-E")
+    wait(lambda: any("받지 않았" in t or "did not take" in t
+                     for t in f.texts(f.rid(a), role="system")), 15, "F refused")
+    trusted = [p["account"] for p in a.remote()["trusted"]]
+    assert e.account in trusted and f.account not in trusted, trusted
+    settled(w)
+
+
+def delegate_then_answer(w):
+    a, c = w["A"], w["C"]
+    tell(c, a, "DELEGATE T10")
+    wait(lambda: has(c.texts(c.rid(a)), "HANDED"), 20, "C hears HANDED")
+    wait(lambda: has(c.texts(c.rid(a)), "ACK sub T10"), 30, "C hears the helper's work")
+    settled(w, 30)
+
+
+def delegate_while_another_asks(w):
+    a, c, d = w["A"], w["C"], w["D"]
+    together(lambda: tell(c, a, "DELEGATE T11"), lambda: tell(d, a, "T11-D"))
+    wait(lambda: has(c.texts(c.rid(a)), "ACK sub T11"), 30, "C hears the helper's work")
+    got(d, a, "T11-D", 30)
+    assert not has(d.texts(d.rid(a)), "sub T11"), "D got C's delegated answer"
+    settled(w, 30)
+
+
+SCENARIOS = [
+    ("C·D가 동시에 A에게", two_ask_a_at_once),
+    ("C가 A에게 연달아 3개", one_sender_bursts),
+    ("A↔B 서로 동시에", crossing_tells),
+    ("B·C·D가 동시에 A에게", four_ask_a_at_once),
+    ("A 사용자가 B·C·D 한 번에 멘션", mention_three_from_a),
+    ("A가 꺼진 동안 C·D가 보냄", a_offline_two_send),
+    ("A가 꺼진 동안 보내고 취소", cancel_while_offline),
+    ("처음 보는 E가 연달아 2개 (카드 1장, 이번만)", newcomer_bursts_one_card),
+    ("처음 보는 E·F가 동시에 (카드 2장, 허용/거절)", two_newcomers_two_cards),
+    ("A 대표 봇이 로컬 봇에게 위임", delegate_then_answer),
+    ("위임 중에 D가 끼어듦", delegate_while_another_asks),
+]
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--crew", required=True)
+    ap.add_argument("--router", required=True)
+    ap.add_argument("--only", help="run scenarios whose name contains this")
+    ap.add_argument("--keep", action="store_true", help="keep the temp folder")
+    args = ap.parse_args()
+    w = World(os.path.abspath(args.crew), os.path.abspath(args.router))
+    results = []
+    try:
+        for name, fn in SCENARIOS:
+            if args.only and not any(o in name for o in args.only.split("|")):
+                continue
+            start = time.time()
+            try:
+                fn(w)
+                results.append((name, "PASS", f"{time.time() - start:.1f}s"))
+            except Exception as err:
+                results.append((name, "FAIL", str(err)))
+            print(f"{results[-1][1]}  {name}  {results[-1][2]}", flush=True)
+    finally:
+        w.close()
+        if args.keep or any(r[1] == "FAIL" for r in results):
+            print(f"logs: {w.root}")
+        else:
+            shutil.rmtree(w.root, ignore_errors=True)
+    sys.exit(1 if any(r[1] == "FAIL" for r in results) else 0)
+
+
+if __name__ == "__main__":
+    main()
