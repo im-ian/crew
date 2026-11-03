@@ -561,7 +561,7 @@ fn remote_join(
     avatar_color: Option<String>,
     role: Option<String>,
 ) -> Result<String, String> {
-    let alias = alias.trim().to_string();
+    let alias = alias.trim().to_lowercase();
     if !crate::remote::valid_alias(&alias) {
         return Err(if crate::paths::locale() == "en" {
             "An alias is up to 32 lowercase letters, digits, - or _".into()
@@ -571,6 +571,12 @@ fn remote_join(
     }
     let cwd = crate::remote::work_dir(&alias);
     crate::paths::create_cwd(&cwd).map_err(|e| e.to_string())?;
+    // A custom command comes next, from `set_agent_cli`: start on the default.
+    let cli = if cli.trim().eq_ignore_ascii_case("custom") {
+        "grok".to_string()
+    } else {
+        cli
+    };
     let id = add_agent(
         name.clone(),
         cli,
