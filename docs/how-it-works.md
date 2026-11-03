@@ -52,7 +52,7 @@ Antigravity / Gemini / Copilot / OpenCode도 턴 단위로 실행하지만 세�
 
 ### 공유 메모리
 
-`$CREW_HOME/shared.md` 하나예요. 모든 봇이 같은 노트를 봐요. 메모리 탭에서는 읽기만 하고, 고치는 건 봇이 `crew share`로 해요. 봇 목록은 이 파일에 적히지 않아요. 매 턴 프롬프트의 `Shared memory` 노트가 지금 명단과 공유 노트를 같이 넣어요. 대화가 압축돼도 다음 턴에 다시 붙어요. `crew share set`은 노트만 바꾸고, 명단은 Crew가 그 턴의 봇 목록으로 다시 만들어요.
+`$CREW_HOME/shared.md` 하나예요. 모든 봇이 같은 노트를 봐요. 메모리 탭에서는 읽기만 하고, 고치는 건 봇이 `crew share`로 해요. 봇 목록은 이 파일에 적히지 않아요. 프롬프트 앞의 `Shared memory` 노트가 지금 명단과 공유 노트를 같이 넣어요. 이어지는 세션에는 노트가 바뀐 턴과 대화가 압축된 다음 턴에만 붙고, 그 밖의 턴은 세션이 이미 들고 있는 사본을 써요. 매 턴 통째로 붙이면 세션마다 같은 노트가 쌓여 토큰을 써요. 마지막으로 보낸 노트는 `$CREW_HOME/cli-shared/<봇 id>`에 적어 둬요. Claude(`compact_boundary`)와 Grok(`auto_compact_*`)은 압축을 알려 주고, 슬래시 명령(`/compact` 등) 다음 턴에도 다시 보내요. 압축을 알려 주지 않는 Codex와 세션이 없는 CLI는 매 턴 보내요. `crew share set`은 노트만 바꾸고, 명단은 Crew가 그 턴의 봇 목록으로 다시 만들어요.
 
 ### 그룹 메모리
 
@@ -106,12 +106,13 @@ Antigravity / Gemini / Copilot / OpenCode도 턴 단위로 실행하지만 세�
 | `group-memory/<그룹 id>.md` | 그룹 메모리 |
 | `locale` | `ko` 또는 `en` (알림·CLI 라벨) |
 | `roster.md` | 저장된 봇 명단 사본 |
-| `shared.md` | 공유 메모리 노트. 봇 목록은 매 턴 이 메모와 함께 최신으로 전달 |
+| `shared.md` | 공유 메모리 노트. 봇 목록과 함께, 바뀌었거나 압축된 다음 턴에 최신으로 전달 |
 | `memory/<id>.md` | 대화를 지워도 남는 그 봇의 기억 |
 | `skills/<이름>.md` | `/이름` 스킬 |
 | `transcripts/<id>.jsonl` | 1:1 대화 |
 | `cli-sessions/<id>` | Grok/Claude/Codex 세션 id |
 | `cli-memory/<id>` | 그 세션이 아는 메모리 (바뀌면 알려 주려고) |
+| `cli-shared/<id>` | 그 세션에 마지막으로 보낸 공유 메모리 노트 (바뀌거나 압축되면 다시 보내려고) |
 | `archive/` | 지운 대화 |
 | `uploads/` | 첨부 파일 |
 | `crew.sock` / `crew.pid` | 데몬 |
