@@ -64,6 +64,24 @@ pub fn write_notifications_enabled(on: bool) {
     let _ = fs::write(notifications_path(), if on { "on" } else { "off" });
 }
 
+pub fn worktree_path() -> PathBuf {
+    home_dir().join("worktree")
+}
+
+/// Bots work in their own git worktree. Off when unset, so an older install
+/// keeps editing the folder it was given.
+pub fn worktrees_enabled() -> bool {
+    match fs::read_to_string(worktree_path()) {
+        Ok(s) if s.trim() == "on" => true,
+        _ => false,
+    }
+}
+
+pub fn write_worktrees_enabled(on: bool) {
+    let _ = fs::create_dir_all(home_dir());
+    let _ = fs::write(worktree_path(), if on { "on" } else { "off" });
+}
+
 pub fn pid_path() -> PathBuf {
     home_dir().join("crew.pid")
 }
@@ -517,6 +535,21 @@ mod tests {
             assert!(!notifications_enabled());
             fs::write(notifications_path(), "nope").unwrap();
             assert!(notifications_enabled());
+        });
+    }
+
+    #[test]
+    fn worktrees_default_off_and_only_on_enables_them() {
+        testing::with_home("worktree", || {
+            assert!(!worktrees_enabled());
+            write_worktrees_enabled(true);
+            assert!(worktrees_enabled());
+            write_worktrees_enabled(false);
+            assert!(!worktrees_enabled());
+            fs::write(worktree_path(), "on\n").unwrap();
+            assert!(worktrees_enabled());
+            fs::write(worktree_path(), "yes").unwrap();
+            assert!(!worktrees_enabled());
         });
     }
 

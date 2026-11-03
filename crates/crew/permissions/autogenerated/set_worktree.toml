@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-worktree"
+description = "Enables the set_worktree command without any pre-configured scope."
+commands.allow = ["set_worktree"]
+
+[[permission]]
+identifier = "deny-set-worktree"
+description = "Denies the set_worktree command without any pre-configured scope."
+commands.deny = ["set_worktree"]

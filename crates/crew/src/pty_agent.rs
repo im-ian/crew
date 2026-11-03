@@ -40,7 +40,8 @@ pub fn spawn(
     if cfg.cmd.is_empty() {
         anyhow::bail!("agent {} has empty cmd", cfg.id);
     }
-    let cwd = crate::config::Config::default_cwd(cfg);
+    let place = crate::worktree::place_for(&cfg.id, &crate::config::Config::default_cwd(cfg));
+    let cwd = place.cwd;
     paths::create_cwd(&cwd)?;
 
     let argv = cfg.spawn_cmd_with(fresh_session, roster);

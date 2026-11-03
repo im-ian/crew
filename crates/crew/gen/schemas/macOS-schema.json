@@ -495,6 +495,12 @@
           "markdownDescription": "Enables the set_routine_enabled command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_worktree command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-worktree",
+          "markdownDescription": "Enables the set_worktree command without any pre-configured scope."
+        },
+        {
           "description": "Enables the stop_agent command without any pre-configured scope.",
           "type": "string",
           "const": "allow-stop-agent",
@@ -841,6 +847,12 @@
           "type": "string",
           "const": "deny-set-routine-enabled",
           "markdownDescription": "Denies the set_routine_enabled command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_worktree command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-worktree",
+          "markdownDescription": "Denies the set_worktree command without any pre-configured scope."
         },
         {
           "description": "Denies the stop_agent command without any pre-configured scope.",

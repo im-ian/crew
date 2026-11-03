@@ -881,6 +881,13 @@ fn set_notifications(enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Mirror the worktree switch so bots started by the daemon use the same choice.
+#[tauri::command]
+fn set_worktree(enabled: bool) -> Result<(), String> {
+    crate::paths::write_worktrees_enabled(enabled);
+    Ok(())
+}
+
 /// An open sheet, preview, or menu is using Escape. macOS then keeps fullscreen.
 #[tauri::command]
 fn set_escape_layer(open: bool) {
@@ -1102,6 +1109,7 @@ pub fn run() -> anyhow::Result<()> {
             set_dock_badge,
             set_locale,
             set_notifications,
+            set_worktree,
             set_escape_layer,
             remote_probe,
             remote_join,

@@ -73,7 +73,8 @@ pub fn open(
     rows: u16,
     fresh_session: bool,
 ) -> anyhow::Result<Arc<HeadlessSession>> {
-    let cwd = crate::config::Config::default_cwd(cfg);
+    let place = crate::worktree::place_for(&cfg.id, &crate::config::Config::default_cwd(cfg));
+    let cwd = place.cwd;
     paths::create_cwd(&cwd)?;
     if fresh_session {
         clear_session(&cfg.id);
@@ -620,8 +621,15 @@ fn run_turn(
     } else {
         prompt
     };
-    let argv = cfg.turn_cmd(&prompt, turn_session.as_ref(), &roster, &memory_seen.start);
-    let cwd = crate::config::Config::default_cwd(&cfg);
+    let place = crate::worktree::place_for(&cfg.id, &crate::config::Config::default_cwd(&cfg));
+    let argv = cfg.turn_cmd_in(
+        &prompt,
+        turn_session.as_ref(),
+        &roster,
+        &memory_seen.start,
+        place.isolated.as_ref(),
+    );
+    let cwd = place.cwd;
     if let Err(err) = crate::paths::create_cwd(&cwd) {
         eprintln!("[crew] cwd {}: {err:#}", cwd.display());
     }

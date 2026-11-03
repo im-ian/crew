@@ -191,6 +191,7 @@ export const api = {
   setLocale: (locale: string) => invoke<void>("set_locale", { locale }),
   setNotifications: (enabled: boolean) =>
     invoke<void>("set_notifications", { enabled }),
+  setWorktree: (enabled: boolean) => invoke<void>("set_worktree", { enabled }),
   setEscapeLayer: (open: boolean) => invoke<void>("set_escape_layer", { open }),
   remoteProbe: (url: string) => invoke<RemoteServer>("remote_probe", { url }),
   /** The new local representative bot's id. */
