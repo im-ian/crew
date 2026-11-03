@@ -1853,7 +1853,11 @@ function ChoiceCard({
     const selected = pending ? picks[qi] || [] : q.selected || [];
     const fields = q.fields || [];
     const fieldValues = values[qi] || fields.map((f) => f.value || "");
-    const showFields = fields.length > 0 && card.state !== "closed";
+    // Answered, a box left blank has nothing to show: only filled ones stay.
+    const shownFields = fields
+      .map((f, fi) => ({ f, fi }))
+      .filter(({ fi }) => open || (fieldValues[fi] || "").trim());
+    const showFields = shownFields.length > 0 && card.state !== "closed";
     const showList =
       (q.options || []).length > 0 &&
       (open ||
@@ -1895,7 +1899,7 @@ function ChoiceCard({
         ) : null}
         {showFields ? (
           <div className="choice-fields">
-            {fields.map((f, fi) => {
+            {shownFields.map(({ f, fi }) => {
               const id = `${card.id}-${qi}-${f.id || fi}`;
               return (
                 <label className="choice-field" key={f.id || fi} htmlFor={id}>
