@@ -405,6 +405,11 @@ pub fn cli_memory_path(agent_id: &str) -> PathBuf {
     home_dir().join("cli-memory").join(safe_agent_id(agent_id))
 }
 
+/// The shared memory note this bot's CLI session was last given.
+pub fn cli_shared_path(agent_id: &str) -> PathBuf {
+    home_dir().join("cli-shared").join(safe_agent_id(agent_id))
+}
+
 pub fn cli_recap_path(agent_id: &str) -> PathBuf {
     home_dir().join("cli-recaps").join(safe_agent_id(agent_id))
 }

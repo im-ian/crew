@@ -230,9 +230,8 @@ fn memory_note(memory: &str) -> String {
 }
 
 /// The system prompt keeps the instructions a session started with. Shared
-/// memory, including the live teammate list, rides in the prompt on every
-/// turn so a compact cannot leave an old copy as the only one. A slash
-/// command has to stay the first line. A path is not a command.
+/// memory, including the live teammate list, rides in the prompt instead. A
+/// slash command has to stay the first line. A path is not a command.
 fn shared_note_for_turn(
     prompt: &str,
     agent: &AgentConfig,
@@ -251,6 +250,32 @@ fn shared_note_for_turn(
         crate::memory::group_for(&agent.id).as_ref(),
     ));
     Some(note)
+}
+
+fn load_shared_seen(agent_id: &str) -> Option<String> {
+    fs::read_to_string(paths::cli_shared_path(agent_id)).ok()
+}
+
+fn save_shared_seen(agent_id: &str, note: Option<&str>) {
+    let path = paths::cli_shared_path(agent_id);
+    let Some(note) = note else {
+        let _ = fs::remove_file(path);
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(path, note);
+}
+
+/// Whether this turn's prompt carries the shared memory note. A resumed
+/// session already holds the copy it was last given, so it hears the note
+/// again only when the note changed or a compact may have folded that copy
+/// away. Sent whole every turn, a few thousand tokens piled up in every
+/// session's context. `every_turn` is for a CLI with no session of its own,
+/// and for codex, which does not say when it compacts.
+fn shared_note_due(every_turn: bool, resume: bool, seen: Option<&str>, note: &str) -> bool {
+    every_turn || !resume || seen != Some(note)
 }
 
 /// Drop the CLI session so the next turn opens a new one. Refused mid-turn:
@@ -566,7 +591,18 @@ fn run_turn(
         memory_now.trim(),
         &prompt,
     );
-    let shared_note = shared_note_for_turn(&prompt, &cfg, &roster);
+    let shared_every_turn = cfg.prompt_mode() || program == "codex";
+    let shared_live = shared_note_for_turn(&prompt, &cfg, &roster);
+    let shared_note = shared_live.clone().filter(|note| {
+        shared_note_due(
+            shared_every_turn,
+            resume,
+            load_shared_seen(&session.id).as_deref(),
+            note,
+        )
+    });
+    // A slash command such as `/compact` can rewrite what the session holds.
+    let slash = crate::daemon::is_slash_command(&prompt);
     let prompt = match memory_note {
         Some(note) => format!("{note}\n\n{prompt}"),
         None => prompt,
@@ -620,6 +656,14 @@ fn run_turn(
             // Like the recap: a turn that failed leaves the news for the next.
             if outcome.got_text && !dead {
                 let _ = save_memory_seen(&session.id, &memory_seen);
+            }
+            // The copy the session now holds, unless a compact may have folded it.
+            if outcome.compacted || slash {
+                save_shared_seen(&session.id, None);
+            } else if outcome.got_text && !dead {
+                if let Some(note) = shared_live.as_deref() {
+                    save_shared_seen(&session.id, Some(note));
+                }
             }
             if dead {
                 if let Ok(mut inner) = session.inner.lock() {
@@ -738,6 +782,8 @@ struct TurnOutcome {
     session_id: Option<String>,
     got_text: bool,
     error: Option<String>,
+    /// The CLI compacted the session during this turn.
+    compacted: bool,
 }
 
 fn spawn_and_stream(
@@ -963,6 +1009,7 @@ fn spawn_and_stream(
         session_id: state.session_id,
         got_text: state.got_text,
         error,
+        compacted: state.compacted,
     })
 }
 
@@ -1142,6 +1189,8 @@ struct ParseState {
     /// Auto-compact starts this turn's stream over. Text after it is held
     /// while it still matches what the user already saw.
     compact_replay: bool,
+    /// The session was compacted this turn, so notes it was given may be gone.
+    compacted: bool,
     /// Tokens held since the compact, joined in arrival order.
     replay_buf: String,
     /// Assistant text this turn already showed. Chunks are joined as the CLI
@@ -1283,6 +1332,7 @@ fn grok_text(v: &Value, state: &mut ParseState) -> Option<String> {
             state.replay_buf.clear();
         }
         state.compact_replay = true;
+        state.compacted = true;
         return None;
     }
     if matches!(kind, "auto_compact_failed" | "auto_compact_cancelled") {
@@ -2326,6 +2376,12 @@ fn subagent_report(v: &Value) -> Option<String> {
 fn claude_text(v: &Value, state: &mut ParseState) -> Option<String> {
     // A subagent's words are its report's business, not the bot's reply.
     if from_subagent(v) {
+        return None;
+    }
+    if v.get("type").and_then(Value::as_str) == Some("system")
+        && v.get("subtype").and_then(Value::as_str) == Some("compact_boundary")
+    {
+        state.compacted = true;
         return None;
     }
     if let Some(delta) = claude_text_delta(v) {
@@ -3871,7 +3927,45 @@ mod tests {
     }
 
     #[test]
-    fn every_turn_opens_with_shared_memory() {
+    fn shared_memory_goes_out_again_only_when_it_may_be_missing() {
+        // A new session, and a CLI that cannot say when it compacts, always hear it.
+        assert!(shared_note_due(false, false, Some("a"), "a"));
+        assert!(shared_note_due(true, true, Some("a"), "a"));
+        // A resumed session that holds this copy does not.
+        assert!(!shared_note_due(false, true, Some("a"), "a"));
+        assert!(shared_note_due(false, true, Some("a"), "b"));
+        // After a compact the copy is forgotten, so the next turn sends it.
+        assert!(shared_note_due(false, true, None, "a"));
+    }
+
+    #[test]
+    fn a_compact_marks_the_turn_compacted() {
+        let mut st = ParseState::default();
+        ingest_line(
+            CliKind::Claude,
+            r#"{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"auto","pre_tokens":160000}}"#,
+            &mut st,
+        );
+        assert!(st.compacted);
+        assert!(!st.got_text);
+        let mut st = ParseState::default();
+        ingest_line(
+            CliKind::Grok,
+            r#"{"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"auto_compact_completed"}}}"#,
+            &mut st,
+        );
+        assert!(st.compacted);
+        let mut st = ParseState::default();
+        ingest_line(
+            CliKind::Claude,
+            r#"{"type":"system","subtype":"init"}"#,
+            &mut st,
+        );
+        assert!(!st.compacted);
+    }
+
+    #[test]
+    fn shared_memory_note_holds_the_live_list() {
         crate::paths::testing::with_home("shared-turn", || {
             crate::memory::write_shared("harbor is closed").unwrap();
             let alpha = AgentConfig::new("alpha".into(), "Alpha".into(), vec!["grok".into()], None);
