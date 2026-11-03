@@ -479,6 +479,8 @@ def sender_cancels_a_running_turn(w):
     wait(lambda: working(a), 10, "A working on S2")
     assert c.rpc({"type": "interrupt", "agent": c.rid(a)})["type"] == "ok"
     wait(lambda: system_says(c, a, "취소", "cancelled"), 10, "C sees cancelled")
+    note = [m for m in c.messages(c.rid(a)) if m["role"] == "system" and "취소" in m["text"]]
+    assert all(m["from"] == "crew" for m in note), f"a note of A to itself: {note}"
     wait(lambda: not working(a), 10, "A stopped S2")
     time.sleep(3.5)
     assert not has(c.texts(c.rid(a)), "ACK SLOW S2"), "C got an answer after cancelling"

@@ -643,6 +643,21 @@ pub fn push_remote_tell(key: &str, from: &str, text: &str, peer: Option<String>)
     )
 }
 
+/// Crew's own line in a chat, such as why a remote bot's job ended. It opens
+/// no turn and asks nobody.
+pub fn push_crew_note(key: &str, text: &str) -> ChatMessage {
+    push_role(
+        key,
+        Role::System,
+        "crew",
+        text,
+        false,
+        Some(MessageKind::Received),
+        None,
+        false,
+    )
+}
+
 pub fn push_handoff(agent: &str, from: &str, text: &str) -> ChatMessage {
     push_role(
         agent,

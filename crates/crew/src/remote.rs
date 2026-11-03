@@ -1346,7 +1346,7 @@ fn finish_out(id: &str, ok: bool, error: &str) {
     let rid = remote_id(&job.alias, &job.to);
     if !ok {
         let text = done_text(error);
-        crate::transcript::push_notice(&rid, &rid, &text, job.asker.clone());
+        crate::transcript::push_crew_note(&rid, &text);
         if let Some(chat) = job.asker.as_ref().or(job.owner.as_ref()) {
             crate::daemon::remote_reply(chat, &rid, &text);
         }
