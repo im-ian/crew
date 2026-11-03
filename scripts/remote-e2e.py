@@ -559,6 +559,26 @@ def profile_follows(w):
     settled(w)
 
 
+def rep_renamed(w):
+    a, b, c = w["A"], w["B"], w["C"]
+    named = lambda n, name: any(m["name"] == name for m in n.remote()["members"])
+    local = lambda: next(x["name"] for x in a.rpc({"type": "list"})["agents"] if x["id"] == a.rep)
+    before = local()
+    out = a.cli("agent", "set", a.rep, "--name", "C")
+    assert "이미" in out or "taken" in out, f"took a taken name: {out}"
+    out = a.cli("agent", "set", a.rep, "--name", "A two")
+    assert "1–32" in out, f"took a bad name: {out}"
+    assert local() == before and named(c, "A"), "a refused name stuck"
+    a.cli("agent", "set", a.rep, "--name", "Ayy")
+    wait(lambda: named(b, "Ayy"), 10, "B sees Ayy")
+    assert a.remote()["name"] == "Ayy", a.remote()
+    tell(b, a, "E13")
+    got(b, a, "E13")
+    a.cli("agent", "set", a.rep, "--name", "A")
+    wait(lambda: named(b, "A") and named(c, "A"), 10, "back to A")
+    settled(w)
+
+
 def tell_expires(w):
     a, c = w["A"], w["C"]
     w.stop_router()
@@ -635,6 +655,7 @@ SCENARIOS = [
     ("A가 주인에게 물어보는 중 C가 취소", cancel_while_owner_is_asked),
     ("A가 꺼진 동안 라우터 재시작", router_restarts_while_a_is_off),
     ("관리자가 B 이름을 바꿈", renamed_member),
+    ("A가 대표 봇 이름을 바꿈 (겹치는 이름·잘못된 이름은 거절)", rep_renamed),
     ("A가 대표 봇 역할·색을 바꿈 (B 바로, 꺼져 있던 C는 켜질 때)", profile_follows),
     ("보관 기간이 지나 만료", tell_expires),
     ("같은 계정을 두 곳에서", same_account_twice),
