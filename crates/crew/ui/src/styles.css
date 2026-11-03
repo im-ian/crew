@@ -4792,6 +4792,28 @@ button.mention-chip:active {
   font-weight: 650;
   line-height: 1.3;
 }
+.dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+.dialog-help {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+.dialog-help svg { display: block; }
+.dialog-help:hover { background: var(--field); color: var(--ink); }
+.dialog-help:active { transform: scale(0.94); }
 .sheet p, .dialog p {
   margin: var(--space-8) 0 0;
   color: var(--muted);

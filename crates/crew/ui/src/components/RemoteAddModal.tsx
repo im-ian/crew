@@ -12,10 +12,11 @@ import {
   portOk,
   routerUrl,
   ROUTER_PORT,
+  ROUTER_REPO,
   slugAlias,
 } from "../remote";
 import type { CliKind, RemoteJoin, RemoteServer } from "../types";
-import { LoaderCircle } from "../icons";
+import { CircleHelp, LoaderCircle } from "../icons";
 import { Avatar } from "./Avatar";
 import { FacePop } from "./FacePicker";
 import { Field } from "./Field";
@@ -50,6 +51,17 @@ export function RemoteAddModal({ open, aliases, onClose, onJoin }: Props) {
       open={open}
       title={server ? t("remoteAdd.profileTitle") : t("remoteAdd.title")}
       onClose={onClose}
+      aside={
+        <button
+          type="button"
+          className="dialog-help"
+          title={t("remoteAdd.help")}
+          aria-label={t("remoteAdd.help")}
+          onClick={() => void api.openUrl(ROUTER_REPO)}
+        >
+          <CircleHelp size={18} />
+        </button>
+      }
     >
       {server ? (
         <ProfileStep

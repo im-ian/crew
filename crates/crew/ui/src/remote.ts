@@ -2,6 +2,8 @@ import type { AgentInfo, RemoteInfo } from "./types";
 
 /** The port crew-router listens on unless its owner picked another. */
 export const ROUTER_PORT = 7420;
+/** Where a router comes from: install, run, and how to connect. */
+export const ROUTER_REPO = "https://github.com/im-ian/crew-router";
 
 const NAME_MAX = 32;
 const ALIAS_MAX = 32;
