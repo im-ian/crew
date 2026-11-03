@@ -3275,7 +3275,7 @@ fn send_from_user(id: &str, shown: &str, text: &str, steer: bool) -> anyhow::Res
         return Ok(());
     }
     ensure_accepts_turn(id)?;
-    let roster = crate::remote::roster_for(id, roster_vec());
+    let roster = crate::remote::with_remote(roster_vec());
     let msg = crate::transcript::push_user(id, "user", shown);
     // The teammates named here answer after this message's turn, so they ride
     // with it instead of waiting on whatever the bot is doing now.
@@ -3397,7 +3397,7 @@ fn tell_agent_origin(
         anyhow::bail!("unknown agent {to}");
     }
     if crate::remote::split_id(to).is_some() && !known_agent(to) {
-        return tell_remote(from, to, text, origin);
+        return tell_remote(from, to, text, origin, then);
     }
     {
         let map = agents().lock().expect("agents mutex");
@@ -3492,13 +3492,24 @@ fn tell_agent_origin(
 }
 
 /// A tell to a bot on another PC. It goes out through the router now: the
-/// remote bot runs there, so nothing here waits for the sender to be idle.
+/// remote bot runs there, so nothing here waits for the sender to be idle,
+/// and the rest of a chain (`then`, the next names of a user's @mention)
+/// goes out right after it instead of waiting on a turn here.
 fn tell_remote(
     from: &str,
     to: &str,
     text: &str,
     origin: Option<TurnOrigin>,
+    then: &mut VecDeque<SerialJob>,
 ) -> anyhow::Result<()> {
+    // A user's @mention copies the reply back to the chat they typed in.
+    let mention_owner = origin.as_ref().and_then(|o| {
+        if o.from == "user" {
+            o.reply_agent.clone().filter(|owner| known_agent(owner))
+        } else {
+            None
+        }
+    });
     let from = from_id(from);
     let envelope = crate::protocol::envelope(&from, text);
     let parsed = targeting::origin_from_envelope(&envelope);
@@ -3511,18 +3522,24 @@ fn tell_remote(
         );
     }
     let asker = (from != "user" && known_agent(&from)).then_some(from.as_str());
-    let rid = crate::remote::tell(asker, to, text, origin.hops)?;
+    let rid = crate::remote::tell(asker, mention_owner.as_deref(), to, text, origin.hops)?;
     if let Some(asker) = asker {
         crate::transcript::push_notice(&rid, asker, text, Some(asker.to_string()));
         let peer = parent.as_ref().and_then(|p| asked_by(p, asker));
         crate::transcript::push_notice(asker, &format!("to:{rid}"), text, peer);
     } else {
         crate::transcript::push_user(&rid, "user", text);
+        if let Some(owner) = mention_owner.as_deref() {
+            crate::transcript::push_mention_notice(owner, &format!("to:{rid}"), text);
+        }
     }
     let _ = events().send(Event::Told {
         from,
         to: rid,
     });
+    if !then.is_empty() {
+        run_chain(std::mem::take(then));
+    }
     Ok(())
 }
 

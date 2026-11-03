@@ -110,8 +110,13 @@ struct OutJob {
     id: String,
     alias: String,
     to: String,
-    /// The local bot that asked. `None` when the user wrote in the remote chat.
+    /// The local bot that asked, woken by the answer. `None` when the user
+    /// wrote in the remote chat or @mentioned the remote bot.
     asker: Option<String>,
+    /// The chat a user's @mention was typed in. The answer is copied there
+    /// for its next prompt, without waking it, like a local mention.
+    #[serde(default)]
+    owner: Option<String>,
     hops: u32,
     /// The reply being written, in the remote bot's transcript here.
     #[serde(default)]
@@ -926,7 +931,13 @@ fn hex(bytes: &[u8]) -> String {
 
 /// A local bot (or the user, as `asker: None`) asks a remote bot. The rows
 /// land in the remote bot's chat here; the reply comes back as a handoff.
-pub fn tell(asker: Option<&str>, to: &str, text: &str, hops: u32) -> anyhow::Result<String> {
+pub fn tell(
+    asker: Option<&str>,
+    owner: Option<&str>,
+    to: &str,
+    text: &str,
+    hops: u32,
+) -> anyhow::Result<String> {
     let Some((alias, account)) = resolve(to) else {
         bail!("unknown agent {to}");
     };
@@ -941,6 +952,7 @@ pub fn tell(asker: Option<&str>, to: &str, text: &str, hops: u32) -> anyhow::Res
         alias: alias.clone(),
         to: account.clone(),
         asker: asker.map(str::to_string),
+        owner: owner.map(str::to_string),
         hops,
         row: None,
     };
@@ -966,7 +978,7 @@ pub fn send_from_user(to: &str, text: &str) -> anyhow::Result<()> {
     let rid = remote_id(&alias, &account);
     ensure_transcript(&rid);
     crate::transcript::push_user(&rid, "user", text);
-    tell(None, &rid, text, 0)?;
+    tell(None, None, &rid, text, 0)?;
     Ok(())
 }
 
@@ -1107,8 +1119,8 @@ fn on_reply(alias: &str, v: &Value) {
         }
     }
     set_out_row(&job.id, None);
-    if let Some(asker) = &job.asker {
-        crate::daemon::remote_reply(asker, &rid, &text);
+    if let Some(chat) = job.asker.as_ref().or(job.owner.as_ref()) {
+        crate::daemon::remote_reply(chat, &rid, &text);
     }
 }
 
@@ -1166,8 +1178,8 @@ fn finish_out(id: &str, ok: bool, error: &str) {
     if !ok {
         let text = done_text(error);
         crate::transcript::push_notice(&rid, &rid, &text, job.asker.clone());
-        if let Some(asker) = &job.asker {
-            crate::daemon::remote_reply(asker, &rid, &text);
+        if let Some(chat) = job.asker.as_ref().or(job.owner.as_ref()) {
+            crate::daemon::remote_reply(chat, &rid, &text);
         }
     }
     if let Some(asker) = &job.asker {
@@ -1722,12 +1734,15 @@ pub fn roster_for(bot: &str, roster: Vec<AgentConfig>) -> Vec<AgentConfig> {
             out.extend(remote_roster(Some(&alias)));
             out
         }
-        None => {
-            let mut out = roster;
-            out.extend(remote_roster(None));
-            out
-        }
+        None => with_remote(roster),
     }
+}
+
+/// Every local bot and every remote one: who the user can @mention, even in
+/// a representative's chat. The user owns this PC.
+pub fn with_remote(mut roster: Vec<AgentConfig>) -> Vec<AgentConfig> {
+    roster.extend(remote_roster(None));
+    roster
 }
 
 /// A representative's per-turn note, in place of the shared memory note: no
@@ -2210,6 +2225,47 @@ mod tests {
         assert_eq!(server.signup, "invite");
         assert!(server_from("wss://x", &json!({"type": "server", "protocol": 2})).is_err());
         assert!(server_from("wss://x", &json!({"type": "welcome"})).is_err());
+    }
+
+    #[test]
+    fn the_user_can_mention_every_bot_but_a_representative_sees_only_its_own() {
+        let alias = "rostertest";
+        let cfg = RemoteConfig {
+            alias: alias.into(),
+            account: "acc_me0000000000".into(),
+            bot: "rep".into(),
+            delegates: vec!["helper".into()],
+            ..RemoteConfig::default()
+        };
+        let mut link = new_link(cfg, String::new());
+        link.members = vec![
+            Member {
+                account: "acc_me0000000000".into(),
+                name: "me".into(),
+                ..Member::default()
+            },
+            Member {
+                account: "acc_jay000000000".into(),
+                name: "Jay".into(),
+                ..Member::default()
+            },
+        ];
+        state().lock().unwrap().links.insert(alias.into(), link);
+        let local = |id: &str| AgentConfig::new(id.into(), id.into(), vec!["cat".into()], None);
+        let roster = vec![local("rep"), local("helper"), local("secret")];
+
+        let ids = |v: Vec<AgentConfig>| v.into_iter().map(|a| a.id).collect::<Vec<_>>();
+        let all = ids(with_remote(roster.clone()));
+        assert!(all.contains(&"secret".to_string()));
+        assert!(all.contains(&"rostertest/acc_jay000000000".to_string()));
+        assert!(!all.contains(&"rostertest/acc_me0000000000".to_string()));
+
+        let rep = ids(roster_for("rep", roster));
+        assert!(rep.contains(&"helper".to_string()));
+        assert!(rep.contains(&"rostertest/acc_jay000000000".to_string()));
+        assert!(!rep.contains(&"secret".to_string()));
+
+        state().lock().unwrap().links.remove(alias);
     }
 
     /// A one-shot router on a local port: answers `hello`, then `signup`.
