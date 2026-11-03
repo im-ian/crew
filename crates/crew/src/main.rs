@@ -20,6 +20,7 @@ mod notify;
 mod paths;
 mod protocol;
 mod pty_agent;
+mod remote;
 mod routine_log;
 mod rows;
 mod search;

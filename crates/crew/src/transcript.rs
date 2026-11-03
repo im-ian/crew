@@ -620,6 +620,12 @@ pub fn push_mention_notice(agent: &str, from: &str, text: &str) -> ChatMessage {
     )
 }
 
+/// What a bot on another PC said, in its chat here. `peer` is the local bot
+/// that asked, if one did. The words came over the network, so no turn runs.
+pub fn push_remote_reply(key: &str, from: &str, text: &str, peer: Option<String>) -> ChatMessage {
+    push_role(key, Role::Assistant, from, text, false, None, peer, false)
+}
+
 pub fn push_handoff(agent: &str, from: &str, text: &str) -> ChatMessage {
     push_role(
         agent,

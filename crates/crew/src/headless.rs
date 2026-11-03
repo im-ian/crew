@@ -241,6 +241,11 @@ fn shared_note_for_turn(
     if crate::daemon::is_slash_command(prompt) {
         return None;
     }
+    // A representative answers people on other PCs: it gets the team's notes
+    // and none of this PC's.
+    if let Some(note) = crate::remote::rep_note(agent, roster) {
+        return Some(note);
+    }
     let mut note = crate::config::shared_memory_note(agent, roster, &crate::memory::read_shared());
     note.push_str(&crate::config::group_memory_section(
         crate::memory::group_for(&agent.id).as_ref(),

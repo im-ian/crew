@@ -2454,6 +2454,7 @@ pub async fn run() -> anyhow::Result<()> {
         pump_inbox_inner(&agent_cfg.id);
     }
     let _ = write_roster(&cfg.agents);
+    crate::remote::start();
 
     let listener = UnixListener::bind(paths::socket_path())
         .with_context(|| format!("bind {}", paths::socket_path().display()))?;
@@ -2818,6 +2819,12 @@ async fn handle_client(
                     }
                     continue;
                 }
+                if let Some(responses) = crate::remote::handle(&req).await {
+                    for ev in responses {
+                        write_event(&mut write, &ev).await?;
+                    }
+                    continue;
+                }
                 let responses = dispatch(req, &shutdown);
                 for ev in responses {
                     write_event(&mut write, &ev).await?;
@@ -2881,12 +2888,28 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             }
             out
         }
+        Request::Send { agent, text, .. } if crate::remote::is_remote(&agent) => {
+            match crate::remote::send_from_user(&agent, &text) {
+                Ok(()) => vec![Event::Ok],
+                Err(err) => vec![Event::Error {
+                    message: err.to_string(),
+                }],
+            }
+        }
         Request::Send { agent, text, steer } => match send_from_user(&agent, &text, &text, steer) {
             Ok(()) => vec![Event::Ok],
             Err(err) => vec![Event::Error {
                 message: err.to_string(),
             }],
         },
+        Request::Interrupt { agent } if crate::remote::is_remote(&agent) => {
+            match crate::remote::cancel(&agent) {
+                Ok(()) => vec![Event::Ok],
+                Err(err) => vec![Event::Error {
+                    message: err.to_string(),
+                }],
+            }
+        }
         Request::Interrupt { agent } => match interrupt_turn(&agent) {
             Ok(()) => vec![Event::Ok],
             Err(err) => vec![Event::Error {
@@ -2941,7 +2964,18 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
                 message: err.to_string(),
             }],
         },
-        Request::Search { query } => vec![Event::Search {
+        // Answered in `handle_client`, which can wait on the network.
+        Request::RemoteProbe { .. }
+        | Request::RemoteJoin { .. }
+        | Request::RemoteList
+        | Request::RemoteSet { .. }
+        | Request::RemoteLeave { .. }
+        | Request::TeamMemory { .. }
+        | Request::TeamMemoryAppend { .. }
+        | Request::TeamMemorySet { .. } => vec![Event::Error {
+            message: "remote requests are answered on the connection".into(),
+        }],
+                Request::Search { query } => vec![Event::Search {
             hits: search_corpus(&query),
         }],
         Request::Tell { from, to, text } => match tell_agent(&from, &to, &text) {
@@ -3164,6 +3198,8 @@ fn list_agents() -> Vec<AgentInfo> {
                 headless: cfg.is_some_and(|c| c.headless),
                 failed: false,
                 asking: false,
+                remote: None,
+                remote_online: false,
             }
         })
         .collect();
@@ -3174,6 +3210,7 @@ fn list_agents() -> Vec<AgentInfo> {
         a.failed = turn_failed(&a.id);
         a.asking = crate::transcript::has_pending_choice(&a.id);
     }
+    list.extend(crate::remote::agent_infos());
     list
 }
 
@@ -3191,7 +3228,7 @@ fn snapshot_agent(id: &str) -> anyhow::Result<Event> {
 fn messages_agent(id: &str) -> anyhow::Result<Event> {
     {
         let map = agents().lock().expect("agents mutex");
-        if !map.contains_key(id) {
+        if !map.contains_key(id) && !crate::remote::is_remote(id) {
             anyhow::bail!("unknown agent {id}");
         }
     }
@@ -3238,7 +3275,7 @@ fn send_from_user(id: &str, shown: &str, text: &str, steer: bool) -> anyhow::Res
         return Ok(());
     }
     ensure_accepts_turn(id)?;
-    let roster = roster_vec();
+    let roster = crate::remote::roster_for(id, roster_vec());
     let msg = crate::transcript::push_user(id, "user", shown);
     // The teammates named here answer after this message's turn, so they ride
     // with it instead of waiting on whatever the bot is doing now.
@@ -3359,6 +3396,9 @@ fn tell_agent_origin(
     if to.is_empty() {
         anyhow::bail!("unknown agent {to}");
     }
+    if crate::remote::split_id(to).is_some() && !known_agent(to) {
+        return tell_remote(from, to, text, origin);
+    }
     {
         let map = agents().lock().expect("agents mutex");
         if !map.contains_key(to) {
@@ -3441,11 +3481,126 @@ fn tell_agent_origin(
             }
         }
     }
+    if from != "user" && from != to && crate::remote::is_rep(&from) {
+        crate::remote::on_local_tell(&from, get_origin(&from).as_ref());
+    }
     let _ = events().send(Event::Told {
         from: from.clone(),
         to: to.to_string(),
     });
     Ok(())
+}
+
+/// A tell to a bot on another PC. It goes out through the router now: the
+/// remote bot runs there, so nothing here waits for the sender to be idle.
+fn tell_remote(
+    from: &str,
+    to: &str,
+    text: &str,
+    origin: Option<TurnOrigin>,
+) -> anyhow::Result<()> {
+    let from = from_id(from);
+    let envelope = crate::protocol::envelope(&from, text);
+    let parsed = targeting::origin_from_envelope(&envelope);
+    let parent = origin.or_else(|| get_origin(&from));
+    let origin = targeting::inherit_origin(parent.as_ref(), parsed);
+    if targeting::relay_exhausted(&origin) {
+        anyhow::bail!(
+            "relay limit reached after {} bot-to-bot hops; waiting for the user",
+            targeting::MAX_RELAY_HOPS
+        );
+    }
+    let asker = (from != "user" && known_agent(&from)).then_some(from.as_str());
+    let rid = crate::remote::tell(asker, to, text, origin.hops)?;
+    if let Some(asker) = asker {
+        crate::transcript::push_notice(&rid, asker, text, Some(asker.to_string()));
+        let peer = parent.as_ref().and_then(|p| asked_by(p, asker));
+        crate::transcript::push_notice(asker, &format!("to:{rid}"), text, peer);
+    } else {
+        crate::transcript::push_user(&rid, "user", text);
+    }
+    let _ = events().send(Event::Told {
+        from,
+        to: rid,
+    });
+    Ok(())
+}
+
+/// A teammate's tell from another PC, for its representative `bot`. It runs
+/// like a tell from a local bot: `from` is the remote id the reply goes to.
+pub(crate) fn remote_deliver(bot: &str, from: &str, text: &str, hops: u32) -> anyhow::Result<()> {
+    let origin = TurnOrigin {
+        from: from.to_string(),
+        reply_agent: Some(from.to_string()),
+        hops,
+        ..TurnOrigin::default()
+    };
+    if targeting::relay_exhausted(&origin) {
+        anyhow::bail!(
+            "relay limit reached after {} bot-to-bot hops",
+            targeting::MAX_RELAY_HOPS
+        );
+    }
+    ensure_accepts_turn(bot)?;
+    let envelope = crate::protocol::envelope(from, text);
+    let msg = crate::transcript::push_system(bot, from, text, asked_by(&origin, bot));
+    submit_delivery(bot, &envelope, true, Some(msg.id), origin)
+}
+
+/// A remote bot's sealed reply to the local bot that asked it, as a local
+/// peer's reply would land.
+pub(crate) fn remote_reply(asker: &str, from: &str, text: &str) {
+    if !known_agent(asker) || text.trim().is_empty() {
+        return;
+    }
+    let row = crate::transcript::push_handoff(asker, from, text);
+    enqueue_handoff(asker, from, text, Some(&row.id));
+}
+
+/// The remote bot is done: wake the bot that asked, as `wake_asker` does.
+pub(crate) fn remote_wake(asker: &str, from: &str, hops: u32) {
+    if !known_agent(asker) {
+        return;
+    }
+    let wake = TurnOrigin {
+        from: from.to_string(),
+        hops: hops + 1,
+        ..TurnOrigin::default()
+    };
+    if targeting::relay_exhausted(&wake) {
+        return;
+    }
+    let Some(reply) = take_handoff_from(asker, from) else {
+        return;
+    };
+    let text = crate::protocol::handoff_envelope(from, &reply.text);
+    if submit_delivery(asker, &text, true, None, wake).is_err() {
+        restore_handoffs(asker, vec![reply]);
+    }
+}
+
+pub(crate) fn agent_config(id: &str) -> Option<AgentConfig> {
+    configs().lock().ok()?.get(id).cloned()
+}
+
+pub(crate) fn turn_origin(id: &str) -> Option<TurnOrigin> {
+    get_origin(id)
+}
+
+pub(crate) fn agent_status(id: &str) -> Option<AgentStatus> {
+    live_status(id).ok()
+}
+
+pub(crate) fn stop_turn(id: &str) -> anyhow::Result<()> {
+    interrupt_turn(id)
+}
+
+/// A card for the human in `agent`'s chat, answered on the returned channel.
+pub(crate) fn open_ask(
+    agent: &str,
+    asks: &[AskQuestion],
+) -> anyhow::Result<(String, oneshot::Receiver<Event>)> {
+    start_ask(agent, asks)
 }
 
 fn deliver(id: &str, text: &str, newline: bool, skip_rows: &[String]) -> anyhow::Result<()> {
@@ -3465,7 +3620,7 @@ fn deliver(id: &str, text: &str, newline: bool, skip_rows: &[String]) -> anyhow:
         }
         LiveAgent::Headless(session) => {
             let cfg = clone_agent_cfg(id)?;
-            let roster = roster_vec();
+            let roster = crate::remote::roster_for(id, roster_vec());
             headless::kick(session, cfg, roster, text.to_string(), skip_rows.to_vec())
         }
     }
@@ -3657,6 +3812,7 @@ fn remove_agent(id: &str) -> anyhow::Result<()> {
             .with_context(|| format!("unknown agent {id}"))?
     };
     configs().lock().expect("configs mutex").remove(id);
+    crate::remote::on_bot_removed(id);
     crate::avatar::clear(id);
     crate::headless::clear_session(id);
     crate::headless::clear_recap(id);
@@ -4041,7 +4197,11 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
     if text.is_empty() && msg.choice.is_none() {
         return;
     }
-    let Some(origin) = get_origin(agent) else {
+    let origin = get_origin(agent);
+    if msg.choice.is_none() && crate::remote::is_rep(agent) {
+        crate::remote::on_sealed(agent, &text, origin.as_ref());
+    }
+    let Some(origin) = origin else {
         return;
     };
     let targets = targeting::postback_targets(&origin, agent);
@@ -4061,6 +4221,9 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
 /// for the exit, since the next turn resumes the session the CLI is writing.
 /// `turn_ended` at the exit finds the wake spent and nothing left to release.
 pub(crate) fn turn_answered(id: &str) {
+    if crate::remote::is_rep(id) {
+        crate::remote::turn_over(id, get_origin(id).as_ref());
+    }
     wake_asker(id);
     release(take_followers(id));
 }
@@ -4079,6 +4242,9 @@ pub(crate) fn turn_ended(id: &str) {
     // goes on once they answer, and ends after that.
     if matches!(live_status(id), Ok(AgentStatus::Blocked)) {
         return;
+    }
+    if crate::remote::is_rep(id) {
+        crate::remote::turn_over(id, get_origin(id).as_ref());
     }
     wake_asker(id);
     crate::transcript::set_peer(id, None);

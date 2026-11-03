@@ -207,6 +207,59 @@ pub enum Request {
     Search {
         query: String,
     },
+    /// Is a crew-router there? See `docs/router.md`.
+    RemoteProbe {
+        url: String,
+    },
+    /// Sign `bot` up as this PC's representative on the router at `url`.
+    RemoteJoin {
+        url: String,
+        alias: String,
+        name: String,
+        #[serde(default)]
+        invite: Option<String>,
+        bot: String,
+    },
+    RemoteList,
+    /// `None` leaves a list as it is. Trusted and blocked are account ids.
+    RemoteSet {
+        alias: String,
+        #[serde(default)]
+        delegates: Option<Vec<String>>,
+        #[serde(default)]
+        trusted: Option<Vec<String>>,
+        #[serde(default)]
+        blocked: Option<Vec<String>>,
+    },
+    /// Leave the router: the name is free from now.
+    RemoteLeave {
+        alias: String,
+    },
+    /// The router's team notes. Without `alias`, the router `bot` represents,
+    /// or the only one.
+    TeamMemory {
+        #[serde(default)]
+        alias: Option<String>,
+        #[serde(default)]
+        bot: Option<String>,
+    },
+    TeamMemoryAppend {
+        #[serde(default)]
+        alias: Option<String>,
+        #[serde(default)]
+        bot: Option<String>,
+        text: String,
+    },
+    /// Replace the notes, only if they are still at `version`.
+    TeamMemorySet {
+        #[serde(default)]
+        alias: Option<String>,
+        #[serde(default)]
+        bot: Option<String>,
+        text: String,
+        #[serde(default)]
+        version: Option<u64>,
+    },
     Shutdown,
 }
 
@@ -267,6 +320,19 @@ pub enum Event {
     Answered {
         text: String,
     },
+    RemoteServer {
+        server: crate::remote::RemoteServer,
+    },
+    Remotes {
+        remotes: Vec<crate::remote::RemoteInfo>,
+    },
+    TeamMemory {
+        alias: String,
+        text: String,
+        version: u64,
+    },
+    /// Someone changed the team notes first. Nothing was written.
+    TeamMemoryConflict,
     Shutdown,
 }
 
@@ -309,6 +375,12 @@ pub struct AgentInfo {
     /// A question card is open and waiting for the user.
     #[serde(default, skip_serializing_if = "is_false")]
     pub asking: bool,
+    /// The router alias of a bot on another PC. Its id is `<alias>/<account>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
+    /// That bot's PC is connected to the router, and so is this one.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub remote_online: bool,
 }
 
 fn is_false(v: &bool) -> bool {
