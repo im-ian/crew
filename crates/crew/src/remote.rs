@@ -1659,6 +1659,24 @@ fn current_in(st: &mut State, bot: &str, origin: Option<&TurnOrigin>) -> Option<
     Some(at)
 }
 
+/// The teammate whose job a local bot's answer picks back up, as `current_in`
+/// will. Nobody asked that turn in so many words, but its reply is theirs, so
+/// it belongs in their side chat.
+pub fn waking_job_peer(bot: &str, origin: &TurnOrigin) -> Option<String> {
+    if !woken_by_local_bot(origin) {
+        return None;
+    }
+    let st = state().lock().ok()?;
+    let mine = |state| {
+        st.jobs
+            .inbound
+            .iter()
+            .find(|j| j.bot == bot && j.state == state)
+    };
+    let job = mine(InState::Running).or_else(|| mine(InState::Waiting))?;
+    Some(remote_id(&job.alias, &job.from))
+}
+
 fn woken_by_local_bot(origin: &TurnOrigin) -> bool {
     !origin.from.is_empty()
         && origin.from != "user"

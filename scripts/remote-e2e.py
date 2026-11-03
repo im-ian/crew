@@ -437,6 +437,8 @@ def delegate_then_answer(w):
     tell(c, a, "DELEGATE T10")
     wait(lambda: has(c.texts(c.rid(a)), "HANDED"), 20, "C hears HANDED")
     wait(lambda: has(c.texts(c.rid(a)), "ACK sub T10"), 30, "C hears the helper's work")
+    final = [m for m in a.messages(a.rep) if m["role"] == "assistant" and "ACK sub T10" in m["text"]]
+    assert final and all(m.get("peer") == a.rid(c) for m in final), f"final answer off C's side chat: {final}"
     settled(w, 30)
 
 

@@ -1007,7 +1007,8 @@ fn start_delivery(
             }
         }
     }
-    let prev_peer = crate::transcript::set_peer(id, asked_by(&origin, id));
+    let peer = asked_by(&origin, id).or_else(|| crate::remote::waking_job_peer(id, &origin));
+    let prev_peer = crate::transcript::set_peer(id, peer);
     let prev_origin = get_origin(id);
     set_origin(id, origin);
     let epoch = serial_epoch(id);
