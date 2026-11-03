@@ -212,6 +212,16 @@ fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
             | (Request::Ask { .. }, Event::Answered { .. } | Event::Error { .. })
             | (Request::AnswerChoice { .. }, Event::Ok)
             | (Request::Search { .. }, Event::Search { .. })
+            | (Request::RemoteProbe { .. }, Event::RemoteServer { .. })
+            | (Request::RemoteJoin { .. }, Event::Ok)
+            | (Request::RemoteList, Event::Remotes { .. })
+            | (Request::RemoteSet { .. }, Event::Ok)
+            | (Request::RemoteLeave { .. }, Event::Ok)
+            | (Request::TeamMemory { .. }, Event::TeamMemory { .. })
+            | (
+                Request::TeamMemoryAppend { .. } | Request::TeamMemorySet { .. },
+                Event::Ok | Event::TeamMemoryConflict,
+            )
             | (Request::Shutdown, Event::Shutdown | Event::Ok)
             | (_, Event::Error { .. }) => return Ok(ev),
             _ => continue,
