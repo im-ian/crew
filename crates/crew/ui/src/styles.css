@@ -4730,24 +4730,95 @@ button.mention-chip:active {
 .sheet-body:has(.face-pop.open) {
   overflow: visible;
 }
-.settings-groups {
+/* Settings: categories on the left, one page on the right. The window keeps
+   one size so switching pages never moves the list under the cursor. */
+.dialog.settings-dialog {
   display: flex;
   flex-direction: column;
-  gap: var(--space-22);
-  margin-top: var(--space-18);
+  width: min(760px, calc(100% - 40px));
+  height: min(560px, 88vh);
+  padding: 0;
+  overflow: hidden;
+}
+.settings-dialog > h3 {
+  padding: var(--space-20) var(--space-24) var(--space-16);
+  border-bottom: 1px solid var(--line);
+}
+.settings-split {
+  display: grid;
+  grid-template-columns: 188px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-12);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+}
+.settings-nav button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  width: 100%;
+  padding: var(--space-8) var(--space-10);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-lg);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.settings-nav button svg { flex-shrink: 0; }
+.settings-nav button:hover { background: var(--hover); color: var(--ink); }
+.settings-nav button.on { background: var(--active); color: var(--ink); font-weight: 600; }
+.settings-nav button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--working) 55%, transparent);
+  outline-offset: -2px;
+}
+.settings-body {
+  min-width: 0;
+  padding: var(--space-20) var(--space-24) var(--space-24);
+  overflow-y: auto;
+  animation: settings-page var(--dur) var(--ease-out);
+}
+@keyframes settings-page {
+  from { opacity: 0; transform: translateY(4px); }
+}
+.settings-body > h4 {
+  margin: 0 0 var(--space-18);
+  font-size: var(--text-2xl);
+  font-weight: 650;
+  color: var(--ink);
 }
 /* Notes under a switch wrap to one or two lines. A short one must not pull
    the controls below it up onto the cursor. */
-.settings-groups .apply-note {
+.settings-body .form-stack .apply-note {
   min-height: 2.9em;
 }
-.settings-group h4 {
-  margin: 0 0 var(--space-10);
-  font-size: var(--text-xs);
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
+/* A wide page would stretch a two-way switch across the whole row. */
+.settings-body .seg,
+.settings-body .settings-action,
+.settings-body .update-actions {
+  max-width: 340px;
+}
+.settings-body .settings-notify { max-width: 340px; }
+.settings-body .shortcut-list { margin-top: 0; }
+.settings-body .shortcut-list + .apply-note { margin-top: var(--space-16); }
+@media (prefers-reduced-motion: reduce) {
+  .settings-body { animation: none; }
+}
+/* A narrow window keeps the page readable and folds the categories to icons;
+   the name is on hover. */
+@media (max-width: 640px) {
+  .settings-split { grid-template-columns: 56px minmax(0, 1fr); }
+  .settings-nav { padding: var(--space-8); }
+  .settings-nav button { justify-content: center; padding: var(--space-8); }
+  .settings-nav button span { display: none; }
 }
 .field-block {
   display: flex;
