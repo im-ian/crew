@@ -15,6 +15,8 @@ import {
   withUnaccepted,
   type HeldSend,
 } from "./sendGate";
+import { randomFace } from "./avatar";
+import { freeBotName, loadBotDefault } from "./botDefault";
 import { openPendingOnFocus } from "./focusChat";
 import { useT } from "./LocaleContext";
 import { loadLastChat, pickOpenAgent, saveLastChat } from "./lastChat";
@@ -117,6 +119,7 @@ export function useCrew() {
   const ctxOpenRef = useRef(ctx.open);
   ctxOpenRef.current = ctx.open;
   const agentsRef = useRef(agents);
+  const quickBusy = useRef(false);
   agentsRef.current = agents;
   const listAgents = useRef(newestOnly(api.listAgents)).current;
   const getMessages = useRef(newestOnly(api.getMessages)).current;
@@ -1034,6 +1037,28 @@ export function useCrew() {
     }
   }
 
+  /** ⌘⇧N: a bot on the default AI with a random face, no form. */
+  async function createQuickBot() {
+    if (quickBusy.current) return;
+    quickBusy.current = true;
+    try {
+      const start = loadBotDefault();
+      const face = randomFace();
+      await createBot({
+        name: freeBotName(t("quickBot.name"), agentsRef.current.map((a) => a.name)),
+        cli: start.cli,
+        model: start.model,
+        effort: start.effort,
+        cmd: start.cmd,
+        shape: face.shape,
+        color: face.color,
+        groupId: null,
+      });
+    } finally {
+      quickBusy.current = false;
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     void api
@@ -1303,6 +1328,7 @@ export function useCrew() {
     closeConfirm,
     doConfirm,
     openNewBot,
+    createQuickBot,
     closeNewBot,
     createBot,
     openNewGroup,

@@ -92,6 +92,7 @@ xattr -dr com.apple.quarantine /Applications/Crew.app
 **앱**
 
 - 설정 옆 사용량 버튼에서 Claude / Grok / Codex / Antigravity 플랜의 한도 사용률을 봐요. 80%를 넘으면 빨간 점이 붙어요
+- 설정 > 일반 > 기본 AI. 새 봇 창이 이 AI로 시작하고, `⌘⇧N`은 이 AI로 봇을 바로 만들어요
 - 대화 폭(전체/좁게), 얼굴만 남게 접히는 사이드바
 - 한국어 / English, 다크 / 라이트 / 시스템
 
@@ -105,6 +106,7 @@ xattr -dr com.apple.quarantine /Applications/Crew.app
 | --- | --- |
 | `⌘K` | 검색 |
 | `⌘N` | 새 봇 |
+| `⌘⇧N` | 기본 AI와 무작위 얼굴로 바로 새 봇 |
 | `⌘I` | 봇 정보 |
 | `⌘⇧R` | 루틴 |
 | `⌘,` | 설정 |
