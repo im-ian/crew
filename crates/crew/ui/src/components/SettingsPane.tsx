@@ -1,5 +1,6 @@
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
 import { api } from "../api";
+import { loadBotDefault, saveBotDefault, type BotDefault } from "../botDefault";
 import { useLocale, useT } from "../LocaleContext";
 import type { Locale } from "../i18n";
 import type { ChatWidth } from "../chatWidth";
@@ -10,6 +11,7 @@ import type { UpdaterApi } from "../updater";
 import { Info, Keyboard, MessageSquare, Monitor, SlidersHorizontal } from "../icons";
 import { Field } from "./Field";
 import { Modal } from "./Modal";
+import { ModelPicker } from "./ModelPicker";
 import { Seg } from "./Seg";
 import { ShortcutList } from "./ShortcutHelp";
 
@@ -52,6 +54,15 @@ export function SettingsPane({
   const t = useT();
   const { locale, setLocale } = useLocale();
   const [notify, setNotify] = useState(loadNotify);
+  const [botDefault, setBotDefault] = useState(loadBotDefault);
+
+  function changeBotDefault(next: Partial<BotDefault>) {
+    setBotDefault((prev) => {
+      const merged = { ...prev, ...next };
+      saveBotDefault(merged);
+      return merged;
+    });
+  }
   // Stays on the last page while the app runs, like the window it came from.
   const [section, setSection] = useState<Section>("general");
 
@@ -153,6 +164,22 @@ export function SettingsPane({
                   ? t("settings.notifications.note.on")
                   : t("settings.notifications.note.off")}
               </p>
+              <Field label={t("settings.botDefault")}>
+                <ModelPicker
+                  cli={botDefault.cli}
+                  model={botDefault.model}
+                  effort={botDefault.effort}
+                  active={open && section === "general"}
+                  command={botDefault.cmd}
+                  onCli={(cli) =>
+                    changeBotDefault({ cli, model: "", effort: "", cmd: "" })
+                  }
+                  onModel={(model) => changeBotDefault({ model })}
+                  onEffort={(effort) => changeBotDefault({ effort })}
+                  onCommand={(cmd) => changeBotDefault({ cmd })}
+                />
+              </Field>
+              <p className="apply-note">{t("settings.botDefault.note")}</p>
             </div>
           ) : section === "display" ? (
             <div className="form-stack">

@@ -227,6 +227,11 @@ export function App() {
         c.openNewBot();
         return;
       }
+      if (id === "quick-bot") {
+        // A held key repeats. One press, one bot.
+        if (!e.repeat) void c.createQuickBot();
+        return;
+      }
       if (id === "info") {
         if (c.selected) c.openInfo(c.selected);
         return;

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { randomFace, type AvatarShape } from "../avatar";
+import { loadBotDefault } from "../botDefault";
 import { useT } from "../LocaleContext";
 import type { CliKind, Group } from "../types";
 import { Avatar } from "./Avatar";
@@ -49,11 +50,12 @@ export function NewBotModal({
 
   useEffect(() => {
     if (!open) return;
+    const start = loadBotDefault();
     setName("");
-    setModel("");
-    setCli("grok");
-    setCommand("");
-    setEffort("");
+    setModel(start.model);
+    setCli(start.cli);
+    setCommand(start.cmd);
+    setEffort(start.effort);
     setGroupId(
       placeId && groupsRef.current.some((g) => g.id === placeId) ? placeId : "",
     );
