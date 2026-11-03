@@ -87,6 +87,28 @@ pub enum AvatarShape {
     PixelCircle,
     PixelTriangle,
     Bun,
+    Crystal,
+    Octagon,
+    Shield,
+    Crown,
+    Cup,
+    Trash,
+    Bulb,
+    Umbrella,
+    Bell,
+    PixelHeart,
+    PixelStar,
+    PixelDiamond,
+    PixelGhost,
+    Sun,
+    Crescent,
+    FirstQuarter,
+    FullMoon,
+    LastQuarter,
+    WaningCrescent,
+    Blossom,
+    Snowflake,
+    Mushroom,
 }
 
 const AVATAR_SHAPES: &[AvatarShape] = &[
@@ -121,6 +143,28 @@ const AVATAR_SHAPES: &[AvatarShape] = &[
     AvatarShape::PixelCircle,
     AvatarShape::PixelTriangle,
     AvatarShape::Bun,
+    AvatarShape::Crystal,
+    AvatarShape::Octagon,
+    AvatarShape::Shield,
+    AvatarShape::Crown,
+    AvatarShape::Cup,
+    AvatarShape::Trash,
+    AvatarShape::Bulb,
+    AvatarShape::Umbrella,
+    AvatarShape::Bell,
+    AvatarShape::PixelHeart,
+    AvatarShape::PixelStar,
+    AvatarShape::PixelDiamond,
+    AvatarShape::PixelGhost,
+    AvatarShape::Sun,
+    AvatarShape::Crescent,
+    AvatarShape::FirstQuarter,
+    AvatarShape::FullMoon,
+    AvatarShape::LastQuarter,
+    AvatarShape::WaningCrescent,
+    AvatarShape::Blossom,
+    AvatarShape::Snowflake,
+    AvatarShape::Mushroom,
 ];
 
 impl AvatarShape {
@@ -157,6 +201,28 @@ impl AvatarShape {
             AvatarShape::PixelCircle => "pixel-circle",
             AvatarShape::PixelTriangle => "pixel-triangle",
             AvatarShape::Bun => "bun",
+            AvatarShape::Crystal => "crystal",
+            AvatarShape::Octagon => "octagon",
+            AvatarShape::Shield => "shield",
+            AvatarShape::Crown => "crown",
+            AvatarShape::Cup => "cup",
+            AvatarShape::Trash => "trash",
+            AvatarShape::Bulb => "bulb",
+            AvatarShape::Umbrella => "umbrella",
+            AvatarShape::Bell => "bell",
+            AvatarShape::PixelHeart => "pixel-heart",
+            AvatarShape::PixelStar => "pixel-star",
+            AvatarShape::PixelDiamond => "pixel-diamond",
+            AvatarShape::PixelGhost => "pixel-ghost",
+            AvatarShape::Sun => "sun",
+            AvatarShape::Crescent => "crescent",
+            AvatarShape::FirstQuarter => "first-quarter",
+            AvatarShape::FullMoon => "full-moon",
+            AvatarShape::LastQuarter => "last-quarter",
+            AvatarShape::WaningCrescent => "waning-crescent",
+            AvatarShape::Blossom => "blossom",
+            AvatarShape::Snowflake => "snowflake",
+            AvatarShape::Mushroom => "mushroom",
         }
     }
 
@@ -171,6 +237,14 @@ impl AvatarShape {
             "puffy_diamond" | "puffydiamond" => "puffy-diamond",
             "pixel_circle" | "pixelcircle" => "pixel-circle",
             "pixel_triangle" | "pixeltriangle" => "pixel-triangle",
+            "pixel_heart" | "pixelheart" => "pixel-heart",
+            "pixel_star" | "pixelstar" => "pixel-star",
+            "pixel_diamond" | "pixeldiamond" => "pixel-diamond",
+            "pixel_ghost" | "pixelghost" => "pixel-ghost",
+            "first_quarter" | "firstquarter" => "first-quarter",
+            "full_moon" | "fullmoon" => "full-moon",
+            "last_quarter" | "lastquarter" => "last-quarter",
+            "waning_crescent" | "waningcrescent" => "waning-crescent",
             other => other,
         };
         AVATAR_SHAPES
@@ -2223,6 +2297,43 @@ mod tests {
             AvatarShape::Ghostish
         );
         assert!(AvatarShape::from_key("banana").is_err());
+    }
+
+    /// The picker lists shapes in avatar.ts and the daemon lists them here. A shape
+    /// missing on one side is a face that cannot be saved or cannot be drawn.
+    #[test]
+    fn avatar_shapes_match_the_ui_list() {
+        let src = include_str!("../ui/src/avatar.ts");
+        // Every quoted name between the opening bracket and `] as const;`, so a
+        // list may be one line or many. Comment lines are skipped.
+        let quoted = |from: &str| -> std::collections::BTreeSet<String> {
+            let start = src.find(from).unwrap_or_else(|| panic!("{from} not in avatar.ts"));
+            let body = &src[start + from.len()..];
+            let end = body.find("] as const;").expect("list end");
+            let found: std::collections::BTreeSet<String> = body[..end]
+                .lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .flat_map(|line| line.split('"').skip(1).step_by(2))
+                .map(str::to_string)
+                .collect();
+            assert!(!found.is_empty(), "no shapes read after {from}");
+            found
+        };
+        let mut ui = quoted("export const AVATAR_SHAPES = [");
+        ui.extend(quoted("export const LEGACY_SHAPES = ["));
+        let daemon: std::collections::BTreeSet<String> =
+            AVATAR_SHAPES.iter().map(|s| s.as_str().to_string()).collect();
+        assert_eq!(ui, daemon);
+    }
+
+    #[test]
+    fn shapes_the_picker_dropped_still_load() {
+        for key in ["cookie", "puffy", "puffy-diamond"] {
+            let shape = AvatarShape::from_key(key).unwrap();
+            let raw = serde_json::to_string(&shape).unwrap();
+            assert_eq!(raw, format!("\"{key}\""));
+            assert_eq!(serde_json::from_str::<AvatarShape>(&raw).unwrap(), shape);
+        }
     }
 
     #[test]

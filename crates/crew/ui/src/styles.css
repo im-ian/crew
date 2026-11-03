@@ -1040,6 +1040,44 @@ button.avatar {
     transition: none;
   }
 }
+/* Moving parts of the sun and moon faces (faceArt.ts). They turn slowly and breathe
+   so they are never mistaken for the working hoop. */
+.cel-spin,
+.cel-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.cel-spin {
+  animation: cel-spin 26s linear infinite;
+  animation-delay: calc(var(--avatar-phase, 0) * -3s);
+}
+.cel-pulse {
+  animation: cel-pulse 3.4s ease-in-out infinite;
+  animation-delay: calc(var(--avatar-phase, 0) * -0.4s);
+}
+.cel-dark {
+  opacity: 0.16;
+  animation: cel-dark 6s ease-in-out infinite;
+  animation-delay: calc(var(--avatar-phase, 0) * -0.7s);
+}
+.cel-crater {
+  opacity: 0.13;
+  animation: cel-crater 7s ease-in-out infinite;
+}
+.cel-crater:nth-of-type(2) { animation-delay: -2.3s; }
+.cel-crater:nth-of-type(3) { animation-delay: -4.6s; }
+@keyframes cel-spin { to { transform: rotate(360deg); } }
+@keyframes cel-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+@keyframes cel-dark { 0%, 100% { opacity: 0.12; } 50% { opacity: 0.26; } }
+@keyframes cel-crater { 0%, 100% { opacity: 0.09; } 50% { opacity: 0.2; } }
+@media (prefers-reduced-motion: reduce) {
+  .cel-spin,
+  .cel-pulse,
+  .cel-dark,
+  .cel-crater {
+    animation: none;
+  }
+}
 /* Working looks. WorkProps draws the props over the avatar box and BotFace adds
    `look-*`, so the face keeps its size. The gaze rules yield while the pointer
    is on the face, so hover still steers the eyes. */
@@ -4674,9 +4712,6 @@ button.mention-chip:active {
 }
 .new-avatar.has-face { background: transparent; }
 .shape-picker {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
-  gap: var(--space-4);
   /* Same cap as a model column: the list scrolls here, not the sheet. */
   height: var(--face-list-h);
   min-height: 0;
@@ -4687,6 +4722,25 @@ button.mention-chip:active {
   /* Pull the rule into the middle of the column gap. */
   margin-right: calc(var(--space-10) * -1);
   border-right: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
+}
+.shape-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  gap: var(--space-4);
+}
+/* Each group title holds at the top while its shapes scroll under it. The list has
+   1px of padding, so the title sits one pixel up to cover it: a shape passing
+   under it would otherwise show in that strip. */
+.shape-group-head {
+  position: sticky;
+  top: -1px;
+  z-index: 2;
+  margin-top: -1px;
+  padding: var(--space-6) var(--space-2) var(--space-4);
+  background: var(--menu);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 .shape-pick {
   aspect-ratio: 1;
