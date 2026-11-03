@@ -1915,6 +1915,11 @@ async fn join(
             .insert(alias.to_string(), new_link(cfg, String::new()));
         save_configs(&st);
     }
+    // Its first turn, or anything said before, ran with this PC's notes and
+    // bots. The session would carry them into turns for the team.
+    if let Err(err) = crate::daemon::fresh_start(bot) {
+        eprintln!("[crew] remote {alias}: could not start {bot} afresh: {err:#}");
+    }
     tokio::spawn(run_link(alias.to_string()));
     Ok(())
 }

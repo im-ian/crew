@@ -3583,6 +3583,11 @@ pub(crate) fn agent_config(id: &str) -> Option<AgentConfig> {
     configs().lock().ok()?.get(id).cloned()
 }
 
+/// Archive `id`'s chat and open a new session, as the reset button does.
+pub(crate) fn fresh_start(id: &str) -> anyhow::Result<()> {
+    reset_agent(id, false).map(|_| ())
+}
+
 pub(crate) fn turn_origin(id: &str) -> Option<TurnOrigin> {
     get_origin(id)
 }
