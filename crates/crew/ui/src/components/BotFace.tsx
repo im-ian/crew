@@ -7,7 +7,7 @@ import {
 } from "react";
 import { avatarPhase, type AvatarShape } from "../avatar";
 import { EXTRA_BOXES, EXTRA_INKS, extraFace } from "../faceGeometry";
-import { afterglowOf, type Afterglow, type BotSignal } from "../botSignals";
+import { afterglowAt, type BotSignal } from "../botSignals";
 import type { AgentStatus } from "../types";
 import type { WorkLook } from "../workLook";
 
@@ -218,45 +218,24 @@ function liveMood(status?: AgentStatus | null): Mood | null {
  * The face a bot wears when a run ends: a smile for a quick one, a dance for a
  * long one, a droop for one that failed. It goes as soon as the bot starts
  * something else. While the bot's chat holds lines nobody has seen it keeps
- * going, and it stops the moment the reader looks. When the reader is already
- * there it lasts for a moment, as a timed reaction.
+ * going, and it ends once the reader has looked and its usual moment has passed.
+ * A run that ends with the reader already in the chat plays for that moment.
  */
 function useAfterglow(
   status: AgentStatus | null | undefined,
   signal: BotSignal | null | undefined,
 ): "happy" | "success" | "failure" | null {
-  const prev = useRef(status);
-  const [glow, setGlow] = useState<Afterglow | null>(null);
-  const unread = !!signal?.unread;
-  // Whether the reaction has waited on an unread chat, so a look ends it.
-  const waited = useRef(false);
+  const [, wake] = useState(0);
+  const endedAt = signal?.endedAt ?? 0;
+  const glow = afterglowAt(status, signal, Date.now());
+  const waiting = !!glow && !signal?.unread && glow.left > 0;
+  const left = glow?.left ?? 0;
   useEffect(() => {
-    const was = prev.current;
-    prev.current = status;
-    if (status !== "idle") {
-      waited.current = false;
-      setGlow(null);
-      return;
-    }
-    if (was !== "working") return;
-    waited.current = false;
-    setGlow(afterglowOf(signal ?? undefined));
-  }, [status]);
-  useEffect(() => {
-    if (!glow) return;
-    if (unread) {
-      waited.current = true;
-      return;
-    }
-    if (waited.current) {
-      waited.current = false;
-      setGlow(null);
-      return;
-    }
-    const t = setTimeout(() => setGlow(null), glow.ms);
+    if (!waiting) return;
+    const t = setTimeout(() => wake((n) => n + 1), left + 1);
     return () => clearTimeout(t);
-  }, [glow, unread]);
-  return glow?.kind ?? null;
+  }, [waiting, endedAt]);
+  return glow?.shown ? glow.kind : null;
 }
 
 const GAZE_X = 4.6;

@@ -5,17 +5,26 @@ import type { AgentInfo, AgentStatus } from "./types";
  * What a bot's face needs beyond its status, shared by every face of the bot.
  * `runMs` is how long the run that last ended took, kept until the next one
  * ends, so a face can tell a long job from a quick one when it finishes.
- * `unread` is whether the bot's chat has lines the reader has not seen, so a
- * face can keep its reaction going until they look.
+ * `endedAt` is when that run ended (0 while none has, or one is running), and
+ * `unread` is whether the bot's chat has lines the reader has not seen. A face
+ * reads both to keep its reaction going until the reader looks, and since they
+ * live here a face that mounts late, or is rebuilt, shows the same reaction.
  */
 export type BotSignal = {
   failed: boolean;
   asking: boolean;
   runMs: number;
+  endedAt: number;
   unread: boolean;
 };
 
-const NONE: BotSignal = { failed: false, asking: false, runMs: 0, unread: false };
+const NONE: BotSignal = {
+  failed: false,
+  asking: false,
+  runMs: 0,
+  endedAt: 0,
+  unread: false,
+};
 
 const signals = new Map<string, BotSignal>();
 const startedAt = new Map<string, number>();
@@ -28,6 +37,7 @@ function same(a: BotSignal, b: BotSignal): boolean {
     a.failed === b.failed &&
     a.asking === b.asking &&
     a.runMs === b.runMs &&
+    a.endedAt === b.endedAt &&
     a.unread === b.unread
   );
 }
@@ -42,17 +52,23 @@ export function publishBotSignals(agents: AgentInfo[], now: number = Date.now())
     lastStatus.set(a.id, a.status);
     const prev = signals.get(a.id) ?? NONE;
     let runMs = prev.runMs;
+    let endedAt = prev.endedAt;
     if (a.status === "working") {
       if (!startedAt.has(a.id)) startedAt.set(a.id, now);
+      endedAt = 0;
     } else {
       const began = startedAt.get(a.id);
-      if (was === "working" && began !== undefined) runMs = Math.max(0, now - began);
+      if (was === "working" && began !== undefined) {
+        runMs = Math.max(0, now - began);
+        endedAt = now;
+      }
       startedAt.delete(a.id);
     }
     const next: BotSignal = {
       failed: !!a.failed,
       asking: !!a.asking,
       runMs,
+      endedAt,
       unread: unreadIds.has(a.id),
     };
     if (!same(prev, next)) {
@@ -113,4 +129,20 @@ export function afterglowOf(signal: BotSignal | undefined): Afterglow {
   if (signal?.failed) return { kind: "failure", ms: 8000 };
   if ((signal?.runMs ?? 0) >= LONG_RUN_MS) return { kind: "success", ms: 2600 };
   return { kind: "happy", ms: 1600 };
+}
+
+/**
+ * The reaction a face shows right now, and how long its usual moment has left
+ * (0 once spent, when only an unread chat keeps it up). Null when the bot is
+ * not idle or no run of its has ended since the app began.
+ */
+export function afterglowAt(
+  status: AgentStatus | null | undefined,
+  signal: BotSignal | null | undefined,
+  now: number,
+): { kind: Afterglow["kind"]; left: number; shown: boolean } | null {
+  if (status !== "idle" || !signal || signal.endedAt <= 0) return null;
+  const { kind, ms } = afterglowOf(signal);
+  const left = Math.max(0, signal.endedAt + ms - now);
+  return { kind, left, shown: signal.unread || left > 0 };
 }
