@@ -217,9 +217,9 @@ function liveMood(status?: AgentStatus | null): Mood | null {
 /**
  * The face a bot wears when a run ends: a smile for a quick one, a dance for a
  * long one, a droop for one that failed. It goes as soon as the bot starts
- * something else. While the bot's chat holds lines nobody has seen it keeps
- * going, and it ends once the reader has looked and its usual moment has passed.
- * A run that ends with the reader already in the chat plays for that moment.
+ * something else. When the run ended with its chat unseen the reaction keeps
+ * going until the reader looks. A run that ends with the reader already in the
+ * chat plays for its usual moment.
  */
 function useAfterglow(
   status: AgentStatus | null | undefined,
@@ -228,13 +228,15 @@ function useAfterglow(
   const [, wake] = useState(0);
   const endedAt = signal?.endedAt ?? 0;
   const glow = afterglowAt(status, signal, Date.now());
-  const waiting = !!glow && !signal?.unread && glow.left > 0;
+  const waiting = !!glow && !signal?.held && glow.left > 0;
   const left = glow?.left ?? 0;
+  const kind = glow?.kind;
+  // The kind moves the moment's length (a failure outlasts the rest), so it re-arms.
   useEffect(() => {
     if (!waiting) return;
     const t = setTimeout(() => wake((n) => n + 1), left + 1);
     return () => clearTimeout(t);
-  }, [waiting, endedAt]);
+  }, [waiting, endedAt, kind]);
   return glow?.shown ? glow.kind : null;
 }
 

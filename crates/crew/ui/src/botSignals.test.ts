@@ -63,7 +63,7 @@ describe("publishBotSignals", () => {
       asking: false,
       runMs: 0,
       endedAt: 0,
-      unread: false,
+      held: false,
     });
   });
 
@@ -97,35 +97,94 @@ describe("publishBotSignals", () => {
 });
 
 describe("publishBotUnread", () => {
-  it("marks the bots whose chat holds unseen lines, and clears them once seen", () => {
-    const a = nextId();
-    const b = nextId();
-    publishBotSignals([agent(a), agent(b)], 0);
-    publishBotUnread([a]);
-    expect(peekBotSignal(a).unread).toBe(true);
-    expect(peekBotSignal(b).unread).toBe(false);
-    publishBotUnread([]);
-    expect(peekBotSignal(a).unread).toBe(false);
+  /** A run that ends in idle at `at`, while the chat is unread or not. */
+  function runEnds(id: string, at: number, unread: boolean) {
+    publishBotSignals([agent(id, { status: "working" })], at - 5_000);
+    if (unread) publishBotUnread([id], at);
+    publishBotSignals([agent(id)], at);
+  }
+
+  it("holds the reaction of a run that ended with its chat unseen", () => {
+    const id = nextId();
+    runEnds(id, 10_000, true);
+    expect(peekBotSignal(id)).toMatchObject({ endedAt: 10_000, held: true });
   });
 
-  it("survives the list being read again", () => {
+  it("does not hold a run that ended with the reader in the chat", () => {
+    const id = nextId();
+    runEnds(id, 10_000, false);
+    expect(peekBotSignal(id)).toMatchObject({ endedAt: 10_000, held: false });
+  });
+
+  it("lets go when the reader looks", () => {
+    const id = nextId();
+    runEnds(id, 10_000, true);
+    publishBotUnread([], 20_000);
+    expect(peekBotSignal(id).held).toBe(false);
+  });
+
+  it("holds when the unread arrives just after the list shows the run ended", () => {
+    const id = nextId();
+    runEnds(id, 10_000, false);
+    publishBotUnread([id], 10_050);
+    expect(peekBotSignal(id).held).toBe(true);
+  });
+
+  it("does not revive a reaction the reader has seen when a later line arrives", () => {
+    const id = nextId();
+    runEnds(id, 10_000, true);
+    publishBotUnread([], 20_000);
+    publishBotUnread([id], 3_600_000);
+    expect(peekBotSignal(id).held).toBe(false);
+  });
+
+  it("holds nothing for a run that ended blocked or asleep, nor a later idle", () => {
     const id = nextId();
     publishBotSignals([agent(id, { status: "working" })], 0);
-    publishBotUnread([id]);
-    publishBotSignals([agent(id)], 5_000);
-    expect(peekBotSignal(id)).toMatchObject({ unread: true, runMs: 5_000 });
-    publishBotUnread([]);
+    publishBotUnread([id], 4_000);
+    publishBotSignals([agent(id, { status: "blocked" })], 5_000);
+    expect(peekBotSignal(id)).toMatchObject({ endedAt: 0, held: false });
+    publishBotSignals([agent(id)], 900_000);
+    expect(peekBotSignal(id)).toMatchObject({ endedAt: 0, held: false });
+  });
+
+  it("clears the hold when the bot starts again", () => {
+    const id = nextId();
+    runEnds(id, 10_000, true);
+    publishBotSignals([agent(id, { status: "working" })], 11_000);
+    expect(peekBotSignal(id)).toMatchObject({ endedAt: 0, held: false });
+  });
+
+  it("remembers an unread chat for a bot the list names later", () => {
+    const id = nextId();
+    publishBotUnread([id], 0);
+    runEnds(id, 10_000, false);
+    expect(peekBotSignal(id).held).toBe(true);
+    publishBotUnread([], 11_000);
+  });
+
+  it("makes no entry for a bot the list has not named", () => {
+    const id = nextId();
+    publishBotUnread([id], 0);
+    expect(peekBotSignal(id)).toEqual({
+      failed: false,
+      asking: false,
+      runMs: 0,
+      endedAt: 0,
+      held: false,
+    });
+    publishBotUnread([], 1);
   });
 
   it("wakes the faces only when it moved", () => {
     const id = nextId();
-    publishBotSignals([agent(id)], 0);
+    runEnds(id, 10_000, false);
     let calls = 0;
     const off = onBotSignals(() => calls++);
-    publishBotUnread([id]);
-    publishBotUnread([id]);
+    publishBotUnread([id], 10_100);
+    publishBotUnread([id], 10_200);
     expect(calls).toBe(1);
-    publishBotUnread([]);
+    publishBotUnread([], 10_300);
     expect(calls).toBe(2);
     off();
   });
@@ -133,19 +192,19 @@ describe("publishBotUnread", () => {
 
 describe("afterglowOf", () => {
   it("smiles after a quick run", () => {
-    expect(afterglowOf({ failed: false, asking: false, runMs: 4000, endedAt: 0, unread: false }).kind).toBe("happy");
+    expect(afterglowOf({ failed: false, asking: false, runMs: 4000, endedAt: 0, held: false }).kind).toBe("happy");
     expect(afterglowOf(undefined).kind).toBe("happy");
   });
 
   it("dances after a long one", () => {
-    expect(afterglowOf({ failed: false, asking: false, runMs: LONG_RUN_MS, endedAt: 0, unread: false }).kind).toBe("success");
-    expect(afterglowOf({ failed: false, asking: false, runMs: LONG_RUN_MS - 1, endedAt: 0, unread: false }).kind).toBe("happy");
+    expect(afterglowOf({ failed: false, asking: false, runMs: LONG_RUN_MS, endedAt: 0, held: false }).kind).toBe("success");
+    expect(afterglowOf({ failed: false, asking: false, runMs: LONG_RUN_MS - 1, endedAt: 0, held: false }).kind).toBe("happy");
   });
 
   it("droops after a failure, however long it ran, and holds it longest", () => {
-    const failed = afterglowOf({ failed: true, asking: false, runMs: 90_000, endedAt: 0, unread: false });
+    const failed = afterglowOf({ failed: true, asking: false, runMs: 90_000, endedAt: 0, held: false });
     expect(failed.kind).toBe("failure");
-    const long = afterglowOf({ failed: false, asking: false, runMs: 90_000, endedAt: 0, unread: false });
+    const long = afterglowOf({ failed: false, asking: false, runMs: 90_000, endedAt: 0, held: false });
     expect(failed.ms).toBeGreaterThan(long.ms);
   });
 });
@@ -156,7 +215,7 @@ describe("afterglowAt", () => {
     asking: false,
     runMs: 0,
     endedAt: 1_000,
-    unread: false,
+    held: false,
     ...over,
   });
 
@@ -165,27 +224,27 @@ describe("afterglowAt", () => {
     expect(afterglowAt("idle", sig(), 2_600)).toMatchObject({ left: 0, shown: false });
   });
 
-  it("keeps going while the chat is unread, however late", () => {
-    const fail = sig({ failed: true, unread: true });
+  it("keeps going while held, however late", () => {
+    const fail = sig({ failed: true, held: true });
     expect(afterglowAt("idle", fail, 1_000 + 3_600_000)).toMatchObject({ kind: "failure", shown: true });
   });
 
-  it("ends the moment the reader looks once the moment has passed", () => {
-    const unseen = sig({ failed: true, unread: true });
-    const seen = sig({ failed: true, unread: false });
+  it("ends once the hold is let go and the moment has passed", () => {
+    const unseen = sig({ failed: true, held: true });
+    const seen = sig({ failed: true, held: false });
     const later = 1_000 + 60_000;
     expect(afterglowAt("idle", unseen, later)?.shown).toBe(true);
     expect(afterglowAt("idle", seen, later)?.shown).toBe(false);
   });
 
   it("shows a reaction to a late-mounted face the same as to the first", () => {
-    const s = sig({ runMs: 90_000, unread: true });
+    const s = sig({ runMs: 90_000, held: true });
     expect(afterglowAt("idle", s, 50_000)).toMatchObject({ kind: "success", shown: true });
   });
 
   it("shows nothing before a run has ended, or while the bot is busy", () => {
-    expect(afterglowAt("idle", sig({ endedAt: 0, unread: true }), 5)).toBeNull();
-    expect(afterglowAt("working", sig({ unread: true }), 5)).toBeNull();
+    expect(afterglowAt("idle", sig({ endedAt: 0, held: true }), 5)).toBeNull();
+    expect(afterglowAt("working", sig({ held: true }), 5)).toBeNull();
     expect(afterglowAt("idle", undefined, 5)).toBeNull();
   });
 });
