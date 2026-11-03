@@ -1252,15 +1252,14 @@ button.avatar {
 .avatar.is-blocked {
   overflow: visible;
 }
-/* The hoop plane: a circle squashed into a tilted ellipse. Bead sizes below are
-   pre-divided by this 0.42 so they render round. */
 .orbit-clip {
   /* The hoop spins and tilts, and its turning boxes reach past the face. Every
      transformed box counts toward the scroll area of the thread, so a hoop at the
      bottom would make scrollHeight jump each frame. This fixed box holds the whole
-     orbit and clips at its edge, so the reach the thread sees never changes. It sits
-     outside the farthest bead and glow. */
-  --orbit-pad: calc(var(--orbit-ref, 40px) * 0.6);
+     orbit and clips at its edge, so the reach the thread sees never changes. The pad
+     is the widest roll (r up to 0.28 in orbitRoll.ts, a bit more for the bead) plus the
+     7px glow, which does not scale with the face. */
+  --orbit-pad: calc(var(--orbit-ref, 40px) * 0.3 + 10px);
   position: absolute;
   inset: calc(var(--orbit-pad) * -1);
   contain: paint;
@@ -1268,6 +1267,8 @@ button.avatar {
 }
 .orbit-clip.is-back { z-index: 0; }
 .orbit-clip.is-front { z-index: 3; }
+/* The hoop plane: a circle squashed into a tilted ellipse. Bead sizes below are
+   pre-divided by this 0.42 so they render round. */
 .avatar-orbit {
   position: absolute;
   inset: calc(var(--orbit-pad) - 6px);
