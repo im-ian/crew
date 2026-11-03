@@ -4210,6 +4210,10 @@ fn known_agent(id: &str) -> bool {
         .map(|m| m.contains_key(id))
         .unwrap_or(false)
 }
+    // Before the kill, as in `remove_agent`: a turn that had not written yet
+    // would put its prompt back, parked at the front of the cleared inbox,
+    // and every line queued after it would wait for the user.
+    forget_prompt(id);
 
 fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
     if msg.role != Role::Assistant {
