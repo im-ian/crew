@@ -7,7 +7,7 @@ import {
 } from "react";
 import { avatarPhase, type AvatarShape } from "../avatar";
 import { EXTRA_BOXES, EXTRA_INKS, extraFace } from "../faceGeometry";
-import { afterglowOf, type BotSignal } from "../botSignals";
+import { afterglowOf, type Afterglow, type BotSignal } from "../botSignals";
 import type { AgentStatus } from "../types";
 import type { WorkLook } from "../workLook";
 
@@ -215,30 +215,48 @@ function liveMood(status?: AgentStatus | null): Mood | null {
 }
 
 /**
- * The face a bot wears for a moment when a run ends: a smile for a quick one, a
- * dance for a long one, a droop for one that failed. It goes as soon as the bot
- * starts something else.
+ * The face a bot wears when a run ends: a smile for a quick one, a dance for a
+ * long one, a droop for one that failed. It goes as soon as the bot starts
+ * something else. While the bot's chat holds lines nobody has seen it keeps
+ * going, and it stops the moment the reader looks. When the reader is already
+ * there it lasts for a moment, as a timed reaction.
  */
 function useAfterglow(
   status: AgentStatus | null | undefined,
   signal: BotSignal | null | undefined,
 ): "happy" | "success" | "failure" | null {
   const prev = useRef(status);
-  const [glow, setGlow] = useState<"happy" | "success" | "failure" | null>(null);
+  const [glow, setGlow] = useState<Afterglow | null>(null);
+  const unread = !!signal?.unread;
+  // Whether the reaction has waited on an unread chat, so a look ends it.
+  const waited = useRef(false);
   useEffect(() => {
     const was = prev.current;
     prev.current = status;
     if (status !== "idle") {
+      waited.current = false;
       setGlow(null);
       return;
     }
     if (was !== "working") return;
-    const { kind, ms } = afterglowOf(signal ?? undefined);
-    setGlow(kind);
-    const t = setTimeout(() => setGlow(null), ms);
-    return () => clearTimeout(t);
+    waited.current = false;
+    setGlow(afterglowOf(signal ?? undefined));
   }, [status]);
-  return glow;
+  useEffect(() => {
+    if (!glow) return;
+    if (unread) {
+      waited.current = true;
+      return;
+    }
+    if (waited.current) {
+      waited.current = false;
+      setGlow(null);
+      return;
+    }
+    const t = setTimeout(() => setGlow(null), glow.ms);
+    return () => clearTimeout(t);
+  }, [glow, unread]);
+  return glow?.kind ?? null;
 }
 
 const GAZE_X = 4.6;

@@ -5,18 +5,31 @@ import type { AgentInfo, AgentStatus } from "./types";
  * What a bot's face needs beyond its status, shared by every face of the bot.
  * `runMs` is how long the run that last ended took, kept until the next one
  * ends, so a face can tell a long job from a quick one when it finishes.
+ * `unread` is whether the bot's chat has lines the reader has not seen, so a
+ * face can keep its reaction going until they look.
  */
-export type BotSignal = { failed: boolean; asking: boolean; runMs: number };
+export type BotSignal = {
+  failed: boolean;
+  asking: boolean;
+  runMs: number;
+  unread: boolean;
+};
 
-const NONE: BotSignal = { failed: false, asking: false, runMs: 0 };
+const NONE: BotSignal = { failed: false, asking: false, runMs: 0, unread: false };
 
 const signals = new Map<string, BotSignal>();
 const startedAt = new Map<string, number>();
 const lastStatus = new Map<string, AgentStatus>();
+let unreadIds = new Set<string>();
 const listeners = new Set<() => void>();
 
 function same(a: BotSignal, b: BotSignal): boolean {
-  return a.failed === b.failed && a.asking === b.asking && a.runMs === b.runMs;
+  return (
+    a.failed === b.failed &&
+    a.asking === b.asking &&
+    a.runMs === b.runMs &&
+    a.unread === b.unread
+  );
 }
 
 /** Feed the list the window just read. Faces re-draw only when something changed. */
@@ -36,7 +49,12 @@ export function publishBotSignals(agents: AgentInfo[], now: number = Date.now())
       if (was === "working" && began !== undefined) runMs = Math.max(0, now - began);
       startedAt.delete(a.id);
     }
-    const next: BotSignal = { failed: !!a.failed, asking: !!a.asking, runMs };
+    const next: BotSignal = {
+      failed: !!a.failed,
+      asking: !!a.asking,
+      runMs,
+      unread: unreadIds.has(a.id),
+    };
     if (!same(prev, next)) {
       signals.set(a.id, next);
       changed = true;
@@ -48,6 +66,21 @@ export function publishBotSignals(agents: AgentInfo[], now: number = Date.now())
     startedAt.delete(id);
     if (signals.delete(id)) changed = true;
   }
+  if (changed) for (const l of [...listeners]) l();
+}
+
+/** Which bots' chats hold lines the reader has not seen. Faces re-draw only when this moved. */
+export function publishBotUnread(ids: Iterable<string>): void {
+  const now = new Set(ids);
+  let changed = false;
+  for (const id of new Set([...unreadIds, ...now])) {
+    const prev = signals.get(id) ?? NONE;
+    const next: BotSignal = { ...prev, unread: now.has(id) };
+    if (same(prev, next)) continue;
+    signals.set(id, next);
+    changed = true;
+  }
+  unreadIds = now;
   if (changed) for (const l of [...listeners]) l();
 }
 

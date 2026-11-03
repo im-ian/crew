@@ -5,6 +5,7 @@ import {
   onBotSignals,
   peekBotSignal,
   publishBotSignals,
+  publishBotUnread,
 } from "./botSignals";
 import type { AgentInfo } from "./types";
 
@@ -43,7 +44,12 @@ describe("publishBotSignals", () => {
   it("leaves a bot that was never seen working at zero", () => {
     const id = nextId();
     publishBotSignals([agent(id)], 0);
-    expect(peekBotSignal(id)).toEqual({ failed: false, asking: false, runMs: 0 });
+    expect(peekBotSignal(id)).toEqual({
+      failed: false,
+      asking: false,
+      runMs: 0,
+      unread: false,
+    });
   });
 
   it("carries a failure and an open question from the list", () => {
@@ -75,21 +81,56 @@ describe("publishBotSignals", () => {
   });
 });
 
+describe("publishBotUnread", () => {
+  it("marks the bots whose chat holds unseen lines, and clears them once seen", () => {
+    const a = nextId();
+    const b = nextId();
+    publishBotSignals([agent(a), agent(b)], 0);
+    publishBotUnread([a]);
+    expect(peekBotSignal(a).unread).toBe(true);
+    expect(peekBotSignal(b).unread).toBe(false);
+    publishBotUnread([]);
+    expect(peekBotSignal(a).unread).toBe(false);
+  });
+
+  it("survives the list being read again", () => {
+    const id = nextId();
+    publishBotSignals([agent(id, { status: "working" })], 0);
+    publishBotUnread([id]);
+    publishBotSignals([agent(id)], 5_000);
+    expect(peekBotSignal(id)).toMatchObject({ unread: true, runMs: 5_000 });
+    publishBotUnread([]);
+  });
+
+  it("wakes the faces only when it moved", () => {
+    const id = nextId();
+    publishBotSignals([agent(id)], 0);
+    let calls = 0;
+    const off = onBotSignals(() => calls++);
+    publishBotUnread([id]);
+    publishBotUnread([id]);
+    expect(calls).toBe(1);
+    publishBotUnread([]);
+    expect(calls).toBe(2);
+    off();
+  });
+});
+
 describe("afterglowOf", () => {
   it("smiles after a quick run", () => {
-    expect(afterglowOf({ failed: false, asking: false, runMs: 4000 }).kind).toBe("happy");
+    expect(afterglowOf({ failed: false, asking: false, runMs: 4000, unread: false }).kind).toBe("happy");
     expect(afterglowOf(undefined).kind).toBe("happy");
   });
 
   it("dances after a long one", () => {
-    expect(afterglowOf({ failed: false, asking: false, runMs: LONG_RUN_MS }).kind).toBe("success");
-    expect(afterglowOf({ failed: false, asking: false, runMs: LONG_RUN_MS - 1 }).kind).toBe("happy");
+    expect(afterglowOf({ failed: false, asking: false, runMs: LONG_RUN_MS, unread: false }).kind).toBe("success");
+    expect(afterglowOf({ failed: false, asking: false, runMs: LONG_RUN_MS - 1, unread: false }).kind).toBe("happy");
   });
 
   it("droops after a failure, however long it ran, and holds it longest", () => {
-    const failed = afterglowOf({ failed: true, asking: false, runMs: 90_000 });
+    const failed = afterglowOf({ failed: true, asking: false, runMs: 90_000, unread: false });
     expect(failed.kind).toBe("failure");
-    const long = afterglowOf({ failed: false, asking: false, runMs: 90_000 });
+    const long = afterglowOf({ failed: false, asking: false, runMs: 90_000, unread: false });
     expect(failed.ms).toBeGreaterThan(long.ms);
   });
 });
