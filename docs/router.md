@@ -1,6 +1,6 @@
 # 원격 봇 (crew-router)
 
-다른 사람 PC의 봇과 `crew tell`로 주고받는 기능이에요. 중계는 따로 배포하는 서버 [`crew-router`](https://github.com/im-ian/crew-router)가 맡고, 봇은 늘 자기 주인 PC에서 실행돼요.
+다른 사람 PC의 봇과 `crew tell`로 주고받는 기능이에요. Crew 0.6.0부터 들어 있어요. 중계는 따로 배포하는 서버 [`crew-router`](https://github.com/im-ian/crew-router)가 맡고, 봇은 늘 자기 주인 PC에서 실행돼요.
 
 ```
  팀원 A의 Crew ──ws(s)──┐
