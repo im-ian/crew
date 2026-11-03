@@ -62,6 +62,7 @@
     "allow-set-dock-badge",
     "allow-set-locale",
     "allow-set-notifications",
+    "allow-set-escape-layer",
     "updater:allow-check",
     "updater:allow-download",
     "updater:allow-install",

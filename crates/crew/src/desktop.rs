@@ -710,6 +710,12 @@ fn set_notifications(enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// An open sheet, preview, or menu is using Escape. macOS then keeps fullscreen.
+#[tauri::command]
+fn set_escape_layer(open: bool) {
+    crate::escape_layer::set_layer_open(open);
+}
+
 /// Blank when the person cancels. A trailing slash is the dialog's, not part of the folder.
 fn folder_from_picker(stdout: &str) -> Option<String> {
     let path = stdout.trim();
@@ -857,6 +863,8 @@ pub fn run() -> anyhow::Result<()> {
     });
     #[cfg(debug_assertions)]
     crate::ui_dev::ensure_vite()?;
+    #[cfg(target_os = "macos")]
+    crate::macos_escape::install();
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -922,7 +930,8 @@ pub fn run() -> anyhow::Result<()> {
             pick_folder,
             set_dock_badge,
             set_locale,
-            set_notifications
+            set_notifications,
+            set_escape_layer
         ])
         .run(tauri::generate_context!())
         .map_err(|e| anyhow::anyhow!(e))?;

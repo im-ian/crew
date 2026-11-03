@@ -56,6 +56,7 @@ fn main() {
             "set_dock_badge",
             "set_locale",
             "set_notifications",
+            "set_escape_layer",
         ])),
     )
     .expect("failed to run tauri build");

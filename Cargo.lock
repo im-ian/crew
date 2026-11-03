@@ -533,6 +533,7 @@ dependencies = [
  "anyhow",
  "clap",
  "libc",
+ "objc2",
  "portable-pty",
  "serde",
  "serde_json",

@@ -110,6 +110,12 @@ export function useCrew() {
   newGroupOpenRef.current = newGroupOpen;
   const groupSettingsRef = useRef(groupSettingsId);
   groupSettingsRef.current = groupSettingsId;
+  const confirmOpenRef = useRef(confirmOpen);
+  confirmOpenRef.current = confirmOpen;
+  const newBotOpenRef = useRef(newBotOpen);
+  newBotOpenRef.current = newBotOpen;
+  const ctxOpenRef = useRef(ctx.open);
+  ctxOpenRef.current = ctx.open;
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
   const listAgents = useRef(newestOnly(api.listAgents)).current;
@@ -1140,7 +1146,7 @@ export function useCrew() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.defaultPrevented) return;
+      if (e.defaultPrevented || e.isComposing) return;
       if (e.key !== "Escape") return;
       if (newGroupOpenRef.current) {
         e.preventDefault();
@@ -1152,6 +1158,17 @@ export function useCrew() {
         setGroupSettingsId(null);
         return;
       }
+      // Idle Escape still leaves fullscreen. Only a layer that this key
+      // closes marks the event handled.
+      if (
+        !confirmOpenRef.current &&
+        !paneOpenRef.current &&
+        !newBotOpenRef.current &&
+        !ctxOpenRef.current
+      ) {
+        return;
+      }
+      e.preventDefault();
       closeConfirm();
       closePane();
       closeNewBot();
