@@ -8,10 +8,12 @@ import type { Delivery } from "../deliveryPref";
 import { loadNotify, saveNotify } from "../notifyPref";
 import type { ThemePref } from "../theme";
 import type { UpdaterApi } from "../updater";
-import { Info, Keyboard, MessageSquare, Monitor, SlidersHorizontal } from "../icons";
+import type { AgentInfo, RemoteInfo } from "../types";
+import { Globe, Info, Keyboard, MessageSquare, Monitor, SlidersHorizontal } from "../icons";
 import { Field } from "./Field";
 import { Modal } from "./Modal";
 import { ModelPicker } from "./ModelPicker";
+import { RemoteSettings, type RemoteChange } from "./RemoteSettings";
 import { Seg } from "./Seg";
 import { ShortcutList } from "./ShortcutHelp";
 
@@ -28,9 +30,14 @@ type Props = {
   onClose: () => void;
   onOpenSkills: () => void;
   updater: UpdaterApi;
+  remotes: RemoteInfo[];
+  agents: AgentInfo[];
+  onSetRemote: (change: RemoteChange) => Promise<void>;
+  onLeaveRemote: (alias: string) => void;
+  onAddRemote: () => void;
 };
 
-type Section = "general" | "display" | "chat" | "shortcuts" | "about";
+type Section = "general" | "display" | "chat" | "remote" | "shortcuts" | "about";
 
 const LANGS: { value: Locale; label: string }[] = [
   { value: "ko", label: "한글" },
@@ -50,6 +57,11 @@ export function SettingsPane({
   onClose,
   onOpenSkills,
   updater,
+  remotes,
+  agents,
+  onSetRemote,
+  onLeaveRemote,
+  onAddRemote,
 }: Props) {
   const t = useT();
   const { locale, setLocale } = useLocale();
@@ -88,6 +100,7 @@ export function SettingsPane({
     { id: "general", label: t("settings.group.general"), icon: <SlidersHorizontal /> },
     { id: "display", label: t("settings.group.display"), icon: <Monitor /> },
     { id: "chat", label: t("settings.group.chat"), icon: <MessageSquare /> },
+    { id: "remote", label: t("settings.group.remote"), icon: <Globe /> },
     { id: "shortcuts", label: t("settings.shortcuts"), icon: <Keyboard /> },
     { id: "about", label: t("settings.group.about"), icon: <Info /> },
   ];
@@ -238,6 +251,15 @@ export function SettingsPane({
               </Field>
               <p className="apply-note">{t("settings.skills.note")}</p>
             </div>
+          ) : section === "remote" ? (
+            <RemoteSettings
+              remotes={remotes}
+              agents={agents}
+              active={open && section === "remote"}
+              onSet={onSetRemote}
+              onLeave={onLeaveRemote}
+              onAdd={onAddRemote}
+            />
           ) : section === "shortcuts" ? (
             <>
               <ShortcutList />

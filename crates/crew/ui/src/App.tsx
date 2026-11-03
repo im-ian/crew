@@ -51,6 +51,10 @@ export function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  // Asked from settings, so it is drawn over them and Escape shuts it first.
+  // The alias outlives the dialog, so its title holds while it fades out.
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const [leaveAlias, setLeaveAlias] = useState("");
   const [theme, setTheme] = useState<ThemePref>(loadThemePref);
   const [showTools, setShowTools] = useState(loadShowTools);
   const [chatWidth, setChatWidth] = useState(loadChatWidth);
@@ -179,6 +183,13 @@ export function App() {
       // The skills window handles its own Escape, and no shortcut should act
       // on the app hidden behind it.
       if (skillsOpen) return;
+      if (leaveOpen) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setLeaveOpen(false);
+        }
+        return;
+      }
       if ((settingsOpen || helpOpen) && e.key === "Escape" && popoverIsOpen()) return;
       if (settingsOpen && e.key === "Escape") {
         e.preventDefault();
@@ -279,7 +290,7 @@ export function App() {
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [helpOpen, settingsOpen, skillsOpen, peek]);
+  }, [helpOpen, settingsOpen, skillsOpen, peek, leaveOpen]);
 
   return (
     <div className="app">
@@ -536,6 +547,30 @@ export function App() {
           setSkillsOpen(true);
         }}
         updater={updater}
+        remotes={crew.remotes}
+        agents={crew.agents}
+        onSetRemote={crew.setRemote}
+        onLeaveRemote={(alias) => {
+          setLeaveAlias(alias);
+          setLeaveOpen(true);
+        }}
+        onAddRemote={() => {
+          setSettingsOpen(false);
+          crew.openRemoteAdd();
+        }}
+      />
+      <ConfirmDialog
+        open={leaveOpen}
+        kind="leave-remote"
+        leaving={{
+          alias: leaveAlias,
+          name: crew.remotes.find((r) => r.alias === leaveAlias)?.name ?? "",
+        }}
+        onCancel={() => setLeaveOpen(false)}
+        onConfirm={() => {
+          setLeaveOpen(false);
+          if (leaveAlias) void crew.leaveRemote(leaveAlias);
+        }}
       />
       <SkillsPane open={skillsOpen} onClose={() => setSkillsOpen(false)} />
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />

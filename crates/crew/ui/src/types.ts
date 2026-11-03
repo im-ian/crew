@@ -6,7 +6,7 @@ export type PaneTab = "info" | "routines" | "memory";
 /** How saving an edit to a waiting message ended. "gone": it went out first. */
 export type EditResult = "saved" | "gone" | "failed";
 export type CtxKind = Kind | "group" | "create";
-export type ConfirmKind = "reset" | "remove" | "remove-group";
+export type ConfirmKind = "reset" | "remove" | "remove-group" | "leave-remote";
 
 export type Group = {
   id: string;

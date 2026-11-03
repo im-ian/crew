@@ -4897,6 +4897,119 @@ button.mention-chip:active {
 @media (prefers-reduced-motion: reduce) {
   .settings-body { animation: none; }
 }
+/* Settings → Remote: a card per router, a line between two. */
+.remote-cards {
+  display: flex;
+  flex-direction: column;
+}
+.remote-card + .remote-card {
+  margin-top: var(--space-24);
+  padding-top: var(--space-24);
+  border-top: 1px solid var(--line);
+}
+.remote-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-bottom: var(--space-12);
+}
+.remote-card-alias {
+  color: var(--ink);
+  font-size: var(--text-xl);
+  font-weight: 650;
+}
+.remote-card-state {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.remote-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-6) var(--space-16);
+  margin: 0 0 var(--space-18);
+  font-size: var(--text-md);
+}
+.remote-facts dt { color: var(--muted); }
+.remote-facts dd {
+  margin: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.remote-facts-sub {
+  margin-left: var(--space-8);
+  color: var(--faint);
+}
+.remote-picks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 340px;
+}
+.remote-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-6);
+  border-radius: var(--radius-md);
+  color: var(--ink);
+  font-size: var(--text-lg);
+  cursor: pointer;
+  user-select: none;
+}
+.remote-pick:hover { background: var(--hover); }
+.remote-pick input { accent-color: var(--working); margin: 0; }
+.remote-pick-avatar {
+  width: 20px;
+  height: 20px;
+  font-size: 9px;
+}
+.remote-pick-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.remote-people {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 420px;
+}
+.remote-people li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-4) 0;
+  font-size: var(--text-lg);
+}
+.remote-people-name { color: var(--ink); }
+.remote-people-account {
+  flex: 1;
+  min-width: 0;
+  color: var(--faint);
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ghost.remote-people-action {
+  padding: var(--space-4) var(--space-10);
+  font-size: var(--text-md);
+}
+.remote-memo-foot {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-12);
+  margin-top: var(--space-8);
+}
+/* Its notes are one line each; the switch rows' reserved height would gap them. */
+.settings-body .remote-card .form-stack .apply-note { min-height: 0; }
+.remote-memo-foot .apply-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+}
 /* A narrow window keeps the page readable and folds the categories to icons;
    the name is on hover. */
 @media (max-width: 640px) {

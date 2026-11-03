@@ -1062,6 +1062,33 @@ export function useCrew() {
     setRemoteAddOpen(false);
   }
 
+  /** A failed change is shown; the list is read again either way. */
+  async function setRemote(change: {
+    alias: string;
+    delegates: string[] | null;
+    trusted: string[] | null;
+    blocked: string[] | null;
+  }) {
+    try {
+      await api.remoteSet(change);
+    } catch (err) {
+      showError(err);
+    }
+    await refreshRemotes();
+  }
+
+  /** Leaves the router. The representative bot and its chat stay. */
+  async function leaveRemote(alias: string) {
+    try {
+      await api.remoteLeave(alias);
+      showToast(t("remote.left", { alias }));
+    } catch (err) {
+      showError(err);
+    }
+    await refreshRemotes();
+    await refreshList().catch(showError);
+  }
+
   /**
    * Signs up to a router and opens the representative bot it made. A refusal
    * is thrown back, so the dialog can put it under the field it is about.
@@ -1433,6 +1460,8 @@ export function useCrew() {
     openRemoteAdd,
     closeRemoteAdd,
     joinRemote,
+    setRemote,
+    leaveRemote,
     pickFolder,
     createNamedGroup,
     openGroupSettings,
