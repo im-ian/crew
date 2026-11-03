@@ -338,10 +338,9 @@ md.core.ruler.after("inline", "image_gallery", (state) => {
       i += 1;
       continue;
     }
-    const layout = run.length === 2 ? "pair" : run.length === 3 ? "trio" : "grid";
     const open = new state.Token("image_gallery_open", "div", 1);
     open.block = true;
-    open.attrSet("class", `md-gallery is-${layout}`);
+    open.attrSet("class", "md-gallery");
     open.attrSet("data-count", String(run.length));
     out.push(open);
     for (const image of run) out.push(image);

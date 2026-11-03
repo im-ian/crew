@@ -14,6 +14,7 @@ import { api } from "../api";
 import type { AgentInfo } from "../types";
 import { useT } from "../LocaleContext";
 import { CornerDownRight, Play, Terminal, X } from "../icons";
+import { GALLERY_CAP, galleryExtra, imageStep } from "../imageAlbum";
 import { CopyButton } from "./CopyButton";
 import { MentionChip } from "./MentionChip";
 
@@ -55,6 +56,11 @@ type Shot = {
   path?: string;
 };
 
+type Preview = {
+  shots: Shot[];
+  index: number;
+};
+
 type Props = {
   text: string;
   agents: AgentInfo[];
@@ -77,20 +83,26 @@ export function MdBody({
   const onMentionRef = useRef(onMention);
   onMentionRef.current = onMention;
   const clickable = !!onMention;
-  const [shot, setShot] = useState<Shot | null>(null);
-  const closeShot = useCallback(() => setShot(null), []);
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const closeShot = useCallback(() => setPreview(null), []);
+  const openPreview = useCallback((shots: Shot[], index: number) => {
+    if (!shots.length) return;
+    setPreview({ shots, index });
+  }, []);
   const zoomLabel = t("image.preview");
   const nodes = useMemo(() => {
     const html = injectMentionChips(renderMarkdown(text, defs), agents);
     const handleAgent = onMention
       ? (id: string) => onMentionRef.current?.(id)
       : undefined;
-    return htmlToReact(html, agents, handleAgent, baseDir, setShot, zoomLabel);
-  }, [text, defs, agents, clickable, baseDir, onMention, zoomLabel]);
+    return htmlToReact(html, agents, handleAgent, baseDir, openPreview, zoomLabel);
+  }, [text, defs, agents, clickable, baseDir, onMention, zoomLabel, openPreview]);
   return (
     <div className={className}>
       {nodes}
-      {shot ? <MediaPreview key={shot.kind + shot.src} shot={shot} onClose={closeShot} /> : null}
+      {preview ? (
+        <MediaPreview shots={preview.shots} start={preview.index} onClose={closeShot} />
+      ) : null}
     </div>
   );
 }
@@ -113,7 +125,7 @@ function htmlToReact(
   agents: AgentInfo[],
   onMention: ((id: string) => void) | undefined,
   baseDir: string | undefined,
-  onOpen: (shot: Shot) => void,
+  onOpen: (shots: Shot[], index: number) => void,
   zoomLabel: string,
 ): ReactNode[] {
   const tmpl = document.createElement("template");
@@ -127,7 +139,7 @@ function nodesToReact(
   prefix: string,
   onMention: ((id: string) => void) | undefined,
   baseDir: string | undefined,
-  onOpen: (shot: Shot) => void,
+  onOpen: (shots: Shot[], index: number) => void,
   zoomLabel: string,
 ): ReactNode[] {
   const out: ReactNode[] = [];
@@ -152,7 +164,7 @@ function nodeToReact(
   key: string,
   onMention: ((id: string) => void) | undefined,
   baseDir: string | undefined,
-  onOpen: (shot: Shot) => void,
+  onOpen: (shots: Shot[], index: number) => void,
   zoomLabel: string,
 ): ReactNode {
   if (node.nodeType === Node.TEXT_NODE) {
@@ -195,18 +207,25 @@ function nodeToReact(
     return id ? <span key={key}>@{id}</span> : null;
   }
   if (tag === "BR") return <br key={key} />;
-  const kids = nodesToReact(el.childNodes, agents, key, onMention, baseDir, onOpen, zoomLabel);
   if (el.classList.contains("md-gallery")) {
+    const shots = galleryShots(el, baseDir);
+    const shown = shots.slice(0, GALLERY_CAP);
+    const extra = galleryExtra(shots.length);
     return (
-      <div
-        key={key}
-        className={el.getAttribute("class") || "md-gallery"}
-        data-count={el.getAttribute("data-count") || String(kids.length)}
-      >
-        {kids}
+      <div key={key} className="md-gallery" data-count={String(shots.length)}>
+        {shown.map((shot, i) => (
+          <AlbumImage
+            key={`${shot.src}-${i}`}
+            shot={shot}
+            label={shot.alt || zoomLabel}
+            more={extra > 0 && i === shown.length - 1 ? extra : 0}
+            onOpen={() => onOpen(shots, i)}
+          />
+        ))}
       </div>
     );
   }
+  const kids = nodesToReact(el.childNodes, agents, key, onMention, baseDir, onOpen, zoomLabel);
   if (!TAGS.has(tag)) return kids;
   if (tag === "PRE") {
     const isOut = el.classList.contains("md-out");
@@ -246,7 +265,7 @@ function nodeToReact(
       );
     }
     const open = () => {
-      if (src) onOpen({ src, alt, kind: "image" });
+      if (src) onOpen([{ src, alt, kind: "image" }], 0);
     };
     return (
       <img
@@ -384,11 +403,11 @@ function MediaCard({
   src: string;
   name: string;
   path?: string;
-  onOpen: (shot: Shot) => void;
+  onOpen: (shots: Shot[], index: number) => void;
 }) {
   const t = useT();
   const [posterFailed, setPosterFailed] = useState(false);
-  const open = () => onOpen({ src, alt: name, kind, path });
+  const open = () => onOpen([{ src, alt: name, kind, path }], 0);
   const label = name ? `${t("media.play")}: ${name}` : t("media.play");
   const press = (e: { preventDefault: () => void; stopPropagation: () => void }) => {
     e.preventDefault();
@@ -427,21 +446,97 @@ function MediaCard({
   );
 }
 
-function MediaPreview({ shot, onClose }: { shot: Shot; onClose: () => void }) {
+function galleryShots(el: HTMLElement, baseDir: string | undefined): Shot[] {
+  const shots: Shot[] = [];
+  for (const child of Array.from(el.children)) {
+    if (!(child instanceof HTMLElement) || child.tagName !== "IMG") continue;
+    const raw = child.getAttribute("src") || "";
+    const src = mediaSrc(raw, baseDir);
+    if (!src) continue;
+    shots.push({ src, alt: child.getAttribute("alt") || "", kind: "image" });
+  }
+  return shots;
+}
+
+function AlbumImage({
+  shot,
+  label,
+  more,
+  onOpen,
+}: {
+  shot: Shot;
+  label: string;
+  more: number;
+  onOpen: () => void;
+}) {
+  const open = (e: { preventDefault: () => void; stopPropagation: () => void }) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onOpen();
+  };
+  return (
+    <span className="md-shot">
+      <img
+        alt={shot.alt}
+        aria-label={more > 0 ? `${label}, +${more}` : label}
+        src={shot.src}
+        role="button"
+        tabIndex={0}
+        onClick={open}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          open(e);
+        }}
+      />
+      {more > 0 ? (
+        <span className="md-gallery-more" aria-hidden="true">
+          +{more}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function MediaPreview({
+  shots,
+  start,
+  onClose,
+}: {
+  shots: Shot[];
+  start: number;
+  onClose: () => void;
+}) {
   const t = useT();
   const closeRef = useRef<HTMLButtonElement>(null);
+  const [index, setIndex] = useState(start);
   const [failed, setFailed] = useState(false);
+  const shot = shots[index] ?? shots[0];
   useEffect(() => {
     closeRef.current?.focus();
+  }, []);
+  useEffect(() => {
+    setFailed(false);
+  }, [shot?.src, shot?.kind]);
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || document.fullscreenElement) return;
+      if (e.key === "Escape" && !document.fullscreenElement) {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) return;
+      if (!shot || shot.kind !== "image") return;
+      const next = imageStep(e.key, index, shots.length);
+      if (next == null) return;
       e.preventDefault();
       e.stopPropagation();
-      onClose();
+      if (next !== index) setIndex(next);
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
+  }, [onClose, shot, index, shots.length]);
+  if (!shot) return null;
   const label =
     shot.alt ||
     (shot.kind === "video" ? t("media.video") : shot.kind === "audio" ? t("media.audio") : t("image.preview"));
@@ -472,6 +567,11 @@ function MediaPreview({ shot, onClose }: { shot: Shot; onClose: () => void }) {
       ) : null}
       {shot.kind === "audio" && !failed ? (
         <audio src={shot.src} controls autoPlay onError={() => setFailed(true)} onMouseDown={keep} />
+      ) : null}
+      {shots.length > 1 && shot.kind === "image" ? (
+        <p className="img-preview-count">
+          {index + 1} / {shots.length}
+        </p>
       ) : null}
       {failed ? (
         <div className="img-preview-fail" onMouseDown={keep}>
