@@ -11,6 +11,7 @@ import {
   parseItemKey,
   groupCwd,
   pruneLayout,
+  firstOpenAgent,
   railOrder,
   setGroupFolder,
   toPersist,
@@ -266,6 +267,40 @@ describe("railOrder", () => {
     );
     expect(order.map((o) => o.id)).not.toContain("ghost");
     expect(order.map((o) => o.id)).not.toContain("room");
+  });
+});
+
+describe("firstOpenAgent", () => {
+  const agents = [agent("a1", "가"), agent("a2", "나"), agent("a3", "다")];
+
+  it("is the first visible row, folders before loose bots", () => {
+    expect(
+      firstOpenAgent([group("g1", ["agent:a2"])], ["agent:a1"], agents),
+    ).toBe("a2");
+  });
+
+  it("skips a collapsed folder and uses the next visible bot", () => {
+    expect(
+      firstOpenAgent(
+        [group("g1", ["agent:a2"], true), group("g2", ["agent:a3"])],
+        ["agent:a1"],
+        agents,
+      ),
+    ).toBe("a3");
+  });
+
+  it("opens the first folder bot when every row is hidden", () => {
+    expect(
+      firstOpenAgent(
+        [group("g1", ["agent:a2", "agent:a1"], true)],
+        [],
+        [agent("a1"), agent("a2")],
+      ),
+    ).toBe("a2");
+  });
+
+  it("ignores a bot that is not in the list", () => {
+    expect(firstOpenAgent([group("g1", ["agent:ghost"])], [], agents)).toBe("a1");
   });
 });
 
