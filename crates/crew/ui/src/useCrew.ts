@@ -22,6 +22,16 @@ import { useT } from "./LocaleContext";
 import { loadLastChat, pickOpenAgent, saveLastChat } from "./lastChat";
 import { loadNotify } from "./notifyPref";
 import { publishBotSignals, publishBotUnread } from "./botSignals";
+import {
+  botNotices,
+  noticeLife,
+  noticeStays,
+  topNotice,
+  type BotNoticeKind,
+  type BotSnap,
+  type IslandNotice,
+  type PlainTone,
+} from "./island";
 import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
 import {
   adoptNewGroups,
@@ -88,7 +98,8 @@ export function useCrew() {
   const [newBotPlace, setNewBotPlace] = useState<string | null>(null);
   const [newGroupOpen, setNewGroupOpen] = useState(false);
   const [groupSettingsId, setGroupSettingsId] = useState<string | null>(null);
-  const [toast, setToast] = useState({ text: "", show: false });
+  const [island, setIsland] = useState<IslandNotice | null>(null);
+  const [islandOpen, setIslandOpen] = useState(false);
   const [ctx, setCtx] = useState<Ctx>({
     open: false,
     x: 0,
@@ -129,7 +140,10 @@ export function useCrew() {
   const groupsRef = useRef<RailLayout>({ groups, ungrouped });
   groupsRef.current = { groups, ungrouped };
   const groupsLoaded = useRef(false);
-  const toastTimer = useRef<number | null>(null);
+  const islandTimer = useRef<number | null>(null);
+  const islandRef = useRef<IslandNotice | null>(null);
+  const islandSeq = useRef(0);
+  const botSnaps = useRef(new Map<string, BotSnap>());
   const cancelling = useRef(new Set<string>());
   const sendingQueued = useRef(new Set<string>());
   const heldSends = useRef<HeldSend[]>([]);
@@ -172,6 +186,14 @@ export function useCrew() {
     });
   }, [selected, selectedKind, currentAgent?.last_ts]);
 
+  // Opening the bot the island talks about, by any route, answers it.
+  useEffect(() => {
+    const cur = islandRef.current;
+    if (selectedKind === "agent" && cur && "botId" in cur && cur.botId === selected) {
+      closeIsland();
+    }
+  }, [selected, selectedKind]);
+
   // The faces keep a finished run's reaction going until the chat is seen.
   useEffect(() => {
     const keys = new Set(unread);
@@ -205,16 +227,63 @@ export function useCrew() {
     return hit.body;
   }
 
-  function showToast(text: string) {
-    setToast({ text, show: true });
-    if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => {
-      setToast((prev) => ({ ...prev, show: false }));
-    }, 2500);
+  // One notice at a time in the titlebar island; a newer one takes its place.
+  function raiseIsland(
+    next:
+      | { kind: PlainTone; text: string }
+      | { kind: BotNoticeKind; botId: string },
+    life: number,
+  ) {
+    islandSeq.current += 1;
+    const notice = { ...next, seq: islandSeq.current } as IslandNotice;
+    islandRef.current = notice;
+    setIsland(notice);
+    setIslandOpen(true);
+    if (islandTimer.current) window.clearTimeout(islandTimer.current);
+    islandTimer.current = noticeStays(next.kind)
+      ? null
+      : window.setTimeout(() => closeIsland(), life);
+  }
+
+  function closeIsland() {
+    if (islandTimer.current) window.clearTimeout(islandTimer.current);
+    islandTimer.current = null;
+    islandRef.current = null;
+    setIslandOpen(false);
+  }
+
+  function showToast(text: string, tone: PlainTone = "ok") {
+    raiseIsland({ kind: tone, text }, noticeLife(text));
   }
 
   function showError(err: unknown) {
-    showToast(errMsg(err));
+    showToast(errMsg(err), "error");
+  }
+
+  // What the bots just did, for the island. Not the bot whose chat is in
+  // front of the user: they see it there already.
+  function noticeBots(list: AgentInfo[]) {
+    const { notices, snaps } = botNotices(botSnaps.current, list, Date.now());
+    botSnaps.current = snaps;
+    const sel = selectedRef.current;
+    const watching = (id: string) =>
+      sel.kind === "agent" && sel.id === id && document.hasFocus() && !document.hidden;
+    const top = topNotice(notices.filter((n) => !watching(n.botId)));
+    if (top) {
+      raiseIsland(top, 4000);
+      return;
+    }
+    // A question answered or an approval given somewhere else lets its notice go.
+    const cur = islandRef.current;
+    if (cur && "botId" in cur) {
+      const snap = snaps.get(cur.botId);
+      const over =
+        !snap ||
+        (cur.kind === "question" && !snap.asking) ||
+        (cur.kind === "blocked" && snap.status !== "blocked") ||
+        (cur.kind === "failure" && snap.status === "working");
+      if (over) closeIsland();
+    }
   }
 
   function hideCtx() {
@@ -423,7 +492,7 @@ export function useCrew() {
       // a folder change still goes through.
       const same = fields.memory === fields.base;
       if (!same && !(await api.setGroupMemory(id, fields.memory, fields.base))) {
-        showToast(t("groupSettings.changed"));
+        showToast(t("groupSettings.changed"), "warn");
         return false;
       }
     } catch (err) {
@@ -576,6 +645,7 @@ export function useCrew() {
     if (!list) return;
     // Before the list state, so a face sees its status and signal together.
     publishBotSignals(list);
+    noticeBots(list);
     setAgents(list);
     if (groupsLoaded.current) {
       const pruned = pruneLayout(groupsRef.current, list);
@@ -873,7 +943,7 @@ export function useCrew() {
         showToast(t("memory.saved"));
         return true;
       }
-      showToast(t("memory.changed"));
+      showToast(t("memory.changed"), "warn");
     } catch (err) {
       showError(err);
     }
@@ -1320,7 +1390,9 @@ export function useCrew() {
     newBotPlace,
     newGroupOpen,
     groupSettingsId,
-    toast,
+    island,
+    islandOpen,
+    closeIsland,
     ctx,
     groups,
     ungrouped,
