@@ -148,6 +148,15 @@ describe("publishBotUnread", () => {
     expect(peekBotSignal(id)).toMatchObject({ endedAt: 0, held: false });
   });
 
+  it("does not replay a reaction when the bot leaves idle and comes back", () => {
+    const id = nextId();
+    runEnds(id, 10_000, true);
+    publishBotSignals([agent(id, { status: "exited" })], 20_000);
+    publishBotSignals([agent(id)], 30_000);
+    expect(peekBotSignal(id)).toMatchObject({ endedAt: 0, held: false });
+    publishBotUnread([], 31_000);
+  });
+
   it("clears the hold when the bot starts again", () => {
     const id = nextId();
     runEnds(id, 10_000, true);

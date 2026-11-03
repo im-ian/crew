@@ -63,11 +63,16 @@ export function publishBotSignals(agents: AgentInfo[], now: number = Date.now())
       const began = startedAt.get(a.id);
       if (was === "working" && began !== undefined) {
         runMs = Math.max(0, now - began);
-        // Only a run that comes to rest in idle earns a reaction.
-        endedAt = a.status === "idle" ? now : 0;
-        held = a.status === "idle" && unreadIds.has(a.id);
+        endedAt = now;
+        held = unreadIds.has(a.id);
       }
       startedAt.delete(a.id);
+      // Only a run that comes to rest in idle earns a reaction, and leaving
+      // idle (blocked, asleep) ends it, so a return to idle does not replay it.
+      if (a.status !== "idle") {
+        endedAt = 0;
+        held = false;
+      }
     }
     const next: BotSignal = {
       failed: !!a.failed,

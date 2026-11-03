@@ -236,7 +236,7 @@ function useAfterglow(
     if (!waiting) return;
     const t = setTimeout(() => wake((n) => n + 1), left + 1);
     return () => clearTimeout(t);
-  }, [waiting, endedAt, kind]);
+  }, [waiting, endedAt, kind, left]);
   return glow?.shown ? glow.kind : null;
 }
 
