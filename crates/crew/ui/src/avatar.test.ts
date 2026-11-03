@@ -80,12 +80,17 @@ describe("avatar shapes", () => {
     }
   });
 
-  it("paints through currentColor so the color can change without new markup", () => {
+  it("paints through currentColor, with only black or white tints besides", () => {
+    // A mark may darken or lighten the body (craters, the ghost half) but never
+    // bring a color of its own, so a bot's color still decides the whole face.
     for (const shape of AVATAR_SHAPES) {
       const art = artFace(shape);
       if (!art) continue;
       expect(art.markup, shape).toContain("currentColor");
-      expect(art.markup, shape).not.toMatch(/#[0-9a-f]{6}\b/i);
+      const fixed = art.markup.match(/#[0-9a-f]{3,8}\b|\b(?:rgb|hsl)a?\(/gi) ?? [];
+      for (const color of fixed) {
+        expect(["#000", "#fff"], `${shape} ${color}`).toContain(color.toLowerCase());
+      }
     }
   });
 });

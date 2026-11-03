@@ -2304,16 +2304,20 @@ mod tests {
     #[test]
     fn avatar_shapes_match_the_ui_list() {
         let src = include_str!("../ui/src/avatar.ts");
+        // Every quoted name between the opening bracket and `] as const;`, so a
+        // list may be one line or many. Comment lines are skipped.
         let quoted = |from: &str| -> std::collections::BTreeSet<String> {
             let start = src.find(from).unwrap_or_else(|| panic!("{from} not in avatar.ts"));
-            let body = &src[start..];
+            let body = &src[start + from.len()..];
             let end = body.find("] as const;").expect("list end");
-            body[..end]
-                .split('"')
-                .skip(1)
-                .step_by(2)
+            let found: std::collections::BTreeSet<String> = body[..end]
+                .lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .flat_map(|line| line.split('"').skip(1).step_by(2))
                 .map(str::to_string)
-                .collect()
+                .collect();
+            assert!(!found.is_empty(), "no shapes read after {from}");
+            found
         };
         let mut ui = quoted("export const AVATAR_SHAPES = [");
         ui.extend(quoted("export const LEGACY_SHAPES = ["));
