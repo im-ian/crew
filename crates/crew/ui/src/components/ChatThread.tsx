@@ -41,7 +41,11 @@ import {
   optionView,
   otherBadge,
   answerSummary,
+  blankDraft,
+  dropChoiceDraft,
+  keepChoiceDraft,
   questionDone,
+  readChoiceDraft,
   shortLabels,
 } from "../choiceView";
 import { routineSwitchName } from "../routineNote";
@@ -1631,15 +1635,13 @@ function ChoiceCard({
   const questions = card.questions || [];
   const pending = card.state === "pending";
   const hasFields = questions.some((q) => (q.fields || []).length > 0);
-  const [picks, setPicks] = useState<string[][]>(() =>
-    questions.map((q) => q.selected || []),
+  // A card left half answered picks up where it was when the chat opens again.
+  const [start] = useState(
+    () => (pending && readChoiceDraft(card.id)) || blankDraft(questions),
   );
-  const [values, setValues] = useState<string[][]>(() =>
-    questions.map((q) => (q.fields || []).map((f) => f.value || "")),
-  );
-  const [others, setOthers] = useState<string[]>(() =>
-    questions.map((q) => q.other || ""),
-  );
+  const [picks, setPicks] = useState<string[][]>(start.picks);
+  const [values, setValues] = useState<string[][]>(start.values);
+  const [others, setOthers] = useState<string[]>(start.others);
   const [sent, setSent] = useState(false);
   const open = pending && !sent;
   // Several questions are a stack: one in front, the rest as card edges
@@ -1647,11 +1649,16 @@ function ChoiceCard({
   // of its largest step, so nothing moves as it turns. Answered, the card
   // lists them all again.
   const stacked = open && questions.length > 1;
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(() => Math.min(start.step, questions.length));
   const [turn, setTurn] = useState<"next" | "prev" | null>(null);
   const total = questions.length + 1;
   const onSummary = step === questions.length;
   const swipe = useRef({ swept: 0, until: 0 });
+
+  useEffect(() => {
+    if (pending) keepChoiceDraft(card.id, questions, { picks, values, others, step });
+    else dropChoiceDraft(card.id);
+  }, [card.id, pending, questions, picks, values, others, step]);
 
   function go(next: number) {
     if (next === step || next < 0 || next >= total) return;

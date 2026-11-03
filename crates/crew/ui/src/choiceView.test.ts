@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { answerSummary, answeredOptionView, otherBadge, questionDone } from "./choiceView";
-import type { ChoiceOption } from "./types";
+import {
+  answerSummary,
+  answeredOptionView,
+  blankDraft,
+  draftTouched,
+  dropChoiceDraft,
+  keepChoiceDraft,
+  otherBadge,
+  questionDone,
+  readChoiceDraft,
+} from "./choiceView";
+import type { ChoiceOption, ChoiceQuestion } from "./types";
 
 const options: ChoiceOption[] = [
   { id: "A", label: "PR 생성까지만 하고, 머지·배포는 내 허락 후" },
@@ -79,5 +89,43 @@ describe("answerSummary", () => {
       ],
     };
     expect(answerSummary(login, [], ["ian", "pw"])).toBe("아이디: ian, 비밀번호: ••••••");
+  });
+});
+
+describe("choice drafts", () => {
+  const questions: ChoiceQuestion[] = [
+    { question: "어느 쪽?", options },
+    { question: "로그인", options: [], fields: [{ id: "u", label: "아이디", value: "ian" }] },
+  ];
+
+  it("starts from what the bot sent", () => {
+    expect(blankDraft(questions)).toEqual({
+      picks: [[], []],
+      values: [[], ["ian"]],
+      others: ["", ""],
+      step: 0,
+    });
+    expect(draftTouched(questions, blankDraft(questions))).toBe(false);
+  });
+
+  it("sees a pick, a field or a typed answer as touched", () => {
+    const blank = blankDraft(questions);
+    expect(draftTouched(questions, { ...blank, picks: [["B"], []] })).toBe(true);
+    expect(draftTouched(questions, { ...blank, values: [[], ["kim"]] })).toBe(true);
+    expect(draftTouched(questions, { ...blank, others: ["직접", ""] })).toBe(true);
+    expect(draftTouched(questions, { ...blank, step: 2 })).toBe(false);
+  });
+
+  it("keeps a draft until it is dropped, and forgets a blank one", () => {
+    const touched = { ...blankDraft(questions), picks: [["A"], []] };
+    keepChoiceDraft("card-1", questions, touched);
+    expect(readChoiceDraft("card-1")).toEqual(touched);
+    keepChoiceDraft("card-1", questions, { ...blankDraft(questions), step: 1 });
+    expect(readChoiceDraft("card-1")?.step).toBe(1);
+    keepChoiceDraft("card-1", questions, blankDraft(questions));
+    expect(readChoiceDraft("card-1")).toBeUndefined();
+    keepChoiceDraft("card-1", questions, touched);
+    dropChoiceDraft("card-1");
+    expect(readChoiceDraft("card-1")).toBeUndefined();
   });
 });

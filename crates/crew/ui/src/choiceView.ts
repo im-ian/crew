@@ -64,3 +64,51 @@ export function answerSummary(
   });
   return parts.join(", ");
 }
+
+/** What a card holds while it waits: every pick, field and typed answer, and the question in front. */
+export type ChoiceDraft = {
+  picks: string[][];
+  values: string[][];
+  others: string[];
+  step: number;
+};
+
+/** The card as the bot sent it, before the user touched anything. */
+export function blankDraft(questions: ChoiceQuestion[]): ChoiceDraft {
+  return {
+    picks: questions.map((q) => q.selected || []),
+    values: questions.map((q) => (q.fields || []).map((f) => f.value || "")),
+    others: questions.map((q) => q.other || ""),
+    step: 0,
+  };
+}
+
+/** Whether the answers differ from the blank card. The step alone is not an answer. */
+export function draftTouched(questions: ChoiceQuestion[], draft: ChoiceDraft): boolean {
+  const blank = blankDraft(questions);
+  const same = (a: string[] = [], b: string[] = []) =>
+    a.length === b.length && a.every((v, i) => v === b[i]);
+  return questions.some(
+    (_, i) =>
+      !same(draft.picks[i], blank.picks[i]) ||
+      !same(draft.values[i], blank.values[i]) ||
+      (draft.others[i] || "") !== blank.others[i],
+  );
+}
+
+// Leaving the chat unmounts the card, so its draft waits here by card id.
+// Memory only: a field can be a secret, and nothing typed should reach disk.
+const drafts = new Map<string, ChoiceDraft>();
+
+export function readChoiceDraft(id: string): ChoiceDraft | undefined {
+  return drafts.get(id);
+}
+
+export function keepChoiceDraft(id: string, questions: ChoiceQuestion[], draft: ChoiceDraft) {
+  if (draft.step === 0 && !draftTouched(questions, draft)) drafts.delete(id);
+  else drafts.set(id, draft);
+}
+
+export function dropChoiceDraft(id: string) {
+  drafts.delete(id);
+}
