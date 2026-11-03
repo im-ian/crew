@@ -11,18 +11,27 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useLocale, useT } from "../LocaleContext";
-import { groupOrderChanges, itemKey, parseItemKey } from "../groups";
+import { groupOrderChanges, itemKey, parseItemKey, UNGROUPED_ID } from "../groups";
 import type { AgentInfo, Group, Kind, RemoteInfo, SearchHit } from "../types";
 import { listStamp } from "../clock";
 import { mentionRuns, mentionText } from "../mentions";
 import { foldsAt, numberDuplicateNames, RAIL_FOLDED } from "../rail";
 import {
+  folderBefore,
   isOnline,
+  isRemoteKey,
   loadRemoteFolds,
+  loadRemoteLayout,
   localAgents,
+  moveRailSection,
+  moveRemoteBot,
+  railSections,
+  remoteKey,
   remoteSections,
   representing,
   saveRemoteFolds,
+  saveRemoteLayout,
+  type RemoteLayout,
   type RemoteSection,
 } from "../remote";
 import { Avatar } from "./Avatar";
@@ -117,6 +126,7 @@ type DragGeom = {
   armed: boolean;
 };
 
+/** A "group" drag moves a rail section: a folder by its id, a router by `remote:alias`. */
 type RailDrag = DragGeom &
   (
     | { kind: "item"; key: string; item: RailItem }
@@ -150,38 +160,44 @@ function pickClosest(stack: Element[], sel: string): HTMLElement | null {
   return null;
 }
 
+function rowDrop(row: HTMLElement, y: number, dragKey: string, groupId: string | null): RailDrop {
+  const key = row.dataset.railRow || null;
+  const rect = row.getBoundingClientRect();
+  const inset = 8;
+  const before = y < rect.top + rect.height * 0.5;
+  if (before) {
+    return {
+      kind: "item",
+      groupId,
+      beforeKey: key,
+      into: false,
+      line: lineAt(rect, true, inset),
+    };
+  }
+  const next = nextRailRow(row);
+  let insertBefore = next?.dataset.railRow || null;
+  if (insertBefore === dragKey && next) {
+    insertBefore = nextRailRow(next)?.dataset.railRow || null;
+  }
+  return {
+    kind: "item",
+    groupId,
+    beforeKey: insertBefore,
+    into: false,
+    line: lineAt(rect, false, inset),
+  };
+}
+
 function hitRailTarget(x: number, y: number, dragKey: string): RailDrop | null {
   const stack = document.elementsFromPoint(x, y);
   const row = pickClosest(stack, "[data-rail-row]");
   if (row) {
-    const key = row.dataset.railRow || null;
-    const rect = row.getBoundingClientRect();
+    // A router's rows are the router's; a bot on this PC does not go there.
+    if (row.closest("[data-rail-remote]")) return null;
     const groupEl = row.closest("[data-rail-group]");
     const groupId =
       groupEl instanceof HTMLElement ? groupEl.dataset.railGroup || null : null;
-    const inset = 8;
-    const before = y < rect.top + rect.height * 0.5;
-    if (before) {
-      return {
-        kind: "item",
-        groupId,
-        beforeKey: key,
-        into: false,
-        line: lineAt(rect, true, inset),
-      };
-    }
-    const next = nextRailRow(row);
-    let insertBefore = next?.dataset.railRow || null;
-    if (insertBefore === dragKey && next) {
-      insertBefore = nextRailRow(next)?.dataset.railRow || null;
-    }
-    return {
-      kind: "item",
-      groupId,
-      beforeKey: insertBefore,
-      into: false,
-      line: lineAt(rect, false, inset),
-    };
+    return rowDrop(row, y, dragKey, groupId);
   }
 
   const head = pickClosest(stack, "[data-rail-group-head]");
@@ -222,32 +238,42 @@ function hitRailTarget(x: number, y: number, dragKey: string): RailDrop | null {
   return null;
 }
 
-/** Folder reorder. The dragged folder stays above loose bots; only folders move. */
+/** A router's bot moves among that router's bots and nowhere else. */
+function hitRemoteRow(x: number, y: number, dragKey: string, alias: string): RailDrop | null {
+  const row = pickClosest(document.elementsFromPoint(x, y), "[data-rail-row]");
+  const section = row?.closest<HTMLElement>("[data-rail-remote]");
+  if (!row || section?.dataset.railRemote !== alias) return null;
+  return rowDrop(row, y, dragKey, null);
+}
+
+/**
+ * Section reorder: folders and routers move among each other. A folder stays
+ * above the loose bots; a router can also go below them.
+ */
 function hitGroupTarget(y: number, dragId: string, order: string[]): RailDrop {
-  const sections = [...document.querySelectorAll<HTMLElement>("[data-rail-group]")].filter(
-    (el) => el.dataset.railGroup && el.dataset.railGroup !== dragId,
+  const folder = !isRemoteKey(dragId);
+  const sections = [...document.querySelectorAll<HTMLElement>("[data-rail-section]")].filter(
+    (el) => el.dataset.railSection && el.dataset.railSection !== dragId,
   );
   let beforeId: string | null = null;
   let anchor: HTMLElement | null = null;
   let before = true;
   for (const section of sections) {
-    const head = section.querySelector<HTMLElement>("[data-rail-group-head]");
+    const key = section.dataset.railSection || null;
+    const head = section.querySelector<HTMLElement>(
+      "[data-rail-group-head], [data-rail-remote-head]",
+    );
     const headRect = (head ?? section).getBoundingClientRect();
-    if (y < headRect.top + headRect.height * 0.5) {
-      beforeId = section.dataset.railGroup || null;
+    if ((folder && key === UNGROUPED_ID) || y < headRect.top + headRect.height * 0.5) {
+      beforeId = key;
       anchor = section;
       break;
     }
   }
   if (!anchor) {
-    const ungrouped = document.querySelector<HTMLElement>("[data-rail-ungrouped]");
-    if (ungrouped) {
-      anchor = ungrouped;
-    } else {
-      const all = document.querySelectorAll<HTMLElement>("[data-rail-group]");
-      anchor = all[all.length - 1] ?? null;
-      before = false;
-    }
+    const all = document.querySelectorAll<HTMLElement>("[data-rail-section]");
+    anchor = all[all.length - 1] ?? null;
+    before = false;
   }
   const changes = groupOrderChanges(order, dragId, beforeId);
   return {
@@ -370,9 +396,20 @@ export function Sidebar({
   // Rebuilding the list numbers every duplicate name and re-sorts each group;
   // a drag re-renders this on every pointermove and none of it can change.
   const built = useMemo(() => toItems(localAgents(agents)), [agents]);
+  // Where routers and their bots sit is this PC's, so it is kept here.
+  const [remoteLayout, setRemoteLayout] = useState(loadRemoteLayout);
   const sections = useMemo(
-    () => remoteSections(agents, remotes, locale),
-    [agents, remotes, locale],
+    () => remoteSections(agents, remotes, locale, remoteLayout.bots),
+    [agents, remotes, locale, remoteLayout.bots],
+  );
+  const railKeys = useMemo(
+    () =>
+      railSections(
+        groups.map((g) => g.id),
+        sections.map((s) => s.alias),
+        remoteLayout.sections,
+      ),
+    [groups, sections, remoteLayout.sections],
   );
   const hit = (item: RailItem) =>
     matches(
@@ -411,6 +448,28 @@ export function Sidebar({
     .filter(({ items }) => !searching || items.length);
   const empty = !all.length && !remoteShown.length;
   const [remoteFolds, setRemoteFolds] = useState(loadRemoteFolds);
+  const groupByKey = new Map(grouped.map((g) => [g.group.id, g]));
+  const remoteByKey = new Map(remoteShown.map((r) => [remoteKey(r.section.alias), r]));
+  // The sections on screen, top to bottom, for telling whether a drop moves one.
+  const shownKeys = railKeys.filter((key) =>
+    key === UNGROUPED_ID
+      ? ungroupedItems.length > 0
+      : groupByKey.has(key) || remoteByKey.has(key),
+  );
+
+  function keepRemoteLayout(next: RemoteLayout) {
+    setRemoteLayout(next);
+    saveRemoteLayout(next);
+  }
+
+  // A folder's place among folders is the layout's; next to a router it is this PC's.
+  function reorderSection(key: string, beforeKey: string | null) {
+    const next = moveRailSection(remoteLayout, railKeys, sections, key, beforeKey);
+    if (!isRemoteKey(key)) {
+      onReorderGroupRef.current(key, folderBefore(next.sections, key, groups.map((g) => g.id)));
+    }
+    if (sections.length) keepRemoteLayout(next);
+  }
 
   function toggleRemote(alias: string) {
     setRemoteFolds((prev) => {
@@ -537,6 +596,8 @@ export function Sidebar({
 
   const [drag, setDrag] = useState<RailDrag | null>(null);
   const [drop, setDrop] = useState<RailDrop | null>(null);
+  // A bot on this PC being dragged, which can land among the loose bots.
+  const localDrag = drag?.kind === "item" && drag.armed && !drag.item.agent?.remote;
   const dragRef = useRef<RailDrag | null>(null);
   const dropRef = useRef<RailDrop | null>(null);
   const didDrag = useRef(false);
@@ -605,12 +666,18 @@ export function Sidebar({
     if (!apply || !d || !t) return;
     if (d.kind === "group") {
       if (t.kind !== "group") return;
-      onReorderGroupRef.current(d.key, t.beforeId);
+      reorderSection(d.key, t.beforeId);
       return;
     }
     if (t.kind !== "item" || t.beforeKey === d.key) return;
     const parsed = parseItemKey(d.key);
     if (!parsed) return;
+    const alias = d.item.agent?.remote;
+    if (alias) {
+      const beforeId = t.beforeKey ? (parseItemKey(t.beforeKey)?.id ?? null) : null;
+      keepRemoteLayout(moveRemoteBot(remoteLayout, sections, alias, parsed.id, beforeId));
+      return;
+    }
     onMoveRef.current(parsed.kind, parsed.id, t.groupId, t.beforeKey);
     if (t.into && t.groupId) {
       const collapsed = document.querySelector(
@@ -698,6 +765,7 @@ export function Sidebar({
 
   function onRowPointerDown(e: ReactPointerEvent<HTMLButtonElement>, item: RailItem) {
     const rect = e.currentTarget.getBoundingClientRect();
+    const alias = item.agent?.remote;
     beginDrag(
       e,
       {
@@ -711,20 +779,25 @@ export function Sidebar({
         width: rect.width,
         armed: false,
       },
-      (x, y) => hitRailTarget(x, y, item.key),
+      (x, y) => (alias ? hitRemoteRow(x, y, item.key, alias) : hitRailTarget(x, y, item.key)),
     );
   }
 
-  function onGroupPointerDown(e: ReactPointerEvent<HTMLDivElement>, group: Group) {
+  function onGroupPointerDown(
+    e: ReactPointerEvent<HTMLDivElement>,
+    key: string,
+    name: string,
+    collapsed: boolean,
+  ) {
     const rect = e.currentTarget.getBoundingClientRect();
-    const order = groups.map((g) => g.id);
+    const order = shownKeys;
     beginDrag(
       e,
       {
         kind: "group",
-        key: group.id,
-        groupName: group.name,
-        collapsed: group.collapsed,
+        key,
+        groupName: name,
+        collapsed,
         x: e.clientX,
         y: e.clientY,
         grabX: e.clientX - rect.left,
@@ -732,7 +805,180 @@ export function Sidebar({
         width: rect.width,
         armed: false,
       },
-      (_x, y) => hitGroupTarget(y, group.id, order),
+      (_x, y) => hitGroupTarget(y, key, order),
+    );
+  }
+
+  function renderFolder({ group, items }: { group: Group; items: RailItem[] }) {
+    if (searching && !items.length) return null;
+    const hidden = !searching && group.collapsed;
+    const showEmpty = !hidden && !items.length && !searching;
+    return (
+      <section
+        key={group.id}
+        className={
+          "rail-section grouped" +
+          (drop?.kind === "item" && drop.groupId === group.id && drop.into
+            ? " drop-into"
+            : "") +
+          (drag?.kind === "group" && drag.key === group.id && drag.armed
+            ? " dragging"
+            : "")
+        }
+        data-rail-group={group.id}
+        data-rail-section={group.id}
+      >
+        <GroupHead
+          group={group}
+          compact={folded}
+          renaming={renamingId === group.id}
+          searching={searching}
+          dropInto={
+            drop?.kind === "item" && drop.groupId === group.id && drop.into
+          }
+          onToggle={() => {
+            if (didDrag.current) return;
+            onToggleGroup(group.id);
+          }}
+          onPointerDown={
+            searching || renamingId === group.id
+              ? undefined
+              : (e) => onGroupPointerDown(e, group.id, group.name, group.collapsed)
+          }
+          onRename={(name) => {
+            onRenameGroup(group.id, name);
+            onRenameDone();
+          }}
+          onCancelRename={onRenameDone}
+          onContextMenu={(e) => onGroupCtx(e, group.id)}
+          onMenu={(e) => onGroupMenu(e, group.id)}
+          onNewBot={() => onGroupNewBot(group.id)}
+        />
+        {hidden ? null : showEmpty ? (
+          <div className="empty-rail" data-rail-empty="1">
+            {t("sidebar.dropHere")}
+          </div>
+        ) : (
+          items.map((item) => (
+            <ItemRow
+              key={item.key}
+              item={item}
+              compact={folded}
+              agents={agents}
+              represents={representing(item.id, remotes)}
+              active={selectedKind === item.kind && selected === item.id}
+              unread={unread.includes(item.key)}
+              drafting={drafting.includes(item.id)}
+              dragging={drag?.kind === "item" && drag.key === item.key && drag.armed}
+              onSelect={() => {
+                if (didDrag.current) return;
+                select(item);
+              }}
+              onContextMenu={(e) => ctx(e, item)}
+              onPointerDown={
+                searching ? undefined : (e) => onRowPointerDown(e, item)
+              }
+            />
+          ))
+        )}
+      </section>
+    );
+  }
+
+  function renderLoose() {
+    if (!ungroupedItems.length && !localDrag) return null;
+    return (
+      <section
+        key={UNGROUPED_ID}
+        className={
+          "rail-section" +
+          (drop?.kind === "item" && drop.groupId === null && drop.into
+            ? " drop-into"
+            : "")
+        }
+        data-rail-ungrouped="1"
+        data-rail-section={UNGROUPED_ID}
+      >
+        {ungroupedItems.map((item) => (
+          <ItemRow
+            key={item.key}
+            item={item}
+            compact={folded}
+            agents={agents}
+            represents={representing(item.id, remotes)}
+            active={selectedKind === item.kind && selected === item.id}
+            unread={unread.includes(item.key)}
+            drafting={drafting.includes(item.id)}
+            dragging={drag?.kind === "item" && drag.key === item.key && drag.armed}
+            onSelect={() => {
+              if (didDrag.current) return;
+              select(item);
+            }}
+            onContextMenu={(e) => ctx(e, item)}
+            onPointerDown={
+              searching ? undefined : (e) => onRowPointerDown(e, item)
+            }
+          />
+        ))}
+        {!ungroupedItems.length && localDrag ? (
+          <div className="empty-rail" data-rail-empty="1">
+            {t("sidebar.ungroupDrop")}
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
+  function renderRouter({ section, items }: { section: RemoteSection; items: RailItem[] }) {
+    const hidden = !searching && remoteFolds.includes(section.alias);
+    const key = remoteKey(section.alias);
+    return (
+      <section
+        key={key}
+        className={
+          "rail-section grouped remote-section" +
+          (drag?.kind === "group" && drag.key === key && drag.armed ? " dragging" : "")
+        }
+        data-rail-section={key}
+        data-rail-remote={section.alias}
+      >
+        <RemoteHead
+          section={section}
+          compact={folded}
+          collapsed={hidden}
+          onToggle={() => {
+            if (didDrag.current) return;
+            toggleRemote(section.alias);
+          }}
+          onPointerDown={
+            searching ? undefined : (e) => onGroupPointerDown(e, key, section.alias, hidden)
+          }
+        />
+        {hidden ? null : items.length ? (
+          items.map((item) => (
+            <ItemRow
+              key={item.key}
+              item={item}
+              compact={folded}
+              agents={agents}
+              active={selectedKind === item.kind && selected === item.id}
+              unread={unread.includes(item.key)}
+              drafting={drafting.includes(item.id)}
+              dragging={drag?.kind === "item" && drag.key === item.key && drag.armed}
+              onSelect={() => {
+                if (didDrag.current) return;
+                select(item);
+              }}
+              onContextMenu={(e) => ctx(e, item)}
+              onPointerDown={
+                searching ? undefined : (e) => onRowPointerDown(e, item)
+              }
+            />
+          ))
+        ) : folded ? null : (
+          <div className="empty-rail">{t("sidebar.remoteEmpty")}</div>
+        )}
+      </section>
     );
   }
 
@@ -811,148 +1057,12 @@ export function Sidebar({
           </div>
         ) : (
           <>
-            {grouped.map(({ group, items }) => {
-              if (searching && !items.length) return null;
-              const hidden = !searching && group.collapsed;
-              const showEmpty = !hidden && !items.length && !searching;
-              return (
-                <section
-                  key={group.id}
-                  className={
-                    "rail-section grouped" +
-                    (drop?.kind === "item" && drop.groupId === group.id && drop.into
-                      ? " drop-into"
-                      : "") +
-                    (drag?.kind === "group" && drag.key === group.id && drag.armed
-                      ? " dragging"
-                      : "")
-                  }
-                  data-rail-group={group.id}
-                >
-                  <GroupHead
-                    group={group}
-                    compact={folded}
-                    renaming={renamingId === group.id}
-                    searching={searching}
-                    dropInto={
-                      drop?.kind === "item" && drop.groupId === group.id && drop.into
-                    }
-                    onToggle={() => {
-                      if (didDrag.current) return;
-                      onToggleGroup(group.id);
-                    }}
-                    onPointerDown={
-                      searching || renamingId === group.id
-                        ? undefined
-                        : (e) => onGroupPointerDown(e, group)
-                    }
-                    onRename={(name) => {
-                      onRenameGroup(group.id, name);
-                      onRenameDone();
-                    }}
-                    onCancelRename={onRenameDone}
-                    onContextMenu={(e) => onGroupCtx(e, group.id)}
-                    onMenu={(e) => onGroupMenu(e, group.id)}
-                    onNewBot={() => onGroupNewBot(group.id)}
-                  />
-                  {hidden ? null : showEmpty ? (
-                    <div className="empty-rail" data-rail-empty="1">
-                      {t("sidebar.dropHere")}
-                    </div>
-                  ) : (
-                    items.map((item) => (
-                      <ItemRow
-                        key={item.key}
-                        item={item}
-                        compact={folded}
-                        agents={agents}
-                        represents={representing(item.id, remotes)}
-                        active={selectedKind === item.kind && selected === item.id}
-                        unread={unread.includes(item.key)}
-                        drafting={drafting.includes(item.id)}
-                        dragging={drag?.kind === "item" && drag.key === item.key && drag.armed}
-                        onSelect={() => {
-                          if (didDrag.current) return;
-                          select(item);
-                        }}
-                        onContextMenu={(e) => ctx(e, item)}
-                        onPointerDown={
-                          searching ? undefined : (e) => onRowPointerDown(e, item)
-                        }
-                      />
-                    ))
-                  )}
-                </section>
-              );
-            })}
-            {ungroupedItems.length || (drag?.kind === "item" && drag.armed) ? (
-              <section
-                className={
-                  "rail-section" +
-                  (drop?.kind === "item" && drop.groupId === null && drop.into
-                    ? " drop-into"
-                    : "")
-                }
-                data-rail-ungrouped="1"
-              >
-                {ungroupedItems.map((item) => (
-                  <ItemRow
-                    key={item.key}
-                    item={item}
-                    compact={folded}
-                    agents={agents}
-                    represents={representing(item.id, remotes)}
-                    active={selectedKind === item.kind && selected === item.id}
-                    unread={unread.includes(item.key)}
-                    drafting={drafting.includes(item.id)}
-                    dragging={drag?.kind === "item" && drag.key === item.key && drag.armed}
-                    onSelect={() => {
-                      if (didDrag.current) return;
-                      select(item);
-                    }}
-                    onContextMenu={(e) => ctx(e, item)}
-                    onPointerDown={
-                      searching ? undefined : (e) => onRowPointerDown(e, item)
-                    }
-                  />
-                ))}
-                {!ungroupedItems.length && drag?.kind === "item" && drag.armed ? (
-                  <div className="empty-rail" data-rail-empty="1">
-                    {t("sidebar.ungroupDrop")}
-                  </div>
-                ) : null}
-              </section>
-            ) : null}
-            {remoteShown.map(({ section, items }) => {
-              const hidden = !searching && remoteFolds.includes(section.alias);
-              return (
-                <section key={"remote:" + section.alias} className="rail-section grouped remote-section">
-                  <RemoteHead
-                    section={section}
-                    compact={folded}
-                    collapsed={hidden}
-                    onToggle={() => toggleRemote(section.alias)}
-                  />
-                  {hidden ? null : items.length ? (
-                    items.map((item) => (
-                      <ItemRow
-                        key={item.key}
-                        item={item}
-                        compact={folded}
-                        agents={agents}
-                        fixed
-                        active={selectedKind === item.kind && selected === item.id}
-                        unread={unread.includes(item.key)}
-                        drafting={drafting.includes(item.id)}
-                        onSelect={() => select(item)}
-                        onContextMenu={(e) => ctx(e, item)}
-                      />
-                    ))
-                  ) : folded ? null : (
-                    <div className="empty-rail">{t("sidebar.remoteEmpty")}</div>
-                  )}
-                </section>
-              );
+            {railKeys.map((key) => {
+              if (key === UNGROUPED_ID) return renderLoose();
+              const router = remoteByKey.get(key);
+              if (router) return renderRouter(router);
+              const folder = groupByKey.get(key);
+              return folder ? renderFolder(folder) : null;
             })}
           </>
         )}
@@ -1015,6 +1125,7 @@ export function Sidebar({
                   <div
                     className={
                       "group-head" +
+                      (isRemoteKey(drag.key) ? " remote-head" : "") +
                       (drag.collapsed ? " collapsed" : "") +
                       (folded ? " compact" : "")
                     }
@@ -1176,17 +1287,19 @@ function GroupHead({
   );
 }
 
-/** A router's head. Its rows are the router's, so nothing here moves or renames. */
+/** A router's head. It moves like a folder's; its rows are the router's, so nothing renames. */
 function RemoteHead({
   section,
   compact,
   collapsed,
   onToggle,
+  onPointerDown,
 }: {
   section: RemoteSection;
   compact?: boolean;
   collapsed: boolean;
   onToggle: () => void;
+  onPointerDown?: (e: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
   const t = useT();
   const connected = section.remote?.connected;
@@ -1202,7 +1315,9 @@ function RemoteHead({
       className={
         "group-head remote-head" + (collapsed ? " collapsed" : "") + (compact ? " compact" : "")
       }
+      data-rail-remote-head={section.alias}
       title={compact ? label : section.remote?.url || undefined}
+      onPointerDown={onPointerDown}
     >
       <button
         type="button"
@@ -1237,7 +1352,6 @@ function ItemRow({
   drafting,
   dragging,
   ghost,
-  fixed,
   represents = [],
   onSelect,
   onContextMenu,
@@ -1245,8 +1359,6 @@ function ItemRow({
 }: {
   item: RailItem;
   agents: AgentInfo[];
-  /** Not a drop target: a teammate's row under its router. */
-  fixed?: boolean;
   /** Routers this local bot stands in for. */
   represents?: string[];
   /** The folded rail: the face alone, the name on hover. */
@@ -1355,7 +1467,7 @@ function ItemRow({
         (dragging ? " dragging" : "") +
         (online ? "" : " is-offline")
       }
-      data-rail-row={fixed ? undefined : item.key}
+      data-rail-row={item.key}
       title={compact ? label : remote ? `${a?.remote}/${item.name}` : undefined}
       aria-label={compact ? label : undefined}
       onClick={onSelect}

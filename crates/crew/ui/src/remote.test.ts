@@ -1,22 +1,29 @@
 import { describe, expect, it } from "vitest";
+import { UNGROUPED_ID } from "./groups";
 import {
   aliasError,
+  chatOrder,
+  folderBefore,
   freeAlias,
   isOnline,
   joinErrorField,
   localAgents,
+  moveRailSection,
+  moveRemoteBot,
+  moved,
   nameError,
+  normalizeRemoteLayout,
   normalizeRemotes,
   portOk,
+  railSections,
   remoteLabel,
-  remoteOrder,
   remoteSections,
   representing,
   routerUrl,
   slugAlias,
   toggled,
 } from "./remote";
-import type { AgentInfo, RemoteInfo } from "./types";
+import type { AgentInfo, Group, RemoteInfo } from "./types";
 
 function local(id: string, name = id): AgentInfo {
   return { id, name, status: "idle", cmd: ["cat"], cwd: "/tmp", routines: [] };
@@ -168,17 +175,137 @@ describe("remote bots", () => {
     expect(sections[2].remote).toBeNull();
   });
 
+  it("puts saved bots first, then the rest by name", () => {
+    const more = [...bots, remote("team", "acc_3", "bob")];
+    const [team] = remoteSections(more, [router("team")], "ko", {
+      team: ["team/acc_2", "gone/acc_0", "team/acc_1"],
+    });
+    expect(team.bots.map((b) => b.name)).toEqual(["zed", "amy", "bob"]);
+  });
+
   it("steps through open routers' bots after the local ones", () => {
-    expect(remoteOrder(bots, [router("team"), router("lab")], ["lab"])).toEqual([
+    const empty = { groups: [], ungrouped: [] };
+    const saved = { sections: [], bots: {} };
+    expect(chatOrder(empty, bots, [router("team"), router("lab")], ["lab"], saved)).toEqual([
+      { kind: "agent", id: "impl" },
       { kind: "agent", id: "team/acc_1" },
       { kind: "agent", id: "team/acc_2" },
     ]);
+  });
+
+  it("steps through a router where the rail put it", () => {
+    const rail = { groups: [folder("g1", ["agent:impl"])], ungrouped: [] };
+    const saved = { sections: ["remote:lab", "g1"], bots: { team: ["team/acc_2"] } };
+    expect(
+      chatOrder(rail, bots, [router("team"), router("lab")], [], saved).map((r) => r.id),
+    ).toEqual(["lab/acc_9", "impl", "team/acc_2", "team/acc_1"]);
   });
 
   it("finds the routers a local bot stands in for", () => {
     expect(representing("rep", [router("team"), router("lab", "other")])).toEqual(["team"]);
     expect(representing("impl", [router("team")])).toEqual([]);
   });
+});
+
+function folder(id: string, items: string[] = []): Group {
+  return { id, name: id, collapsed: false, items };
+}
+
+describe("rail sections", () => {
+  const U = UNGROUPED_ID;
+
+  it("puts a router this PC has not placed after the loose bots", () => {
+    expect(railSections(["g1", "g2"], ["team", "lab"], [])).toEqual([
+      "g1",
+      "g2",
+      U,
+      "remote:team",
+      "remote:lab",
+    ]);
+  });
+
+  it("puts a saved router back above the folder it was saved above", () => {
+    expect(railSections(["g1", "g2"], ["team"], ["remote:team", "g1", "g2", U])).toEqual([
+      "remote:team",
+      "g1",
+      "g2",
+      U,
+    ]);
+    // The folders' own order is the layout's; the router follows its folder.
+    expect(railSections(["g2", "g1"], ["team"], ["g1", "remote:team", "g2", U])).toEqual([
+      "remote:team",
+      "g2",
+      "g1",
+      U,
+    ]);
+    expect(railSections(["g1"], ["team"], ["g1", "remote:team", U])).toEqual([
+      "g1",
+      "remote:team",
+      U,
+    ]);
+  });
+
+  it("skips vanished folders and routers, and adds new routers last", () => {
+    expect(
+      railSections(["g2"], ["team", "new"], ["remote:gone", "remote:team", "g1", "g2", U]),
+    ).toEqual(["remote:team", "g2", U, "remote:new"]);
+  });
+
+  it("moves a router among folders", () => {
+    const keys = ["g1", "g2", U, "remote:team"];
+    expect(moved(keys, "remote:team", "g1")).toEqual(["remote:team", "g1", "g2", U]);
+    expect(moved(keys, "remote:team", "g2")).toEqual(["g1", "remote:team", "g2", U]);
+    expect(moved(keys, "remote:team", U)).toEqual(["g1", "g2", "remote:team", U]);
+    expect(moved(keys, "remote:team", null)).toEqual(keys);
+    expect(moved(keys, "remote:team", "nowhere")).toEqual(keys);
+  });
+
+  it("tells the layout which folder a moved folder now goes before", () => {
+    const keys = ["remote:team", "g2", "g1", U];
+    expect(folderBefore(keys, "g2", ["g1", "g2"])).toBe("g1");
+    expect(folderBefore(keys, "g1", ["g1", "g2"])).toBeNull();
+  });
+
+  it("saves only the sections and bots still here", () => {
+    const sections = remoteSections([remote("team", "a", "amy")], [router("team")]);
+    const saved = {
+      sections: ["remote:gone"],
+      bots: { team: ["team/a", "team/old"], gone: ["gone/x"] },
+    };
+    expect(
+      moveRailSection(saved, ["g1", U, "remote:team"], sections, "remote:team", "g1"),
+    ).toEqual({ sections: ["remote:team", "g1", U], bots: { team: ["team/a"] } });
+  });
+
+  it("moves a bot within its router only", () => {
+    const sections = remoteSections(bots(), [router("team"), router("lab")]);
+    const saved = { sections: ["remote:lab", "g1"], bots: {} };
+    const next = moveRemoteBot(saved, sections, "team", "team/acc_2", "team/acc_1");
+    expect(next).toEqual({
+      sections: saved.sections,
+      bots: { team: ["team/acc_2", "team/acc_1"] },
+    });
+    // Another router's bot, or a spot in another router, moves nothing.
+    expect(moveRemoteBot(saved, sections, "team", "lab/acc_9", null).bots).toEqual({});
+    expect(moveRemoteBot(saved, sections, "team", "team/acc_2", "lab/acc_9").bots).toEqual({
+      team: ["team/acc_1", "team/acc_2"],
+    });
+  });
+
+  it("reads back only a well formed saved layout", () => {
+    expect(normalizeRemoteLayout(null)).toEqual({ sections: [], bots: {} });
+    expect(
+      normalizeRemoteLayout({ sections: ["g1", 3], bots: { team: ["a", null], bad: "x" } }),
+    ).toEqual({ sections: ["g1"], bots: { team: ["a"], bad: [] } });
+  });
+
+  function bots() {
+    return [
+      remote("team", "acc_2", "zed"),
+      remote("team", "acc_1", "amy"),
+      remote("lab", "acc_9", "kim"),
+    ];
+  }
 });
 
 describe("toggled", () => {

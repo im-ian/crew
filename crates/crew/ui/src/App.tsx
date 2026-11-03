@@ -17,8 +17,7 @@ import { SkillsPane } from "./components/SkillsPane";
 import { ShortcutHelp } from "./components/ShortcutHelp";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
-import { railOrder } from "./groups";
-import { loadRemoteFolds, localAgents, remoteOrder, representing } from "./remote";
+import { chatOrder, loadRemoteFolds, loadRemoteLayout, representing } from "./remote";
 import { copyText } from "./components/CopyButton";
 import { useT } from "./LocaleContext";
 import type { TFn } from "./i18n";
@@ -263,10 +262,13 @@ export function App() {
         return;
       }
       if (id === "prev-chat" || id === "next-chat") {
-        const order = [
-          ...railOrder(c.groups, c.ungrouped, localAgents(c.agents)),
-          ...remoteOrder(c.agents, c.remotes, loadRemoteFolds()),
-        ];
+        const order = chatOrder(
+          { groups: c.groups, ungrouped: c.ungrouped },
+          c.agents,
+          c.remotes,
+          loadRemoteFolds(),
+          loadRemoteLayout(),
+        );
         if (!order.length) return;
         const i = order.findIndex(
           (row) => row.kind === c.selectedKind && row.id === c.selected,

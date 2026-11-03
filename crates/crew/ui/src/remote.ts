@@ -1,4 +1,11 @@
-import type { AgentInfo, RemoteInfo } from "./types";
+import {
+  groupIdOf,
+  groupOrderChanges,
+  railOrder,
+  UNGROUPED_ID,
+  type RailLayout,
+} from "./groups";
+import type { AgentInfo, Kind, RemoteInfo } from "./types";
 
 /** The port crew-router listens on unless its owner picked another. */
 export const ROUTER_PORT = 7420;
@@ -124,15 +131,24 @@ export type RemoteSection = {
   bots: AgentInfo[];
 };
 
+/** Where this PC put its routers and their bots, kept next to the router folds. */
+export type RemoteLayout = {
+  /** The rail's sections top to bottom: folder ids, the loose bots, `remote:alias`. */
+  sections: string[];
+  /** Bot ids per router alias, top to bottom. */
+  bots: Record<string, string[]>;
+};
+
 /**
- * One rail section per router, in the order the daemon lists them, bots by
- * name. An alias that only the bot list has (the router list failed, or is
- * a poll behind) still gets its section.
+ * One rail section per router, in the order the daemon lists them. Bots go
+ * in the order this PC saved, then by name. An alias that only the bot list
+ * has (the router list failed, or is a poll behind) still gets its section.
  */
 export function remoteSections(
   agents: AgentInfo[],
   remotes: RemoteInfo[],
   locale = "ko",
+  saved: RemoteLayout["bots"] = {},
 ): RemoteSection[] {
   const byAlias = new Map<string, AgentInfo[]>();
   for (const a of agents) {
@@ -151,22 +167,146 @@ export function remoteSections(
     if (!listed.has(alias)) out.push({ alias, remote: null, bots: byAlias.get(alias) ?? [] });
   }
   for (const section of out) {
-    section.bots = [...section.bots].sort((a, b) =>
-      (a.name || a.id).localeCompare(b.name || b.id, locale),
-    );
+    const rank = new Map((saved[section.alias] ?? []).map((id, i) => [id, i]));
+    section.bots = [...section.bots].sort((a, b) => {
+      const ra = rank.get(a.id);
+      const rb = rank.get(b.id);
+      if (ra !== undefined || rb !== undefined) {
+        return (ra ?? Infinity) - (rb ?? Infinity);
+      }
+      return (a.name || a.id).localeCompare(b.name || b.id, locale);
+    });
   }
   return out;
 }
 
-/** Remote rows for ⌘[ and ⌘], after the local ones. A folded router is skipped. */
-export function remoteOrder(
+/** A router's key among the rail's sections, next to folder ids. */
+export function remoteKey(alias: string): string {
+  return `remote:${alias}`;
+}
+
+export function isRemoteKey(key: string): boolean {
+  return key.startsWith("remote:");
+}
+
+/**
+ * The rail's sections top to bottom: folders in layout order, then the loose
+ * bots, with each router put back before the folder it was saved above. A
+ * router this PC has not placed goes after the loose bots.
+ */
+export function railSections(
+  groupIds: string[],
+  aliases: string[],
+  saved: readonly string[],
+): string[] {
+  const local = [...groupIds, UNGROUPED_ID];
+  const isLocal = new Set(local);
+  const routers = new Set(aliases.map(remoteKey));
+  const above = new Map<string, string[]>();
+  const placed = new Set<string>();
+  let pending: string[] = [];
+  for (const key of saved) {
+    if (routers.has(key) && !placed.has(key)) {
+      placed.add(key);
+      pending.push(key);
+    } else if (isLocal.has(key) && pending.length) {
+      above.set(key, [...(above.get(key) ?? []), ...pending]);
+      pending = [];
+    }
+  }
+  return [
+    ...local.flatMap((key) => [...(above.get(key) ?? []), key]),
+    ...pending,
+    ...aliases.map(remoteKey).filter((key) => !placed.has(key)),
+  ];
+}
+
+/** `key` taken out of `keys` and put back before `beforeKey`, or at the end. */
+export function moved(keys: readonly string[], key: string, beforeKey: string | null): string[] {
+  if (!groupOrderChanges([...keys], key, beforeKey)) return [...keys];
+  const rest = keys.filter((k) => k !== key);
+  rest.splice(beforeKey == null ? rest.length : rest.indexOf(beforeKey), 0, key);
+  return rest;
+}
+
+/**
+ * Where a folder lands in the layout once the rail's sections are in `keys`:
+ * before the next folder below it, or last.
+ */
+export function folderBefore(
+  keys: readonly string[],
+  groupId: string,
+  groupIds: string[],
+): string | null {
+  const folders = new Set(groupIds);
+  return keys.slice(keys.indexOf(groupId) + 1).find((k) => folders.has(k)) ?? null;
+}
+
+/** Saved bot orders for routers and bots still here. */
+function keptBots(saved: RemoteLayout["bots"], sections: RemoteSection[]): RemoteLayout["bots"] {
+  const out: RemoteLayout["bots"] = {};
+  for (const s of sections) {
+    const here = new Set(s.bots.map((b) => b.id));
+    const ids = (saved[s.alias] ?? []).filter((id) => here.has(id));
+    if (ids.length) out[s.alias] = ids;
+  }
+  return out;
+}
+
+/** The saved layout after a folder or router moved among the rail's sections. */
+export function moveRailSection(
+  saved: RemoteLayout,
+  keys: readonly string[],
+  sections: RemoteSection[],
+  key: string,
+  beforeKey: string | null,
+): RemoteLayout {
+  return { sections: moved(keys, key, beforeKey), bots: keptBots(saved.bots, sections) };
+}
+
+/** The saved layout after a router's bot moved within its router. */
+export function moveRemoteBot(
+  saved: RemoteLayout,
+  sections: RemoteSection[],
+  alias: string,
+  id: string,
+  beforeId: string | null,
+): RemoteLayout {
+  const bots = keptBots(saved.bots, sections);
+  const ids = sections.find((s) => s.alias === alias)?.bots.map((b) => b.id) ?? [];
+  if (ids.includes(id)) bots[alias] = moved(ids, id, beforeId);
+  return { sections: saved.sections, bots };
+}
+
+/**
+ * Rows for ⌘[ and ⌘], top to bottom as the rail stacks folders, loose bots
+ * and routers. A collapsed folder or a folded router is skipped.
+ */
+export function chatOrder(
+  rail: RailLayout,
   agents: AgentInfo[],
   remotes: RemoteInfo[],
   folded: readonly string[],
-): { kind: "agent"; id: string }[] {
-  return remoteSections(agents, remotes)
-    .filter((s) => !folded.includes(s.alias))
-    .flatMap((s) => s.bots.map((b) => ({ kind: "agent" as const, id: b.id })));
+  saved: RemoteLayout,
+): { kind: Kind; id: string }[] {
+  const rows = new Map<string, { kind: Kind; id: string }[]>();
+  for (const row of railOrder(rail.groups, rail.ungrouped, localAgents(agents))) {
+    const key = groupIdOf(rail.groups, row.kind, row.id) ?? UNGROUPED_ID;
+    rows.set(key, [...(rows.get(key) ?? []), row]);
+  }
+  const sections = remoteSections(agents, remotes, undefined, saved.bots);
+  for (const s of sections) {
+    if (folded.includes(s.alias)) continue;
+    rows.set(
+      remoteKey(s.alias),
+      s.bots.map((b) => ({ kind: "agent" as const, id: b.id })),
+    );
+  }
+  return railSections(
+    rail.groups.map((g) => g.id),
+    sections.map((s) => s.alias),
+    saved.sections,
+  ).flatMap((key) => rows.get(key) ?? []);
 }
 
 /** Aliases of the routers this local bot stands in for. */
@@ -202,6 +342,39 @@ export function loadRemoteFolds(): string[] {
 export function saveRemoteFolds(aliases: string[]) {
   try {
     localStorage.setItem(FOLD_KEY, JSON.stringify(aliases));
+  } catch {
+    /* private mode */
+  }
+}
+
+const ORDER_KEY = "crew.remote-order";
+
+function strings(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
+/** Where this PC put its routers and their bots, or nothing for a value that is not that. */
+export function normalizeRemoteLayout(raw: unknown): RemoteLayout {
+  if (!raw || typeof raw !== "object") return { sections: [], bots: {} };
+  const r = raw as Partial<Record<keyof RemoteLayout, unknown>>;
+  const bots: RemoteLayout["bots"] = {};
+  if (r.bots && typeof r.bots === "object" && !Array.isArray(r.bots)) {
+    for (const [alias, ids] of Object.entries(r.bots)) bots[alias] = strings(ids);
+  }
+  return { sections: strings(r.sections), bots };
+}
+
+export function loadRemoteLayout(): RemoteLayout {
+  try {
+    return normalizeRemoteLayout(JSON.parse(localStorage.getItem(ORDER_KEY) || "{}"));
+  } catch {
+    return { sections: [], bots: {} };
+  }
+}
+
+export function saveRemoteLayout(layout: RemoteLayout) {
+  try {
+    localStorage.setItem(ORDER_KEY, JSON.stringify(layout));
   } catch {
     /* private mode */
   }
