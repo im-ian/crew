@@ -1037,7 +1037,15 @@ export function useCrew() {
     }
   }
 
-  /** ⌘⇧N: a bot on the default AI with a random face, no form. */
+  /**
+   * ⌘⇧N: a bot on the default AI with a random face, no form. It joins the
+   * group of the chat that is open, so it works in that group's folder.
+   */
+  function openGroupId(): string | null {
+    const { id, kind } = selectedRef.current;
+    return id ? groupIdOf(groupsRef.current.groups, kind, id) : null;
+  }
+
   async function createQuickBot() {
     if (quickBusy.current) return;
     quickBusy.current = true;
@@ -1052,7 +1060,7 @@ export function useCrew() {
         cmd: start.cmd,
         shape: face.shape,
         color: face.color,
-        groupId: null,
+        groupId: openGroupId(),
       });
     } finally {
       quickBusy.current = false;
