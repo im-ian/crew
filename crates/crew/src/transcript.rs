@@ -626,6 +626,23 @@ pub fn push_remote_reply(key: &str, from: &str, text: &str, peer: Option<String>
     push_role(key, Role::Assistant, from, text, false, None, peer, false)
 }
 
+/// A local bot's tell to a bot on another PC, in that bot's chat here. It
+/// reads as received from `from`, as it would in a local bot's chat, but it
+/// opens no turn: the bot answers on its own PC. Stored as sent, it read as
+/// that bot's own words to `from`, and the side chat lost its replies.
+pub fn push_remote_tell(key: &str, from: &str, text: &str, peer: Option<String>) -> ChatMessage {
+    push_role(
+        key,
+        Role::System,
+        from,
+        text,
+        false,
+        Some(MessageKind::Received),
+        peer,
+        false,
+    )
+}
+
 pub fn push_handoff(agent: &str, from: &str, text: &str) -> ChatMessage {
     push_role(
         agent,
@@ -2481,6 +2498,41 @@ mod tests {
             assert_eq!(preview(&agent).as_deref(), Some("작업 중이야?"));
 
             drop_agent(&agent);
+        });
+    }
+
+    /// A local bot asked a bot on another PC, twice. In that bot's chat here
+    /// the asks read as received from the local bot, so the side chat shows
+    /// who said what, and no turn waits on this PC.
+    #[test]
+    fn a_tell_to_a_remote_bot_reads_as_received_in_its_chat() {
+        crate::paths::testing::with_home("remote-tell", || {
+            let n = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let rid = format!("lab/acc_{n}");
+            for (ask, answer) in [("Q1", "ACK Q1"), ("Q2", "ACK Q2")] {
+                push_remote_tell(&rid, "repc", ask, Some("repc".into()));
+                assert!(
+                    !chats().lock().unwrap().get(&rid).unwrap().expecting,
+                    "the answer comes over the network, not from a turn here"
+                );
+                push_remote_reply(&rid, &rid, answer, Some("repc".into()));
+            }
+            let rows = messages(&rid);
+            let asks: Vec<_> = rows.iter().filter(|m| m.role == Role::System).collect();
+            assert_eq!(asks.len(), 2, "{rows:?}");
+            for m in asks {
+                assert_eq!(m.from, "repc");
+                assert_eq!(m.kind, Some(MessageKind::Received));
+                assert_eq!(m.peer.as_deref(), Some("repc"));
+                assert_eq!(
+                    crate::rows::classify_row(m, None, &[]),
+                    crate::rows::RowClass::Received
+                );
+            }
+            drop_agent(&rid);
         });
     }
 

@@ -299,6 +299,62 @@ def crossing_tells(w):
         assert replies == [f"ACK {token}"], (x.name, replies)
 
 
+def side_chat_rows(w):
+    """The side chat reads both bots' words off one chat's rows: who sent
+    each, and which turn a reply belongs to. D's representative asks A twice;
+    each chat holds the exchange in order, with each line on its speaker."""
+    a, d = w["A"], w["D"]
+    for token in ("SC1", "SC2"):
+        tell(d, a, token, as_bot=True)
+        got(d, a, token)
+        settled(w)
+    want = ["SC1", "ACK SC1", "SC2", "ACK SC2"]
+
+    def exchange(rows, ask, answer):
+        out = []
+        for m in rows:
+            if "SC" not in m["text"]:
+                continue
+            if ask(m):
+                out.append(("ask", m["text"]))
+            elif answer(m):
+                out.append(("answer", m["text"]))
+        return out
+
+    # D's chat with A here: D's representative asked, A answered.
+    rid_a = d.rid(a)
+    rows = d.messages(rid_a)
+    seen = exchange(
+        rows,
+        lambda m: m["role"] == "system" and m["from"] == d.rep and m.get("kind") == "received"
+        and m.get("peer") == d.rep,
+        lambda m: m["role"] == "assistant" and m["from"] == rid_a and m.get("peer") == d.rep,
+    )
+    assert seen == list(zip(["ask", "answer"] * 2, want)), (seen, rows)
+    # D's representative: sent to A, then A's answer handed back.
+    rows = d.messages(d.rep)
+    seen = exchange(
+        rows,
+        lambda m: m["from"] == f"to:{rid_a}" and m.get("kind") == "sent",
+        lambda m: m["from"] == rid_a and m.get("kind") == "handoff",
+    )
+    assert seen == list(zip(["ask", "answer"] * 2, want)), (seen, rows)
+    # A's representative: received from D, its reply tagged as D's turn.
+    rid_d = a.rid(d)
+    rows = a.messages(a.rep)
+    seen = exchange(
+        rows,
+        lambda m: m["from"] == rid_d and m.get("kind") == "received" and m.get("peer") == rid_d,
+        lambda m: m["role"] == "assistant" and m.get("peer") == rid_d,
+    )
+    assert seen == list(zip(["ask", "answer"] * 2, want)), (seen, rows)
+    # Both ends are on the roster, so the side chat has a name and a face.
+    names = {x["id"]: x.get("name") for x in a.rpc({"type": "list"})["agents"]}
+    assert names.get(rid_d) == "D", names
+    names = {x["id"]: x.get("name") for x in d.rpc({"type": "list"})["agents"]}
+    assert names.get(rid_a) == "A", names
+
+
 def four_ask_a_at_once(w):
     a = w["A"]
     senders = [w[k] for k in "BCD"]
@@ -635,6 +691,7 @@ SCENARIOS = [
     ("C·D가 동시에 A에게", two_ask_a_at_once),
     ("C가 A에게 연달아 3개", one_sender_bursts),
     ("A↔B 서로 동시에", crossing_tells),
+    ("D 대표 봇이 A에게 두 번: 사이드 채팅 행", side_chat_rows),
     ("B·C·D가 동시에 A에게", four_ask_a_at_once),
     ("A 사용자가 B·C·D 한 번에 멘션", mention_three_from_a),
     ("A가 꺼진 동안 C·D가 보냄", a_offline_two_send),

@@ -3549,7 +3549,7 @@ fn tell_remote(
     let asker = (from != "user" && known_agent(&from)).then_some(from.as_str());
     let rid = crate::remote::tell(asker, mention_owner.as_deref(), to, text, origin.hops)?;
     if let Some(asker) = asker {
-        crate::transcript::push_notice(&rid, asker, text, Some(asker.to_string()));
+        crate::transcript::push_remote_tell(&rid, asker, text, Some(asker.to_string()));
         let peer = parent.as_ref().and_then(|p| asked_by(p, asker));
         crate::transcript::push_notice(asker, &format!("to:{rid}"), text, peer);
     } else {
