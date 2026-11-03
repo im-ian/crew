@@ -225,6 +225,29 @@ export function railOrder(
   return out;
 }
 
+/** First bot a reopened window can land on.
+ *  The sidebar's first visible row. A collapsed folder hides its bots, so
+ *  they are not that row. When every folder is collapsed and nothing is
+ *  loose, the first bot in folder order still opens a chat. */
+export function firstOpenAgent(
+  groups: Group[],
+  ungrouped: string[],
+  agents: AgentInfo[],
+): string | null {
+  const shown = railOrder(groups, ungrouped, agents)[0];
+  if (shown) return shown.id;
+  const valid = validKeys(agents);
+  for (const g of groups) {
+    if (g.id === UNGROUPED_ID) continue;
+    for (const key of g.items) {
+      if (!valid.has(key)) continue;
+      const parsed = parseItemKey(key);
+      if (parsed) return parsed.id;
+    }
+  }
+  return null;
+}
+
 /** True when inserting `id` before `beforeId` (or at the end) would change `ids`. */
 export function groupOrderChanges(
   ids: string[],

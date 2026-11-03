@@ -17,11 +17,13 @@ import {
 } from "./sendGate";
 import { openPendingOnFocus } from "./focusChat";
 import { useT } from "./LocaleContext";
+import { loadLastChat, pickOpenAgent, saveLastChat } from "./lastChat";
 import { loadNotify } from "./notifyPref";
 import { publishBotSignals, publishBotUnread } from "./botSignals";
 import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
 import {
   adoptNewGroups,
+  firstOpenAgent,
   groupCwd,
   groupIdOf,
   itemKey,
@@ -66,7 +68,7 @@ type Ctx = {
 export function useCrew() {
   const t = useT();
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(loadLastChat);
   const [selectedKind, setSelectedKind] = useState<Kind>("agent");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   // Right after a switch, `messages` are still the last chat's.
@@ -139,6 +141,10 @@ export function useCrew() {
   const [openedRead, setOpenedRead] = useState<{ key: string; ts: number } | null>(
     null,
   );
+  useEffect(() => {
+    if (selected) saveLastChat(selected);
+  }, [selected]);
+
   useEffect(() => {
     if (!selected) return;
     const key = itemKey(selectedKind, selected);
@@ -531,14 +537,34 @@ export function useCrew() {
     }
   }
 
+  // The open chat survives a restart. A bot that is no longer in the list
+  // waits for the folder layout, then the window opens the first visible row.
+  function applyOpenAgent(list: AgentInfo[]) {
+    const ready = groupsLoaded.current;
+    const sel = pickOpenAgent(
+      selectedRef.current.id,
+      loadLastChat(),
+      list,
+      ready
+        ? firstOpenAgent(
+            groupsRef.current.groups,
+            groupsRef.current.ungrouped,
+            list,
+          )
+        : null,
+      ready,
+    );
+    selectedRef.current = { id: sel, kind: "agent" };
+    setSelected(sel);
+    setSelectedKind("agent");
+    if (paneOpenRef.current && !list.some((x) => x.id === sel)) {
+      setPaneOpen(false);
+    }
+  }
+
   const refreshList = useCallback(async () => {
     const list = await listAgents();
     if (!list) return;
-    let { id: sel } = selectedRef.current;
-    if (!sel || !list.some((a) => a.id === sel)) {
-      sel = list[0]?.id ?? null;
-    }
-    selectedRef.current = { id: sel, kind: "agent" };
     // Before the list state, so a face sees its status and signal together.
     publishBotSignals(list);
     setAgents(list);
@@ -546,11 +572,7 @@ export function useCrew() {
       const pruned = pruneLayout(groupsRef.current, list);
       if (layoutChanged(pruned, groupsRef.current)) persistLayout(pruned);
     }
-    setSelected(sel);
-    setSelectedKind("agent");
-    if (paneOpenRef.current && !list.some((x) => x.id === sel)) {
-      setPaneOpen(false);
-    }
+    applyOpenAgent(list);
   }, []);
 
   const refreshMessages = useCallback(async () => {
@@ -1017,12 +1039,14 @@ export function useCrew() {
         groupsRef.current = next;
         setGroups(next.groups);
         setUngrouped(next.ungrouped);
+        if (agentsRef.current.length) applyOpenAgent(agentsRef.current);
       })
       .catch(() => {
         if (cancelled || groupsLoaded.current) return;
         groupsLoaded.current = true;
         setGroups([]);
         setUngrouped([]);
+        if (agentsRef.current.length) applyOpenAgent(agentsRef.current);
       });
     return () => {
       cancelled = true;
