@@ -8,9 +8,9 @@ UI="$PWD/../../crates/crew/ui"
 
 
 "$CHROME" --headless=new --disable-gpu --hide-scrollbars \
-  --force-device-scale-factor=2 --window-size=1600,720 \
+  --force-device-scale-factor=2 --window-size=1600,480 \
   --screenshot="$PWD/hero.png" "file://$PWD/hero.html"
-sips -z 720 1600 hero.png >/dev/null
+sips -z 480 1600 hero.png >/dev/null
 
 if ! curl -fs http://127.0.0.1:1430/readme.html >/dev/null; then
   (cd "$UI" && npx vite --port 1430 --strictPort >/dev/null 2>&1) &
