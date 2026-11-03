@@ -254,6 +254,7 @@ export function PeekRoom({
                 agent={agent}
                 who={who}
                 agents={agents}
+                own={m.from === self.id}
                 flash={flash.has(m.id)}
               />
             );
@@ -292,12 +293,15 @@ function PeekBubble({
   agent,
   who,
   agents,
+  own = false,
   flash = false,
 }: {
   message: ChatMessage;
   agent: AgentInfo | null;
   who: string;
   agents: AgentInfo[];
+  /** This room's bot. Its lines sit on the right: it is the one speaking. */
+  own?: boolean;
   flash?: boolean;
 }) {
   const color = agent
@@ -307,23 +311,26 @@ function PeekBubble({
     : undefined;
   const parts = splitBubbles(m.text || "");
   const defs = useMemo(() => messageDefinitions(m.text || ""), [m.text]);
+  const face = agent ? (
+    <Avatar
+      className="msg-avatar"
+      id={agent.id}
+      name={agent.name || agent.id}
+      src={agent.avatar}
+      shape={agent.avatar_shape}
+      color={agent.avatar_color}
+      status={agent.status}
+      title={who}
+    />
+  ) : null;
   return (
     <div
-      className={"row them incoming" + (flash ? " flash" : "")}
+      className={
+        "row them incoming" + (own ? " own" : "") + (flash ? " flash" : "")
+      }
       data-msg-id={m.id}
     >
-      {agent ? (
-        <Avatar
-          className="msg-avatar"
-          id={agent.id}
-          name={agent.name || agent.id}
-          src={agent.avatar}
-          shape={agent.avatar_shape}
-          color={agent.avatar_color}
-          status={agent.status}
-          title={who}
-        />
-      ) : null}
+      {own ? null : face}
       <div className="channel-msg">
         <div
           className="channel-who"
@@ -361,6 +368,7 @@ function PeekBubble({
           })}
         </div>
       </div>
+      {own ? face : null}
     </div>
   );
 }
