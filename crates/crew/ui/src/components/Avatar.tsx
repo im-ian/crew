@@ -54,16 +54,18 @@ function StatusOrbit({
 }) {
   if (status !== "working" && status !== "blocked") return null;
   return (
-    <span className={`avatar-orbit is-${status} is-${half}`} aria-hidden>
-      <i>
-        <b />
-      </i>
-      {status === "working" ? (
+    <span className={`orbit-clip is-${half}`} aria-hidden>
+      <span className={`avatar-orbit is-${status} is-${half}`}>
         <i>
           <b />
         </i>
-      ) : null}
-      {status === "blocked" ? <u /> : null}
+        {status === "working" ? (
+          <i>
+            <b />
+          </i>
+        ) : null}
+        {status === "blocked" ? <u /> : null}
+      </span>
     </span>
   );
 }

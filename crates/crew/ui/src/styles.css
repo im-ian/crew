@@ -1252,16 +1252,29 @@ button.avatar {
 .avatar.is-blocked {
   overflow: visible;
 }
+.orbit-clip {
+  /* The hoop spins and tilts, and its turning boxes reach past the face. Every
+     transformed box counts toward the scroll area of the thread, so a hoop at the
+     bottom would make scrollHeight jump each frame. This fixed box holds the whole
+     orbit and clips at its edge, so the reach the thread sees never changes. The pad
+     is the widest roll (r up to 0.28 in orbitRoll.ts, a bit more for the bead) plus the
+     7px glow, which does not scale with the face. */
+  --orbit-pad: calc(var(--orbit-ref, 40px) * 0.3 + 10px);
+  position: absolute;
+  inset: calc(var(--orbit-pad) * -1);
+  contain: paint;
+  pointer-events: none;
+}
+.orbit-clip.is-back { z-index: 0; }
+.orbit-clip.is-front { z-index: 3; }
 /* The hoop plane: a circle squashed into a tilted ellipse. Bead sizes below are
    pre-divided by this 0.42 so they render round. */
 .avatar-orbit {
   position: absolute;
-  inset: -6px;
+  inset: calc(var(--orbit-pad) - 6px);
   pointer-events: none;
   transform: scaleY(0.42);
 }
-.avatar-orbit.is-back { z-index: 0; }
-.avatar-orbit.is-front { z-index: 3; }
 .avatar-orbit i {
   position: absolute;
   inset: 0;
@@ -1323,7 +1336,7 @@ button.avatar {
     --orbit-r 2.6s ease-in-out;
 }
 .avatar-orbit.is-working {
-  inset: calc(var(--orbit-r, 0.15) * var(--orbit-ref, 40px) * -1);
+  inset: calc(var(--orbit-pad) - var(--orbit-r, 0.15) * var(--orbit-ref, 40px));
   transform: rotate(var(--orbit-rot, 0deg)) scaleY(var(--orbit-k, 0.42));
 }
 .avatar-orbit.is-working i,
@@ -1388,17 +1401,17 @@ button.avatar {
   .avatar-orbit u::before {
     animation: none;
   }
-  .avatar-orbit.is-back { display: none; }
+  .orbit-clip.is-back { display: none; }
   /* the second satellite is only offset by a delay, so at rest it would sit on the first */
   .avatar-orbit.is-working i + i { display: none; }
   /* back copy is hidden, so the front one carries the whole ring */
   .avatar-orbit.is-front u { clip-path: none; }
 }
-.mention-chip .avatar-orbit {
+.mention-chip .orbit-clip {
   display: none;
 }
 .who-avatar .avatar-orbit:not(.is-working) {
-  inset: -3px;
+  inset: calc(var(--orbit-pad) - 3px);
 }
 .who-avatar .avatar-orbit u::before { border-width: 1.5px; }
 .who-avatar .avatar-orbit:not(.is-working) b {
