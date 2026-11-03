@@ -1297,7 +1297,9 @@ button.avatar {
    and --orbit-r (how far out it sits) on the avatar, and the avatar glides to each.
    A bead is as tall as it is wide divided by --orbit-k, so the flattening renders it
    round. Without a roll the registered defaults give the plain tilted hoop; keep them
-   in step with ORBIT_REST in orbitRoll.ts. */
+   in step with ORBIT_REST in orbitRoll.ts. The var() fallbacks are the same rest
+   hoop, for a WebView that cannot register the properties (it then steps between
+   rolls instead of gliding). */
 @property --orbit-rot {
   syntax: "<angle>";
   inherits: true;
@@ -1320,8 +1322,8 @@ button.avatar {
     --orbit-r 2.6s ease-in-out;
 }
 .avatar-orbit.is-working {
-  inset: calc(var(--orbit-r) * var(--orbit-ref, 40px) * -1);
-  transform: rotate(var(--orbit-rot)) scaleY(var(--orbit-k));
+  inset: calc(var(--orbit-r, 0.15) * var(--orbit-ref, 40px) * -1);
+  transform: rotate(var(--orbit-rot, 0deg)) scaleY(var(--orbit-k, 0.42));
 }
 .avatar-orbit.is-working i,
 .avatar-orbit.is-working b {
@@ -1330,8 +1332,8 @@ button.avatar {
 .avatar-orbit.is-working b {
   --bead: var(--orbit-bead, 4.5px);
   width: var(--bead);
-  height: calc(var(--bead) / var(--orbit-k));
-  margin: calc(var(--bead) / var(--orbit-k) * -0.5) 0 0 calc(var(--bead) * -0.5);
+  height: calc(var(--bead) / var(--orbit-k, 0.42));
+  margin: calc(var(--bead) / var(--orbit-k, 0.42) * -0.5) 0 0 calc(var(--bead) * -0.5);
 }
 .avatar-orbit.is-working.is-back b {
   --bead: calc(var(--orbit-bead, 4.5px) * 0.72);
