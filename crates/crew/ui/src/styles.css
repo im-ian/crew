@@ -679,9 +679,10 @@ html.rail-dragging {
   -webkit-user-drag: none;
   position: relative;
 }
-/* The unread dot sits on the right edge. The padding clears the clock,
-   or a one-line row draws it underneath the dot. */
-.rail-row.unread .agent-name { font-weight: 700; padding-right: 14px; }
+/* The unread dot sits on the right edge, over the text column. The inset
+   keeps the clock and the preview a step clear of the 7px dot. */
+.rail-row.unread .rail-row-text { padding-right: 22px; }
+.rail-row.unread .agent-name { font-weight: 700; }
 .unread-dot {
   position: absolute;
   right: 10px;
