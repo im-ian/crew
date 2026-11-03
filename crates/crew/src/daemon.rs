@@ -4027,6 +4027,7 @@ fn set_agent(
     if renamed {
         inject_roster_update(None);
     }
+    crate::remote::on_profile_changed(id);
     Ok(())
 }
 

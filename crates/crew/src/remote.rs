@@ -181,6 +181,8 @@ struct Link {
     members: Vec<Member>,
     team: (String, u64),
     presence: String,
+    /// The profile frame last sent on this connection. Cleared on welcome.
+    profile: Option<Value>,
     /// Why this PC stopped trying, as the settings say it. Cleared on welcome.
     error: Option<String>,
 }
@@ -607,6 +609,7 @@ fn new_link(cfg: RemoteConfig, team: String) -> Link {
         members: Vec::new(),
         team: (team, 0),
         presence: String::new(),
+        profile: None,
         error: None,
     }
 }
@@ -859,6 +862,7 @@ fn on_welcome(alias: &str, v: &Value) {
         };
         link.connected = true;
         link.presence.clear();
+        link.profile = None;
         link.error = None;
         if let Some(name) = v["name"].as_str() {
             link.cfg.name = name.to_string();
@@ -870,11 +874,50 @@ fn on_welcome(alias: &str, v: &Value) {
     set_members(alias, members);
     on_team_memory(alias, &v["team_memory"]);
     if let Some(bot) = link_cfg(alias).map(|c| c.bot) {
-        send(alias, profile_frame(&bot));
+        send_profile(alias, &bot);
         send_presence(alias, &bot);
     }
     for frame in pending {
         send(alias, frame);
+    }
+}
+
+/// Sends the bot's profile unless this connection already has it. Offline,
+/// the next welcome sends it.
+fn send_profile(alias: &str, bot: &str) {
+    let frame = profile_frame(bot);
+    let changed = state()
+        .lock()
+        .ok()
+        .and_then(|mut st| {
+            let link = st.links.get_mut(alias)?;
+            if !link.connected || link.profile.as_ref() == Some(&frame) {
+                return Some(false);
+            }
+            link.profile = Some(frame.clone());
+            Some(true)
+        })
+        .unwrap_or(false);
+    if changed {
+        send(alias, frame);
+    }
+}
+
+/// The bot's avatar or role changed: the routers it stands in for hear it now,
+/// so teammates' PCs and bots see it without a reconnect.
+pub fn on_profile_changed(bot: &str) {
+    let aliases: Vec<String> = state()
+        .lock()
+        .map(|st| {
+            st.links
+                .values()
+                .filter(|l| l.cfg.bot == bot)
+                .map(|l| l.cfg.alias.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    for alias in aliases {
+        send_profile(&alias, bot);
     }
 }
 
@@ -2525,6 +2568,50 @@ mod tests {
         assert!(!rep.contains(&"secret".to_string()));
 
         state().lock().unwrap().links.remove(alias);
+    }
+
+    #[test]
+    fn a_changed_profile_goes_out_once_and_only_while_connected() {
+        let alias = "profiletest";
+        let cfg = RemoteConfig {
+            alias: alias.into(),
+            account: "acc_me0000000000".into(),
+            bot: "profile-rep".into(),
+            ..RemoteConfig::default()
+        };
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut link = new_link(cfg, String::new());
+        link.tx = Some(tx);
+        link.connected = true;
+        state().lock().unwrap().links.insert(alias.into(), link);
+        let sent = |rx: &mut mpsc::UnboundedReceiver<Value>| {
+            std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>()
+        };
+
+        on_profile_changed("profile-rep");
+        let frames = sent(&mut rx);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0]["type"], "profile");
+        on_profile_changed("profile-rep");
+        assert!(sent(&mut rx).is_empty(), "the same profile again stays home");
+        on_profile_changed("someone-else");
+        assert!(sent(&mut rx).is_empty());
+
+        state().lock().unwrap().links.get_mut(alias).unwrap().profile = None;
+        on_profile_changed("profile-rep");
+        assert_eq!(sent(&mut rx).len(), 1, "a new connection hears it again");
+
+        {
+            let mut st = state().lock().unwrap();
+            let link = st.links.get_mut(alias).unwrap();
+            link.connected = false;
+            link.profile = None;
+        }
+        on_profile_changed("profile-rep");
+        assert!(sent(&mut rx).is_empty());
+        let mut st = state().lock().unwrap();
+        assert!(!st.jobs.outbox.contains_key(alias), "the next welcome sends it");
+        st.links.remove(alias);
     }
 
     /// A one-shot router on a local port: answers `hello`, then `signup`.
