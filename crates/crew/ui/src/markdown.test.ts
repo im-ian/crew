@@ -325,13 +325,13 @@ describe("image albums", () => {
     const three = "![a](/tmp/a.png)\n\n![b](/tmp/b.png)\n\n![c](/tmp/c.png)";
     expect(html(one)).toBe('<p><img src="/tmp/a.png" alt="a"></p>');
     expect(html(two)).toBe(
-      '<div class="md-gallery is-pair" data-count="2"><img src="/tmp/a.png" alt="a"><img src="/tmp/b.png" alt="b"></div>',
+      '<div class="md-gallery" data-count="2"><img src="/tmp/a.png" alt="a"><img src="/tmp/b.png" alt="b"></div>',
     );
     expect(html(three)).toBe(
-      '<div class="md-gallery is-trio" data-count="3"><img src="/tmp/a.png" alt="a"><img src="/tmp/b.png" alt="b"><img src="/tmp/c.png" alt="c"></div>',
+      '<div class="md-gallery" data-count="3"><img src="/tmp/a.png" alt="a"><img src="/tmp/b.png" alt="b"><img src="/tmp/c.png" alt="c"></div>',
     );
     expect(html("see this\n\n![a](/tmp/a.png)\n![b](/tmp/b.png)")).toBe(
-      '<p>see this</p><div class="md-gallery is-pair" data-count="2"><img src="/tmp/a.png" alt="a"><img src="/tmp/b.png" alt="b"></div>',
+      '<p>see this</p><div class="md-gallery" data-count="2"><img src="/tmp/a.png" alt="a"><img src="/tmp/b.png" alt="b"></div>',
     );
   });
 

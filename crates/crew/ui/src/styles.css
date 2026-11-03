@@ -3332,40 +3332,48 @@ button.choice-option:active:not(:disabled) .choice-badge {
   outline: 2px solid var(--link);
   outline-offset: 2px;
 }
-/* A run of pictures is one album. Each cell keeps the picture's shape. */
+/* A run of pictures is one horizontal row. Past five, the last cell wears +N. */
 .md-gallery {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2px;
-  width: 240px;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
   max-width: 100%;
   margin: 0.35em 0;
-  border-radius: 18px;
-  overflow: hidden;
 }
 .md-gallery:first-child { margin-top: 0; }
 .md-gallery:last-child { margin-bottom: 0; }
+.md-shot {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 132px;
+  height: 88px;
+}
 .md-gallery img {
   width: 100%;
-  height: 118px;
+  height: 100%;
   max-width: none;
   max-height: none;
-  object-fit: contain;
-  border-radius: 0;
+  object-fit: cover;
+  border-radius: 12px;
 }
 .md-gallery img[role="button"]:focus-visible {
   outline-offset: -2px;
 }
-.md-gallery.is-pair img { height: 124px; }
-.md-gallery.is-trio img:first-child {
-  grid-column: 1 / -1;
-  height: 134px;
-}
-.md-gallery.is-trio img { height: 90px; }
-.md-gallery.is-grid img { height: 96px; }
-.md-gallery.is-grid img:last-child:nth-child(odd) {
-  grid-column: 1 / -1;
-  height: 120px;
+.md-gallery-more {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 .img-preview {
   position: fixed;
@@ -3375,6 +3383,18 @@ button.choice-option:active:not(:disabled) .choice-badge {
   place-items: center;
   padding: 64px 28px 28px;
   background: rgba(0, 0, 0, 0.78);
+}
+.img-preview-count {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 16px;
+  margin: 0;
+  text-align: center;
+  color: #fff;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 .img-preview img {
   max-width: min(1100px, calc(100vw - 56px));
