@@ -43,4 +43,4 @@ macOS `.app` / `.dmg`는 `./scripts/build-macos.sh`로 만들어요. 서명 키�
 
 GitHub에 `vX.Y.Z` 태그를 올리면 Release 워크플로가 Apple Silicon·Intel DMG와 업데이터 `latest.json`을 게시해요. `Cargo.toml`, `crates/crew/tauri.conf.json`, `crates/crew/ui/package.json`의 버전이 태그와 같아야 해요. 업데이터 서명을 쓰려면 저장소 Secrets에 `TAURI_SIGNING_PRIVATE_KEY`가 있어야 해요.
 
-README 그림은 `docs/readme/*.html`을 고친 뒤 `docs/readme/render.sh`로 다시 만들어요.
+README 그림은 `docs/readme/render.sh`로 다시 만들어요. 화면 세 장은 실제 앱을 데모 데이터로 띄워 찍어요(`crates/crew/ui/src/readme.tsx`, Vite 127.0.0.1:1430). 데모 봇이나 대화를 바꾸려면 그 파일을 고쳐요. 상단 그림은 `docs/readme/hero.html`이에요.
