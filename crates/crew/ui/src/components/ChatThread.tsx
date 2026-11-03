@@ -1615,6 +1615,56 @@ const STACK_BEHIND = 2;
 const SWIPE_FAR = 60;
 const SWIPE_REST_MS = 550;
 
+// A typed answer: Enter moves on like the other boxes, Shift+Enter breaks
+// the line, and the box grows with what is written.
+function ChoiceText({
+  id,
+  className,
+  value,
+  placeholder,
+  disabled,
+  onChange,
+  onEnter,
+}: {
+  id?: string;
+  className: string;
+  value: string;
+  placeholder?: string;
+  disabled: boolean;
+  onChange: (next: string) => void;
+  onEnter: () => void;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // Border-box: the border is not in scrollHeight, so a bare one would
+    // come up short and scroll a single line. Past max-height it scrolls.
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + el.offsetHeight - el.clientHeight + "px";
+  }, [value]);
+  return (
+    <textarea
+      ref={ref}
+      id={id}
+      className={className}
+      rows={1}
+      value={value}
+      placeholder={placeholder}
+      disabled={disabled}
+      autoComplete="off"
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) {
+          return;
+        }
+        e.preventDefault();
+        onEnter();
+      }}
+    />
+  );
+}
+
 function ChoiceCard({
   card,
   onAnswer,
@@ -1812,22 +1862,33 @@ function ChoiceCard({
               return (
                 <label className="choice-field" key={f.id || fi} htmlFor={id}>
                   <span className="choice-field-label">{f.label}</span>
-                  <input
-                    id={id}
-                    className="textin choice-input"
-                    type={f.secret ? "password" : "text"}
-                    value={fieldValues[fi] || ""}
-                    disabled={!open || !onAnswer}
-                    autoComplete="off"
-                    onChange={(e) => setField(qi, fi, e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter" || e.nativeEvent.isComposing) {
-                        return;
-                      }
-                      e.preventDefault();
-                      enter();
-                    }}
-                  />
+                  {f.secret ? (
+                    <input
+                      id={id}
+                      className="textin choice-input"
+                      type="password"
+                      value={fieldValues[fi] || ""}
+                      disabled={!open || !onAnswer}
+                      autoComplete="off"
+                      onChange={(e) => setField(qi, fi, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter" || e.nativeEvent.isComposing) {
+                          return;
+                        }
+                        e.preventDefault();
+                        enter();
+                      }}
+                    />
+                  ) : (
+                    <ChoiceText
+                      id={id}
+                      className="textin choice-input"
+                      value={fieldValues[fi] || ""}
+                      disabled={!open || !onAnswer}
+                      onChange={(next) => setField(qi, fi, next)}
+                      onEnter={enter}
+                    />
+                  )}
                 </label>
               );
             })}
@@ -1867,21 +1928,13 @@ function ChoiceCard({
                 }
               >
                 <span className="choice-badge">{badge}</span>
-                <input
+                <ChoiceText
                   className="choice-other-input"
-                  type="text"
                   value={other}
                   placeholder={t("thread.choiceOther")}
                   disabled={!open || !onAnswer}
-                  autoComplete="off"
-                  onChange={(e) => setOther(qi, e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key !== "Enter" || e.nativeEvent.isComposing) {
-                      return;
-                    }
-                    e.preventDefault();
-                    enter();
-                  }}
+                  onChange={(next) => setOther(qi, next)}
+                  onEnter={enter}
                 />
               </label>
             ) : null}

@@ -2555,6 +2555,11 @@ button.sys-note:focus-visible {
 .choice-stack {
   position: relative;
   margin-top: var(--space-8);
+  /* The same clamp as the card, so the edges behind it stay its width when
+     a long answer on the summary step asks the message to grow. */
+  width: max-content;
+  min-width: min(100%, 560px);
+  max-width: min(100%, 560px);
   padding-bottom: calc(var(--behind, 0) * 6px);
 }
 .choice-stack[data-behind="1"] { --behind: 1; }
@@ -2647,6 +2652,7 @@ button.sys-note:focus-visible {
   font-weight: 600;
   line-height: 1.35;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 .choice-sum-row.is-missing .choice-sum-a {
   color: var(--faint);
@@ -2758,6 +2764,10 @@ button.choice-option.is-on:hover:not(:disabled) {
 .choice-other-input {
   flex: 1;
   min-width: 0;
+  resize: none;
+  /* Grows with Shift+Enter lines up to about six, then scrolls inside. */
+  max-height: 160px;
+  overflow-y: auto;
   border: 0;
   outline: none;
   padding: 0;
@@ -2826,6 +2836,8 @@ button.choice-option:active:not(:disabled) .choice-badge {
 .choice-label {
   font-size: var(--text-lg);
   line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .choice-desc {
   color: var(--muted);
@@ -2875,6 +2887,12 @@ button.choice-option:active:not(:disabled) .choice-badge {
 }
 .choice-input {
   background: var(--bg);
+  resize: none;
+  max-height: 160px;
+  overflow-y: auto;
+  font: inherit;
+  font-size: var(--text-lg);
+  line-height: 1.35;
 }
 .choice-input:disabled {
   opacity: 0.85;
