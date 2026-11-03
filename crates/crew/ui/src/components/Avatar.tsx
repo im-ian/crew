@@ -1,7 +1,8 @@
-import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { avatarColor, avatarPhase, initialOf, resolveFace } from "../avatar";
 import type { AgentStatus } from "../types";
 import { useBotSignal } from "../botSignals";
+import { useOrbitRoll } from "../orbitRoll";
 import { useWorkLook, type WorkLook } from "../workLook";
 import { BotFace } from "./BotFace";
 import { WorkProps } from "./WorkProps";
@@ -57,6 +58,11 @@ function StatusOrbit({
       <i>
         <b />
       </i>
+      {status === "working" ? (
+        <i>
+          <b />
+        </i>
+      ) : null}
       {status === "blocked" ? <u /> : null}
     </span>
   );
@@ -89,6 +95,12 @@ export function Avatar({
   const live = faceStatus(status, badge);
   const drawn = useWorkLook(live === "working", id);
   const signal = useBotSignal(id);
+  const root = useRef<HTMLElement | null>(null);
+  const setRoot = useCallback((el: HTMLElement | null) => {
+    root.current = el;
+  }, []);
+  // Two satellites on a hoop that tilts to a new angle every few seconds.
+  useOrbitRoll(live === "working", id, root);
   // A bot waiting on an answer is not busy, so it sets its tools down.
   const look = live === "working" && !signal.asking ? (workLook ?? drawn) : null;
   const letterBg = id ? avatarColor(id) : "#3a3a3c";
@@ -140,6 +152,7 @@ export function Avatar({
   if (as === "button") {
     return (
       <button
+        ref={setRoot}
         type="button"
         className={cls}
         style={style}
@@ -152,7 +165,13 @@ export function Avatar({
   }
   const Tag = as === "span" ? "span" : "div";
   return (
-    <Tag className={cls} style={style} title={title} onClick={onClick}>
+    <Tag
+      ref={setRoot}
+      className={cls}
+      style={style}
+      title={title}
+      onClick={onClick}
+    >
       {body}
     </Tag>
   );

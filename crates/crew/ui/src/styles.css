@@ -1292,6 +1292,57 @@ button.avatar {
 .avatar-orbit.is-blocked b {
   animation-duration: 3.4s;
 }
+/* Working: two satellites on a hoop that tilts to a new angle every few seconds.
+   orbitRoll.ts writes --orbit-rot (the plane's turn), --orbit-k (how flat it looks)
+   and --orbit-r (how far out it sits) on the avatar, and the avatar glides to each.
+   A bead is as tall as it is wide divided by --orbit-k, so the flattening renders it
+   round. Without a roll the registered defaults give the plain tilted hoop; keep them
+   in step with ORBIT_REST in orbitRoll.ts. The var() fallbacks are the same rest
+   hoop, for a WebView that cannot register the properties (it then steps between
+   rolls instead of gliding). */
+@property --orbit-rot {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0deg;
+}
+@property --orbit-k {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0.42;
+}
+@property --orbit-r {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0.15;
+}
+.avatar.is-working {
+  transition:
+    --orbit-rot 2.6s ease-in-out,
+    --orbit-k 2.6s ease-in-out,
+    --orbit-r 2.6s ease-in-out;
+}
+.avatar-orbit.is-working {
+  inset: calc(var(--orbit-r, 0.15) * var(--orbit-ref, 40px) * -1);
+  transform: rotate(var(--orbit-rot, 0deg)) scaleY(var(--orbit-k, 0.42));
+}
+.avatar-orbit.is-working i,
+.avatar-orbit.is-working b {
+  animation-duration: 2.3s;
+}
+.avatar-orbit.is-working b {
+  --bead: var(--orbit-bead, 4.5px);
+  width: var(--bead);
+  height: calc(var(--bead) / var(--orbit-k, 0.42));
+  margin: calc(var(--bead) / var(--orbit-k, 0.42) * -0.5) 0 0 calc(var(--bead) * -0.5);
+}
+.avatar-orbit.is-working.is-back b {
+  --bead: calc(var(--orbit-bead, 4.5px) * 0.72);
+}
+/* The second satellite rides half a lap behind the first. */
+.avatar-orbit.is-working i + i,
+.avatar-orbit.is-working i + i b {
+  animation-delay: calc(var(--avatar-phase, 0) * -0.2s - 1.15s);
+}
 .avatar-orbit.is-blocked b {
   background: var(--blocked);
   box-shadow: 0 0 7px color-mix(in srgb, var(--blocked) 80%, white);
@@ -1337,17 +1388,19 @@ button.avatar {
     animation: none;
   }
   .avatar-orbit.is-back { display: none; }
+  /* the second satellite is only offset by a delay, so at rest it would sit on the first */
+  .avatar-orbit.is-working i + i { display: none; }
   /* back copy is hidden, so the front one carries the whole ring */
   .avatar-orbit.is-front u { clip-path: none; }
 }
 .mention-chip .avatar-orbit {
   display: none;
 }
-.who-avatar .avatar-orbit {
+.who-avatar .avatar-orbit:not(.is-working) {
   inset: -3px;
 }
 .who-avatar .avatar-orbit u::before { border-width: 1.5px; }
-.who-avatar .avatar-orbit b {
+.who-avatar .avatar-orbit:not(.is-working) b {
   width: 3.6px;
   height: 8.6px;
   margin: -4.3px 0 0 -1.8px;
@@ -3618,6 +3671,8 @@ button.choice-option:active:not(:disabled) .choice-badge {
   height: 18px;
   font-size: 8px;
   flex-shrink: 0;
+  --orbit-ref: 20px;
+  --orbit-bead: 3.6px;
 }
 .who-name {
   color: var(--who-color, var(--muted));
