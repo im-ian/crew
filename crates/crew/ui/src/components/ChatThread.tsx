@@ -11,6 +11,7 @@ import {
 } from "react";
 import { ARRIVE_MS, OPEN_SLACK_MS, playArrive, useArriving } from "../arrive";
 import { useLocale, useT } from "../LocaleContext";
+import { useBotLabel } from "../BotLabelContext";
 import type { TFn } from "../i18n";
 import type { ReplyTarget } from "../reply";
 import { splitReply } from "../reply";
@@ -1046,7 +1047,8 @@ function TransferNote({
 }) {
   const agent = agents.find((a) => a.id === otherId) ?? null;
   const t = useT();
-  const who = displayWho(otherId, agent, t);
+  const labelOf = useBotLabel();
+  const who = displayWho(otherId, agent, t, labelOf);
   const open =
     onSelectAgent && agent ? () => onSelectAgent(agent.id) : undefined;
   // Starts open when there is no chip of its own. A later note adds the chip
@@ -1417,6 +1419,7 @@ function NoteGroup({
   highlightId?: string | null;
 }) {
   const t = useT();
+  const labelOf = useBotLabel();
   const [open, setOpen] = useState(false);
   const hit = items.some((m) => m.id === highlightId);
   const agent = agents.find((a) => a.id === peerId) ?? null;
@@ -1429,7 +1432,7 @@ function NoteGroup({
   const show = (!side && open) || hit;
   // One note wears the same chip as many. The row stays a run, so opening it
   // keeps this mounted and the note inside keeps its body when the next arrives.
-  const who = displayWho(peerId, agent, t);
+  const who = displayWho(peerId, agent, t, labelOf);
   const queued = items.some((m) => m.queued);
   return (
     <div className={"note-run" + (queued ? " queued" : "")}>
@@ -2182,6 +2185,7 @@ function Bubble({
   lookAt?: CaretPoint | null;
 }) {
   const t = useT();
+  const labelOf = useBotLabel();
   const text =
     m.role === "assistant" ? stripCrewMarkers(m.text || "") : m.text || "";
   if (m.role !== "user") {
@@ -2192,7 +2196,7 @@ function Bubble({
       <Incoming
         message={{ ...m, text }}
         agent={agent}
-        who={displayWho(m.from, agent, t)}
+        who={displayWho(m.from, agent, t, labelOf)}
         agents={agents}
         caret={caret}
         openName={!self}

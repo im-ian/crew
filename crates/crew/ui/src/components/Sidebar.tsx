@@ -36,6 +36,8 @@ import {
 } from "../remote";
 import { Avatar } from "./Avatar";
 import { MentionChip } from "./MentionChip";
+import { BotLabelProvider } from "../BotLabelContext";
+import { botSearchText } from "../botLabel";
 import { PlanUsageButton } from "./PlanUsageBar";
 import { ChevronDown, Ellipsis, Plus, Search, Settings } from "../icons";
 
@@ -414,8 +416,7 @@ export function Sidebar({
   const hit = (item: RailItem) =>
     matches(
       [
-        item.agent?.name,
-        item.agent?.id,
+        item.agent ? botSearchText(item.agent, groups) : null,
         item.agent?.title,
         item.agent?.role,
         item.agent?.remote,
@@ -1431,13 +1432,16 @@ function ItemRow({
         </div>
         {item.preview ? (
           <div className="agent-preview">
-            {previewRuns.map((run, i) =>
-              run.agent ? (
-                <MentionChip key={i} agent={run.agent} />
-              ) : (
-                <span key={i}>{run.text}</span>
-              ),
-            )}
+            {/* The preview is this bot's chat, so its group is the one left off. */}
+            <BotLabelProvider viewer={item.id}>
+              {previewRuns.map((run, i) =>
+                run.agent ? (
+                  <MentionChip key={i} agent={run.agent} />
+                ) : (
+                  <span key={i}>{run.text}</span>
+                ),
+              )}
+            </BotLabelProvider>
           </div>
         ) : null}
       </div>

@@ -4,10 +4,11 @@ import { flushSync } from "react-dom";
 import type { AgentInfo, EditResult, Kind, Skill } from "../types";
 import { api } from "../api";
 import { useT } from "../LocaleContext";
+import { useBotLabel, useLabelGroups } from "../BotLabelContext";
+import { botSearchText } from "../botLabel";
 import { mediaKind } from "../markdown";
 import {
   mentionIds,
-  mentionLabel,
   mentionMatches,
   resolveMention,
   trimMentionPunct,
@@ -95,6 +96,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   onCaret,
 }, ref) {
   const t = useT();
+  const labelOf = useBotLabel();
+  const groups = useLabelGroups();
   const inputRef = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
   const [mention, setMention] = useState<Mention | null>(null);
@@ -161,10 +164,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     if (!mention) return [];
     const bots = agents.filter((a) => {
       if (selectedKind === "agent" && a.id === selected) return false;
-      return mentionMatches(a, mention.query);
+      // The row shows the group too, so the group's name finds it.
+      return (
+        mentionMatches(a, mention.query) ||
+        botSearchText(a, groups).toLowerCase().includes(mention.query.toLowerCase())
+      );
     });
     return bots.slice(0, 8);
-  }, [agents, mention, selected, selectedKind]);
+  }, [agents, groups, mention, selected, selectedKind]);
 
   const skillMatches = useMemo(() => {
     if (!slash) return [];
@@ -249,7 +256,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   }
 
   function pickMention(agent: AgentInfo) {
-    if (!insertChip(inputRef.current, () => renderChip(<MentionChip agent={agent} />))) return;
+    if (!insertChip(inputRef.current, () => renderChip(<MentionChip agent={agent} label={labelOf(agent)} />))) return;
     setMention(null);
     refreshEmpty();
     fit();
@@ -600,7 +607,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
                   shape={a.avatar_shape}
                   color={a.avatar_color}
                 />
-                <span className="mention-name">{mentionLabel(a)}</span>
+                <span className="mention-name">{labelOf(a)}</span>
                 {/* A teammate's id is an account number; its server says more. */}
                 {!a.remote && a.name && a.name !== a.id ? (
                   <span className="mention-id">{a.id}</span>
@@ -939,7 +946,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
               const at = before.match(/(^|[\s])@(\S+)$/);
               const token = at ? trimMentionPunct(at[2]) : "";
               const agent = token ? resolveMention(token, agents) : undefined;
-              if (agent && insertChip(inputRef.current, () => renderChip(<MentionChip agent={agent} />))) {
+              if (agent && insertChip(inputRef.current, () => renderChip(<MentionChip agent={agent} label={labelOf(agent)} />))) {
                 e.preventDefault();
                 setMention(null);
                 refreshEmpty();

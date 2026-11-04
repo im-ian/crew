@@ -11,8 +11,9 @@ export function displayWho(
   id: string,
   agent: AgentInfo | null,
   t: TFn,
+  label?: (agent: AgentInfo) => string,
 ): string {
-  if (agent) return agent.name || agent.id;
+  if (agent) return label ? label(agent) : agent.name || agent.id;
   const sub = subagentType(id);
   if (sub) return t("thread.subagent", { name: sub });
   return id.startsWith("#") ? id : t("thread.deletedBot");
