@@ -93,7 +93,6 @@ export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
   let lead;
   let words;
   let full: string;
-  let action: string | null = null;
   if (bot && "botId" in shown) {
     const said = t(`island.${shown.kind}`);
     const face = resolveFace(bot.id, bot.avatar_shape, bot.avatar_color);
@@ -116,7 +115,6 @@ export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
       </>
     );
     full = `${who} ${said}`;
-    action = kind === "question" ? t("island.answer") : kind === "success" ? null : t("island.open");
   } else {
     lead = <span className="island-dot" />;
     words = "text" in shown ? shown.text : "";
@@ -146,7 +144,7 @@ export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
               <Check size={15} />
             </span>
           ) : null}
-          {action && bot ? (
+          {bot ? (
             <button
               type="button"
               className="island-go"
@@ -155,7 +153,7 @@ export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
                 onOpenBot(bot.id);
               }}
             >
-              {action}
+              {t("island.go")}
             </button>
           ) : null}
           {stays ? (
