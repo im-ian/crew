@@ -194,6 +194,9 @@ struct State {
     team_waiters: HashMap<String, Vec<oneshot::Sender<Result<(), String>>>>,
     /// Renames waiting on their router, by frame id: the error code on refusal.
     rename_waiters: HashMap<String, oneshot::Sender<Result<(), String>>>,
+    /// Tells the owner picked on a hand-on card: (representative, bot, text).
+    /// They go through once without another card.
+    picked: HashSet<(String, String, String)>,
 }
 
 fn state() -> &'static Mutex<State> {
@@ -1584,6 +1587,221 @@ async fn ask_trust(alias: String, bot: String, v: Value) {
     }
 }
 
+// ---- handing a teammate's work to a local bot ----
+
+const KEEP_IT: &str = "맡기지 않기";
+const MAX_CANDIDATES: usize = 4;
+
+/// A representative's `crew tell` to a local bot outside its folder, made in a
+/// teammate's job. Crew holds it and asks the owner which bot takes the work;
+/// `true` means it is held. A tell to its folder's bots goes straight on.
+pub fn hold_local_tell(
+    rep: &str,
+    to: &str,
+    text: &str,
+    origin: Option<TurnOrigin>,
+    roster: &[AgentConfig],
+) -> bool {
+    if to == rep || split_id(to).is_some() || !is_rep(rep) || is_rep(to) {
+        return false;
+    }
+    {
+        let Ok(mut st) = state().lock() else {
+            return false;
+        };
+        if st
+            .picked
+            .remove(&(rep.to_string(), to.to_string(), text.to_string()))
+        {
+            return false;
+        }
+        // The owner talking to it, or a routine, is not a teammate's job.
+        if current_in(&mut st, rep, origin.as_ref()).is_none() {
+            return false;
+        }
+    }
+    if rep_folder(rep).is_some_and(|f| in_folder(&f, to)) {
+        return false;
+    }
+    let Ok(rt) = tokio::runtime::Handle::try_current() else {
+        return false;
+    };
+    // The job waits for the work to come back, as for any tell of its own.
+    on_local_tell(rep, origin.as_ref());
+    let name = roster
+        .iter()
+        .find(|a| a.id == rep)
+        .map(|a| a.display_name().to_string())
+        .unwrap_or_else(|| rep.to_string());
+    let candidates = hand_on_candidates(rep, to, text, roster);
+    let reps = rep_bots();
+    let others: Vec<(String, String)> = roster
+        .iter()
+        .filter(|a| a.id != rep && !reps.contains(&a.id) && split_id(&a.id).is_none())
+        .map(|a| (a.id.clone(), a.display_name().to_string()))
+        .collect();
+    rt.spawn(ask_hand_on(rep.to_string(), name, text.to_string(), origin, candidates, others));
+    true
+}
+
+/// Who the card offers, as (id, label): the bot the representative named
+/// first, then bots the work @mentions, then bots whose name, id or role the
+/// work spells out. Never a representative, never a bot on another PC.
+fn hand_on_candidates(
+    rep: &str,
+    to: &str,
+    text: &str,
+    roster: &[AgentConfig],
+) -> Vec<(String, String)> {
+    let reps = rep_bots();
+    let pool: Vec<&AgentConfig> = roster
+        .iter()
+        .filter(|a| a.id != rep && !reps.contains(&a.id) && split_id(&a.id).is_none())
+        .collect();
+    let lower = text.to_lowercase();
+    let spelled = |word: &str| {
+        let w = word.trim().to_lowercase();
+        w.chars().count() >= 2 && lower.contains(&w)
+    };
+    let mentioned: Vec<String> = crate::config::mention_tokens(text)
+        .into_iter()
+        .map(|t| t.to_lowercase())
+        .collect();
+    let mut ids: Vec<String> = Vec::new();
+    let mut add = |id: &str| {
+        if ids.len() < MAX_CANDIDATES && !ids.iter().any(|i| i == id) {
+            ids.push(id.to_string());
+        }
+    };
+    if let Some(a) = pool.iter().find(|a| a.id == to) {
+        add(&a.id);
+    }
+    for a in &pool {
+        if mentioned.contains(&a.id.to_lowercase()) {
+            add(&a.id);
+        }
+    }
+    for a in &pool {
+        let role = a.role.as_deref().unwrap_or("");
+        if spelled(a.display_name())
+            || spelled(&a.id)
+            || role.split(|c: char| c.is_whitespace() || c == ',' || c == '·').any(spelled)
+        {
+            add(&a.id);
+        }
+    }
+    let name = |id: &str| {
+        pool.iter()
+            .find(|a| a.id == id)
+            .map(|a| a.display_name().to_string())
+            .unwrap_or_else(|| id.to_string())
+    };
+    ids.iter()
+        .map(|id| {
+            let n = name(id);
+            let twin = ids.iter().any(|o| o != id && name(o) == n);
+            let label = if twin { format!("{n} · {id}") } else { n };
+            (id.clone(), label)
+        })
+        .collect()
+}
+
+/// The bot the owner picked on the card, or `None` to keep the work. The
+/// answer reads `question → pick`; a typed name may pick a bot the card did
+/// not offer, from `others`.
+fn picked_bot(
+    answer: &str,
+    candidates: &[(String, String)],
+    others: &[(String, String)],
+) -> Option<String> {
+    let a = answer.rsplit(" → ").next().unwrap_or("").trim();
+    if a.is_empty() || a.contains(KEEP_IT) || a.starts_with("Keep it") {
+        return None;
+    }
+    // The longest label first, so `리뷰어 2` is not read as `리뷰어`.
+    let mut by_len: Vec<&(String, String)> = candidates.iter().collect();
+    by_len.sort_by_key(|(_, label)| std::cmp::Reverse(label.chars().count()));
+    by_len
+        .into_iter()
+        .find(|(_, label)| a == label || a.contains(label.as_str()))
+        .or_else(|| {
+            others
+                .iter()
+                .find(|(id, label)| a.eq_ignore_ascii_case(id) || a == label)
+        })
+        .map(|(id, _)| id.clone())
+}
+
+async fn ask_hand_on(
+    rep: String,
+    name: String,
+    text: String,
+    origin: Option<TurnOrigin>,
+    candidates: Vec<(String, String)>,
+    others: Vec<(String, String)>,
+) {
+    let question = if ko() {
+        format!("{name}이(가) 팀원이 맡긴 일을 이 PC의 봇에게 넘기려 해요. 어느 봇에게 맡길까요?")
+    } else {
+        format!("{name} wants to hand a teammate's work to a bot on this PC. Which bot takes it?")
+    };
+    let mut options: Vec<String> = candidates.iter().map(|(_, label)| label.clone()).collect();
+    options.push(say(KEEP_IT, "Keep it — answer the teammate itself"));
+    let ask = AskQuestion {
+        question,
+        options,
+        inputs: Vec::new(),
+        hint: Some(preview(&text)),
+        multi: false,
+    };
+    let picked = match crate::daemon::open_ask(&rep, &[ask]) {
+        Ok((card, rx)) => {
+            let key = (rep.clone(), card);
+            if let Ok(mut st) = state().lock() {
+                st.jobs.cards.push(key.clone());
+                save_jobs(&st);
+            }
+            let answer = match rx.await {
+                Ok(Event::Answered { text }) => picked_bot(&text, &candidates, &others),
+                _ => None,
+            };
+            if let Ok(mut st) = state().lock() {
+                st.jobs.cards.retain(|c| c != &key);
+                save_jobs(&st);
+            }
+            answer
+        }
+        Err(err) => {
+            eprintln!("[crew] remote: could not ask who takes {rep}'s work: {err:#}");
+            None
+        }
+    };
+    let sent = picked.and_then(|to| {
+        if let Ok(mut st) = state().lock() {
+            st.picked.insert((rep.clone(), to.clone(), text.clone()));
+        }
+        match crate::daemon::tell_as(&rep, &to, &text, origin) {
+            Ok(()) => Some(()),
+            Err(err) => {
+                eprintln!("[crew] remote: could not hand {rep}'s work to {to}: {err:#}");
+                if let Ok(mut st) = state().lock() {
+                    st.picked.remove(&(rep.clone(), to, text.clone()));
+                }
+                None
+            }
+        }
+    });
+    if sent.is_none() {
+        let note = say(
+            "주인이 이 일을 다른 봇에게 맡기지 않기로 했어요. 직접 처리해서 팀원에게 답하세요.",
+            "Your owner chose not to hand this work to another bot. Do it yourself and answer the teammate.",
+        );
+        if let Err(err) = crate::daemon::wake_from_crew(&rep, &note) {
+            eprintln!("[crew] remote: could not wake {rep}: {err:#}");
+        }
+    }
+}
+
 fn update_cfg(alias: &str, f: impl FnOnce(&mut RemoteConfig)) {
     if let Ok(mut st) = state().lock() {
         if let Some(link) = st.links.get_mut(alias) {
@@ -2217,7 +2435,7 @@ pub fn rep_note(agent: &AgentConfig, roster: &[AgentConfig]) -> Option<String> {
             list(&local)
         ),
         None => format!(
-            "Local bots on this PC: {}. Before you hand work to one with `crew tell <id> <text>`, ask your owner with `crew ask` which one, offering only the bots that fit the work, and hand it only to the one they pick. ",
+            "Local bots on this PC: {}. Hand work to the one that fits best with `crew tell <id> <text>`; Crew asks your owner on a card which bot takes it, and the work goes to the one they pick. ",
             list(&local)
         ),
     };
@@ -2636,6 +2854,38 @@ mod tests {
     }
 
     #[test]
+    fn the_hand_on_card_offers_the_named_bot_then_related_ones() {
+        let bot = |id: &str, name: &str, role: Option<&str>| {
+            let mut a = AgentConfig::new(id.into(), name.into(), vec!["cat".into()], None);
+            a.role = role.map(str::to_string);
+            a
+        };
+        let roster = vec![
+            bot("rep", "이안", None),
+            bot("impl", "구현", None),
+            bot("review", "리뷰어", Some("코드 리뷰")),
+            bot("design", "디자이너", None),
+            bot("notes", "메모", None),
+            bot("team/acc_x", "원격", None),
+        ];
+        let ids = |v: Vec<(String, String)>| v.into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+        assert_eq!(
+            ids(hand_on_candidates("rep", "impl", "구현 끝나면 리뷰 부탁하고 @design 에게 화면도", &roster)),
+            ["impl", "design", "review"]
+        );
+        assert_eq!(ids(hand_on_candidates("rep", "notes", "정리해 줘", &roster)), ["notes"]);
+
+        let offered = hand_on_candidates("rep", "impl", "리뷰어 확인", &roster);
+        let others = vec![("notes".to_string(), "메모".to_string())];
+        let q = "이안이(가) 팀원이 맡긴 일을 이 PC의 봇에게 넘기려 해요. 어느 봇에게 맡길까요?";
+        assert_eq!(picked_bot(&format!("{q} → 리뷰어"), &offered, &others), Some("review".into()));
+        assert_eq!(picked_bot(&format!("{q} → 구현"), &offered, &others), Some("impl".into()));
+        assert_eq!(picked_bot(&format!("{q} → 메모"), &offered, &others), Some("notes".into()));
+        assert_eq!(picked_bot(&format!("{q} → {KEEP_IT}"), &offered, &others), None);
+        assert_eq!(picked_bot(&format!("{q} → (답 없음)"), &offered, &others), None);
+    }
+
+    #[test]
     fn the_first_request_card_reads_the_owners_pick() {
         let [always, once, deny, block] = [
             format!("{TRUST_ALWAYS} — 앞으로 이 팀원의 요청은 바로 실행"),
@@ -2785,7 +3035,7 @@ mod tests {
             assert!(rep.contains(&"secret".to_string()));
             assert!(!rep.contains(&"other-rep".to_string()));
             let note = rep_note(&local("rep"), &roster_for("rep", roster)).unwrap();
-            assert!(note.contains("ask your owner with `crew ask`"), "{note}");
+            assert!(note.contains("Crew asks your owner on a card"), "{note}");
 
             state().lock().unwrap().links.remove(alias);
             state().lock().unwrap().links.remove(other);

@@ -135,6 +135,28 @@ if (remoteShot) {
       members: [], trusted: [], blocked: [],
     });
   }
+  // `?shot=remote-handon`: the representative, outside a folder, wants to hand
+  // 민지's work on, and the owner picks the bot.
+  thread.rep = [
+    { id: "h1", role: "system", from: "acme/acc_k3j9x0", kind: "received", ts: at(5), text: "주문 API에 `discount` 필드 넣고, 화면 문구도 같이 봐 주세요." },
+    { id: "h2", role: "assistant", from: "rep", ts: at(4), text: "구현 봇에게 맡겨 볼게요." },
+    {
+      id: "h3", role: "assistant", from: "rep", ts: at(4), text: "",
+      choice: {
+        id: "h3:q", state: "pending",
+        questions: [{
+          question: "이안이(가) 팀원이 맡긴 일을 이 PC의 봇에게 넘기려 해요. 어느 봇에게 맡길까요?",
+          hint: "주문 API에 discount 필드를 넣고 마이그레이션까지 만들어 주세요. 화면 문구는 @design 에게 확인",
+          options: [
+            { id: "A", label: "구현" },
+            { id: "B", label: "디자이너" },
+            { id: "C", label: "리뷰어" },
+            { id: "D", label: "맡기지 않기" },
+          ],
+        }],
+      },
+    },
+  ];
   thread["acme/acc_k3j9x0"] = [
     { id: "x1", role: "user", from: "user", ts: at(9), text: "주문 API에 `discount` 필드 넣을 수 있을까요? 금요일 배포 전에요." },
     { id: "x2", role: "assistant", from: "acme/acc_k3j9x0", ts: at(6), text: "네, 스키마에 넣고 마이그레이션까지 만들게요. 끝나면 PR 링크 드릴게요." },
@@ -145,7 +167,8 @@ const probe: RemoteServer = {
   url: "wss://router.acme.dev:7420", name: "crew-router", version: "0.1.0", protocol: 1, title: "Acme Team", signup: "invite",
 };
 // The App opens the first bot in the list.
-const first = shot === "routines" ? "brief" : remoteShot ? "acme/acc_k3j9x0" : "impl";
+const first =
+  shot === "routines" ? "brief" : shot === "remote-handon" ? "rep" : remoteShot ? "acme/acc_k3j9x0" : "impl";
 agents.sort((a, b) => (a.id === first ? -1 : b.id === first ? 1 : 0));
 
 localStorage.clear();

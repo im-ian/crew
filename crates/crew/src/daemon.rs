@@ -3396,6 +3396,30 @@ fn tell_agent(from: &str, to: &str, text: &str) -> anyhow::Result<()> {
     tell_agent_origin(from, to, text, None, true, &mut VecDeque::new())
 }
 
+/// A tell sent for `from` once its owner allowed it, as if `from` sent it in
+/// the turn `origin` stands for.
+pub(crate) fn tell_as(
+    from: &str,
+    to: &str,
+    text: &str,
+    origin: Option<TurnOrigin>,
+) -> anyhow::Result<()> {
+    tell_agent_origin(from, to, text, origin, true, &mut VecDeque::new())
+}
+
+/// Crew's own word to `bot`, which opens a turn. It reads like a local bot's
+/// answer, so a representative's waiting job picks it up.
+pub(crate) fn wake_from_crew(bot: &str, text: &str) -> anyhow::Result<()> {
+    ensure_accepts_turn(bot)?;
+    let origin = TurnOrigin {
+        from: "crew".into(),
+        ..TurnOrigin::default()
+    };
+    let envelope = crate::protocol::envelope("crew", text);
+    let msg = crate::transcript::push_system(bot, "crew", text, None);
+    submit_delivery(bot, &envelope, true, Some(msg.id), origin)
+}
+
 /// `then` is the rest of a chain that waits on this tell's turn.
 fn tell_agent_origin(
     from: &str,
@@ -3420,6 +3444,20 @@ fn tell_agent_origin(
     }
     let from = from_id(from);
     ensure_accepts_turn(to)?;
+    // A representative handing a teammate's work outside its folder waits
+    // for its owner to pick the bot.
+    if allow_defer
+        && from != "user"
+        && crate::remote::hold_local_tell(
+            &from,
+            to,
+            text,
+            origin.clone().or_else(|| get_origin(&from)),
+            &roster_vec(),
+        )
+    {
+        return Ok(());
+    }
     // Hold this tell until the sender is idle so it does not overlap that turn.
     // A representative's own `crew tell` during a remote job: the job waits
     // for that bot's answer instead of ending with this turn.
