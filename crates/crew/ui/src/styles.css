@@ -5110,35 +5110,6 @@ button.mention-chip:active {
   margin-left: var(--space-8);
   color: var(--faint);
 }
-.remote-picks {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  max-width: 340px;
-  margin: var(--space-6) 0 0;
-  padding: 0;
-  list-style: none;
-}
-.remote-pick {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-  padding: var(--space-4) var(--space-6);
-  border-radius: var(--radius-md);
-  color: var(--ink);
-  font-size: var(--text-lg);
-}
-.remote-pick-avatar {
-  width: 20px;
-  height: 20px;
-  font-size: 9px;
-}
-.remote-pick-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .remote-people {
   list-style: none;
   margin: 0;

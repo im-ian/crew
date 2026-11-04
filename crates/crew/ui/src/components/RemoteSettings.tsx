@@ -3,8 +3,7 @@ import { api, errMsg } from "../api";
 import { ChevronDown } from "../icons";
 import { useT } from "../LocaleContext";
 import { toggled } from "../remote";
-import type { AgentInfo, Group, RemoteAccount, RemoteInfo } from "../types";
-import { Avatar } from "./Avatar";
+import type { AgentInfo, RemoteAccount, RemoteInfo } from "../types";
 import { CopyButton } from "./CopyButton";
 import { Field } from "./Field";
 
@@ -17,8 +16,6 @@ export type RemoteChange = {
 type Props = {
   remotes: RemoteInfo[];
   agents: AgentInfo[];
-  /** Sidebar folders: the representative's folder is who it hands work to. */
-  groups: Group[];
   /** The page is showing, so the team memos can be read. */
   active: boolean;
   onSet: (change: RemoteChange) => Promise<void>;
@@ -31,7 +28,7 @@ type Props = {
  * folded to its head until opened, so a second router is not a long scroll
  * below the first.
  */
-export function RemoteSettings({ remotes, agents, groups, active, onSet, onLeave, onAdd }: Props) {
+export function RemoteSettings({ remotes, agents, active, onSet, onLeave, onAdd }: Props) {
   const t = useT();
   const [open, setOpen] = useState<string[]>([]);
   const add = (
@@ -47,7 +44,6 @@ export function RemoteSettings({ remotes, agents, groups, active, onSet, onLeave
       </div>
     );
   }
-  const reps = new Set(remotes.map((r) => r.bot));
   return (
     <div className="remote-cards">
       {remotes.map((r) => (
@@ -55,8 +51,6 @@ export function RemoteSettings({ remotes, agents, groups, active, onSet, onLeave
           key={r.alias}
           remote={r}
           agents={agents}
-          groups={groups}
-          reps={reps}
           open={open.includes(r.alias)}
           onToggle={() => setOpen((prev) => toggled(prev, r.alias))}
           active={active}
@@ -72,8 +66,6 @@ export function RemoteSettings({ remotes, agents, groups, active, onSet, onLeave
 function RemoteCard({
   remote: r,
   agents,
-  groups,
-  reps,
   open,
   onToggle,
   active,
@@ -82,8 +74,6 @@ function RemoteCard({
 }: {
   remote: RemoteInfo;
   agents: AgentInfo[];
-  groups: Group[];
-  reps: Set<string>;
   open: boolean;
   onToggle: () => void;
   active: boolean;
@@ -93,11 +83,6 @@ function RemoteCard({
   const t = useT();
   const [busy, setBusy] = useState(false);
   const rep = agents.find((a) => a.id === r.bot);
-  const folder = groups.find((g) => g.items.includes(`agent:${r.bot}`));
-  // Its folder's bots, but not a representative: that one works for another team.
-  const delegates = folder
-    ? agents.filter((a) => !reps.has(a.id) && folder.items.includes(`agent:${a.id}`))
-    : [];
   const bodyId = `remote-card-${r.alias}`;
 
   async function change(next: Omit<RemoteChange, "alias">) {
@@ -148,35 +133,6 @@ function RemoteCard({
           </dd>
         </dl>
         <div className="form-stack">
-          <Field label={t("remote.delegates")} hint={t("remote.delegatesNote")}>
-            <p className="apply-note">
-              {folder
-                ? t("remote.delegatesFolder", { folder: folder.name })
-                : t("remote.delegatesAsk")}
-            </p>
-            {folder ? (
-              delegates.length ? (
-                <ul className="remote-picks">
-                  {delegates.map((a) => (
-                    <li key={a.id} className="remote-pick">
-                      <Avatar
-                        as="span"
-                        className="remote-pick-avatar"
-                        id={a.id}
-                        name={a.name || a.id}
-                        src={a.avatar}
-                        shape={a.avatar_shape}
-                        color={a.avatar_color}
-                      />
-                      <span className="remote-pick-name">{a.name || a.id}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="apply-note">{t("remote.noDelegates")}</p>
-              )
-            ) : null}
-          </Field>
           <Field label={t("remote.trusted")} hint={t("remote.trustedNote")}>
             <People
               people={r.trusted}
