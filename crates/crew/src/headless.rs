@@ -865,6 +865,12 @@ fn spawn_and_stream(
     if let Ok(inner) = session.inner.lock() {
         state.session_id = inner.session_id.clone();
     }
+    // Codex leaves its compacts out of the stream; its rollout has them. A
+    // resumed thread is opened now, before codex can compact it this turn.
+    let mut rollout = None;
+    if cli == CliKind::Codex {
+        note_codex_compacts(&mut rollout, &mut state);
+    }
     let mut plain = String::new();
     let mut sealed = false;
     let reader = BufReader::new(stdout);
@@ -904,6 +910,11 @@ fn spawn_and_stream(
                 continue;
             }
         }
+        // Before this line's text: codex wrote the compact before it went on.
+        if cli == CliKind::Codex {
+            note_codex_compacts(&mut rollout, &mut state);
+        }
+        show_compacts(session, &mut state);
         let mut turn_end = false;
         // grok/claude/codex stream every reply as JSON, so a bare line there is
         // CLI chatter and must never become the answer. A text CLI's stdout is
@@ -960,6 +971,7 @@ fn spawn_and_stream(
                 plain.push_str(line);
             }
         }
+        show_compacts(session, &mut state);
         if let Some(id) = state.session_id.as_ref() {
             if let Ok(mut inner) = session.inner.lock() {
                 inner.session_id = Some(id.clone());
@@ -979,6 +991,11 @@ fn spawn_and_stream(
             state.got_text = true;
         }
         flush_held_tools(session, &mut state);
+    }
+    // A compact after the last line, such as one past the reply.
+    if cli == CliKind::Codex {
+        note_codex_compacts(&mut rollout, &mut state);
+        show_compacts(session, &mut state);
     }
 
     let status = {
@@ -1023,6 +1040,30 @@ fn spawn_and_stream(
         error,
         compacted: state.compacted,
     })
+}
+
+/// A compact the chat has not shown yet gets its line, above the reply.
+fn show_compacts(session: &HeadlessSession, state: &mut ParseState) {
+    if std::mem::take(&mut state.compact_unshown) {
+        crate::transcript::push_compact_note(&session.id);
+    }
+}
+
+/// The thread is known once codex names it, or from the start on a resume.
+fn note_codex_compacts(
+    rollout: &mut Option<crate::codex_rollout::Rollout>,
+    state: &mut ParseState,
+) {
+    let Some(thread) = state.session_id.as_deref() else {
+        return;
+    };
+    if rollout.as_ref().map_or(true, |r| r.thread() != thread) {
+        *rollout = Some(crate::codex_rollout::Rollout::new(thread));
+    }
+    if rollout.as_mut().is_some_and(|r| r.compactions() > 0) {
+        state.compacted = true;
+        state.compact_unshown = true;
+    }
 }
 
 /// Each CLI's own "turn over" event. The process outlives it by about a second
@@ -1203,6 +1244,8 @@ struct ParseState {
     compact_replay: bool,
     /// The session was compacted this turn, so notes it was given may be gone.
     compacted: bool,
+    /// A compact finished and the chat has not said so yet.
+    compact_unshown: bool,
     /// Tokens held since the compact, joined in arrival order.
     replay_buf: String,
     /// Assistant text this turn already showed. Chunks are joined as the CLI
@@ -1345,6 +1388,10 @@ fn grok_text(v: &Value, state: &mut ParseState) -> Option<String> {
         }
         state.compact_replay = true;
         state.compacted = true;
+        // Started may still fail; only a finished compact gets a line.
+        if kind == "auto_compact_completed" {
+            state.compact_unshown = true;
+        }
         return None;
     }
     if matches!(kind, "auto_compact_failed" | "auto_compact_cancelled") {
@@ -2394,6 +2441,7 @@ fn claude_text(v: &Value, state: &mut ParseState) -> Option<String> {
         && v.get("subtype").and_then(Value::as_str) == Some("compact_boundary")
     {
         state.compacted = true;
+        state.compact_unshown = true;
         return None;
     }
     if let Some(delta) = claude_text_delta(v) {
@@ -3959,6 +4007,7 @@ mod tests {
             &mut st,
         );
         assert!(st.compacted);
+        assert!(st.compact_unshown);
         assert!(!st.got_text);
         let mut st = ParseState::default();
         ingest_line(
@@ -3967,6 +4016,16 @@ mod tests {
             &mut st,
         );
         assert!(st.compacted);
+        assert!(st.compact_unshown);
+        // A compact that has only started may still fail: no line for it yet.
+        let mut st = ParseState::default();
+        ingest_line(
+            CliKind::Grok,
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"auto_compact_started"}}}"#,
+            &mut st,
+        );
+        assert!(st.compacted);
+        assert!(!st.compact_unshown);
         let mut st = ParseState::default();
         ingest_line(
             CliKind::Claude,

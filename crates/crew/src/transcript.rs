@@ -188,7 +188,7 @@ fn is_for_user(msg: &ChatMessage) -> bool {
 /// away too. Either one lit the unread dot on a chat with nothing new in it.
 /// A card on a tool call still waits on the user.
 fn is_news(msg: &ChatMessage) -> bool {
-    if !is_for_user(msg) || is_subagent_note(msg) {
+    if !is_for_user(msg) || is_subagent_note(msg) || msg.kind == Some(MessageKind::Compact) {
         return false;
     }
     msg.kind != Some(MessageKind::Tool) || msg.choice.is_some() || msg.approval.is_some()
@@ -521,9 +521,7 @@ fn excluding(msgs: &[ChatMessage], skip: &[String]) -> Option<String> {
 
 fn prior_of(msgs: &[ChatMessage]) -> Option<String> {
     let mut end = msgs.len();
-    if let Some(last) = msgs.iter().rposition(|m| {
-        !m.queued && m.kind != Some(MessageKind::Tool) && !is_subagent_note(m)
-    }) {
+    if let Some(last) = msgs.iter().rposition(|m| !m.queued && !is_work(m)) {
         if msgs[last].role != Role::Assistant {
             end = last;
         }
@@ -536,7 +534,7 @@ fn recap_of(msgs: &[ChatMessage]) -> Option<String> {
     let mut used = 0;
     let mut cut = false;
     for msg in msgs.iter().rev() {
-        if msg.queued || msg.kind == Some(MessageKind::Tool) || is_subagent_note(msg) {
+        if msg.queued || is_work(msg) {
             continue;
         }
         let text = crate::rows::display_text(msg);
@@ -761,6 +759,12 @@ pub fn push_subagent(agent: &str, key: &str, from: &str, text: &str) -> ChatMess
     push_in_turn(agent, Some(key), from, text, kind)
 }
 
+/// How the turn went, not what was said: a tool call, a subagent note, or a
+/// compact. A recap of the chat leaves these out.
+fn is_work(msg: &ChatMessage) -> bool {
+    matches!(msg.kind, Some(MessageKind::Tool | MessageKind::Compact)) || is_subagent_note(msg)
+}
+
 /// A bot's talk with its own subagent. Like a tool call, it is how the bot
 /// did its work, not something said to the user.
 fn is_subagent_note(msg: &ChatMessage) -> bool {
@@ -813,13 +817,51 @@ fn push_in_turn(
             if let Some(id) = call_id {
                 chat.tool_ids.insert(id.to_string(), msg.id.clone());
             }
-            if let Some(idx) = chat.pending_idx {
-                chat.messages.insert(idx, msg.clone());
-                chat.pending_idx = Some(idx + 1);
-            } else {
-                chat.messages.push(msg.clone());
-            }
+            insert_in_turn(chat, msg.clone());
         }
+        persist(agent, chat);
+    }
+    emit(agent, msg.clone());
+    msg
+}
+
+/// Above the reply still being written, or last when there is none.
+fn insert_in_turn(chat: &mut AgentChat, msg: ChatMessage) {
+    if let Some(idx) = chat.pending_idx {
+        chat.messages.insert(idx, msg);
+        chat.pending_idx = Some(idx + 1);
+    } else {
+        chat.messages.push(msg);
+    }
+}
+
+/// Crew's line where the CLI folded the earlier conversation into a summary.
+/// It sits in the turn like a tool row, but with no peer: the whole session
+/// was folded, so it stays in the main chat even on a side chat's turn.
+pub fn push_compact_note(agent: &str) -> ChatMessage {
+    let text = if crate::paths::locale() == "en" {
+        "The earlier conversation was compacted."
+    } else {
+        "이전 대화는 압축됐어요."
+    };
+    let msg = ChatMessage {
+        id: new_id(),
+        role: Role::System,
+        from: "crew".to_string(),
+        text: text.to_string(),
+        ts: now_ms(),
+        queued: false,
+        peer: None,
+        kind: Some(MessageKind::Compact),
+        approval: None,
+        choice: None,
+        mention: false,
+    };
+    if let Ok(mut map) = chats().lock() {
+        let chat = map
+            .entry(agent.to_string())
+            .or_insert_with(AgentChat::empty);
+        insert_in_turn(chat, msg.clone());
         persist(agent, chat);
     }
     emit(agent, msg.clone());
@@ -2176,6 +2218,40 @@ mod tests {
         assert_eq!(rows[1].text, "It moved to parse.rs.");
         assert_eq!(rows[2].role, Role::Assistant);
         assert_eq!(rows[2].text, "I'll ask. Found it.");
+        drop_agent(&agent);
+    }
+
+    #[test]
+    fn a_compact_line_sits_above_the_reply_and_is_not_news() {
+        let agent = format!(
+            "compact-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        push_user(&agent, "user", "keep going");
+        // A side chat's turn: the whole session was folded all the same.
+        set_peer(&agent, Some("beta".into()));
+        begin_turn(&agent);
+        on_assistant_delta(&agent, "Picking up where we were.");
+        let note = push_compact_note(&agent);
+        on_assistant_delta(&agent, " Done.");
+        let rows = messages(&agent);
+        assert_eq!(rows.len(), 3, "the reply stays one bubble");
+        assert_eq!(rows[1].id, note.id);
+        assert_eq!(rows[1].from, "crew");
+        assert_eq!(rows[1].kind, Some(MessageKind::Compact));
+        assert_eq!(rows[1].peer, None, "it stays in the main chat");
+        assert_eq!(rows[2].role, Role::Assistant);
+        end_turn(&agent);
+        set_peer(&agent, None);
+        let sealed = messages(&agent);
+        assert!(!is_news(&sealed[1]), "no unread dot for a compact");
+        assert_eq!(preview(&agent).as_deref(), Some("keep going"));
+        let recap = recap(&agent).unwrap();
+        assert!(!recap.contains(&note.text));
         drop_agent(&agent);
     }
 
