@@ -198,7 +198,7 @@ export const KO = {
   "thread.deny": "거부",
   "thread.choiceClosed": "닫힘",
   "thread.choiceClose": "선택지 닫기",
-  "thread.choiceOther": "기타",
+  "thread.choiceOther": "직접 입력",
   "thread.choiceMulti": "여러 개 고를 수 있어요",
   "thread.choiceAll": "모두 선택",
   "thread.choiceNone": "모두 해제",

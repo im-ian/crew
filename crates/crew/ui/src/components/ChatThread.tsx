@@ -54,7 +54,9 @@ import {
 } from "../choiceView";
 import { routineSwitchName } from "../routineNote";
 import { queueActions, shownInThread, userLineAppearance } from "../sendGate";
-import { isSelfMentionDelivery } from "../mentions";
+import { isSelfMentionDelivery, mentionRuns, mentionText } from "../mentions";
+import { MentionChip } from "./MentionChip";
+import { focusField, MentionField } from "./MentionField";
 import { clockLabels, messageClockParts } from "../clock";
 import type { CaretPoint } from "../caretPoint";
 import { threadFaceId } from "../threadFace";
@@ -1382,6 +1384,8 @@ function Incoming({
           <ChoiceCard
             key={m.choice.id}
             card={m.choice}
+            agents={agents}
+            asker={agent?.id ?? null}
             onAnswer={onAnswerChoice}
           />
         ) : null}
@@ -1627,59 +1631,17 @@ const SWIPE_REST_MS = 550;
 
 // A typed answer: Enter moves on like the other boxes, Shift+Enter breaks
 // the line, and the box grows with what is written.
-function ChoiceText({
-  id,
-  className,
-  value,
-  placeholder,
-  disabled,
-  onChange,
-  onEnter,
-}: {
-  id?: string;
-  className: string;
-  value: string;
-  placeholder?: string;
-  disabled: boolean;
-  onChange: (next: string) => void;
-  onEnter: () => void;
-}) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    // Border-box: the border is not in scrollHeight, so a bare one would
-    // come up short and scroll a single line. Past max-height it scrolls.
-    el.style.height = "auto";
-    el.style.height = el.scrollHeight + el.offsetHeight - el.clientHeight + "px";
-  }, [value]);
-  return (
-    <textarea
-      ref={ref}
-      id={id}
-      className={className}
-      rows={1}
-      value={value}
-      placeholder={placeholder}
-      disabled={disabled}
-      autoComplete="off"
-      onChange={(e) => onChange(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) {
-          return;
-        }
-        e.preventDefault();
-        onEnter();
-      }}
-    />
-  );
-}
 
 function ChoiceCard({
   card,
+  agents,
+  asker,
   onAnswer,
 }: {
   card: ChoiceCardData;
+  agents: AgentInfo[];
+  /** The bot that asked. Its answer can name any other bot. */
+  asker: string | null;
   onAnswer?: (
     answers: string[][],
     values: string[][],
@@ -1905,7 +1867,12 @@ function ChoiceCard({
             {shownFields.map(({ f, fi }) => {
               const id = `${card.id}-${qi}-${f.id || fi}`;
               return (
-                <label className="choice-field" key={f.id || fi} htmlFor={id}>
+                <label
+                  className="choice-field"
+                  key={f.id || fi}
+                  htmlFor={id}
+                  onClick={(e) => focusField(e.currentTarget, e.target)}
+                >
                   <span className="choice-field-label">{f.label}</span>
                   {f.secret ? (
                     <input
@@ -1925,11 +1892,13 @@ function ChoiceCard({
                       }}
                     />
                   ) : (
-                    <ChoiceText
+                    <MentionField
                       id={id}
                       className="textin choice-input"
                       value={fieldValues[fi] || ""}
                       disabled={!open || !onAnswer}
+                      agents={agents}
+                      skip={asker}
                       onChange={(next) => setField(qi, fi, next)}
                       onEnter={enter}
                     />
@@ -1972,13 +1941,16 @@ function ChoiceCard({
                 className={
                   "choice-option choice-other" + (other.trim() ? " is-on" : "")
                 }
+                onClick={(e) => focusField(e.currentTarget, e.target)}
               >
                 <span className="choice-badge">{badge}</span>
-                <ChoiceText
+                <MentionField
                   className="choice-other-input"
                   value={other}
                   placeholder={t("thread.choiceOther")}
                   disabled={!open || !onAnswer}
+                  agents={agents}
+                  skip={asker}
                   onChange={(next) => setOther(qi, next)}
                   onEnter={enter}
                 />
@@ -2004,7 +1976,15 @@ function ChoiceCard({
               <div className="choice-option is-on">
                 <span className="choice-badge">{badge}</span>
                 <span className="choice-copy">
-                  <span className="choice-label">{other.trim()}</span>
+                  <span className="choice-label">
+                    {mentionRuns(other.trim(), agents).map((run, i) =>
+                      run.agent ? (
+                        <MentionChip key={i} agent={run.agent} />
+                      ) : (
+                        <span key={i}>{run.text}</span>
+                      ),
+                    )}
+                  </span>
                 </span>
               </div>
             ) : null}
@@ -2035,7 +2015,7 @@ function ChoiceCard({
                 <span className="choice-sum-q">{(q.header || q.question || "").trim()}</span>
                 <span className="choice-sum-a">
                   {ok
-                    ? answerSummary(q, picks[qi], values[qi], others[qi])
+                    ? mentionText(answerSummary(q, picks[qi], values[qi], others[qi]), agents)
                     : t("thread.choiceUnanswered")}
                 </span>
               </button>

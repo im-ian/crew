@@ -2851,10 +2851,7 @@ button.choice-option.is-on:hover:not(:disabled) {
   font-size: var(--text-lg);
   line-height: 1.35;
 }
-.choice-other-input::placeholder {
-  color: var(--faint);
-}
-.choice-other-input:disabled {
+.choice-other-input[aria-disabled="true"] {
   cursor: default;
 }
 .choice-option.is-on .choice-badge {
@@ -2995,9 +2992,24 @@ button.choice-option:active:not(:disabled) .choice-badge {
   font-size: var(--text-lg);
   line-height: 1.35;
 }
-.choice-input:disabled {
+.choice-input:disabled,
+.choice-input[aria-disabled="true"] {
   opacity: 0.85;
   cursor: default;
+}
+/* A typed answer that holds @mention chips, as the composer does. */
+.mention-field {
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+}
+.mention-field.is-empty::before {
+  content: attr(data-placeholder);
+  color: var(--faint);
+  pointer-events: none;
+}
+.mention-field .mention-chip {
+  animation: mention-chip-in var(--dur) var(--ease-out);
 }
 .choice-foot {
   display: flex;
@@ -4290,6 +4302,15 @@ html.peek-resizing .peek-resize::after {
 }
 .mention-item.active,
 .mention-item:hover { background: var(--chip); }
+/* Off a question card, which clips what sticks out of it. The field places
+   the holder; the menu inside keeps its own pop. */
+.mention-float {
+  position: fixed;
+  z-index: 60;
+}
+.mention-menu.is-floating {
+  position: static;
+}
 @keyframes mention-pop {
   from {
     opacity: 0;
