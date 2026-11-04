@@ -1,4 +1,5 @@
 import {
+  forwardRef,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -74,13 +75,25 @@ import {
   VIRTUAL_THRESHOLD,
 } from "../virtualThread";
 import { firstUnreadId } from "../readCursors";
-import { ChevronDown, ChevronLeft, ChevronRight, Reply, X } from "../icons";
+import {
+  JUMP_RISE_MS,
+  jumpFrames,
+  jumpMode,
+  pendingQuestionId,
+  questionJumpDir,
+  type AskJump,
+  type JumpFrame,
+  type JumpMode,
+} from "../questionJump";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, Reply, X } from "../icons";
 import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
 import { MdBody } from "./MdBody";
 import { WhoButton, whoColor } from "./WhoButton";
 
 const STICK_PX = 24;
+/** How far below the thread's top edge a jumped question sits, clear of the fade. */
+const ASK_INSET = 16;
 
 function rowKey(row: ThreadRow): string {
   if (row.kind === "msg") return row.msg.id;
@@ -368,6 +381,8 @@ export function ChatThread({
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(0);
   const [unpinned, setUnpinned] = useState(false);
+  const [askDir, setAskDir] = useState<AskJump | null>(null);
+  const [askJump, setAskJump] = useState<string | null>(null);
   const [heightRev, setHeightRev] = useState(0);
   const [gap, setGap] = useState(ROW_GAP);
   const heightsRef = useRef(new Map<string, number>());
@@ -376,6 +391,7 @@ export function ChatThread({
   const born = useRef(new Map<string, number>());
   const opened = useRef(new Map<string, number>());
   const unpinnedRef = useRef(false);
+  const syncAskRef = useRef<() => void>(() => {});
   const stickRef = useRef(stick);
   const offsetsRef = useRef<number[]>([]);
   const flowLenRef = useRef(0);
@@ -423,11 +439,14 @@ export function ChatThread({
   rangeRef.current = { start: win.start, end: win.end };
   viewportRef.current = viewport;
   followRef.current = followBottom;
+  const pendingAskId = pendingQuestionId(rows);
   const wanted: number[] = [];
   if (virtual) {
     if (focusIndex >= 0) wanted.push(focusIndex);
     const picked = indexOfRow(flow, queuePick);
     if (picked >= 0) wanted.push(picked);
+    const asking = indexOfRow(flow, askJump);
+    if (asking >= 0) wanted.push(asking);
   }
   const mounted = virtual
     ? mountedIndexes(
@@ -493,6 +512,7 @@ export function ChatThread({
     const el = ref.current;
     if (el && stick && !highlightId && !resumeHold) el.scrollTop = el.scrollHeight;
     syncStick();
+    syncAsk();
   }, [
     messages,
     stick,
@@ -503,7 +523,54 @@ export function ChatThread({
     showTools,
     heightRev,
     resumeHold,
+    viewport,
   ]);
+
+  // The scroll that mounts a virtual row measures the card before it exists.
+  // Measure again after that commit. A row that grows later (an image) has
+  // no scroll event, so the observer covers that.
+  useLayoutEffect(() => {
+    syncAsk();
+  }, [scrollTop, viewport, heightRev, pendingAskId]);
+
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    const poke = () => syncAskRef.current();
+    const ro = new ResizeObserver(poke);
+    const arm = () => {
+      ro.disconnect();
+      for (const child of root.children) ro.observe(child);
+    };
+    arm();
+    const mo = new MutationObserver(arm);
+    mo.observe(root, { childList: true });
+    root.addEventListener("load", poke, true);
+    return () => {
+      mo.disconnect();
+      ro.disconnect();
+      root.removeEventListener("load", poke, true);
+    };
+  }, [selected, selectedKind]);
+
+  // The question row may mount only after this jump asks for it. Line the
+  // card up once it is on the page, then let the reader scroll again.
+  useLayoutEffect(() => {
+    if (!askJump) return;
+    const root = ref.current;
+    const card = root ? pendingCard(root, askJump) : null;
+    if (!root || !card) {
+      setAskJump(null);
+      return;
+    }
+    const delta =
+      card.getBoundingClientRect().top - root.getBoundingClientRect().top - ASK_INSET;
+    if (Math.abs(delta) > 1) root.scrollTop += delta;
+    setScrollTop(root.scrollTop);
+    setAskJump(null);
+    syncStick();
+    syncAsk();
+  }, [askJump]);
 
   // The entrance grows the row after this commit. Follow it to the bottom
   // unless the reader has already moved up.
@@ -734,8 +801,72 @@ export function ChatThread({
     movedRef.current = true;
   }
 
+  function pendingCard(root: HTMLElement, id: string): HTMLElement | null {
+    const card = root.querySelector(
+      `[data-msg-id="${CSS.escape(id)}"] .choice-card.is-pending`,
+    );
+    return card instanceof HTMLElement ? card : null;
+  }
+
+  function syncAsk() {
+    const root = ref.current;
+    const id = pendingQuestionId(rows);
+    let next: AskJump | null = null;
+    if (root && id && root.clientHeight >= 8) {
+      const card = pendingCard(root, id);
+      if (card) {
+        const view = root.getBoundingClientRect();
+        const box = card.getBoundingClientRect();
+        next = questionJumpDir({
+          viewHeight: view.height,
+          cardOffsetTop: box.top - view.top,
+          rowTop: 0,
+          rowBottom: 0,
+        });
+      } else if (virtual) {
+        const index = indexOfRow(flow, id);
+        if (index >= 0) {
+          const top = (offsets[index] ?? 0) - root.scrollTop;
+          const bottom = (offsets[index + 1] ?? offsets[index] ?? 0) - root.scrollTop;
+          next = questionJumpDir({
+            viewHeight: root.clientHeight,
+            cardOffsetTop: null,
+            rowTop: top,
+            rowBottom: bottom,
+          });
+        }
+      }
+    }
+    setAskDir((cur) => (cur === next ? cur : next));
+  }
+  syncAskRef.current = syncAsk;
+
+  function jumpToQuestion() {
+    const id = pendingAskId;
+    const root = ref.current;
+    if (!id || !root) return;
+    movedRef.current = true;
+    if (holdRef.current) {
+      holdRef.current = false;
+      setResume((r) => (r && r.hold ? { ...r, hold: false } : r));
+    }
+    unpinnedRef.current = true;
+    setUnpinned(true);
+    onStick(false);
+    if (virtual) {
+      const index = indexOfRow(flow, id);
+      if (index >= 0) {
+        const top = Math.max(0, (offsets[index] ?? 0) - ASK_INSET);
+        root.scrollTop = top;
+        setScrollTop(top);
+      }
+    }
+    setAskJump(id);
+  }
+
   function onThreadScroll() {
     syncStick();
+    syncAsk();
     const el = ref.current;
     if (!el || rowsLenRef.current <= VIRTUAL_THRESHOLD) return;
     const nextTop = el.scrollTop;
@@ -841,7 +972,13 @@ export function ChatThread({
         })}
 
       </div>
-      {away ? <JumpBottom onClick={jumpBottom} /> : null}
+      <JumpDock
+        chatKey={chatKey}
+        away={away}
+        askDir={askDir}
+        onBottom={jumpBottom}
+        onQuestion={jumpToQuestion}
+      />
     </div>
   );
 }
@@ -877,20 +1014,230 @@ export function useStick(
   return { away, sync, jump };
 }
 
-export function JumpBottom({ onClick }: { onClick: () => void }) {
+const JUMP_HIDDEN: JumpFrame = {
+  at: 0,
+  downOn: false,
+  askOn: false,
+  down: "alone",
+  ask: "alone",
+};
+
+/**
+ * Both jump buttons stay mounted while either one is on screen, so a
+ * newcomer can fade up into a seat the other button has already slid to.
+ * The thread is not remounted per chat, so a chat change starts from nothing.
+ */
+function JumpDock({
+  chatKey,
+  away,
+  askDir,
+  onBottom,
+  onQuestion,
+}: {
+  chatKey: string;
+  away: boolean;
+  askDir: AskJump | null;
+  onBottom: () => void;
+  onQuestion: () => void;
+}) {
+  const asking = askDir != null;
+  const barRef = useRef<HTMLDivElement>(null);
+  const downRef = useRef<HTMLButtonElement>(null);
+  const askRef = useRef<HTMLButtonElement>(null);
+  const settledRef = useRef<JumpMode>("none");
+  const liveRef = useRef(false);
+  const seenChat = useRef(chatKey);
+  const dirRef = useRef<AskJump>(askDir ?? "down");
+  const [present, setPresent] = useState(false);
+  const [live, setLive] = useState(false);
+  const [frame, setFrame] = useState<JumpFrame>(JUMP_HIDDEN);
+  if (askDir) dirRef.current = askDir;
+  if (seenChat.current !== chatKey) {
+    seenChat.current = chatKey;
+    settledRef.current = "none";
+    liveRef.current = false;
+    if (present || live) {
+      setPresent(false);
+      setLive(false);
+      setFrame(JUMP_HIDDEN);
+    }
+  }
+
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+    const down = downRef.current?.offsetWidth ?? 0;
+    const ask = askRef.current?.offsetWidth ?? 0;
+    if (down) bar.style.setProperty("--down-w", `${down}px`);
+    if (ask) bar.style.setProperty("--ask-w", `${ask}px`);
+  });
+
+  useLayoutEffect(() => {
+    let cancel = false;
+    const timers: number[] = [];
+    const rafs: number[] = [];
+    const later = (fn: () => void) => {
+      const id = requestAnimationFrame(() => {
+        if (!cancel) fn();
+      });
+      rafs.push(id);
+    };
+    const to = jumpMode(away, asking);
+    const from = settledRef.current;
+    // Nothing showing, and nothing wanted: don't mount the dock.
+    // A reversal before the slide finishes still has the old mode here,
+    // so that case falls through and paints that mode's final seats.
+    if (from === "none" && to === "none") {
+      setPresent(false);
+      setLive(false);
+      liveRef.current = false;
+      return () => {
+        cancel = true;
+      };
+    }
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const frames = jumpFrames(from, to, reduce);
+    setPresent(true);
+
+    const measure = () => {
+      const bar = barRef.current;
+      if (!bar) return;
+      const down = downRef.current?.offsetWidth ?? 0;
+      const ask = askRef.current?.offsetWidth ?? 0;
+      if (down) bar.style.setProperty("--down-w", `${down}px`);
+      if (ask) bar.style.setProperty("--ask-w", `${ask}px`);
+    };
+    const apply = (next: JumpFrame) => {
+      if (cancel) return;
+      measure();
+      setFrame(next);
+    };
+    const finish = () => {
+      if (cancel) return;
+      settledRef.current = to;
+      if (to !== "none") return;
+      timers.push(
+        window.setTimeout(() => {
+          if (cancel) return;
+          setPresent(false);
+          setLive(false);
+          liveRef.current = false;
+        }, reduce ? 0 : JUMP_RISE_MS),
+      );
+    };
+    const run = () => {
+      if (cancel) return;
+      if (!barRef.current) {
+        later(run);
+        return;
+      }
+      measure();
+      if (reduce) {
+        setLive(false);
+        liveRef.current = false;
+        apply(frames[0]);
+        finish();
+        return;
+      }
+      if (from === "none") {
+        setLive(false);
+        liveRef.current = false;
+        apply({ ...frames[0], downOn: false, askOn: false });
+        later(() => {
+          setLive(true);
+          liveRef.current = true;
+          later(() => {
+            apply(frames[0]);
+            finish();
+          });
+        });
+        return;
+      }
+      if (!liveRef.current) {
+        setLive(true);
+        liveRef.current = true;
+      }
+      frames.forEach((next, i) => {
+        const go = () => {
+          apply(next);
+          if (i === frames.length - 1) finish();
+        };
+        if (next.at === 0) go();
+        else timers.push(window.setTimeout(go, next.at));
+      });
+    };
+    run();
+    return () => {
+      cancel = true;
+      rafs.forEach((id) => cancelAnimationFrame(id));
+      timers.forEach((id) => clearTimeout(id));
+    };
+  }, [away, asking, chatKey]);
+
+  if (!present) return null;
+  const pair = frame.down === "pair" || frame.ask === "pair";
+  return (
+    <div
+      ref={barRef}
+      className={"jump-bar" + (pair ? " is-pair" : "") + (live ? " live" : "")}
+    >
+      <JumpBottom ref={downRef} on={frame.downOn} onClick={onBottom} />
+      <JumpQuestion
+        ref={askRef}
+        dir={dirRef.current}
+        on={frame.askOn}
+        onClick={onQuestion}
+      />
+    </div>
+  );
+}
+
+const JumpQuestion = forwardRef<
+  HTMLButtonElement,
+  { onClick: () => void; dir: AskJump; on: boolean }
+>(function JumpQuestion({ onClick, dir, on }, ref) {
   const t = useT();
+  const label = t("thread.jumpQuestion");
   return (
     <button
+      ref={ref}
       type="button"
-      className="jump-bottom"
-      title={t("thread.jumpBottom")}
-      aria-label={t("thread.jumpBottom")}
+      className={on ? "jump-question is-on" : "jump-question"}
+      title={label}
+      aria-label={label}
+      aria-hidden={on ? undefined : true}
+      tabIndex={on ? undefined : -1}
+      onClick={onClick}
+    >
+      <CircleHelp size={15} />
+      <span>{label}</span>
+      {dir === "up" ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+    </button>
+  );
+});
+
+export const JumpBottom = forwardRef<
+  HTMLButtonElement,
+  { onClick: () => void; on?: boolean }
+>(function JumpBottom({ onClick, on }, ref) {
+  const t = useT();
+  const docked = on !== undefined;
+  const label = t("thread.jumpBottom");
+  return (
+    <button
+      ref={ref}
+      type="button"
+      className={docked && on ? "jump-bottom is-on" : "jump-bottom"}
+      title={label}
+      aria-label={label}
+      aria-hidden={docked && !on ? true : undefined}
+      tabIndex={docked && !on ? -1 : undefined}
       onClick={onClick}
     >
       <ChevronDown size={18} />
     </button>
   );
-}
+});
 
 function EmptyChat({
   agent,

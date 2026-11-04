@@ -1858,6 +1858,77 @@ header .who-name {
 }
 .jump-bottom:hover { background: var(--btn-hover); }
 .jump-bottom:active { transform: translateX(-50%) scale(0.94); }
+.jump-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 12px;
+  height: var(--control-h);
+  z-index: 5;
+  pointer-events: none;
+  --down-w: 32px;
+  --ask-w: 96px;
+  --jump-gap: 8px;
+}
+.jump-bar .jump-bottom,
+.jump-bar .jump-question {
+  position: absolute;
+  top: 0;
+  bottom: auto;
+  margin: 0;
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+}
+.jump-bar.live .jump-bottom,
+.jump-bar.live .jump-question {
+  transition:
+    opacity 220ms var(--ease-out),
+    transform 220ms var(--ease-out);
+}
+/* A hidden button snaps to its seat. Only a visible one slides. */
+.jump-bar.live .jump-bottom.is-on,
+.jump-bar.live .jump-question.is-on {
+  transition:
+    left 280ms var(--ease-out),
+    opacity 220ms var(--ease-out),
+    transform 220ms var(--ease-out);
+}
+.jump-bar .jump-bottom { left: calc(50% - var(--down-w) / 2); }
+.jump-bar .jump-question { left: calc(50% - var(--ask-w) / 2); }
+.jump-bar.is-pair .jump-bottom {
+  left: calc(50% - (var(--down-w) + var(--jump-gap) + var(--ask-w)) / 2);
+}
+.jump-bar.is-pair .jump-question {
+  left: calc(50% - (var(--down-w) + var(--jump-gap) + var(--ask-w)) / 2 + var(--down-w) + var(--jump-gap));
+}
+.jump-bar .is-on {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+.jump-bar .jump-bottom:active,
+.jump-bar .jump-question:active { transform: scale(0.94); }
+.jump-question {
+  height: var(--control-h);
+  padding: 0 12px 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--btn);
+  color: var(--on-ink);
+  font: inherit;
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+.jump-question svg { display: block; }
+.jump-question:hover { background: var(--btn-hover); }
 .empty-chat {
   margin: auto;
   display: flex;
@@ -5989,6 +6060,17 @@ html[data-theme="light"] .island.is-link:hover { background: #2a2a2d; }
   }
   .jump-bottom:active {
     transform: translateX(-50%);
+  }
+  .jump-bar .jump-bottom,
+  .jump-bar .jump-question,
+  .jump-bar.live .jump-bottom,
+  .jump-bar.live .jump-question,
+  .jump-bar.live .jump-bottom.is-on,
+  .jump-bar.live .jump-question.is-on,
+  .jump-bar .jump-bottom:active,
+  .jump-bar .jump-question:active {
+    transition: none;
+    transform: none;
   }
   .rail-ghost {
     transform: none;
