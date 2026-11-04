@@ -52,6 +52,18 @@ describe("normalizeGroups", () => {
     expect(groups[0].items).toEqual(["agent:a1"]);
   });
 
+  it("keeps a loose bot between folders", () => {
+    const raw = [
+      { id: UNGROUPED_ID, name: "", items: ["agent:a1"] },
+      { id: "g1", name: "One", items: ["agent:a2"] },
+      { id: UNGROUPED_ID, name: "", items: ["agent:a3"] },
+    ];
+    const layout = normalizeGroups(raw);
+    expect(layout.order).toEqual(["agent:a1", "g1", "agent:a3"]);
+    expect(layout.groups.map((g) => g.id)).toEqual(["g1"]);
+    expect(normalizeGroups(toPersist(layout))).toEqual(layout);
+  });
+
   it("pulls the ungrouped bucket out of the saved list", () => {
     const { groups, ungrouped } = normalizeGroups([
       { id: "g1", name: "One", items: ["agent:a1"] },
@@ -221,15 +233,25 @@ describe("moveGroup", () => {
     expect(next.ungrouped).toEqual(["agent:a3"]);
   });
 
-  it("moves a group to the end when it is dropped below the folders", () => {
+  it("moves a group under a loose bot when it is dropped at the bottom", () => {
     const next = moveGroup(layout, "g1", null);
     expect(next.groups.map((g) => g.id)).toEqual(["g2", "g3", "g1"]);
     expect(next.groups[2].items).toEqual(["agent:a1"]);
+    expect(next.order).toEqual(["g2", "g3", "agent:a3", "g1"]);
+  });
+
+  it("puts a folder between loose bots and a loose bot between folders", () => {
+    const betweenBots = moveGroup(layout, "g1", null);
+    const parked = moveGroup(betweenBots, "g2", "g1");
+    expect(parked.order).toEqual(["g3", "agent:a3", "g2", "g1"]);
+    const botFirst = moveItem(layout, "agent:a3", null, "g1", ["agent:a3"]);
+    expect(botFirst.order).toEqual(["agent:a3", "g1", "g2", "g3"]);
+    expect(botFirst.ungrouped).toEqual(["agent:a3"]);
   });
 
   it("leaves the layout alone when the drop would not move it", () => {
     expect(moveGroup(layout, "g1", "g2")).toBe(layout);
-    expect(moveGroup(layout, "g3", null)).toBe(layout);
+    expect(moveGroup(layout, "g3", "agent:a3")).toBe(layout);
     expect(moveGroup(layout, "g2", "g2")).toBe(layout);
     expect(moveGroup(layout, "missing", "g1")).toBe(layout);
     expect(moveGroup(layout, "g1", "missing")).toBe(layout);
@@ -272,6 +294,17 @@ describe("railOrder", () => {
 
 describe("firstOpenAgent", () => {
   const agents = [agent("a1", "가"), agent("a2", "나"), agent("a3", "다")];
+
+  it("opens a loose bot that was placed above the folders", () => {
+    expect(
+      firstOpenAgent(
+        [group("g1", ["agent:a2"])],
+        ["agent:a1"],
+        agents,
+        ["agent:a1", "g1"],
+      ),
+    ).toBe("a1");
+  });
 
   it("is the first visible row, folders before loose bots", () => {
     expect(

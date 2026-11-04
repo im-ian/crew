@@ -5,6 +5,11 @@ export const UNGROUPED_ID = "__ungrouped";
 export type RailLayout = {
   groups: Group[];
   ungrouped: string[];
+  /**
+   * Top-level keys, top to bottom: folder ids and loose `agent:` keys.
+   * Absent means every folder, then every loose bot.
+   */
+  order?: string[];
 };
 
 export function itemKey(kind: Kind, id: string): string {
@@ -24,7 +29,9 @@ export function normalizeGroups(raw: unknown): RailLayout {
   if (!Array.isArray(raw)) return { groups: [], ungrouped: [] };
   const out: Group[] = [];
   const seen = new Set<string>();
-  let ungrouped: string[] = [];
+  const ungrouped: string[] = [];
+  const order: string[] = [];
+  const looseSeen = new Set<string>();
   for (const row of raw) {
     if (!row || typeof row !== "object") continue;
     const g = row as Partial<Group>;
@@ -33,7 +40,12 @@ export function normalizeGroups(raw: unknown): RailLayout {
       ? g.items.filter((k): k is string => typeof k === "string" && !!parseItemKey(k))
       : [];
     if (id === UNGROUPED_ID) {
-      ungrouped = uniqueKeys(items);
+      for (const key of uniqueKeys(items)) {
+        if (looseSeen.has(key)) continue;
+        looseSeen.add(key);
+        ungrouped.push(key);
+        order.push(key);
+      }
       continue;
     }
     const name = typeof g.name === "string" ? g.name.trim() : "";
@@ -48,8 +60,9 @@ export function normalizeGroups(raw: unknown): RailLayout {
     };
     if (path) next.path = path;
     out.push(next);
+    order.push(id);
   }
-  return { groups: out, ungrouped };
+  return applyOrder(out, order);
 }
 
 /** Last path segment. A trailing slash is the picker's, not part of the name. */
@@ -77,6 +90,7 @@ export function setGroupFolder(layout: RailLayout, id: string, path: string): Ra
       return { id: g.id, name: g.name, collapsed: g.collapsed, items: g.items };
     }),
     ungrouped: layout.ungrouped,
+    ...(layout.order ? { order: layout.order } : {}),
   };
 }
 
@@ -90,19 +104,32 @@ function persistedGroup(g: Group): Group {
 }
 
 export function toPersist(layout: RailLayout): Group[] {
-  const groups = layout.groups
-    .filter((g) => g.id !== UNGROUPED_ID)
-    .map(persistedGroup);
-  if (!layout.ungrouped.length) return groups;
-  return [
-    ...groups,
-    {
+  const byId = new Map(
+    layout.groups.filter((g) => g.id !== UNGROUPED_ID).map((g) => [g.id, g]),
+  );
+  const out: Group[] = [];
+  let bucket: string[] = [];
+  const flush = () => {
+    if (!bucket.length) return;
+    out.push({
       id: UNGROUPED_ID,
       name: "",
       collapsed: false,
-      items: uniqueKeys(layout.ungrouped),
-    },
-  ];
+      items: bucket,
+    });
+    bucket = [];
+  };
+  for (const key of orderedSlots(layout)) {
+    const group = byId.get(key);
+    if (group) {
+      flush();
+      out.push(persistedGroup(group));
+    } else if (parseItemKey(key)) {
+      bucket.push(key);
+    }
+  }
+  flush();
+  return out;
 }
 
 /** Folders a bot just wrote. Folders the window already has stay as they are,
@@ -122,15 +149,21 @@ export function adoptNewGroups(local: RailLayout, remoteRaw: unknown): RailLayou
     })
     .reverse();
   const keys = new Set(ordered.flatMap((g) => g.items));
-  return {
-    groups: [
-      ...local.groups
-        .filter((g) => g.id !== UNGROUPED_ID)
-        .map((g) => ({ ...g, items: g.items.filter((k) => !keys.has(k)) })),
-      ...ordered,
-    ],
-    ungrouped: local.ungrouped.filter((k) => !keys.has(k)),
-  };
+  const groups = [
+    ...local.groups
+      .filter((g) => g.id !== UNGROUPED_ID)
+      .map((g) => ({ ...g, items: g.items.filter((k) => !keys.has(k)) })),
+    ...ordered,
+  ];
+  const ungrouped = local.ungrouped.filter((k) => !keys.has(k));
+  if (!local.order) return { groups, ungrouped };
+  const ids = new Set(groups.map((g) => g.id));
+  const loose = new Set(ungrouped);
+  const order = local.order.filter((k) => ids.has(k) || loose.has(k));
+  for (const g of ordered) {
+    if (!order.includes(g.id)) order.push(g.id);
+  }
+  return applyOrder(groups, order);
 }
 
 export function uniqueGroupName(groups: Group[], base = "새 그룹"): string {
@@ -157,15 +190,15 @@ export function groupIdOf(groups: Group[], kind: Kind, id: string): string | nul
 
 export function pruneLayout(layout: RailLayout, agents: AgentInfo[]): RailLayout {
   const valid = validKeys(agents);
-  return {
-    groups: layout.groups
-      .filter((g) => g.id !== UNGROUPED_ID)
-      .map((g) => ({
-        ...g,
-        items: g.items.filter((k) => valid.has(k)),
-      })),
-    ungrouped: layout.ungrouped.filter((k) => valid.has(k)),
-  };
+  const groups = layout.groups
+    .filter((g) => g.id !== UNGROUPED_ID)
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((k) => valid.has(k)),
+    }));
+  const ungrouped = layout.ungrouped.filter((k) => valid.has(k));
+  if (!layout.order) return { groups, ungrouped };
+  return applyOrder(groups, orderedSlots({ groups, ungrouped, order: layout.order }));
 }
 
 export function layoutChanged(a: RailLayout, b: RailLayout): boolean {
@@ -197,29 +230,105 @@ export function visibleUngroupedKeys(
   return out;
 }
 
+/**
+ * Top-level keys as saved: folder ids and loose bot keys.
+ * A missing folder or bot is appended, folders first when `order` is absent.
+ */
+export function orderedSlots(layout: RailLayout): string[] {
+  const groupIds = layout.groups
+    .filter((g) => g.id !== UNGROUPED_ID)
+    .map((g) => g.id);
+  const loose = layout.ungrouped.filter((k) => parseItemKey(k));
+  const known = new Set<string>([...groupIds, ...loose]);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const key of layout.order ?? [...groupIds, ...loose]) {
+    if (!known.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  for (const id of groupIds) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  for (const key of loose) {
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out;
+}
+
+/** The rail's top level, including loose bots that are not saved yet. */
+export function railSlots(
+  groups: Group[],
+  ungrouped: string[],
+  agents: AgentInfo[],
+  order?: string[],
+): string[] {
+  return orderedSlots({
+    groups,
+    ungrouped: visibleUngroupedKeys(groups, ungrouped, agents),
+    order,
+  });
+}
+
+/**
+ * Drop `order` when it is just folders then loose bots, so an old layout
+ * still compares equal after a save.
+ */
+export function applyOrder(groups: Group[], order: string[]): RailLayout {
+  const rank = new Map(order.map((key, i) => [key, i]));
+  const nextGroups = groups
+    .filter((g) => g.id !== UNGROUPED_ID)
+    .slice()
+    .sort((a, b) => (rank.get(a.id) ?? order.length) - (rank.get(b.id) ?? order.length));
+  const loose = order.filter((key) => parseItemKey(key));
+  const plain = [...nextGroups.map((g) => g.id), ...loose];
+  const mixed =
+    plain.length !== order.length || plain.some((key, i) => key !== order[i]);
+  return mixed
+    ? { groups: nextGroups, ungrouped: loose, order }
+    : { groups: nextGroups, ungrouped: loose };
+}
+
+function insertAt(keys: string[], key: string, before: string | null): string[] {
+  const rest = keys.filter((k) => k !== key);
+  const at = before == null ? -1 : rest.indexOf(before);
+  if (at < 0) rest.push(key);
+  else rest.splice(at, 0, key);
+  return rest;
+}
+
 /** Sidebar order for keyboard next/prev. Collapsed group children are skipped. */
 export function railOrder(
   groups: Group[],
   ungrouped: string[],
   agents: AgentInfo[],
+  order?: string[],
 ): { kind: Kind; id: string }[] {
   const valid = validKeys(agents);
+  const byGroup = new Map(
+    groups.filter((g) => g.id !== UNGROUPED_ID).map((g) => [g.id, g]),
+  );
   const out: { kind: Kind; id: string }[] = [];
   const used = new Set<string>();
-  for (const g of groups) {
-    if (g.id === UNGROUPED_ID) continue;
-    for (const key of g.items) {
-      if (!valid.has(key) || used.has(key)) continue;
-      used.add(key);
-      if (g.collapsed) continue;
-      const parsed = parseItemKey(key);
-      if (parsed) out.push(parsed);
+  for (const slot of railSlots(groups, ungrouped, agents, order)) {
+    const group = byGroup.get(slot);
+    if (group) {
+      if (group.collapsed) continue;
+      for (const key of group.items) {
+        if (!valid.has(key) || used.has(key)) continue;
+        used.add(key);
+        const parsed = parseItemKey(key);
+        if (parsed) out.push(parsed);
+      }
+      continue;
     }
-  }
-  for (const key of visibleUngroupedKeys(groups, ungrouped, agents)) {
-    if (used.has(key)) continue;
-    used.add(key);
-    const parsed = parseItemKey(key);
+    if (!valid.has(slot) || used.has(slot)) continue;
+    used.add(slot);
+    const parsed = parseItemKey(slot);
     if (parsed) out.push(parsed);
   }
   return out;
@@ -233,8 +342,9 @@ export function firstOpenAgent(
   groups: Group[],
   ungrouped: string[],
   agents: AgentInfo[],
+  order?: string[],
 ): string | null {
-  const shown = railOrder(groups, ungrouped, agents)[0];
+  const shown = railOrder(groups, ungrouped, agents, order)[0];
   if (shown) return shown.id;
   const valid = validKeys(agents);
   for (const g of groups) {
@@ -262,21 +372,21 @@ export function groupOrderChanges(
   return to !== from;
 }
 
-/** Move a folder before `beforeId`, or to the end of the folder list when it is null. */
+/**
+ * Move a folder before `beforeId`. That is another folder, a loose bot, or
+ * null for the bottom of the whole list.
+ */
 export function moveGroup(
   layout: RailLayout,
   groupId: string,
   beforeId: string | null,
 ): RailLayout {
-  const ids = layout.groups.map((g) => g.id);
-  if (!groupOrderChanges(ids, groupId, beforeId)) return layout;
-  const moving = layout.groups.find((g) => g.id === groupId);
-  if (!moving) return layout;
-  const groups = layout.groups.filter((g) => g.id !== groupId);
-  const idx = beforeId ? groups.findIndex((g) => g.id === beforeId) : -1;
-  if (idx < 0) groups.push(moving);
-  else groups.splice(idx, 0, moving);
-  return { groups, ungrouped: layout.ungrouped };
+  const slots = orderedSlots(layout);
+  if (!groupOrderChanges(slots, groupId, beforeId)) return layout;
+  return applyOrder(
+    layout.groups,
+    insertAt(slots, groupId, beforeId),
+  );
 }
 
 export function moveItem(
@@ -303,23 +413,30 @@ export function moveItem(
       items: g.items.filter((k) => k !== key),
     }));
   if (!destGroupId) {
-    const list = ungroupedVisual.filter((k) => k !== key);
-    const idx = beforeKey ? list.indexOf(beforeKey) : -1;
-    if (idx < 0) list.push(key);
-    else list.splice(idx, 0, key);
-    return { groups, ungrouped: uniqueKeys(list) };
+    const loose = uniqueKeys(ungroupedVisual.filter((k) => k !== key));
+    const slots = orderedSlots({
+      groups,
+      ungrouped: loose,
+      order: layout.order?.filter((k) => k !== key),
+    });
+    return applyOrder(groups, insertAt(slots, key, beforeKey ?? null));
   }
-  return {
-    groups: groups.map((g) => {
-      if (g.id !== destGroupId) return g;
-      const items = [...g.items];
-      const idx = beforeKey ? items.indexOf(beforeKey) : -1;
-      if (idx < 0) items.push(key);
-      else items.splice(idx, 0, key);
-      return { ...g, items };
+  const placed = groups.map((g) => {
+    if (g.id !== destGroupId) return g;
+    const items = [...g.items];
+    const idx = beforeKey ? items.indexOf(beforeKey) : -1;
+    if (idx < 0) items.push(key);
+    else items.splice(idx, 0, key);
+    return { ...g, items };
+  });
+  return applyOrder(
+    placed,
+    orderedSlots({
+      groups: placed,
+      ungrouped: uniqueKeys(ungroupedVisual.filter((k) => k !== key)),
+      order: layout.order?.filter((k) => k !== key),
     }),
-    ungrouped: uniqueKeys(ungroupedVisual.filter((k) => k !== key)),
-  };
+  );
 }
 
 export function validKeys(agents: AgentInfo[]): Set<string> {

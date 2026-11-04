@@ -264,7 +264,7 @@ export function App() {
       }
       if (id === "prev-chat" || id === "next-chat") {
         const order = chatOrder(
-          { groups: c.groups, ungrouped: c.ungrouped },
+          { groups: c.groups, ungrouped: c.ungrouped, order: c.order },
           c.agents,
           c.remotes,
           loadRemoteFolds(),
@@ -302,6 +302,7 @@ export function App() {
         remotes={crew.remotes}
         groups={crew.groups}
         ungrouped={crew.ungrouped}
+        order={crew.order}
         selected={crew.selected}
         selectedKind={crew.selectedKind}
         query={crew.query}

@@ -242,6 +242,12 @@ describe("rail sections", () => {
     ]);
   });
 
+  it("keeps an old loose-block anchor on the first loose bot", () => {
+    expect(
+      railSections(["g1", "g2", "agent:a"], ["team"], ["g1", "remote:team", U]),
+    ).toEqual(["g1", "g2", "remote:team", "agent:a"]);
+  });
+
   it("puts a saved router back above the folder it was saved above", () => {
     expect(railSections(["g1", "g2"], ["team"], ["remote:team", "g1", "g2", U])).toEqual([
       "remote:team",

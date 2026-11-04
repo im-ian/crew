@@ -487,6 +487,9 @@ button.linkish {
   font: inherit;
 }
 .rail-section + .rail-section { margin-top: var(--space-8); }
+/* Loose bots are separate sections so a folder can sit between them.
+   A run of them stays one list. */
+.rail-section.loose + .rail-section.loose { margin-top: 0; }
 /* A group is a layer, so its rows no longer need an indent to belong to it.
    Re-pointing --rail/--hover/--active here lets the row, toggle and badge
    rules below follow the layer without a grouped copy of each. */

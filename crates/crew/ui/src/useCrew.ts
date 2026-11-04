@@ -42,17 +42,18 @@ import {
   groupIdOf,
   itemKey,
   layoutChanged,
+  applyOrder,
   moveGroup,
   moveItem,
   newGroupId,
   normalizeGroups,
+  orderedSlots,
   parseItemKey,
   pruneLayout,
   setGroupFolder,
   toPersist,
   UNGROUPED_ID,
   uniqueGroupName,
-  uniqueKeys,
   visibleUngroupedKeys,
   type RailLayout,
 } from "./groups";
@@ -114,6 +115,7 @@ export function useCrew() {
   });
   const [groups, setGroups] = useState<Group[]>([]);
   const [ungrouped, setUngrouped] = useState<string[]>([]);
+  const [order, setOrder] = useState<string[] | undefined>();
   const [pendingRenameId, setPendingRenameId] = useState<string | null>(null);
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [highlightId, setHighlightId] = useState<string | null>(null);
@@ -144,8 +146,8 @@ export function useCrew() {
   const pollMessages = useRef(oneAtATime()).current;
   const pollPing = useRef(oneAtATime()).current;
   const pollList = useRef(oneAtATime()).current;
-  const groupsRef = useRef<RailLayout>({ groups, ungrouped });
-  groupsRef.current = { groups, ungrouped };
+  const groupsRef = useRef<RailLayout>({ groups, ungrouped, order });
+  groupsRef.current = order ? { groups, ungrouped, order } : { groups, ungrouped };
   const groupsLoaded = useRef(false);
   const islandTimer = useRef<number | null>(null);
   const islandRef = useRef<IslandNotice | null>(null);
@@ -392,14 +394,20 @@ export function useCrew() {
   }
 
   function persistLayout(next: RailLayout) {
-    const layout = {
-      groups: next.groups.filter((g) => g.id !== UNGROUPED_ID),
-      ungrouped: next.ungrouped,
-    };
+    const groupsOnly = next.groups.filter((g) => g.id !== UNGROUPED_ID);
+    const layout = applyOrder(
+      groupsOnly,
+      orderedSlots({
+        groups: groupsOnly,
+        ungrouped: next.ungrouped,
+        order: next.order,
+      }),
+    );
     groupsLoaded.current = true;
     groupsRef.current = layout;
     setGroups(layout.groups);
     setUngrouped(layout.ungrouped);
+    setOrder(layout.order);
     void api.setGroups(toPersist(layout)).catch((err) => showError(err));
   }
 
@@ -415,6 +423,7 @@ export function useCrew() {
           { id, name, collapsed: false, items: [] },
         ],
         ungrouped: current.ungrouped,
+        order: current.order,
       });
     } else {
       const visual = visibleUngroupedKeys(
@@ -429,6 +438,7 @@ export function useCrew() {
           { id, name, collapsed: false, items: [key] },
         ],
         ungrouped: stripped.ungrouped.filter((k) => k !== key),
+        order: stripped.order,
       });
     }
     setPendingRenameId(id);
@@ -468,6 +478,7 @@ export function useCrew() {
     persistLayout({
       groups: [...current.groups, created],
       ungrouped: current.ungrouped,
+      order: current.order,
     });
     setNewGroupOpen(false);
     // The group is there either way; a memory that fails to save can be
@@ -536,16 +547,21 @@ export function useCrew() {
         g.id === id ? { ...g, name: trimmed } : g,
       ),
       ungrouped: groupsRef.current.ungrouped,
+      order: groupsRef.current.order,
     });
   }
 
   function removeGroup(id: string) {
     const current = groupsRef.current;
     const gone = current.groups.find((g) => g.id === id);
-    persistLayout({
-      groups: current.groups.filter((g) => g.id !== id),
-      ungrouped: uniqueKeys([...(gone?.items || []), ...current.ungrouped]),
-    });
+    const items = (gone?.items || []).filter((k) => parseItemKey(k));
+    const slots = orderedSlots(current).flatMap((k) => (k === id ? items : [k]));
+    persistLayout(
+      applyOrder(
+        current.groups.filter((g) => g.id !== id),
+        slots,
+      ),
+    );
     void api.removeGroupMemory(id).catch((err) => showError(err));
   }
 
@@ -583,6 +599,7 @@ export function useCrew() {
         g.id === id ? { ...g, collapsed: !g.collapsed } : g,
       ),
       ungrouped: groupsRef.current.ungrouped,
+      order: groupsRef.current.order,
     });
   }
 
@@ -645,6 +662,7 @@ export function useCrew() {
             groupsRef.current.groups,
             groupsRef.current.ungrouped,
             localAgents(list),
+            groupsRef.current.order,
           )
         : null,
       ready,
@@ -1254,6 +1272,7 @@ export function useCrew() {
         groupsRef.current = next;
         setGroups(next.groups);
         setUngrouped(next.ungrouped);
+        setOrder(next.order);
         if (agentsRef.current.length) applyOpenAgent(agentsRef.current);
       })
       .catch(() => {
@@ -1511,6 +1530,7 @@ export function useCrew() {
     ctx,
     groups,
     ungrouped,
+    order,
     pendingRenameId,
     clearPendingRename: () => setPendingRenameId(null),
     currentAgent,
