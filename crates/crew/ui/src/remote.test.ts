@@ -14,6 +14,8 @@ import {
   nameError,
   normalizeRemoteLayout,
   normalizeRemotes,
+  placedReps,
+  placeRep,
   portOk,
   railSections,
   remoteLabel,
@@ -22,6 +24,7 @@ import {
   routerUrl,
   slugAlias,
   toggled,
+  unplaceRep,
 } from "./remote";
 import type { AgentInfo, Group, RemoteInfo } from "./types";
 
@@ -201,6 +204,22 @@ describe("remote bots", () => {
     ).toEqual(["lab/acc_9", "impl", "team/acc_2", "team/acc_1"]);
   });
 
+  it("puts this PC's representative in its own router once it was put there", () => {
+    const withRep = [...bots, local("rep")];
+    const routers = [router("team"), router("lab", "other")];
+    expect(placedReps(remoteSections(withRep, routers)).size).toBe(0);
+
+    const saved = { sections: [], bots: { team: ["team/acc_2", "rep"], lab: ["rep"] } };
+    const sections = remoteSections(withRep, routers, "ko", saved.bots);
+    expect(sections[0].bots.map((b) => b.id)).toEqual(["team/acc_2", "rep", "team/acc_1"]);
+    // Not the bot that represents this PC on lab.
+    expect(sections[1].bots.map((b) => b.id)).toEqual(["lab/acc_9"]);
+    expect([...placedReps(sections)]).toEqual(["rep"]);
+    expect(
+      chatOrder({ groups: [], ungrouped: [] }, withRep, routers, [], saved).map((r) => r.id),
+    ).toEqual(["impl", "team/acc_2", "rep", "team/acc_1", "lab/acc_9"]);
+  });
+
   it("finds the routers a local bot stands in for", () => {
     expect(representing("rep", [router("team"), router("lab", "other")])).toEqual(["team"]);
     expect(representing("impl", [router("team")])).toEqual([]);
@@ -290,6 +309,24 @@ describe("rail sections", () => {
     expect(moveRemoteBot(saved, sections, "team", "team/acc_2", "lab/acc_9").bots).toEqual({
       team: ["team/acc_1", "team/acc_2"],
     });
+  });
+
+  it("puts this PC's representative in and takes it back out", () => {
+    const all = [...bots(), local("rep")];
+    const routers = [router("team"), router("lab")];
+    const saved = { sections: ["g1"], bots: {} };
+    let sections = remoteSections(all, routers, "ko", saved.bots);
+    const inTeam = placeRep(saved, sections, "team", "rep", "team/acc_2");
+    expect(inTeam.bots.team).toEqual(["team/acc_1", "rep", "team/acc_2"]);
+    expect(inTeam.sections).toEqual(["g1"]);
+
+    sections = remoteSections(all, routers, "ko", inTeam.bots);
+    const last = placeRep(inTeam, sections, "team", "rep", null);
+    expect(last.bots.team).toEqual(["team/acc_1", "team/acc_2", "rep"]);
+    const inLab = placeRep(inTeam, sections, "lab", "rep", null);
+    expect(inLab.bots).toEqual({ team: ["team/acc_1", "team/acc_2"], lab: ["lab/acc_9", "rep"] });
+
+    expect(unplaceRep(inTeam, sections, "rep").bots).toEqual({ team: ["team/acc_1", "team/acc_2"] });
   });
 
   it("reads back only a well formed saved layout", () => {
