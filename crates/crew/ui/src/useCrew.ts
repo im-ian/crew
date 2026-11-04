@@ -279,6 +279,7 @@ export function useCrew() {
   }
 
   function holdIsland() {
+    if (!islandRef.current) return;
     islandHeld.current = true;
     if (islandTimer.current === null) return;
     stopIslandClock();
@@ -295,8 +296,6 @@ export function useCrew() {
   function closeIsland() {
     stopIslandClock();
     islandLeft.current = null;
-    // It goes away under the pointer, so no mouseleave will come to let go.
-    islandHeld.current = false;
     islandRef.current = null;
     setIslandOpen(false);
   }

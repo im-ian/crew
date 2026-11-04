@@ -5805,6 +5805,8 @@ textarea.textin.skill-body {
 }
 /* Leaving: it folds back to the dot, then the dot shrinks away. */
 .island.is-leaving {
+  /* The notice is already gone; a click here is meant for what is under it. */
+  pointer-events: none;
   transform: translate(-50%, -50%) scale(1);
   opacity: 1;
   animation: island-out 0.24s 0.2s var(--ease) forwards;

@@ -52,6 +52,9 @@ export function Island({ notice, visible, agents, onOpenBot, onClose, onHold, on
   const phaseRef = useRef<Phase>("off");
   phaseRef.current = phase;
   const rowRef = useRef<HTMLDivElement>(null);
+  const hovered = useRef(false);
+  const releaseRef = useRef(onRelease);
+  releaseRef.current = onRelease;
 
   useEffect(() => {
     if (!visible || !notice) {
@@ -87,6 +90,26 @@ export function Island({ notice, visible, agents, onOpenBot, onClose, onHold, on
     const row = rowRef.current;
     if (row) setWidth(row.offsetWidth);
   }, [shown, name, locale, bot?.avatar]);
+
+  // The pointer only holds the island while it can be pointed at. Folding
+  // away, gone, or the window put aside sends no mouseleave, so let go here.
+  const live = (phase === "show" || phase === "open") && !!shown && !("botId" in shown && !bot);
+  useEffect(() => {
+    const letGo = () => {
+      if (!hovered.current) return;
+      hovered.current = false;
+      releaseRef.current();
+    };
+    if (!live) {
+      letGo();
+      return;
+    }
+    window.addEventListener("blur", letGo);
+    return () => {
+      window.removeEventListener("blur", letGo);
+      letGo();
+    };
+  }, [live]);
 
   if (phase === "off" || !shown) return null;
   if ("botId" in shown && !bot) return null;
@@ -137,8 +160,16 @@ export function Island({ notice, visible, agents, onOpenBot, onClose, onHold, on
       role={kind === "error" ? "alert" : "status"}
       title={full}
       onClick={bot ? () => onOpenBot(bot.id) : undefined}
-      onMouseEnter={onHold}
-      onMouseLeave={onRelease}
+      onMouseEnter={() => {
+        if (!live || hovered.current) return;
+        hovered.current = true;
+        onHold();
+      }}
+      onMouseLeave={() => {
+        if (!hovered.current) return;
+        hovered.current = false;
+        onRelease();
+      }}
     >
       <div className="island-row" ref={rowRef}>
         <span className="island-lead">{lead}</span>
@@ -150,14 +181,8 @@ export function Island({ notice, visible, agents, onOpenBot, onClose, onHold, on
             </span>
           ) : null}
           {bot ? (
-            <button
-              type="button"
-              className="island-go"
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenBot(bot.id);
-              }}
-            >
+            // Its click goes up to the pill, which opens the chat.
+            <button type="button" className="island-go">
               {t("island.go")}
             </button>
           ) : null}
