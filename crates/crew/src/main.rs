@@ -3,6 +3,7 @@ use clap::{ArgMatches, Args, CommandFactory, FromArgMatches, Parser, Subcommand}
 mod avatar;
 mod choice;
 mod client;
+mod codex_rollout;
 mod config;
 mod cron;
 mod daemon;

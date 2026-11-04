@@ -124,6 +124,14 @@ describe("threadRows note runs", () => {
     expect(rows[0].kind === "notes" && rows[0].peerId).toBe("jordy");
   });
 
+  it("keeps a compact line in the main chat, between tool runs", () => {
+    const rows = threadRows(
+      [msg("t1", "tool"), note("c", "crew", "compact"), msg("t2", "tool")],
+      roster,
+    );
+    expect(rows.map((r) => r.kind)).toEqual(["tools", "msg", "tools"]);
+  });
+
   it("starts a new run when the other bot changes", () => {
     const rows = threadRows(
       [

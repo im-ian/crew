@@ -286,7 +286,7 @@ fn parse_grok_line(v: &Value) -> Option<PlanUsage> {
 /// Codex writes its windows into each session's `token_count` events. The
 /// newest session that has them is the latest reading.
 fn codex_usage() -> Option<PlanUsage> {
-    let root = env_dir("CODEX_HOME").or_else(|| user_home().map(|h| h.join(".codex")))?;
+    let root = codex_home()?;
     let mut files = Vec::new();
     collect_jsonl(&root.join("sessions"), 4, &mut files);
     files.sort_by(|a, b| b.0.cmp(&a.0));
@@ -568,6 +568,11 @@ fn now() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+/// Where codex keeps its sessions: `CODEX_HOME`, else `~/.codex`.
+pub(crate) fn codex_home() -> Option<PathBuf> {
+    env_dir("CODEX_HOME").or_else(|| user_home().map(|h| h.join(".codex")))
 }
 
 fn env_dir(key: &str) -> Option<PathBuf> {

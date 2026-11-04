@@ -136,6 +136,8 @@ pub fn classify_row(
             MessageKind::Routine => RowClass::Routine,
             MessageKind::Handoff => RowClass::Handoff,
             MessageKind::Tool => RowClass::Tool,
+            // Crew's own line, like any other it writes.
+            MessageKind::Compact => RowClass::Received,
         };
     }
     match msg.role {

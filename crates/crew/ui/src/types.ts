@@ -167,7 +167,13 @@ export type RemoteJoin = {
   color: string | null;
 };
 
-export type MessageKind = "sent" | "received" | "routine" | "handoff" | "tool";
+export type MessageKind =
+  | "sent"
+  | "received"
+  | "routine"
+  | "handoff"
+  | "tool"
+  | "compact";
 export type ApprovalState = "pending" | "allowed" | "denied";
 export type ChoiceState = "pending" | "answered" | "closed";
 

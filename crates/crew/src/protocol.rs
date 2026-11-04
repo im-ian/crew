@@ -415,6 +415,8 @@ pub enum MessageKind {
     Routine,
     Handoff,
     Tool,
+    /// Crew's line where the CLI folded the earlier conversation.
+    Compact,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
