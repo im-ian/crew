@@ -13,6 +13,9 @@ type Props = {
   agents: AgentInfo[];
   onOpenBot: (id: string) => void;
   onClose: () => void;
+  /** The pointer came onto the island or left it: its clock stops meanwhile. */
+  onHold: () => void;
+  onRelease: () => void;
 };
 
 /** The island is always dark, so its colors do not follow the theme. */
@@ -39,7 +42,7 @@ type Phase = "off" | "show" | "open" | "leave";
  * click anywhere on it opens that bot's chat; otherwise a status dot. A new notice while it is open changes the words in
  * place instead of closing and opening again.
  */
-export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
+export function Island({ notice, visible, agents, onOpenBot, onClose, onHold, onRelease }: Props) {
   const { locale, t } = useLocale();
   const labelOf = useBotLabel();
   const [phase, setPhase] = useState<Phase>("off");
@@ -134,6 +137,8 @@ export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
       role={kind === "error" ? "alert" : "status"}
       title={full}
       onClick={bot ? () => onOpenBot(bot.id) : undefined}
+      onMouseEnter={onHold}
+      onMouseLeave={onRelease}
     >
       <div className="island-row" ref={rowRef}>
         <span className="island-lead">{lead}</span>
