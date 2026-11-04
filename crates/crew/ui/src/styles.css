@@ -2992,6 +2992,7 @@ button.choice-option:active:not(:disabled) .choice-badge {
   font-size: var(--text-lg);
   line-height: 1.35;
 }
+.choice-input:disabled,
 .choice-input[aria-disabled="true"] {
   opacity: 0.85;
   cursor: default;

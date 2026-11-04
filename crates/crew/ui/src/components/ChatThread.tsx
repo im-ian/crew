@@ -54,7 +54,7 @@ import {
 } from "../choiceView";
 import { routineSwitchName } from "../routineNote";
 import { queueActions, shownInThread, userLineAppearance } from "../sendGate";
-import { isSelfMentionDelivery, mentionRuns } from "../mentions";
+import { isSelfMentionDelivery, mentionRuns, mentionText } from "../mentions";
 import { MentionChip } from "./MentionChip";
 import { focusField, MentionField } from "./MentionField";
 import { clockLabels, messageClockParts } from "../clock";
@@ -2015,7 +2015,7 @@ function ChoiceCard({
                 <span className="choice-sum-q">{(q.header || q.question || "").trim()}</span>
                 <span className="choice-sum-a">
                   {ok
-                    ? answerSummary(q, picks[qi], values[qi], others[qi])
+                    ? mentionText(answerSummary(q, picks[qi], values[qi], others[qi]), agents)
                     : t("thread.choiceUnanswered")}
                 </span>
               </button>

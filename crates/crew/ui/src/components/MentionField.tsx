@@ -59,18 +59,23 @@ export function MentionField({
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || shown.current === value) return;
-    el.replaceChildren();
-    for (const run of mentionRuns(value, agents)) {
-      if (run.agent) {
-        el.append(renderChip(<MentionChip agent={run.agent} label={labelOf(run.agent)} />));
-        continue;
-      }
-      run.text.split("\n").forEach((line, i) => {
-        if (i) el.append(document.createElement("br"));
-        if (line) el.append(line);
-      });
-    }
     shown.current = value;
+    // A chip comes from a React root of its own, which cannot render while
+    // this commit is under way. A microtask still runs before the paint.
+    queueMicrotask(() => {
+      if (shown.current !== value) return;
+      el.replaceChildren();
+      for (const run of mentionRuns(value, agents)) {
+        if (run.agent) {
+          el.append(renderChip(<MentionChip agent={run.agent} label={labelOf(run.agent)} />));
+          continue;
+        }
+        run.text.split("\n").forEach((line, i) => {
+          if (i) el.append(document.createElement("br"));
+          if (line) el.append(line);
+        });
+      }
+    });
   }, [value, agents, labelOf]);
 
   const bots = query && !disabled ? mentionCandidates(agents, groups, query.query, skip) : [];
