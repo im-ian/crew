@@ -28,8 +28,26 @@ const BLOCK_TAGS = new Set([
   "TD",
 ]);
 
+/** A teammate's bot reads as `server · name`, the server its rail section is. */
 export function mentionLabel(agent: AgentInfo): string {
-  return agent.name || agent.id;
+  const name = agent.name || agent.id;
+  return agent.remote ? `${agent.remote} · ${name}` : name;
+}
+
+/**
+ * Whether the mention menu offers `agent` for what was typed after `@`.
+ * A teammate's bot is found by its server or its own name.
+ */
+export function mentionMatches(agent: AgentInfo, query: string): boolean {
+  const q = query.toLowerCase();
+  if (!q) return true;
+  return [
+    agent.id,
+    agent.name || "",
+    agent.remote || "",
+    agent.remote ? remoteLabel(agent) : "",
+    mentionLabel(agent),
+  ].some((s) => s.toLowerCase().includes(q));
 }
 
 function resolveId(token: string, agents: readonly AgentInfo[]): AgentInfo | undefined {
@@ -51,7 +69,7 @@ export function resolveMention(
     agents.find(
       (a) =>
         a.name === token ||
-        mentionLabel(a).toLowerCase() === lower ||
+        (a.name || a.id).toLowerCase() === lower ||
         // A teammate's bot typed as `alias/name`, the way the rail shows it.
         (!!a.remote && remoteLabel(a).toLowerCase() === lower),
     )
