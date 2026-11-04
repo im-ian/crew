@@ -180,6 +180,14 @@ export function ChevronDown(props: Props) {
   );
 }
 
+export function ChevronUp(props: Props) {
+  return (
+    <Icon {...props}>
+      <path d="m18 15-6-6-6 6" />
+    </Icon>
+  );
+}
+
 export function ChevronLeft(props: Props) {
   return (
     <Icon {...props}>
