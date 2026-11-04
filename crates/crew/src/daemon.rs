@@ -1425,7 +1425,8 @@ fn edit_queued(id: &str, msg_id: &str, text: &str) -> anyhow::Result<()> {
 }
 
 /// Send `msg_id` now. It leaves on its own, ahead of whatever else is waiting.
-/// A turn that is already running keeps going; this line is first when it ends.
+/// A turn that is already running stops for it, as a steer does. A terminal
+/// can't be stopped mid-turn, so there this line is first when the turn ends.
 fn send_queued_now(id: &str, msg_id: &str) -> anyhow::Result<()> {
     let mut item = {
         let mut map = inbox().lock().expect("inbox mutex");
@@ -1446,7 +1447,15 @@ fn send_queued_now(id: &str, msg_id: &str) -> anyhow::Result<()> {
         item.parked = false;
         item
     };
-    match agent_busy(id) {
+    let busy = agent_busy(id).and_then(|busy| {
+        if busy && is_headless(id) {
+            halt_turn(id)?;
+            agent_busy(id)
+        } else {
+            Ok(busy)
+        }
+    });
+    match busy {
         Ok(false) => {
             if let Some(start) = claim_start(id) {
                 let text = item.text.clone();
@@ -5597,9 +5606,10 @@ mod daemon_tests {
         });
     }
 
-    /// Sending a waiting line does not stop the turn that is already answering.
+    /// Sending a waiting line stops the turn that is already answering and
+    /// starts in its place, as a steer does.
     #[test]
-    fn sending_a_waiting_line_leaves_the_running_turn() {
+    fn sending_a_waiting_line_stops_the_running_turn() {
         paths::testing::with_home("send-queued-busy", || {
             let bot = test_id("sendb");
             let log = paths::home_dir().join("prompts");
@@ -5622,18 +5632,13 @@ mod daemon_tests {
                 .expect("나중")
                 .id;
             send_queued_now(&bot, &mid).unwrap();
-            assert!(agent_busy(&bot).unwrap(), "the running turn was stopped");
-            assert!(told(&bot, "alive"));
-            assert_eq!(queued_text(&bot), ["나중"]);
-            assert!(
-                !fs::read_to_string(&log).unwrap().contains("나중"),
-                "the waiting line started under the running turn"
+            eventually(
+                Duration::from_secs(5),
+                "나중 did not start at once",
+                || fs::read_to_string(&log).is_ok_and(|s| s.contains("나중")),
             );
-            interrupt_turn(&bot).unwrap();
-            eventually(Duration::from_secs(5), "나중 did not go next", || {
-                fs::read_to_string(&log).is_ok_and(|s| s.contains("나중"))
-            });
             wait_idle(&bot);
+            assert!(queued_text(&bot).is_empty());
             remove_agent(&bot).unwrap();
         });
     }
