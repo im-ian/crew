@@ -362,3 +362,67 @@ describe("peekMessages", () => {
     ]);
   });
 });
+
+// The rows below are what the daemon writes for a teammate's bot on another
+// PC (`<alias>/<account>`), as read back from a run of scripts/remote-e2e.py.
+describe("peekMessages with a bot on another PC", () => {
+  const REMOTE = "lab/acc_q1ls5t5x89oxycyqq2uz";
+  const ROSTER = new Set(["repc", "helper", REMOTE]);
+
+  it("reads a teammate's tell to the representative and its replies", () => {
+    const thread = [
+      msg("system", REMOTE, "SLOW P1", { id: "r1", kind: "received", peer: REMOTE }),
+      msg("assistant", "repc", "ACK SLOW P1", { id: "a1", peer: REMOTE }),
+      msg("system", REMOTE, "P2", { id: "r2", kind: "received", peer: REMOTE }),
+      msg("assistant", "repc", "ACK P2", { id: "a2", peer: REMOTE }),
+    ];
+    expect(peekPeerId(thread[0], ROSTER)).toBe(REMOTE);
+    const rows = peekMessages(thread, REMOTE, "repc", ROSTER);
+    expect(rows.map((m) => [m.from, m.text])).toEqual([
+      [REMOTE, "SLOW P1"],
+      ["repc", "ACK SLOW P1"],
+      [REMOTE, "P2"],
+      ["repc", "ACK P2"],
+    ]);
+  });
+
+  it("reads the representative's tell out and the answer handed back", () => {
+    const rows = peekMessages(
+      [
+        msg("system", `to:${REMOTE}`, "Q1", { id: "s1", kind: "sent" }),
+        msg("system", REMOTE, "ACK Q1", { id: "h1", kind: "handoff" }),
+        msg("assistant", "repc", "ACK ACK Q1", { id: "w1" }),
+      ],
+      REMOTE,
+      "repc",
+      ROSTER,
+    );
+    expect(rows.map((m) => [m.from, m.text])).toEqual([
+      ["repc", "Q1"],
+      [REMOTE, "ACK Q1"],
+    ]);
+  });
+
+  // In the remote bot's own chat the local bot's asks were stored as sent:
+  // each read as the remote bot's words, and the next ask dropped the reply
+  // before it as if it were a tell back.
+  it("keeps both rounds in the remote bot's chat with the bot that asked", () => {
+    const rows = peekMessages(
+      [
+        msg("system", "repc", "Q1", { id: "t1", kind: "received", peer: "repc" }),
+        msg("assistant", REMOTE, "ACK Q1", { id: "a1", peer: "repc" }),
+        msg("system", "repc", "Q2", { id: "t2", kind: "received", peer: "repc" }),
+        msg("assistant", REMOTE, "ACK Q2", { id: "a2", peer: "repc" }),
+      ],
+      "repc",
+      REMOTE,
+      ROSTER,
+    );
+    expect(rows.map((m) => [m.from, m.text])).toEqual([
+      ["repc", "Q1"],
+      [REMOTE, "ACK Q1"],
+      ["repc", "Q2"],
+      [REMOTE, "ACK Q2"],
+    ]);
+  });
+});

@@ -6,7 +6,7 @@ export type PaneTab = "info" | "routines" | "memory";
 /** How saving an edit to a waiting message ended. "gone": it went out first. */
 export type EditResult = "saved" | "gone" | "failed";
 export type CtxKind = Kind | "group" | "create";
-export type ConfirmKind = "reset" | "remove" | "remove-group";
+export type ConfirmKind = "reset" | "remove" | "remove-group" | "leave-remote";
 
 export type Group = {
   id: string;
@@ -101,6 +101,72 @@ export type AgentInfo = {
   failed?: boolean;
   /** A question card is open and waiting for the user. */
   asking?: boolean;
+  /** Alias of the router a teammate's bot is on. Set only for remote bots. */
+  remote?: string;
+  /** The teammate's PC is connected to the router. */
+  remote_online?: boolean;
+};
+
+export type SignupMode = "open" | "invite" | "closed";
+
+/** What a router says about itself before anyone signs up. */
+export type RemoteServer = {
+  url: string;
+  name: string;
+  version: string;
+  protocol: number;
+  title: string;
+  signup: SignupMode;
+};
+
+/** A teammate's representative bot on a router. */
+export type RemoteMember = {
+  account: string;
+  name: string;
+  role?: string | null;
+  avatar?: string | null;
+  avatar_shape?: string | null;
+  avatar_color?: string | null;
+  online: boolean;
+  status: "idle" | "working" | "asking";
+};
+
+/** A teammate, by router account. The name is only for showing. */
+export type RemoteAccount = { account: string; name: string };
+
+/** One router this PC is signed up to. */
+export type RemoteInfo = {
+  alias: string;
+  url: string;
+  /** My representative bot's name on the router. */
+  name: string;
+  /** Id of my local representative bot. */
+  bot: string;
+  connected: boolean;
+  members: RemoteMember[];
+  /** Local bots the representative may hand work to. */
+  delegates: string[];
+  trusted: RemoteAccount[];
+  blocked: RemoteAccount[];
+  /** Why this PC stopped trying to connect: same account elsewhere, or removed. */
+  error?: string | null;
+};
+
+export type TeamMemory = { text: string; version: number };
+
+/** What the add-remote dialog hands back: the sign-up and the bot's AI. */
+export type RemoteJoin = {
+  url: string;
+  alias: string;
+  name: string;
+  invite: string | null;
+  role: string | null;
+  cli: CliKind;
+  model: string;
+  effort: string;
+  cmd: string;
+  shape: string | null;
+  color: string | null;
 };
 
 export type MessageKind = "sent" | "received" | "routine" | "handoff" | "tool";

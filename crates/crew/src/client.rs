@@ -23,6 +23,8 @@ const PING_TIMEOUT: Duration = Duration::from_millis(900);
 /// One short line into a socket buffer. Taking this long means nobody is
 /// draining it.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+/// A router's connect and its answer each get eight seconds; a join is two.
+const REMOTE_TIMEOUT: Duration = Duration::from_secs(40);
 
 /// How long the whole exchange may take. `None` is for the two that are not
 /// questions: `Ask` waits on a person, and `Subscribe` is a stream the daemon
@@ -62,7 +64,16 @@ fn answer_timeout(req: &Request) -> Option<Duration> {
         | Request::Approve { .. }
         | Request::AnswerChoice { .. }
         | Request::Search { .. }
+        | Request::RemoteList
+        | Request::RemoteSet { .. }
+        | Request::TeamMemory { .. }
         | Request::Shutdown => Some(ANSWER_TIMEOUT),
+        // These wait on a router somewhere on the network.
+        Request::RemoteProbe { .. }
+        | Request::RemoteJoin { .. }
+        | Request::RemoteLeave { .. }
+        | Request::TeamMemoryAppend { .. }
+        | Request::TeamMemorySet { .. } => Some(REMOTE_TIMEOUT),
     }
 }
 
@@ -201,6 +212,16 @@ fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
             | (Request::Ask { .. }, Event::Answered { .. } | Event::Error { .. })
             | (Request::AnswerChoice { .. }, Event::Ok)
             | (Request::Search { .. }, Event::Search { .. })
+            | (Request::RemoteProbe { .. }, Event::RemoteServer { .. })
+            | (Request::RemoteJoin { .. }, Event::Ok)
+            | (Request::RemoteList, Event::Remotes { .. })
+            | (Request::RemoteSet { .. }, Event::Ok)
+            | (Request::RemoteLeave { .. }, Event::Ok)
+            | (Request::TeamMemory { .. }, Event::TeamMemory { .. })
+            | (
+                Request::TeamMemoryAppend { .. } | Request::TeamMemorySet { .. },
+                Event::Ok | Event::TeamMemoryConflict,
+            )
             | (Request::Shutdown, Event::Shutdown | Event::Ok)
             | (_, Event::Error { .. }) => return Ok(ev),
             _ => continue,

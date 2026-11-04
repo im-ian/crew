@@ -1099,10 +1099,17 @@ fn teammates_sentence(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
     if others.is_empty() {
         return "Teammates: (none).".to_string();
     }
+    let remote = others.iter().any(|a| a.id.contains('/'));
     let parts: Vec<String> = others
         .into_iter()
         .map(|a| format!("{} — {}", a.id, a.display_name()))
         .collect();
+    if remote {
+        return format!(
+            "Teammates: {}. An id with a `/` is a bot on someone else's PC, reached through a crew-router: `crew tell` it the same way, and its reply comes back to you.",
+            parts.join("; ")
+        );
+    }
     format!("Teammates: {}.", parts.join("; "))
 }
 
@@ -1219,8 +1226,9 @@ pub(crate) fn mention_tokens(text: &str) -> Vec<String> {
     for (idx, ch) in text.char_indices() {
         if ch == '@' && prev_ws {
             let raw = text[idx + 1..].split(char::is_whitespace).next().unwrap_or("");
+            // A bot on another PC is `<alias>/<account>`.
             let end = raw
-                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '/'))
                 .unwrap_or(raw.len());
             let (token, rest) = raw.split_at(end);
             let ends = rest.is_empty()

@@ -54,6 +54,12 @@ crew share show
 crew share append 배포는 develop에서 확인한다
 crew share set 팀 규칙만 남긴다
 
+crew remote list                              # 붙어 있는 라우터와 그 위의 원격 봇
+crew tell lab/acc_k3j9x0abcd12 이 API 리뷰 부탁해   # 다른 PC의 봇
+crew team memory show
+crew team memory append 배포는 금요일에 하지 않는다
+crew team memory set --remote lab 팀 규칙만 남긴다
+
 crew messages grok
 crew reset grok
 crew reset grok --drop-routines
@@ -66,6 +72,12 @@ crew reset grok --drop-routines
 ## `crew group`
 
 `crew group add --name`은 사이드바 그룹을 만들어요. `--bot <id>`를 반복하면 그 봇을 다른 그룹에서 빼 새 그룹에 넣어요. 없는 봇 id는 거절해요. `crew group list`는 `id`, 이름, 봇 id를 탭으로 나눠 출력해요. `crew group memory show|set|append`는 `--group <id>`의 노트를 다뤄요. 생략하면 `CREW_AGENT_ID` 봇이 있는 그룹이에요.
+
+## `crew remote` · `crew team memory`
+
+원격 봇은 0.6.0부터 쓸 수 있어요. 라우터에 붙는 건 앱의 **+ → 원격 봇 추가**에서 해요. `crew remote list`는 라우터마다 별칭, 주소, 내 이름, 대표 봇, 연결 상태와 팀원들의 원격 봇 id(`<별칭>/<계정 id>`)를 출력해요. 그 id로 `crew tell`하면 그 봇이 자기 PC에서 일하고, 답은 보낸 봇에게 돌아와요.
+
+`crew team memory show|append|set`은 라우터의 팀 공용 메모를 다뤄요. `--remote <별칭>`을 생략하면 대표 봇 세션 안에선 그 봇의 라우터, 아니면 라우터가 하나일 때 그 라우터예요. `set`은 그 사이 다른 사람이 고쳤으면 거절돼요. 데몬과 라우터 연결이 필요해요.
 
 ## `crew ask`
 

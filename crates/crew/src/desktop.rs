@@ -528,6 +528,177 @@ fn rpc_set_avatar(id: String, avatar: Option<String>, unset_avatar: bool) -> Res
     }
 }
 
+fn remote_rpc(req: Request) -> Result<Event, String> {
+    client::ensure_daemon().map_err(|e| e.to_string())?;
+    match client::rpc(req) {
+        Ok(Event::Error { message }) => Err(message),
+        Ok(ev) => Ok(ev),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+/// The health check of 원격 봇 추가. See `docs/router.md`.
+#[tauri::command(async)]
+fn remote_probe(url: String) -> Result<crate::remote::RemoteServer, String> {
+    match remote_rpc(Request::RemoteProbe { url })? {
+        Event::RemoteServer { server } => Ok(server),
+        _ => Err("unexpected daemon response".into()),
+    }
+}
+
+/// Make the local representative, then sign it up. A refused signup takes the
+/// bot back, so a taken name leaves nothing behind.
+#[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
+fn remote_join(
+    url: String,
+    alias: String,
+    name: String,
+    invite: Option<String>,
+    cli: String,
+    avatar: Option<String>,
+    avatar_shape: Option<String>,
+    avatar_color: Option<String>,
+    role: Option<String>,
+) -> Result<String, String> {
+    let alias = alias.trim().to_lowercase();
+    if !crate::remote::valid_alias(&alias) {
+        return Err(if crate::paths::locale() == "en" {
+            "An alias is up to 32 lowercase letters, digits, - or _".into()
+        } else {
+            "별칭은 32자 이하의 영문 소문자·숫자·-·_만 쓸 수 있어요".into()
+        });
+    }
+    let cwd = crate::remote::work_dir(&alias);
+    crate::paths::create_cwd(&cwd).map_err(|e| e.to_string())?;
+    // A custom command comes next, from `set_agent_cli`: start on the default.
+    let cli = if cli.trim().eq_ignore_ascii_case("custom") {
+        "grok".to_string()
+    } else {
+        cli
+    };
+    let id = add_agent(
+        name.clone(),
+        cli,
+        None,
+        None,
+        role,
+        None,
+        None,
+        Some(cwd.display().to_string()),
+    )?;
+    let joined = (|| {
+        if avatar_shape.is_some() || avatar_color.is_some() {
+            set_agent(
+                id.clone(),
+                None,
+                None,
+                false,
+                false,
+                None,
+                None,
+                None,
+                false,
+                false,
+                false,
+                avatar_shape,
+                avatar_color,
+                None,
+                None,
+                false,
+            )?;
+        }
+        if let Some(data) = avatar.and_then(empty_to_none) {
+            set_avatar(id.clone(), data, None)?;
+        }
+        match remote_rpc(Request::RemoteJoin {
+            url,
+            alias,
+            name: name.trim().to_string(),
+            invite: invite.and_then(empty_to_none),
+            bot: id.clone(),
+        })? {
+            Event::Ok => Ok(()),
+            _ => Err("unexpected daemon response".to_string()),
+        }
+    })();
+    match joined {
+        Ok(()) => Ok(id),
+        Err(err) => {
+            let _ = remove_agent(id);
+            Err(err)
+        }
+    }
+}
+
+#[tauri::command(async)]
+fn remote_list() -> Result<Vec<crate::remote::RemoteInfo>, String> {
+    match remote_rpc(Request::RemoteList)? {
+        Event::Remotes { mut remotes } => {
+            for r in &mut remotes {
+                for m in &mut r.members {
+                    m.avatar = m.avatar.take().filter(|a| a.starts_with("data:"));
+                }
+            }
+            Ok(remotes)
+        }
+        _ => Err("unexpected daemon response".into()),
+    }
+}
+
+#[tauri::command(async)]
+fn remote_set(
+    alias: String,
+    delegates: Option<Vec<String>>,
+    trusted: Option<Vec<String>>,
+    blocked: Option<Vec<String>>,
+) -> Result<(), String> {
+    remote_rpc(Request::RemoteSet {
+        alias,
+        delegates,
+        trusted,
+        blocked,
+    })
+    .map(|_| ())
+}
+
+#[tauri::command(async)]
+fn remote_leave(alias: String) -> Result<(), String> {
+    remote_rpc(Request::RemoteLeave { alias }).map(|_| ())
+}
+
+#[derive(serde::Serialize)]
+struct TeamMemory {
+    text: String,
+    version: u64,
+}
+
+#[tauri::command(async)]
+fn team_memory_get(alias: String) -> Result<TeamMemory, String> {
+    match remote_rpc(Request::TeamMemory {
+        alias: Some(alias),
+        bot: None,
+    })? {
+        Event::TeamMemory { text, version, .. } => Ok(TeamMemory { text, version }),
+        _ => Err("unexpected daemon response".into()),
+    }
+}
+
+/// `false`: someone changed the notes first, and nothing was written.
+#[tauri::command(async)]
+fn team_memory_set(alias: String, text: String, version: u64) -> Result<bool, String> {
+    match remote_rpc(Request::TeamMemorySet {
+        alias: Some(alias),
+        bot: None,
+        text,
+        version: Some(version),
+    })? {
+        Event::Ok => Ok(true),
+        Event::TeamMemoryConflict => Ok(false),
+        _ => Err("unexpected daemon response".into()),
+    }
+}
+
 #[tauri::command(async)]
 fn set_avatar(id: String, data: String, name: Option<String>) -> Result<(), String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
@@ -939,7 +1110,14 @@ pub fn run() -> anyhow::Result<()> {
             set_locale,
             set_notifications,
             set_worktree,
-            set_escape_layer
+            set_escape_layer,
+            remote_probe,
+            remote_join,
+            remote_list,
+            remote_set,
+            remote_leave,
+            team_memory_get,
+            team_memory_set
         ])
         .run(tauri::generate_context!())
         .map_err(|e| anyhow::anyhow!(e))?;

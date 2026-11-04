@@ -58,6 +58,13 @@ fn main() {
             "set_notifications",
             "set_worktree",
             "set_escape_layer",
+            "remote_probe",
+            "remote_join",
+            "remote_list",
+            "remote_set",
+            "remote_leave",
+            "team_memory_get",
+            "team_memory_set",
         ])),
     )
     .expect("failed to run tauri build");

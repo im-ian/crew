@@ -10,13 +10,15 @@ import { AgentPane } from "./components/AgentPane";
 import { ConnectionBanner } from "./components/ConnectionBanner";
 import { NewBotModal } from "./components/NewBotModal";
 import { NewGroupModal } from "./components/NewGroupModal";
+import { RemoteAddModal } from "./components/RemoteAddModal";
 import { GroupSettingsModal } from "./components/GroupSettingsModal";
 import { SettingsPane } from "./components/SettingsPane";
 import { SkillsPane } from "./components/SkillsPane";
 import { ShortcutHelp } from "./components/ShortcutHelp";
 import { Sidebar } from "./components/Sidebar";
 import { Island } from "./components/Island";
-import { railOrder } from "./groups";
+import { chatOrder, loadRemoteFolds, loadRemoteLayout, representing } from "./remote";
+import { copyText } from "./components/CopyButton";
 import { useT } from "./LocaleContext";
 import type { TFn } from "./i18n";
 import { isTypingTarget, shortcutId } from "./shortcuts";
@@ -48,6 +50,10 @@ export function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  // Asked from settings, so it is drawn over them and Escape shuts it first.
+  // The alias outlives the dialog, so its title holds while it fades out.
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const [leaveAlias, setLeaveAlias] = useState("");
   const [theme, setTheme] = useState<ThemePref>(loadThemePref);
   const [showTools, setShowTools] = useState(loadShowTools);
   const [chatWidth, setChatWidth] = useState(loadChatWidth);
@@ -176,6 +182,13 @@ export function App() {
       // The skills window handles its own Escape, and no shortcut should act
       // on the app hidden behind it.
       if (skillsOpen) return;
+      if (leaveOpen) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setLeaveOpen(false);
+        }
+        return;
+      }
       if ((settingsOpen || helpOpen) && e.key === "Escape" && popoverIsOpen()) return;
       if (settingsOpen && e.key === "Escape") {
         e.preventDefault();
@@ -249,7 +262,13 @@ export function App() {
         return;
       }
       if (id === "prev-chat" || id === "next-chat") {
-        const order = railOrder(c.groups, c.ungrouped, c.agents);
+        const order = chatOrder(
+          { groups: c.groups, ungrouped: c.ungrouped },
+          c.agents,
+          c.remotes,
+          loadRemoteFolds(),
+          loadRemoteLayout(),
+        );
         if (!order.length) return;
         const i = order.findIndex(
           (row) => row.kind === c.selectedKind && row.id === c.selected,
@@ -273,12 +292,13 @@ export function App() {
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [helpOpen, settingsOpen, skillsOpen, peek]);
+  }, [helpOpen, settingsOpen, skillsOpen, peek, leaveOpen]);
 
   return (
     <div className="app">
       <Sidebar
         agents={crew.agents}
+        remotes={crew.remotes}
         groups={crew.groups}
         ungrouped={crew.ungrouped}
         selected={crew.selected}
@@ -372,9 +392,13 @@ export function App() {
           peekFocus={peekOpen ? peek?.focus[0] ?? null : null}
           onPeek={togglePeek}
           showTools={showTools}
-          onOpenRoutines={() => {
-            if (crew.selected) crew.openRoutines(crew.selected);
-          }}
+          onOpenRoutines={
+            crew.currentAgent?.remote
+              ? undefined
+              : () => {
+                  if (crew.selected) crew.openRoutines(crew.selected);
+                }
+          }
           lookAt={
             crew.currentAgent?.status === "working" ||
             crew.currentAgent?.status === "blocked" ||
@@ -459,6 +483,11 @@ export function App() {
       <ConfirmDialog
         open={crew.confirmOpen}
         kind={crew.confirmKind}
+        represents={
+          crew.confirmKind === "remove" && crew.confirmId
+            ? representing(crew.confirmId, crew.remotes)
+            : []
+        }
         onCancel={crew.closeConfirm}
         onConfirm={(drop) => void crew.doConfirm(drop)}
       />
@@ -474,6 +503,12 @@ export function App() {
         onClose={crew.closeNewGroup}
         onPickFolder={crew.pickFolder}
         onCreate={crew.createNamedGroup}
+      />
+      <RemoteAddModal
+        open={crew.remoteAddOpen}
+        aliases={crew.remotes.map((r) => r.alias)}
+        onClose={crew.closeRemoteAdd}
+        onJoin={crew.joinRemote}
       />
       <GroupSettingsModal
         open={!!crew.groupSettingsId}
@@ -514,6 +549,30 @@ export function App() {
           setSkillsOpen(true);
         }}
         updater={updater}
+        remotes={crew.remotes}
+        agents={crew.agents}
+        onSetRemote={crew.setRemote}
+        onLeaveRemote={(alias) => {
+          setLeaveAlias(alias);
+          setLeaveOpen(true);
+        }}
+        onAddRemote={() => {
+          setSettingsOpen(false);
+          crew.openRemoteAdd();
+        }}
+      />
+      <ConfirmDialog
+        open={leaveOpen}
+        kind="leave-remote"
+        leaving={{
+          alias: leaveAlias,
+          name: crew.remotes.find((r) => r.alias === leaveAlias)?.name ?? "",
+        }}
+        onCancel={() => setLeaveOpen(false)}
+        onConfirm={() => {
+          setLeaveOpen(false);
+          if (leaveAlias) void crew.leaveRemote(leaveAlias);
+        }}
       />
       <SkillsPane open={skillsOpen} onClose={() => setSkillsOpen(false)} />
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
@@ -558,6 +617,14 @@ function menuItems(
           crew.openNewGroup();
         },
       },
+      {
+        type: "action",
+        label: t("menu.addRemote"),
+        onClick: () => {
+          crew.hideCtx();
+          crew.openRemoteAdd();
+        },
+      },
     ];
   }
   if (ctx.kind === "group") {
@@ -593,6 +660,30 @@ function menuItems(
     return items;
   }
   const id = ctx.id;
+  const remote = crew.agents.find((a) => a.id === id && a.remote);
+  if (remote) {
+    // A teammate's bot is only talked to: nothing of it lives on this PC.
+    return [
+      {
+        type: "action",
+        label: t("menu.openChat"),
+        onClick: () => {
+          crew.hideCtx();
+          crew.selectAgent(remote.id);
+        },
+      },
+      {
+        type: "action",
+        label: t("menu.copyMention"),
+        onClick: () => {
+          crew.hideCtx();
+          void copyText("@" + remote.id).then((ok) => {
+            if (ok) crew.showToast(t("common.copied"));
+          });
+        },
+      },
+    ];
+  }
   const currentGroup = id ? crew.itemGroupId("agent", id) : null;
   const moveItems: MenuEntry[] = groups
     .filter((g) => g.id !== currentGroup)

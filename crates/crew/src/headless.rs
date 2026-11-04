@@ -241,6 +241,11 @@ fn shared_note_for_turn(
     if crate::daemon::is_slash_command(prompt) {
         return None;
     }
+    // A representative answers people on other PCs: it gets the team's notes
+    // and none of this PC's.
+    if let Some(note) = crate::remote::rep_note(agent, roster) {
+        return Some(note);
+    }
     let mut note = crate::config::shared_memory_note(agent, roster, &crate::memory::read_shared());
     note.push_str(&crate::config::group_memory_section(
         crate::memory::group_for(&agent.id).as_ref(),
@@ -721,6 +726,10 @@ fn run_turn(
     crate::daemon::forget_prompt(&session.id);
     // Before the idle frame goes out, so the window sees both in one look.
     crate::daemon::note_turn_failed(&session.id, failed);
+    // While the child is still set: once it is gone the next turn can start
+    // and take this turn's origin before `turn_ended` reads it. After the
+    // failure is noted, so a failed turn reaches the teammate as one.
+    crate::daemon::remote_turn_over(&session.id);
     if let Ok(mut inner) = session.inner.lock() {
         inner.child = None;
         if inner.generation == generation {

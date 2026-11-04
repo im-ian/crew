@@ -3,6 +3,8 @@ import {
   injectMentionChips,
   isSelfMentionDelivery,
   mentionIds,
+  mentionLabel,
+  mentionMatches,
   mentionsId,
   mentionRuns,
   mentionText,
@@ -204,5 +206,55 @@ describe("mentionText", () => {
   it("reads back what the row shows, so a search can match it", () => {
     expect(mentionText("@gamma 확인해줘", agents)).toBe("@춘식이 확인해줘");
     expect(mentionText("#ship 올려", agents)).toBe("#ship 올려");
+  });
+});
+
+describe("a remote bot's handle", () => {
+  const amy: AgentInfo = {
+    ...agent("team/acc_k3j9", "amy"),
+    cmd: [],
+    cwd: "",
+    remote: "team",
+    remote_online: true,
+  };
+  const roster = [...agents, amy];
+
+  it("reads alias/account as one id and shows server and name", () => {
+    expect(mentionLabel(amy)).toBe("team · amy");
+    expect(mentionRuns("@team/acc_k3j9 봐줘", roster)).toEqual([
+      { text: "@team · amy", agent: amy },
+      { text: " 봐줘" },
+    ]);
+    expect(injectMentionChips("<p>@team/acc_k3j9에게 물어봐</p>", roster)).toBe(
+      '<p><span class="mention-chip" data-mention="team/acc_k3j9"></span>에게 물어봐</p>',
+    );
+  });
+
+  it("needs the whole id to end the word", () => {
+    expect(mentionRuns("@team/acc_k3j9x 봐", roster)).toEqual([
+      { text: "@team/acc_k3j9x 봐" },
+    ]);
+    expect(mentionRuns("@team/acc_k3j9/x 봐", roster)).toEqual([
+      { text: "@team/acc_k3j9/x 봐" },
+    ]);
+  });
+
+  it("sends alias/name typed by hand as the id", () => {
+    expect(mentionIds("@team/amy 확인해줘", roster)).toBe("@team/acc_k3j9 확인해줘");
+    expect(mentionIds("@amy 확인해줘", roster)).toBe("@team/acc_k3j9 확인해줘");
+  });
+
+  it("is found by its server or its own name", () => {
+    const found = (q: string) => roster.filter((a) => mentionMatches(a, q)).map((a) => a.id);
+    expect(found("tea")).toEqual(["team/acc_k3j9"]);
+    expect(found("AM")).toContain("team/acc_k3j9");
+    expect(found("team/amy")).toEqual(["team/acc_k3j9"]);
+    expect(found("")).toHaveLength(roster.length);
+    expect(found("nobody")).toEqual([]);
+  });
+
+  it("finds a delivered copy that names the remote id", () => {
+    expect(mentionsId("@team/acc_k3j9 hi", "team/acc_k3j9")).toBe(true);
+    expect(mentionsId("@team/acc_k3j9 hi", "team")).toBe(false);
   });
 });

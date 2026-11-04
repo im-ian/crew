@@ -6,9 +6,12 @@ import type {
   ModelList,
   FocusTarget,
   PlanUsage,
+  RemoteInfo,
+  RemoteServer,
   SearchHit,
   SavedSkill,
   Skill,
+  TeamMemory,
 } from "./types";
 
 const modelLists = new Map<string, Promise<ModelList>>();
@@ -190,6 +193,32 @@ export const api = {
     invoke<void>("set_notifications", { enabled }),
   setWorktree: (enabled: boolean) => invoke<void>("set_worktree", { enabled }),
   setEscapeLayer: (open: boolean) => invoke<void>("set_escape_layer", { open }),
+  remoteProbe: (url: string) => invoke<RemoteServer>("remote_probe", { url }),
+  /** The new local representative bot's id. */
+  remoteJoin: (args: {
+    url: string;
+    alias: string;
+    name: string;
+    invite: string | null;
+    cli: string;
+    avatar: string | null;
+    avatarShape: string | null;
+    avatarColor: string | null;
+    role: string | null;
+  }) => invoke<string>("remote_join", args),
+  remoteList: () => invoke<RemoteInfo[]>("remote_list"),
+  /** Null leaves that list as it is. Trusted and blocked are account ids. */
+  remoteSet: (args: {
+    alias: string;
+    delegates: string[] | null;
+    trusted: string[] | null;
+    blocked: string[] | null;
+  }) => invoke<void>("remote_set", args),
+  remoteLeave: (alias: string) => invoke<void>("remote_leave", { alias }),
+  getTeamMemory: (alias: string) => invoke<TeamMemory>("team_memory_get", { alias }),
+  /** False when a teammate changed it after `version` was read. */
+  setTeamMemory: (alias: string, text: string, version: number) =>
+    invoke<boolean>("team_memory_set", { alias, text, version }),
   listModels: (cli: string) => {
     let pending = modelLists.get(cli);
     if (!pending) {

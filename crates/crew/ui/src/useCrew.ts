@@ -33,6 +33,8 @@ import {
   type PlainTone,
 } from "./island";
 import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
+import { isOnline, localAgents, remoteLabel } from "./remote";
+import { useRemotes } from "./useRemotes";
 import {
   adoptNewGroups,
   firstOpenAgent,
@@ -65,6 +67,7 @@ import type {
   Group,
   Kind,
   PaneTab,
+  RemoteJoin,
   Routine,
   SearchHit,
 } from "./types";
@@ -97,6 +100,8 @@ export function useCrew() {
   const [newBotOpen, setNewBotOpen] = useState(false);
   const [newBotPlace, setNewBotPlace] = useState<string | null>(null);
   const [newGroupOpen, setNewGroupOpen] = useState(false);
+  const [remoteAddOpen, setRemoteAddOpen] = useState(false);
+  const { remotes, refreshRemotes } = useRemotes();
   const [groupSettingsId, setGroupSettingsId] = useState<string | null>(null);
   const [island, setIsland] = useState<IslandNotice | null>(null);
   const [islandOpen, setIslandOpen] = useState(false);
@@ -121,6 +126,8 @@ export function useCrew() {
   paneOpenRef.current = paneOpen;
   const newGroupOpenRef = useRef(newGroupOpen);
   newGroupOpenRef.current = newGroupOpen;
+  const remoteAddOpenRef = useRef(remoteAddOpen);
+  remoteAddOpenRef.current = remoteAddOpen;
   const groupSettingsRef = useRef(groupSettingsId);
   groupSettingsRef.current = groupSettingsId;
   const confirmOpenRef = useRef(confirmOpen);
@@ -206,11 +213,18 @@ export function useCrew() {
     void api.setDockBadge(unread.length).catch(() => null);
   }, [unread.length]);
 
-  const placeholder = currentAgent
-    ? t("composer.placeholder.agent", {
-        name: currentAgent.name || currentAgent.id,
-      })
-    : t("composer.placeholder.generic");
+  const placeholder = !currentAgent
+    ? t("composer.placeholder.generic")
+    : currentAgent.remote
+      ? t(
+          isOnline(currentAgent)
+            ? "composer.placeholder.remote"
+            : "composer.placeholder.remoteOffline",
+          { name: remoteLabel(currentAgent) },
+        )
+      : t("composer.placeholder.agent", {
+          name: currentAgent.name || currentAgent.id,
+        });
 
   const tRef = useRef(t);
   tRef.current = t;
@@ -326,7 +340,8 @@ export function useCrew() {
 
   function openPane(id: string, tab: PaneTab) {
     const a = agentsRef.current.find((x) => x.id === id);
-    if (!a) return;
+    // A teammate's bot has no settings, routines or memory on this PC.
+    if (!a || a.remote) return;
     selectedRef.current = { id, kind: "agent" };
     setSelected(id);
     setSelectedKind("agent");
@@ -405,7 +420,7 @@ export function useCrew() {
       const visual = visibleUngroupedKeys(
         current.groups,
         current.ungrouped,
-        agentsRef.current,
+        localAgents(agentsRef.current),
       );
       const stripped = moveItem(current, key, null, null, visual);
       persistLayout({
@@ -540,12 +555,14 @@ export function useCrew() {
     groupId: string | null,
     beforeKey?: string | null,
   ) {
+    // A teammate's bot sits under its router, not in the folders.
+    if (agentsRef.current.find((a) => a.id === id)?.remote) return;
     const current = groupsRef.current;
     const fromId = groupIdOf(current.groups, kind, id);
     const visual = visibleUngroupedKeys(
       current.groups,
       current.ungrouped,
-      agentsRef.current,
+      localAgents(agentsRef.current),
     );
     persistLayout(moveItem(current, itemKey(kind, id), groupId, beforeKey, visual));
     if (kind !== "agent" || !groupId || groupId === fromId) return;
@@ -627,7 +644,7 @@ export function useCrew() {
         ? firstOpenAgent(
             groupsRef.current.groups,
             groupsRef.current.ungrouped,
-            list,
+            localAgents(list),
           )
         : null,
       ready,
@@ -648,7 +665,7 @@ export function useCrew() {
     noticeBots(list);
     setAgents(list);
     if (groupsLoaded.current) {
-      const pruned = pruneLayout(groupsRef.current, list);
+      const pruned = pruneLayout(groupsRef.current, localAgents(list));
       if (layoutChanged(pruned, groupsRef.current)) persistLayout(pruned);
     }
     applyOpenAgent(list);
@@ -1107,6 +1124,96 @@ export function useCrew() {
     }
   }
 
+  function openRemoteAdd() {
+    setRemoteAddOpen(true);
+  }
+
+  function closeRemoteAdd() {
+    setRemoteAddOpen(false);
+  }
+
+  /** A failed change is shown; the list is read again either way. */
+  async function setRemote(change: {
+    alias: string;
+    delegates: string[] | null;
+    trusted: string[] | null;
+    blocked: string[] | null;
+  }) {
+    try {
+      await api.remoteSet(change);
+    } catch (err) {
+      showError(err);
+    }
+    await refreshRemotes();
+  }
+
+  /** Leaves the router. The representative bot and its chat stay. */
+  async function leaveRemote(alias: string) {
+    try {
+      await api.remoteLeave(alias);
+      showToast(t("remote.left", { alias }));
+    } catch (err) {
+      showError(err);
+    }
+    await refreshRemotes();
+    await refreshList().catch(showError);
+  }
+
+  /**
+   * Signs up to a router and opens the representative bot it made. A refusal
+   * is thrown back, so the dialog can put it under the field it is about.
+   */
+  async function joinRemote(args: RemoteJoin) {
+    const custom = args.cli === "custom";
+    const id = await api.remoteJoin({
+      url: args.url,
+      alias: args.alias,
+      name: args.name,
+      invite: args.invite,
+      cli: args.cli,
+      avatar: null,
+      avatarShape: args.shape,
+      avatarColor: args.color,
+      role: args.role,
+    });
+    // The account exists now. What sign-up does not carry is set on the bot
+    // after, and a failure there is shown, not thrown: the dialog must close
+    // or the next Join asks for a second account.
+    const model = args.model.trim();
+    try {
+      if (custom && args.cmd.trim()) await api.setAgentCli(id, "custom", args.cmd.trim());
+      if (model || args.effort) {
+        await api.setAgent({
+          id,
+          model: model || null,
+          effort: args.effort || null,
+          unsetModel: false,
+          unsetEffort: false,
+          title: null,
+          role: null,
+          description: null,
+          unsetTitle: false,
+          unsetRole: false,
+          unsetDescription: false,
+          cwd: null,
+          unsetCwd: false,
+        });
+      }
+    } catch (err) {
+      showError(err);
+    }
+    closeRemoteAdd();
+    selectedRef.current = { id, kind: "agent" };
+    setSelected(id);
+    setSelectedKind("agent");
+    setStick(true);
+    setMessages([]);
+    closePane();
+    await refreshList().catch(showError);
+    void refreshRemotes();
+    await refreshMessages().catch(showError);
+  }
+
   /**
    * ⌘⇧N: a bot on the default AI with a random face, no form. It joins the
    * group of the chat that is open, so it works in that group's folder.
@@ -1256,6 +1363,11 @@ export function useCrew() {
         setNewGroupOpen(false);
         return;
       }
+      if (remoteAddOpenRef.current) {
+        e.preventDefault();
+        setRemoteAddOpen(false);
+        return;
+      }
       if (groupSettingsRef.current) {
         e.preventDefault();
         setGroupSettingsId(null);
@@ -1386,9 +1498,13 @@ export function useCrew() {
     setPaneTab,
     confirmOpen,
     confirmKind,
+    confirmId,
     newBotOpen,
     newBotPlace,
     newGroupOpen,
+    remoteAddOpen,
+    remotes,
+    refreshRemotes,
     groupSettingsId,
     island,
     islandOpen,
@@ -1413,6 +1529,11 @@ export function useCrew() {
     createBot,
     openNewGroup,
     closeNewGroup,
+    openRemoteAdd,
+    closeRemoteAdd,
+    joinRemote,
+    setRemote,
+    leaveRemote,
     pickFolder,
     createNamedGroup,
     openGroupSettings,
@@ -1448,6 +1569,7 @@ export function useCrew() {
     saveMemory,
     loadShared,
     showError,
+    showToast,
   };
 }
 

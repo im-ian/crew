@@ -55,6 +55,16 @@ export function Info(props: Props) {
   );
 }
 
+export function CircleHelp(props: Props) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+      <path d="M12 17h.01" />
+    </Icon>
+  );
+}
+
 export function Search(props: Props) {
   return (
     <Icon {...props}>
@@ -276,6 +286,25 @@ export function Keyboard(props: Props) {
       <path d="M7 16h10" />
       <path d="M8 12h.01" />
       <rect width="20" height="16" x="2" y="4" rx="2" />
+    </Icon>
+  );
+}
+
+/** Spun by `.spin` while a check is out. */
+export function LoaderCircle(props: Props) {
+  return (
+    <Icon {...props}>
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </Icon>
+  );
+}
+
+export function Globe(props: Props) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+      <path d="M2 12h20" />
     </Icon>
   );
 }

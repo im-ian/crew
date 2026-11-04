@@ -333,6 +333,36 @@
           "markdownDescription": "Enables the plan_usage command without any pre-configured scope."
         },
         {
+          "description": "Enables the remote_join command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remote-join",
+          "markdownDescription": "Enables the remote_join command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remote_leave command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remote-leave",
+          "markdownDescription": "Enables the remote_leave command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remote_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remote-list",
+          "markdownDescription": "Enables the remote_list command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remote_probe command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remote-probe",
+          "markdownDescription": "Enables the remote_probe command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remote_set command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remote-set",
+          "markdownDescription": "Enables the remote_set command without any pre-configured scope."
+        },
+        {
           "description": "Enables the remove_agent command without any pre-configured scope.",
           "type": "string",
           "const": "allow-remove-agent",
@@ -481,6 +511,18 @@
           "type": "string",
           "const": "allow-take-pending-focus",
           "markdownDescription": "Enables the take_pending_focus command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the team_memory_get command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-team-memory-get",
+          "markdownDescription": "Enables the team_memory_get command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the team_memory_set command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-team-memory-set",
+          "markdownDescription": "Enables the team_memory_set command without any pre-configured scope."
         },
         {
           "description": "Enables the tell_message command without any pre-configured scope.",
@@ -645,6 +687,36 @@
           "markdownDescription": "Denies the plan_usage command without any pre-configured scope."
         },
         {
+          "description": "Denies the remote_join command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remote-join",
+          "markdownDescription": "Denies the remote_join command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remote_leave command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remote-leave",
+          "markdownDescription": "Denies the remote_leave command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remote_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remote-list",
+          "markdownDescription": "Denies the remote_list command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remote_probe command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remote-probe",
+          "markdownDescription": "Denies the remote_probe command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remote_set command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remote-set",
+          "markdownDescription": "Denies the remote_set command without any pre-configured scope."
+        },
+        {
           "description": "Denies the remove_agent command without any pre-configured scope.",
           "type": "string",
           "const": "deny-remove-agent",
@@ -793,6 +865,18 @@
           "type": "string",
           "const": "deny-take-pending-focus",
           "markdownDescription": "Denies the take_pending_focus command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the team_memory_get command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-team-memory-get",
+          "markdownDescription": "Denies the team_memory_get command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the team_memory_set command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-team-memory-set",
+          "markdownDescription": "Denies the team_memory_set command without any pre-configured scope."
         },
         {
           "description": "Denies the tell_message command without any pre-configured scope.",

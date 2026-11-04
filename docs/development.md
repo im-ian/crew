@@ -30,6 +30,14 @@ cargo test -p crew
 (cd crates/crew/ui && npm test)
 ```
 
+원격 봇은 데몬 여러 개와 [crew-router](https://github.com/im-ian/crew-router)를 이 PC 하나에 띄워 끝까지 확인해요. 각 데몬은 자기 `CREW_HOME`을 쓰고, 대표 봇은 받은 줄에 `ACK`로 답하는 작은 스크립트예요. 동시에 묻기, 연달아 묻기, 서로 묻기, 꺼진 PC, 취소, 첫 승인 카드, 위임을 시나리오별로 돌려요.
+
+```bash
+cargo build -p crew
+python3 scripts/remote-e2e.py --crew target/debug/crew --router ../crew-router/target/release/crew-router
+python3 scripts/remote-e2e.py ... --only "위임|멘션" --keep   # 이름에 든 것만, 로그 폴더 남김
+```
+
 디버그 빌드는 `ui/dist`가 있으면 프론트엔드를 다시 번들하지 않고 창을 Vite에 연결해요. 릴리스 빌드는 `npm run build`로 `ui/dist`를 만들어요.
 
 ```

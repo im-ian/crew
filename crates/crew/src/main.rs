@@ -20,6 +20,7 @@ mod notify;
 mod paths;
 mod protocol;
 mod pty_agent;
+mod remote;
 mod routine_log;
 mod rows;
 mod search;
@@ -119,6 +120,45 @@ enum Cmd {
     /// Shared notes (`$CREW_HOME/shared.md`). Crew adds the live teammate list when showing them.
     #[command(subcommand)]
     Share(ShareCmd),
+    /// Routers this PC is in, and their bots (`docs/router.md`)
+    #[command(subcommand)]
+    Remote(RemoteCmd),
+    /// Notes the whole team on a crew-router shares
+    #[command(subcommand)]
+    Team(TeamCmd),
+}
+
+#[derive(Subcommand)]
+enum RemoteCmd {
+    /// Print each router, its connection, and the bots on it
+    List,
+}
+
+#[derive(Subcommand)]
+enum TeamCmd {
+    /// The router's team notes
+    Memory {
+        /// Router alias. Without it: the router this bot represents, or the only one.
+        #[arg(long, global = true)]
+        remote: Option<String>,
+        #[command(subcommand)]
+        cmd: TeamMemoryCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum TeamMemoryCmd {
+    Show,
+    /// Replace the team notes. Text from args, or stdin.
+    Set {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        text: Vec<String>,
+    },
+    /// Append a team note. Text from args, or stdin.
+    Append {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        text: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -636,6 +676,76 @@ fn run() -> anyhow::Result<()> {
         Some(Cmd::Routine(sub)) => run_routine(sub),
         Some(Cmd::Memory(sub)) => run_memory(sub),
         Some(Cmd::Share(sub)) => run_share(sub),
+        Some(Cmd::Remote(RemoteCmd::List)) => remote_list_cmd(),
+        Some(Cmd::Team(TeamCmd::Memory { remote, cmd })) => team_memory_cmd(remote, cmd),
+    }
+}
+
+fn remote_list_cmd() -> anyhow::Result<()> {
+    client::ensure_daemon()?;
+    let Event::Remotes { remotes } = client::rpc(Request::RemoteList)? else {
+        anyhow::bail!("unexpected daemon response");
+    };
+    if remotes.is_empty() {
+        println!("(no routers)");
+    }
+    for r in remotes {
+        let state = if r.connected { "connected" } else { "offline" };
+        println!("{} {} as {} via {} ({state})", r.alias, r.url, r.name, r.bot);
+        if let Some(error) = &r.error {
+            println!("  ! {error}");
+        }
+        for m in r.members.iter().filter(|m| m.account != r.account) {
+            let online = if m.online { m.status.as_str() } else { "offline" };
+            println!("  {}/{} — {} ({online})", r.alias, m.account, m.name);
+        }
+    }
+    Ok(())
+}
+
+fn team_memory_cmd(remote: Option<String>, cmd: TeamMemoryCmd) -> anyhow::Result<()> {
+    client::ensure_daemon()?;
+    let bot = session_agent_id();
+    let ev = match cmd {
+        TeamMemoryCmd::Show => client::rpc(Request::TeamMemory { alias: remote, bot })?,
+        TeamMemoryCmd::Set { text } => {
+            let text = memory_body(text)?;
+            if text.trim().is_empty() {
+                anyhow::bail!("team memory set needs text; it replaces the team notes");
+            }
+            client::rpc(Request::TeamMemorySet {
+                alias: remote,
+                bot,
+                text,
+                version: None,
+            })?
+        }
+        TeamMemoryCmd::Append { text } => {
+            let text = memory_body(text)?;
+            if text.trim().is_empty() {
+                anyhow::bail!("team memory append needs text");
+            }
+            client::rpc(Request::TeamMemoryAppend {
+                alias: remote,
+                bot,
+                text,
+            })?
+        }
+    };
+    match ev {
+        Event::TeamMemory { text, .. } => {
+            print!("{text}");
+            if !text.ends_with('\n') {
+                println!();
+            }
+            Ok(())
+        }
+        Event::Ok => Ok(()),
+        Event::TeamMemoryConflict => {
+            anyhow::bail!("someone changed the team notes first; run `crew team memory show` and try again")
+        }
+        Event::Error { message } => anyhow::bail!(message),
+        _ => anyhow::bail!("unexpected daemon response"),
     }
 }
 

@@ -5,7 +5,13 @@ import type { AgentInfo, EditResult, Kind, Skill } from "../types";
 import { api } from "../api";
 import { useT } from "../LocaleContext";
 import { mediaKind } from "../markdown";
-import { mentionIds, resolveMention, trimMentionPunct } from "../mentions";
+import {
+  mentionIds,
+  mentionLabel,
+  mentionMatches,
+  resolveMention,
+  trimMentionPunct,
+} from "../mentions";
 import { sendSteers, type Delivery } from "../deliveryPref";
 import { composerAfterSend } from "../sendGate";
 import { stepQueuePick } from "../queuePick";
@@ -153,14 +159,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
 
   const matches = useMemo(() => {
     if (!mention) return [];
-    const q = mention.query.toLowerCase();
     const bots = agents.filter((a) => {
       if (selectedKind === "agent" && a.id === selected) return false;
-      if (!q) return true;
-      return (
-        a.id.toLowerCase().includes(q) ||
-        (a.name || "").toLowerCase().includes(q)
-      );
+      return mentionMatches(a, mention.query);
     });
     return bots.slice(0, 8);
   }, [agents, mention, selected, selectedKind]);
@@ -599,8 +600,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
                   shape={a.avatar_shape}
                   color={a.avatar_color}
                 />
-                <span className="mention-name">{a.name || a.id}</span>
-                {a.name && a.name !== a.id ? (
+                <span className="mention-name">{mentionLabel(a)}</span>
+                {/* A teammate's id is an account number; its server says more. */}
+                {!a.remote && a.name && a.name !== a.id ? (
                   <span className="mention-id">{a.id}</span>
                 ) : null}
               </button>
