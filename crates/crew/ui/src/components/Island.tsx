@@ -34,9 +34,9 @@ const SWAP_MS = 130;
 type Phase = "off" | "show" | "open" | "leave";
 
 /**
- * A pill at the top center of the window that grows out of a dot to say one
- * thing. About a bot, it wears that bot's face with the matching expression;
- * otherwise a status dot. A new notice while it is open changes the words in
+ * A pill just under the titlebar that grows out of a dot to say one thing.
+ * About a bot, it wears that bot's face with the matching expression, and a
+ * click anywhere on it opens that bot's chat; otherwise a status dot. A new notice while it is open changes the words in
  * place instead of closing and opening again.
  */
 export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
@@ -129,11 +129,13 @@ export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
         "island" +
         (phase === "open" ? " is-open" : "") +
         (phase === "leave" ? " is-leaving" : "") +
-        (swap ? " is-swap" : "")
+        (swap ? " is-swap" : "") +
+        (bot ? " is-link" : "")
       }
       style={{ "--k": TINT[kind], "--w": `${width}px` } as CSSProperties}
       role={kind === "error" ? "alert" : "status"}
       title={full}
+      onClick={bot ? () => onOpenBot(bot.id) : undefined}
     >
       <div className="island-row" ref={rowRef}>
         <span className="island-lead">{lead}</span>
@@ -141,11 +143,18 @@ export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
         <span className="island-acts">
           {kind === "success" || kind === "ok" ? (
             <span className="island-check">
-              <Check size={13} />
+              <Check size={15} />
             </span>
           ) : null}
           {action && bot ? (
-            <button type="button" className="island-go" onClick={() => onOpenBot(bot.id)}>
+            <button
+              type="button"
+              className="island-go"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenBot(bot.id);
+              }}
+            >
               {action}
             </button>
           ) : null}
@@ -155,9 +164,12 @@ export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
               className="island-x"
               title={t("common.close")}
               aria-label={t("common.close")}
-              onClick={onClose}
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
             >
-              <X size={12} />
+              <X size={14} />
             </button>
           ) : null}
         </span>
