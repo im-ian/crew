@@ -89,7 +89,8 @@ const usage: PlanUsage[] = [
   { cli: "codex", fiveHour: { usedPercent: 18, resetsAt: now / 1000 + 4 * hour }, weekly: { usedPercent: 31, resetsAt: now / 1000 + 5 * 24 * hour }, capturedAt: now / 1000 - 600 },
 ];
 
-const shot = new URLSearchParams(location.search).get("shot") ?? "window";
+const params = new URLSearchParams(location.search);
+const shot = params.get("shot") ?? "window";
 
 // `?shot=remote…`: one router with three teammates, and this PC's
 // representative bot. The other shots leave them out.
@@ -114,13 +115,26 @@ if (remoteShot) {
       asking: true, avatar_shape: "square", avatar_color: "#a57bff", routines: [], preview: "주인 확인 기다리는 중", last_ts: at(12),
     },
   );
-  groups[1].items.unshift("agent:rep");
+  // `&folder=1` puts the representative in the Crew folder, whose bots it hands work to.
+  groups[params.get("folder") === "1" ? 0 : 1].items.unshift("agent:rep");
   remotes.push({
     alias: "acme", url: "wss://router.acme.dev:7420", name: "ian", bot: "rep", connected: true,
     members: [],
     trusted: [{ account: "acc_k3j9x0", name: "민지" }],
     blocked: [{ account: "acc_zz01", name: "spam-bot" }],
   });
+  // Settings with a second router, away, and its own representative.
+  if (shot === "remote-settings") {
+    agents.push({
+      id: "rep-lab", name: "랩 대표", status: "idle", cmd: ["codex"], cwd: "~", avatar_shape: "square",
+      avatar_color: "#5ac8fa", routines: [],
+    });
+    groups[1].items.push("agent:rep-lab");
+    remotes.push({
+      alias: "lab", url: "ws://10.0.0.7:7420", name: "ian-lab", bot: "rep-lab", connected: false,
+      members: [], trusted: [], blocked: [],
+    });
+  }
   thread["acme/acc_k3j9x0"] = [
     { id: "x1", role: "user", from: "user", ts: at(9), text: "주문 API에 `discount` 필드 넣을 수 있을까요? 금요일 배포 전에요." },
     { id: "x2", role: "assistant", from: "acme/acc_k3j9x0", ts: at(6), text: "네, 스키마에 넣고 마이그레이션까지 만들게요. 끝나면 PR 링크 드릴게요." },
@@ -221,6 +235,14 @@ when(
       key(",");
       when(() => document.querySelector<HTMLElement>('[data-section="remote"]'), (el) => {
         el.click();
+        // `&open=acme` unfolds that router's card.
+        const open = params.get("open");
+        if (open) {
+          when(
+            () => document.querySelector<HTMLElement>(`.remote-card[aria-label="${open}"] .remote-card-head`),
+            (head) => head.click(),
+          );
+        }
         // `#end` shows the bottom of the page: the team memo and Leave.
         if (location.hash !== "#end") return;
         setTimeout(() => document.querySelector(".settings-body")?.scrollTo(0, 9999), 300);
