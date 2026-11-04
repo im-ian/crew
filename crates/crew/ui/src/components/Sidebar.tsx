@@ -11,14 +11,14 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useLocale, useT } from "../LocaleContext";
-import { groupOrderChanges, itemKey, parseItemKey, UNGROUPED_ID } from "../groups";
+import { groupOrderChanges, itemKey, parseItemKey, railSlots, UNGROUPED_ID } from "../groups";
 import type { AgentInfo, Group, Kind, RemoteInfo, SearchHit } from "../types";
 import { listStamp } from "../clock";
 import { mentionRuns, mentionText } from "../mentions";
 import { foldsAt, numberDuplicateNames, RAIL_FOLDED } from "../rail";
 import {
-  folderBefore,
   isOnline,
+  localBefore,
   isRemoteKey,
   loadRemoteFolds,
   loadRemoteLayout,
@@ -159,6 +159,23 @@ function nextRailRow(row: HTMLElement): HTMLElement | null {
   return null;
 }
 
+/** The section after a one-bot loose row. A missing sibling is not the rail's end. */
+function afterLooseSection(row: HTMLElement, dragKey: string): string | null {
+  const section = row.closest("[data-rail-section]");
+  if (!(section instanceof HTMLElement)) return null;
+  if (section.closest("[data-rail-remote]")) return null;
+  if (!parseItemKey(section.dataset.railSection || "")) return null;
+  let n = section.nextElementSibling;
+  while (n) {
+    if (n instanceof HTMLElement) {
+      const key = n.dataset.railSection;
+      if (key && key !== dragKey) return key;
+    }
+    n = n.nextElementSibling;
+  }
+  return null;
+}
+
 function pickClosest(stack: Element[], sel: string): HTMLElement | null {
   for (const node of stack) {
     const hit = node.closest(sel);
@@ -190,6 +207,9 @@ function rowDrop(
   let insertBefore = next?.dataset.railRow || null;
   if (insertBefore === dragKey && next) {
     insertBefore = nextRailRow(next)?.dataset.railRow || null;
+  }
+  if (!insertBefore && groupId == null) {
+    insertBefore = afterLooseSection(row, dragKey);
   }
   return {
     kind: "item",
@@ -274,11 +294,11 @@ function hitRemoteRow(x: number, y: number, dragKey: string, alias: string): Rai
 }
 
 /**
- * Section reorder: folders and routers move among each other. A folder stays
- * above the loose bots; a router can also go below them.
+ * Section reorder: a folder, a loose bot, and a router move among each other.
+ * A loose bot can sit between folders. Dropping one on a folder's rows still
+ * files it into that folder; that path is not this one.
  */
 function hitGroupTarget(y: number, dragId: string, order: string[]): RailDrop {
-  const folder = !isRemoteKey(dragId);
   const sections = [...document.querySelectorAll<HTMLElement>("[data-rail-section]")].filter(
     (el) => el.dataset.railSection && el.dataset.railSection !== dragId,
   );
@@ -291,7 +311,7 @@ function hitGroupTarget(y: number, dragId: string, order: string[]): RailDrop {
       "[data-rail-group-head], [data-rail-remote-head]",
     );
     const headRect = (head ?? section).getBoundingClientRect();
-    if ((folder && key === UNGROUPED_ID) || y < headRect.top + headRect.height * 0.5) {
+    if (y < headRect.top + headRect.height * 0.5) {
       beforeId = key;
       anchor = section;
       break;
@@ -328,6 +348,8 @@ type Props = {
   remotes?: RemoteInfo[];
   groups: Group[];
   ungrouped: string[];
+  /** Folder ids and loose bot keys, when a bot sits between folders. */
+  order?: string[];
   selected: string | null;
   selectedKind: Kind;
   query: string;
@@ -395,6 +417,7 @@ export function Sidebar({
   remotes = [],
   groups,
   ungrouped,
+  order,
   selected,
   selectedKind,
   query,
@@ -430,19 +453,25 @@ export function Sidebar({
   );
   // A representative put in its router's section is not in the local list too.
   const placed = useMemo(() => placedReps(sections), [sections]);
-  const built = useMemo(
-    () => toItems(localAgents(agents).filter((a) => !placed.has(a.id))),
+  const local = useMemo(
+    () => localAgents(agents).filter((a) => !placed.has(a.id)),
     [agents, placed],
+  );
+  const built = useMemo(() => toItems(local), [local]);
+  const localKeys = useMemo(
+    () => railSlots(groups, ungrouped, local, order),
+    [groups, ungrouped, local, order],
   );
   const railKeys = useMemo(
     () =>
       railSections(
-        groups.map((g) => g.id),
+        localKeys,
         sections.map((s) => s.alias),
         remoteLayout.sections,
       ),
-    [groups, sections, remoteLayout.sections],
+    [localKeys, sections, remoteLayout.sections],
   );
+  const localKeySet = useMemo(() => new Set(localKeys), [localKeys]);
   const hit = (item: RailItem) =>
     matches(
       [
@@ -482,10 +511,11 @@ export function Sidebar({
   const groupByKey = new Map(grouped.map((g) => [g.group.id, g]));
   const remoteByKey = new Map(remoteShown.map((r) => [remoteKey(r.section.alias), r]));
   // The sections on screen, top to bottom, for telling whether a drop moves one.
+  const looseByKey = new Map(ungroupedItems.map((item) => [item.key, item]));
   const shownKeys = railKeys.filter((key) =>
     key === UNGROUPED_ID
       ? ungroupedItems.length > 0
-      : groupByKey.has(key) || remoteByKey.has(key),
+      : looseByKey.has(key) || groupByKey.has(key) || remoteByKey.has(key),
   );
 
   function keepRemoteLayout(next: RemoteLayout) {
@@ -497,7 +527,10 @@ export function Sidebar({
   function reorderSection(key: string, beforeKey: string | null) {
     const next = moveRailSection(remoteLayout, railKeys, sections, key, beforeKey);
     if (!isRemoteKey(key)) {
-      onReorderGroupRef.current(key, folderBefore(next.sections, key, groups.map((g) => g.id)));
+      const before = localBefore(next.sections, key, localKeySet);
+      const loose = parseItemKey(key);
+      if (loose) onMoveRef.current(loose.kind, loose.id, null, before);
+      else onReorderGroupRef.current(key, before);
     }
     if (sections.length) keepRemoteLayout(next);
   }
@@ -696,7 +729,24 @@ export function Sidebar({
     if (!apply) didDrag.current = false;
     if (!apply || !d || !t) return;
     if (d.kind === "group") {
-      if (t.kind !== "group") return;
+      if (t.kind === "item") {
+        const loose = parseItemKey(d.key);
+        if (!loose) return;
+        if (t.remote) {
+          const beforeId = t.beforeKey ? (parseItemKey(t.beforeKey)?.id ?? null) : null;
+          keepRemoteLayout(placeRep(remoteLayout, sections, t.remote, loose.id, beforeId));
+          return;
+        }
+        if (!t.groupId) return;
+        onMoveRef.current(loose.kind, loose.id, t.groupId, t.beforeKey);
+        if (sections.length) {
+          keepRemoteLayout({
+            sections: railKeys.filter((k) => k !== d.key),
+            bots: remoteLayout.bots,
+          });
+        }
+        return;
+      }
       reorderSection(d.key, t.beforeId);
       return;
     }
@@ -718,7 +768,11 @@ export function Sidebar({
       return;
     }
     if (placed.has(parsed.id)) keepRemoteLayout(unplaceRep(remoteLayout, sections, parsed.id));
-    onMoveRef.current(parsed.kind, parsed.id, t.groupId, t.beforeKey);
+    const before =
+      t.beforeKey && isRemoteKey(t.beforeKey)
+        ? localBefore(shownKeys, t.beforeKey, localKeySet)
+        : t.beforeKey;
+    onMoveRef.current(parsed.kind, parsed.id, t.groupId, before);
     if (t.into && t.groupId) {
       const collapsed = document.querySelector(
         `[data-rail-group="${t.groupId}"] .group-head.collapsed`,
@@ -771,7 +825,7 @@ export function Sidebar({
       const target = locate(ev.clientX, ev.clientY);
       dropRef.current = target;
       setDrop(target);
-      if (cur.kind === "item" && target?.kind === "item") {
+      if (target?.kind === "item") {
         queueExpand(target.groupId, target.into);
       } else {
         clearExpandTimer();
@@ -807,6 +861,32 @@ export function Sidebar({
     const rect = e.currentTarget.getBoundingClientRect();
     const alias = item.agent?.remote;
     const reps = alias ? [] : representing(item.id, remotes);
+    // A loose bot is its own section, so it can sit between folders. Landing
+    // on a folder's rows or header still files it into that folder, and a
+    // representative can land in its own router.
+    if (!alias && looseByKey.has(item.key)) {
+      beginDrag(
+        e,
+        {
+          kind: "group",
+          key: item.key,
+          groupName: item.name,
+          collapsed: false,
+          x: e.clientX,
+          y: e.clientY,
+          grabX: e.clientX - rect.left,
+          grabY: e.clientY - rect.top,
+          width: rect.width,
+          armed: false,
+        },
+        (x, y) => {
+          const into = hitRailTarget(x, y, item.key, reps);
+          if (into?.kind === "item" && (into.groupId || into.remote)) return into;
+          return hitGroupTarget(y, item.key, shownKeys);
+        },
+      );
+      return;
+    }
     beginDrag(
       e,
       {
@@ -820,8 +900,21 @@ export function Sidebar({
         width: rect.width,
         armed: false,
       },
-      (x, y) =>
-        alias ? hitRemoteRow(x, y, item.key, alias) : hitRailTarget(x, y, item.key, reps),
+      (x, y) => {
+        if (alias) return hitRemoteRow(x, y, item.key, alias);
+        const hit = hitRailTarget(x, y, item.key, reps);
+        if (hit) return hit;
+        // The gap between sections pulls the bot out and parks it there.
+        const section = hitGroupTarget(y, item.key, shownKeys);
+        if (section.kind !== "group") return section;
+        return {
+          kind: "item" as const,
+          groupId: null,
+          beforeKey: section.beforeId,
+          into: false,
+          line: section.line,
+        };
+      },
     );
   }
 
@@ -923,6 +1016,37 @@ export function Sidebar({
             />
           ))
         )}
+      </section>
+    );
+  }
+
+  function renderLooseBot(item: RailItem) {
+    return (
+      <section
+        key={item.key}
+        className={
+          "rail-section loose" +
+          (drag?.kind === "group" && drag.key === item.key && drag.armed ? " dragging" : "")
+        }
+        data-rail-ungrouped="1"
+        data-rail-section={item.key}
+      >
+        <ItemRow
+          item={item}
+          compact={folded}
+          agents={agents}
+          represents={representing(item.id, remotes)}
+          active={selectedKind === item.kind && selected === item.id}
+          unread={unread.includes(item.key)}
+          drafting={drafting.includes(item.id)}
+          dragging={false}
+          onSelect={() => {
+            if (didDrag.current) return;
+            select(item);
+          }}
+          onContextMenu={(e) => ctx(e, item)}
+          onPointerDown={searching ? undefined : (e) => onRowPointerDown(e, item)}
+        />
       </section>
     );
   }
@@ -1105,6 +1229,8 @@ export function Sidebar({
           <>
             {railKeys.map((key) => {
               if (key === UNGROUPED_ID) return renderLoose();
+              const loose = looseByKey.get(key);
+              if (loose) return renderLooseBot(loose);
               const router = remoteByKey.get(key);
               if (router) return renderRouter(router);
               const folder = groupByKey.get(key);
@@ -1167,7 +1293,7 @@ export function Sidebar({
                   ["--ghost-oy" as string]: `${drag.grabY}px`,
                 }}
               >
-                {drag.kind === "group" ? (
+                {drag.kind === "group" && !looseByKey.has(drag.key) ? (
                   <div
                     className={
                       "group-head" +
@@ -1182,7 +1308,12 @@ export function Sidebar({
                     <span className="group-name">{drag.groupName}</span>
                   </div>
                 ) : (
-                  <ItemRow item={drag.item} agents={agents} compact={folded} ghost />
+                  <ItemRow
+                    item={drag.kind === "item" ? drag.item : looseByKey.get(drag.key)!}
+                    agents={agents}
+                    compact={folded}
+                    ghost
+                  />
                 )}
               </div>
             </>,

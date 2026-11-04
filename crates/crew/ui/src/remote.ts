@@ -1,7 +1,7 @@
 import {
-  groupIdOf,
   groupOrderChanges,
-  railOrder,
+  parseItemKey,
+  railSlots,
   UNGROUPED_ID,
   type RailLayout,
 } from "./groups";
@@ -194,17 +194,28 @@ export function isRemoteKey(key: string): boolean {
 }
 
 /**
- * The rail's sections top to bottom: folders in layout order, then the loose
- * bots, with each router put back before the folder it was saved above. A
- * router this PC has not placed goes after the loose bots.
+ * The rail's sections top to bottom. `local` is already folders and loose
+ * bots in the order they show. A router goes back before the section it was
+ * saved above. One this PC has not placed goes after the last loose bot.
+ * An old save still says `__ungrouped` for the whole loose block: that anchor
+ * is the first loose bot.
  */
 export function railSections(
-  groupIds: string[],
+  local: readonly string[],
   aliases: string[],
   saved: readonly string[],
 ): string[] {
-  const local = [...groupIds, UNGROUPED_ID];
-  const isLocal = new Set(local);
+  const firstLoose =
+    local.find((key) => key === UNGROUPED_ID || !!parseItemKey(key)) ?? null;
+  const keys = firstLoose ? [...local] : [...local, UNGROUPED_ID];
+  const isLocal = new Set(keys);
+  const resolve = (key: string): string | null => {
+    if (isLocal.has(key)) return key;
+    if (key === UNGROUPED_ID && firstLoose && firstLoose !== UNGROUPED_ID) {
+      return firstLoose;
+    }
+    return null;
+  };
   const routers = new Set(aliases.map(remoteKey));
   const above = new Map<string, string[]>();
   const placed = new Set<string>();
@@ -213,13 +224,16 @@ export function railSections(
     if (routers.has(key) && !placed.has(key)) {
       placed.add(key);
       pending.push(key);
-    } else if (isLocal.has(key) && pending.length) {
-      above.set(key, [...(above.get(key) ?? []), ...pending]);
+      continue;
+    }
+    const anchor = resolve(key);
+    if (anchor && pending.length) {
+      above.set(anchor, [...(above.get(anchor) ?? []), ...pending]);
       pending = [];
     }
   }
   return [
-    ...local.flatMap((key) => [...(above.get(key) ?? []), key]),
+    ...keys.flatMap((key) => [...(above.get(key) ?? []), key]),
     ...pending,
     ...aliases.map(remoteKey).filter((key) => !placed.has(key)),
   ];
@@ -234,6 +248,20 @@ export function moved(keys: readonly string[], key: string, beforeKey: string | 
 }
 
 /**
+ * The next folder or loose bot after `key` in `keys`, or null at the bottom.
+ * A router between them is skipped: it is not part of the folder layout.
+ */
+export function localBefore(
+  keys: readonly string[],
+  key: string,
+  local: ReadonlySet<string>,
+): string | null {
+  const at = keys.indexOf(key);
+  if (at < 0) return null;
+  return keys.slice(at + 1).find((k) => local.has(k)) ?? null;
+}
+
+/**
  * Where a folder lands in the layout once the rail's sections are in `keys`:
  * before the next folder below it, or last.
  */
@@ -242,8 +270,7 @@ export function folderBefore(
   groupId: string,
   groupIds: string[],
 ): string | null {
-  const folders = new Set(groupIds);
-  return keys.slice(keys.indexOf(groupId) + 1).find((k) => folders.has(k)) ?? null;
+  return localBefore(keys, groupId, new Set(groupIds));
 }
 
 /** Saved bot orders for routers and bots still here. */
@@ -333,13 +360,31 @@ export function chatOrder(
   folded: readonly string[],
   saved: RemoteLayout,
 ): { kind: Kind; id: string }[] {
-  const rows = new Map<string, { kind: Kind; id: string }[]>();
   const sections = remoteSections(agents, remotes, undefined, saved.bots);
+  // A representative put in its router's section is stepped through there.
   const placed = placedReps(sections);
   const local = localAgents(agents).filter((a) => !placed.has(a.id));
-  for (const row of railOrder(rail.groups, rail.ungrouped, local)) {
-    const key = groupIdOf(rail.groups, row.kind, row.id) ?? UNGROUPED_ID;
-    rows.set(key, [...(rows.get(key) ?? []), row]);
+  const slots = railSlots(rail.groups, rail.ungrouped, local, rail.order);
+  const rows = new Map<string, { kind: Kind; id: string }[]>();
+  const byGroup = new Map(rail.groups.map((g) => [g.id, g]));
+  const here = new Set(local.map((a) => a.id));
+  for (const slot of slots) {
+    const group = byGroup.get(slot);
+    if (!group) {
+      const parsed = parseItemKey(slot);
+      if (parsed && here.has(parsed.id)) rows.set(slot, [parsed]);
+      continue;
+    }
+    if (group.collapsed) {
+      rows.set(slot, []);
+      continue;
+    }
+    const bots: { kind: Kind; id: string }[] = [];
+    for (const key of group.items) {
+      const parsed = parseItemKey(key);
+      if (parsed && here.has(parsed.id)) bots.push(parsed);
+    }
+    rows.set(slot, bots);
   }
   for (const s of sections) {
     if (folded.includes(s.alias)) continue;
@@ -349,7 +394,7 @@ export function chatOrder(
     );
   }
   return railSections(
-    rail.groups.map((g) => g.id),
+    slots,
     sections.map((s) => s.alias),
     saved.sections,
   ).flatMap((key) => rows.get(key) ?? []);
