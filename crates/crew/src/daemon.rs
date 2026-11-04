@@ -931,7 +931,7 @@ fn answer_choice(
         if closed {
             return Ok(());
         }
-        return send_agent_shown(agent, &crate::choice::format_answer_masked(&updated), &text);
+        return send_answer(agent, &crate::choice::format_answer_masked(&updated), &text);
     }
     if closed {
         return Ok(());
@@ -941,7 +941,7 @@ fn answer_choice(
         anyhow::bail!("nothing selected");
     }
     // The picker is for the human. Continue only the bot that asked.
-    send_agent_shown(agent, &crate::choice::format_answer_masked(&updated), &text)
+    send_answer(agent, &crate::choice::format_answer_masked(&updated), &text)
 }
 
 /// `/compact`, `/context`: a CLI command, which reads as one only when the
@@ -3279,9 +3279,27 @@ fn send_agent_shown(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
     send_from_user(id, shown, text, false)
 }
 
+/// A question card's answer goes on with the bot that asked. A bot @named in
+/// it is the one the answer means, not someone to message, so no tell goes
+/// out, the same as when `crew ask` takes the answer itself.
+fn send_answer(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
+    send_user_line(id, shown, text, false, false)
+}
+
 /// `steer` stops a turn under way and starts this message in its place, ahead
 /// of what was waiting. Without it, the message waits its turn.
 fn send_from_user(id: &str, shown: &str, text: &str, steer: bool) -> anyhow::Result<()> {
+    send_user_line(id, shown, text, steer, true)
+}
+
+/// `tells`: whether the teammates the line @names hear it too.
+fn send_user_line(
+    id: &str,
+    shown: &str,
+    text: &str,
+    steer: bool,
+    tells: bool,
+) -> anyhow::Result<()> {
     let action = apply_user_interrupt(id, text, steer)?;
     if action == UserSendAction::Stop {
         crate::transcript::push_user(id, "user", shown);
@@ -3292,8 +3310,14 @@ fn send_from_user(id: &str, shown: &str, text: &str, steer: bool) -> anyhow::Res
     let msg = crate::transcript::push_user(id, "user", shown);
     // The teammates named here answer after this message's turn, so they ride
     // with it instead of waiting on whatever the bot is doing now.
-    let mut then = named_tells(text, id, &roster);
-    let delivered = crate::config::with_mention_hint(text, id, &roster);
+    let (mut then, delivered) = if tells {
+        (
+            named_tells(text, id, &roster),
+            crate::config::with_mention_hint(text, id, &roster),
+        )
+    } else {
+        (VecDeque::new(), text.to_string())
+    };
     let named_here = then.len();
     let headless_joins = is_headless(id) && !is_slash_command(text);
     if matches!(live_status(id), Ok(AgentStatus::Blocked)) {
@@ -5932,6 +5956,57 @@ exec sleep 5"#,
             clear_inbox(&bot);
             take_origin(&bot);
             remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A card's typed answer names a bot as the one it means. With no `crew
+    /// ask` left to take it, the answer still goes only to the bot that asked.
+    #[test]
+    fn a_bot_named_in_an_answer_is_not_told() {
+        paths::testing::with_home("answer-named", || {
+            paths::write_notifications_enabled(false);
+            let [bot, b] = ["answer-bot", "answer-b"].map(test_id);
+            for id in [&bot, &b] {
+                insert_spawned_agent(AgentConfig::new(
+                    id.clone(),
+                    id.clone(),
+                    AgentCli::Claude.default_cmd(),
+                    None,
+                ))
+                .unwrap();
+            }
+            let Some(LiveAgent::Headless(session)) = agents().lock().unwrap().get(&bot).cloned()
+            else {
+                panic!("claude runs headless");
+            };
+            let ask = AskQuestion {
+                question: "누구에게 맡길까요?".into(),
+                options: vec!["지금".into(), "나중에".into()],
+                ..AskQuestion::default()
+            };
+            let (choice_id, _rx) = start_ask(&bot, &[ask]).unwrap();
+            drop_ask(&choice_id);
+            let msg = crate::transcript::messages(&bot)
+                .into_iter()
+                .find(|m| m.choice.as_ref().is_some_and(|c| c.id == choice_id))
+                .unwrap();
+            // Busy, so the answer waits in the inbox with whatever it carries.
+            session.inner.lock().unwrap().status = AgentStatus::Working;
+            let other = format!("@{b} 에게 맡겨 주세요");
+            answer_choice(&bot, &msg.id, vec![vec![]], vec![], vec![other.clone()], false).unwrap();
+            {
+                let map = inbox().lock().unwrap();
+                let item = map[&bot].back().expect("the answer waits");
+                assert!(item.text.contains(&other), "{}", item.text);
+                assert!(item.then.is_empty(), "the named bot was told");
+                assert!(!item.text.contains("[crew system]"), "{}", item.text);
+            }
+
+            session.inner.lock().unwrap().status = AgentStatus::Idle;
+            clear_inbox(&bot);
+            for id in [&bot, &b] {
+                remove_agent(id).unwrap();
+            }
         });
     }
 
