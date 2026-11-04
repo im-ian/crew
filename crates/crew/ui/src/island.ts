@@ -84,6 +84,11 @@ export function noticeLife(text: string): number {
   return Math.min(7000, Math.max(2000, 1200 + text.length * 60));
 }
 
+/** What is left of a notice's life when the pointer leaves it: never less than a beat to go. */
+export function lifeAfterHover(left: number): number {
+  return Math.max(1200, left);
+}
+
 /** "탈리가", "안드라스가", "민준이": the subject particle a Korean name takes. */
 export function koSubject(name: string): string {
   const last = name.charCodeAt(name.length - 1);

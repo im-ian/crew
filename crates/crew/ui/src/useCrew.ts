@@ -24,6 +24,7 @@ import { loadNotify } from "./notifyPref";
 import { publishBotSignals, publishBotUnread } from "./botSignals";
 import {
   botNotices,
+  lifeAfterHover,
   noticeLife,
   noticeStays,
   topNotice,
@@ -150,6 +151,11 @@ export function useCrew() {
   groupsRef.current = order ? { groups, ungrouped, order } : { groups, ungrouped };
   const groupsLoaded = useRef(false);
   const islandTimer = useRef<number | null>(null);
+  // While the pointer is on the island its clock stands still: when it would
+  // have closed, and how much was left when the pointer came.
+  const islandEnd = useRef(0);
+  const islandLeft = useRef<number | null>(null);
+  const islandHeld = useRef(false);
   const islandRef = useRef<IslandNotice | null>(null);
   const islandSeq = useRef(0);
   const botSnaps = useRef(new Map<string, BotSnap>());
@@ -255,15 +261,41 @@ export function useCrew() {
     islandRef.current = notice;
     setIsland(notice);
     setIslandOpen(true);
+    stopIslandClock();
+    islandLeft.current = null;
+    if (noticeStays(next.kind)) return;
+    if (islandHeld.current) islandLeft.current = life;
+    else startIslandClock(life);
+  }
+
+  function startIslandClock(life: number) {
+    islandEnd.current = Date.now() + life;
+    islandTimer.current = window.setTimeout(() => closeIsland(), life);
+  }
+
+  function stopIslandClock() {
     if (islandTimer.current) window.clearTimeout(islandTimer.current);
-    islandTimer.current = noticeStays(next.kind)
-      ? null
-      : window.setTimeout(() => closeIsland(), life);
+    islandTimer.current = null;
+  }
+
+  function holdIsland() {
+    if (!islandRef.current) return;
+    islandHeld.current = true;
+    if (islandTimer.current === null) return;
+    stopIslandClock();
+    islandLeft.current = Math.max(0, islandEnd.current - Date.now());
+  }
+
+  function releaseIsland() {
+    islandHeld.current = false;
+    const left = islandLeft.current;
+    islandLeft.current = null;
+    if (left !== null && islandRef.current) startIslandClock(lifeAfterHover(left));
   }
 
   function closeIsland() {
-    if (islandTimer.current) window.clearTimeout(islandTimer.current);
-    islandTimer.current = null;
+    stopIslandClock();
+    islandLeft.current = null;
     islandRef.current = null;
     setIslandOpen(false);
   }
@@ -1527,6 +1559,8 @@ export function useCrew() {
     island,
     islandOpen,
     closeIsland,
+    holdIsland,
+    releaseIsland,
     ctx,
     groups,
     ungrouped,

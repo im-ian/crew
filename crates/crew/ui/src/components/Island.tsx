@@ -13,6 +13,9 @@ type Props = {
   agents: AgentInfo[];
   onOpenBot: (id: string) => void;
   onClose: () => void;
+  /** The pointer came onto the island or left it: its clock stops meanwhile. */
+  onHold: () => void;
+  onRelease: () => void;
 };
 
 /** The island is always dark, so its colors do not follow the theme. */
@@ -34,12 +37,12 @@ const SWAP_MS = 130;
 type Phase = "off" | "show" | "open" | "leave";
 
 /**
- * A pill at the top center of the window that grows out of a dot to say one
- * thing. About a bot, it wears that bot's face with the matching expression;
- * otherwise a status dot. A new notice while it is open changes the words in
+ * A pill just under the titlebar that grows out of a dot to say one thing.
+ * About a bot, it wears that bot's face with the matching expression, and a
+ * click anywhere on it opens that bot's chat; otherwise a status dot. A new notice while it is open changes the words in
  * place instead of closing and opening again.
  */
-export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
+export function Island({ notice, visible, agents, onOpenBot, onClose, onHold, onRelease }: Props) {
   const { locale, t } = useLocale();
   const labelOf = useBotLabel();
   const [phase, setPhase] = useState<Phase>("off");
@@ -49,6 +52,9 @@ export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
   const phaseRef = useRef<Phase>("off");
   phaseRef.current = phase;
   const rowRef = useRef<HTMLDivElement>(null);
+  const hovered = useRef(false);
+  const releaseRef = useRef(onRelease);
+  releaseRef.current = onRelease;
 
   useEffect(() => {
     if (!visible || !notice) {
@@ -85,6 +91,26 @@ export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
     if (row) setWidth(row.offsetWidth);
   }, [shown, name, locale, bot?.avatar]);
 
+  // The pointer only holds the island while it can be pointed at. Folding
+  // away, gone, or the window put aside sends no mouseleave, so let go here.
+  const live = (phase === "show" || phase === "open") && !!shown && !("botId" in shown && !bot);
+  useEffect(() => {
+    const letGo = () => {
+      if (!hovered.current) return;
+      hovered.current = false;
+      releaseRef.current();
+    };
+    if (!live) {
+      letGo();
+      return;
+    }
+    window.addEventListener("blur", letGo);
+    return () => {
+      window.removeEventListener("blur", letGo);
+      letGo();
+    };
+  }, [live]);
+
   if (phase === "off" || !shown) return null;
   if ("botId" in shown && !bot) return null;
 
@@ -93,7 +119,6 @@ export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
   let lead;
   let words;
   let full: string;
-  let action: string | null = null;
   if (bot && "botId" in shown) {
     const said = t(`island.${shown.kind}`);
     const face = resolveFace(bot.id, bot.avatar_shape, bot.avatar_color);
@@ -116,7 +141,6 @@ export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
       </>
     );
     full = `${who} ${said}`;
-    action = kind === "question" ? t("island.answer") : kind === "success" ? null : t("island.open");
   } else {
     lead = <span className="island-dot" />;
     words = "text" in shown ? shown.text : "";
@@ -129,11 +153,23 @@ export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
         "island" +
         (phase === "open" ? " is-open" : "") +
         (phase === "leave" ? " is-leaving" : "") +
-        (swap ? " is-swap" : "")
+        (swap ? " is-swap" : "") +
+        (bot ? " is-link" : "")
       }
       style={{ "--k": TINT[kind], "--w": `${width}px` } as CSSProperties}
       role={kind === "error" ? "alert" : "status"}
       title={full}
+      onClick={bot ? () => onOpenBot(bot.id) : undefined}
+      onMouseEnter={() => {
+        if (!live || hovered.current) return;
+        hovered.current = true;
+        onHold();
+      }}
+      onMouseLeave={() => {
+        if (!hovered.current) return;
+        hovered.current = false;
+        onRelease();
+      }}
     >
       <div className="island-row" ref={rowRef}>
         <span className="island-lead">{lead}</span>
@@ -141,12 +177,13 @@ export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
         <span className="island-acts">
           {kind === "success" || kind === "ok" ? (
             <span className="island-check">
-              <Check size={13} />
+              <Check size={15} />
             </span>
           ) : null}
-          {action && bot ? (
-            <button type="button" className="island-go" onClick={() => onOpenBot(bot.id)}>
-              {action}
+          {bot ? (
+            // Its click goes up to the pill, which opens the chat.
+            <button type="button" className="island-go">
+              {t("island.go")}
             </button>
           ) : null}
           {stays ? (
@@ -155,9 +192,12 @@ export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
               className="island-x"
               title={t("common.close")}
               aria-label={t("common.close")}
-              onClick={onClose}
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
             >
-              <X size={12} />
+              <X size={14} />
             </button>
           ) : null}
         </span>

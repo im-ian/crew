@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { LONG_RUN_MS } from "./botSignals";
-import { botNotices, koSubject, noticeLife, noticeStays, topNotice, type BotSnap } from "./island";
+import {
+  botNotices,
+  koSubject,
+  lifeAfterHover,
+  noticeLife,
+  noticeStays,
+  topNotice,
+  type BotSnap,
+} from "./island";
 import type { AgentInfo } from "./types";
 
 function bot(id: string, extra: Partial<AgentInfo> = {}): AgentInfo {
@@ -93,6 +101,12 @@ describe("notice timing", () => {
     expect(noticeLife("저장됨")).toBe(2000);
     expect(noticeLife("가".repeat(40))).toBe(3600);
     expect(noticeLife("가".repeat(200))).toBe(7000);
+  });
+
+  it("goes on where it stopped once the pointer leaves, with a beat to spare", () => {
+    expect(lifeAfterHover(3000)).toBe(3000);
+    expect(lifeAfterHover(200)).toBe(1200);
+    expect(lifeAfterHover(0)).toBe(1200);
   });
 });
 

@@ -588,6 +588,8 @@ export function App() {
           crew.selectAgent(id);
         }}
         onClose={crew.closeIsland}
+        onHold={crew.holdIsland}
+        onRelease={crew.releaseIsland}
       />
     </div>
   );
