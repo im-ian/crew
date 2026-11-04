@@ -649,13 +649,11 @@ fn remote_list() -> Result<Vec<crate::remote::RemoteInfo>, String> {
 #[tauri::command(async)]
 fn remote_set(
     alias: String,
-    delegates: Option<Vec<String>>,
     trusted: Option<Vec<String>>,
     blocked: Option<Vec<String>>,
 ) -> Result<(), String> {
     remote_rpc(Request::RemoteSet {
         alias,
-        delegates,
         trusted,
         blocked,
     })

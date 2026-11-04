@@ -117,7 +117,7 @@ if (remoteShot) {
   groups[1].items.unshift("agent:rep");
   remotes.push({
     alias: "acme", url: "wss://router.acme.dev:7420", name: "ian", bot: "rep", connected: true,
-    members: [], delegates: ["review", "impl"],
+    members: [],
     trusted: [{ account: "acc_k3j9x0", name: "민지" }],
     blocked: [{ account: "acc_zz01", name: "spam-bot" }],
   });

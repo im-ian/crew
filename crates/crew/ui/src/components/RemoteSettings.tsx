@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { api, errMsg } from "../api";
+import { ChevronDown } from "../icons";
 import { useT } from "../LocaleContext";
-import { localAgents, toggled } from "../remote";
-import type { AgentInfo, RemoteAccount, RemoteInfo } from "../types";
+import { toggled } from "../remote";
+import type { AgentInfo, Group, RemoteAccount, RemoteInfo } from "../types";
 import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
 import { Field } from "./Field";
 
 export type RemoteChange = {
   alias: string;
-  delegates: string[] | null;
   trusted: string[] | null;
   blocked: string[] | null;
 };
@@ -17,6 +17,8 @@ export type RemoteChange = {
 type Props = {
   remotes: RemoteInfo[];
   agents: AgentInfo[];
+  /** Sidebar folders: the representative's folder is who it hands work to. */
+  groups: Group[];
   /** The page is showing, so the team memos can be read. */
   active: boolean;
   onSet: (change: RemoteChange) => Promise<void>;
@@ -24,19 +26,28 @@ type Props = {
   onAdd: () => void;
 };
 
-/** Settings → Remote: one card per router this PC is signed up to. */
-export function RemoteSettings({ remotes, agents, active, onSet, onLeave, onAdd }: Props) {
+/**
+ * Settings → Remote: one card per router this PC is signed up to, each
+ * folded to its head until opened, so a second router is not a long scroll
+ * below the first.
+ */
+export function RemoteSettings({ remotes, agents, groups, active, onSet, onLeave, onAdd }: Props) {
   const t = useT();
+  const [open, setOpen] = useState<string[]>([]);
+  const add = (
+    <button type="button" className="ghost settings-action" onClick={onAdd}>
+      {t("menu.addRemote")}
+    </button>
+  );
   if (!remotes.length) {
     return (
       <div className="form-stack">
         <p className="empty-routines">{t("remote.empty")}</p>
-        <button type="button" className="ghost settings-action" onClick={onAdd}>
-          {t("menu.addRemote")}
-        </button>
+        {add}
       </div>
     );
   }
+  const reps = new Set(remotes.map((r) => r.bot));
   return (
     <div className="remote-cards">
       {remotes.map((r) => (
@@ -44,11 +55,16 @@ export function RemoteSettings({ remotes, agents, active, onSet, onLeave, onAdd 
           key={r.alias}
           remote={r}
           agents={agents}
+          groups={groups}
+          reps={reps}
+          open={open.includes(r.alias)}
+          onToggle={() => setOpen((prev) => toggled(prev, r.alias))}
           active={active}
           onSet={onSet}
           onLeave={() => onLeave(r.alias)}
         />
       ))}
+      <div className="remote-cards-foot">{add}</div>
     </div>
   );
 }
@@ -56,12 +72,20 @@ export function RemoteSettings({ remotes, agents, active, onSet, onLeave, onAdd 
 function RemoteCard({
   remote: r,
   agents,
+  groups,
+  reps,
+  open,
+  onToggle,
   active,
   onSet,
   onLeave,
 }: {
   remote: RemoteInfo;
   agents: AgentInfo[];
+  groups: Group[];
+  reps: Set<string>;
+  open: boolean;
+  onToggle: () => void;
   active: boolean;
   onSet: (change: RemoteChange) => Promise<void>;
   onLeave: () => void;
@@ -69,8 +93,12 @@ function RemoteCard({
   const t = useT();
   const [busy, setBusy] = useState(false);
   const rep = agents.find((a) => a.id === r.bot);
-  // The representative does the work itself; the rest are who it may hand to.
-  const candidates = localAgents(agents).filter((a) => a.id !== r.bot);
+  const folder = groups.find((g) => g.items.includes(`agent:${r.bot}`));
+  // Its folder's bots, but not a representative: that one works for another team.
+  const delegates = folder
+    ? agents.filter((a) => !reps.has(a.id) && folder.items.includes(`agent:${a.id}`))
+    : [];
+  const bodyId = `remote-card-${r.alias}`;
 
   async function change(next: Omit<RemoteChange, "alias">) {
     if (busy) return;
@@ -87,89 +115,95 @@ function RemoteCard({
   }
 
   return (
-    <section className="remote-card" aria-label={r.alias}>
-      <div className="remote-card-head">
+    <section className={"remote-card" + (open ? " open" : "")} aria-label={r.alias}>
+      <button
+        type="button"
+        className="remote-card-head"
+        aria-expanded={open}
+        aria-controls={bodyId}
+        onClick={onToggle}
+      >
+        <ChevronDown className="remote-card-chevron" size={16} />
         <span className="remote-card-alias">{r.alias}</span>
         <span className={"remote-conn" + (r.connected ? " is-on" : "")} aria-hidden />
         <span className="remote-card-state">
           {r.connected ? t("sidebar.remoteConnected") : t("sidebar.remoteDisconnected")}
         </span>
-      </div>
+        <span className="remote-card-me">{t("remote.cardMe", { name: r.name })}</span>
+      </button>
       {r.error ? <p className="field-hint field-error remote-card-error">{r.error}</p> : null}
-      <dl className="remote-facts">
-        <dt>{t("remote.url")}</dt>
-        <dd>{r.url}</dd>
-        <dt>{t("remote.myName")}</dt>
-        <dd>
-          {r.name}
-          {rep ? (
-            <span className="remote-facts-sub">
-              {t("remote.repBot", { name: rep.name || rep.id })}
-            </span>
-          ) : null}
-        </dd>
-      </dl>
-      <div className="form-stack">
-        <Field label={t("remote.delegates")} hint={t("remote.delegatesNote")}>
-          {candidates.length ? (
-            <div className="remote-picks">
-              {candidates.map((a) => (
-                <label key={a.id} className="remote-pick">
-                  <input
-                    type="checkbox"
-                    checked={r.delegates.includes(a.id)}
-                    disabled={busy}
-                    onChange={() =>
-                      void change({
-                        delegates: toggled(r.delegates, a.id),
-                        trusted: null,
-                        blocked: null,
-                      })
-                    }
-                  />
-                  <Avatar
-                    as="span"
-                    className="remote-pick-avatar"
-                    id={a.id}
-                    name={a.name || a.id}
-                    src={a.avatar}
-                    shape={a.avatar_shape}
-                    color={a.avatar_color}
-                  />
-                  <span className="remote-pick-name">{a.name || a.id}</span>
-                </label>
-              ))}
-            </div>
-          ) : (
-            <p className="apply-note">{t("remote.noDelegates")}</p>
-          )}
-        </Field>
-        <Field label={t("remote.trusted")} hint={t("remote.trustedNote")}>
-          <People
-            people={r.trusted}
-            action={t("remote.remove")}
-            busy={busy}
-            onAction={(account) =>
-              void change({ delegates: null, trusted: without(r.trusted, account), blocked: null })
-            }
-          />
-        </Field>
-        <Field label={t("remote.blocked")} hint={t("remote.blockedNote")}>
-          <People
-            people={r.blocked}
-            action={t("remote.unblock")}
-            busy={busy}
-            onAction={(account) =>
-              void change({ delegates: null, trusted: null, blocked: without(r.blocked, account) })
-            }
-          />
-        </Field>
-        <TeamMemoryField alias={r.alias} active={active} />
-        <Field label={t("remote.leave")} hint={t("remote.leaveNote", { name: r.name })}>
-          <button type="button" className="danger settings-action" onClick={onLeave}>
-            {t("remote.leaveAction", { alias: r.alias })}
-          </button>
-        </Field>
+      {/* Kept mounted while folded, so a half typed team memo survives. */}
+      <div id={bodyId} className="remote-card-body" hidden={!open}>
+        <dl className="remote-facts">
+          <dt>{t("remote.url")}</dt>
+          <dd>{r.url}</dd>
+          <dt>{t("remote.myName")}</dt>
+          <dd>
+            {r.name}
+            {rep ? (
+              <span className="remote-facts-sub">
+                {t("remote.repBot", { name: rep.name || rep.id })}
+              </span>
+            ) : null}
+          </dd>
+        </dl>
+        <div className="form-stack">
+          <Field label={t("remote.delegates")} hint={t("remote.delegatesNote")}>
+            <p className="apply-note">
+              {folder
+                ? t("remote.delegatesFolder", { folder: folder.name })
+                : t("remote.delegatesAsk")}
+            </p>
+            {folder ? (
+              delegates.length ? (
+                <ul className="remote-picks">
+                  {delegates.map((a) => (
+                    <li key={a.id} className="remote-pick">
+                      <Avatar
+                        as="span"
+                        className="remote-pick-avatar"
+                        id={a.id}
+                        name={a.name || a.id}
+                        src={a.avatar}
+                        shape={a.avatar_shape}
+                        color={a.avatar_color}
+                      />
+                      <span className="remote-pick-name">{a.name || a.id}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="apply-note">{t("remote.noDelegates")}</p>
+              )
+            ) : null}
+          </Field>
+          <Field label={t("remote.trusted")} hint={t("remote.trustedNote")}>
+            <People
+              people={r.trusted}
+              action={t("remote.remove")}
+              busy={busy}
+              onAction={(account) =>
+                void change({ trusted: without(r.trusted, account), blocked: null })
+              }
+            />
+          </Field>
+          <Field label={t("remote.blocked")} hint={t("remote.blockedNote")}>
+            <People
+              people={r.blocked}
+              action={t("remote.unblock")}
+              busy={busy}
+              onAction={(account) =>
+                void change({ trusted: null, blocked: without(r.blocked, account) })
+              }
+            />
+          </Field>
+          <TeamMemoryField alias={r.alias} active={active && open} />
+          <Field label={t("remote.leave")} hint={t("remote.leaveNote", { name: r.name })}>
+            <button type="button" className="danger settings-action" onClick={onLeave}>
+              {t("remote.leaveAction", { alias: r.alias })}
+            </button>
+          </Field>
+        </div>
       </div>
     </section>
   );

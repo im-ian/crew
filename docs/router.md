@@ -18,7 +18,7 @@
 | 대표 봇 | 한 라우터에 사람(PC)당 하나. 라우터 여러 개에 동시에 붙을 수 있고, 라우터마다 대표 봇이 따로 있다 |
 | 주소 | 봇 id는 `<별칭>/<계정 id>`(예: `team/acc_k3j9x0…`), 화면에는 이름으로 보인다. 별칭은 원격 봇을 추가할 때 내가 정하는 영문 소문자 라우터 이름이다. 멘션 토큰이 ASCII라 이름 대신 계정 id를 쓴다. `crew tell team/이름`도 된다 |
 | 실행 | 받은 일은 받는 쪽 대표 봇이 받는 쪽 PC에서 실행한다 |
-| 위임 | 대표 봇은 주인이 고른 로컬 봇(위임 가능한 봇)에게만 일을 나눌 수 있다. 로컬 봇 이름은 팀원에게 보이지 않는다 |
+| 위임 | 대표 봇이 사이드바 폴더에 있으면 같은 폴더의 로컬 봇에게 바로 일을 나눈다. 폴더 밖(라우터 섹션 포함)에 있으면 모든 로컬 봇이 후보지만, 맡기기 전에 `crew ask`로 주인에게 어느 봇인지 묻고 고른 봇에게만 맡긴다. 다른 라우터의 대표 봇은 후보가 아니다. 로컬 봇 이름은 팀원에게 보이지 않는다 |
 | 대표 봇 프롬프트 | 로컬 공유 메모리·그룹 메모리·로컬 봇 목록을 빼고, 팀 공용 메모·원격 팀원·위임 가능한 봇만 넣는다. 원격 턴만이 아니라 **늘** 그렇다. 주인과 나눈 대화도 같은 CLI 세션에 남아 원격 턴에 이어지기 때문이다 |
 | 카드 | 원격 봇의 질문·승인 카드는 **봇 주인** 화면에 뜬다. 요청한 쪽에는 "주인 답 기다리는 중"만 보인다 |
 | 첫 승인 | 팀원별로 처음 한 번 허용을 받는다. 허용·이번만·거절·차단. 승인 목록은 이름이 아니라 라우터 계정 id 기준 |
@@ -109,7 +109,7 @@ WebSocket 하나(`/ws`), 프레임마다 JSON 텍스트 하나, 모두 `type` �
 
 | 경로 | 내용 |
 | --- | --- |
-| `remotes.json` | `[{alias, url, account, name, token, bot, delegates, trusted, blocked}]` (권한 0600) |
+| `remotes.json` | `[{alias, url, account, name, token, bot, trusted, blocked}]` (권한 0600) |
 | `remote-jobs.json` | 아직 끝나지 않은 원격 일(보낸 것·받은 것). 재시작해도 답이 제자리로 간다 |
 | `team-memory/<별칭>.md` | 라우터 팀 메모의 마지막 사본 |
 | `remote-work/<별칭>/` | 대표 봇의 기본 작업 폴더 |
@@ -123,19 +123,19 @@ WebSocket 하나(`/ws`), 프레임마다 JSON 텍스트 하나, 모두 `type` �
 | `remote_probe {url}` | `remote_server {url, name, version, protocol, title, signup}` |
 | `remote_join {url, alias, name, invite?, cli, avatar?, avatar_shape?, avatar_color?, role?}` | `ok`. 로컬 대표 봇을 만들고 가입·접속한다 |
 | `remote_list` | `remotes {remotes:[RemoteInfo]}`. 바뀔 때마다 구독자에게도 온다 |
-| `remote_set {alias, delegates?, trusted?, blocked?}` | `ok` |
+| `remote_set {alias, trusted?, blocked?}` | `ok` |
 | `remote_leave {alias}` | `ok`. 라우터에서 탈퇴하고 로컬 설정을 지운다. 대표 봇은 남긴다 |
 | `team_memory {alias}` | `team_memory {alias, text, version}` |
 | `team_memory_append {alias, text}` / `team_memory_set {alias, text, version}` | `ok` 또는 `error` |
 
-`RemoteInfo = {alias, url, name, bot, connected, members:[Member], delegates, trusted, blocked}`
+`RemoteInfo = {alias, url, name, bot, connected, members:[Member], trusted, blocked}`
 
 원격 봇은 `agents` 목록에 `remote: <별칭>`, `remote_online`이 붙은 `AgentInfo`로 들어간다. id는 `<별칭>/<계정 id>`이고, `cmd`·`cwd`는 비어 있다. `send`·`messages`·`interrupt`(=`cancel`)는 원격 id에도 된다. 설정·루틴·복제·CLI 변경은 원격 봇에 없다.
 
 ### 봇 규칙에 더하는 것
 
 - 원격 팀원은 `Teammates`에 `<별칭>/<계정 id> — 이름`으로 함께 나오고, `/`가 든 id는 다른 PC의 봇이라는 한 줄이 붙는다. `crew tell <별칭>/<계정 id> <text>`로 부른다.
-- 대표 봇에는 `Shared memory` 노트 대신 원격 노트가 붙는다: 내가 누구를 대표하는지, 원격 팀원, 위임 가능한 봇, `# Team memory`. 로컬 공유 메모리·로컬 봇 목록·그룹 메모리는 넣지 않는다.
+- 대표 봇에는 `Shared memory` 노트 대신 원격 노트가 붙는다: 내가 누구를 대표하는지, 원격 팀원, 위임 가능한 봇(폴더 안이면 그 폴더의 봇, 밖이면 모든 봇과 먼저 주인에게 물으라는 말), `# Team memory`. 로컬 공유 메모리·로컬 봇 목록·그룹 메모리는 넣지 않는다.
 - 대표 봇이 원격 일 중에 위임 가능한 로컬 봇에게 `crew tell`하면, 그 일은 턴이 끝나도 닫히지 않고 로컬 봇의 답으로 깨어난 다음 턴까지 이어진다. 그 턴의 말이 원격으로 간다.
 - 팀원별 첫 승인은 대표 봇 채팅의 질문 카드(허용·이번만·거절·차단)다. 같은 팀원의 요청이 카드가 열린 동안 더 오면 같은 답을 따른다.
 - 첨부는 Crew의 `uploads/` 아래 파일만 보낸다. 봇이 다른 경로를 말해도 그 파일은 나가지 않는다.

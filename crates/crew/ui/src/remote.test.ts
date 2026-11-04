@@ -53,7 +53,6 @@ function router(alias: string, bot = "rep"): RemoteInfo {
     bot,
     connected: true,
     members: [],
-    delegates: [],
     trusted: [],
     blocked: [],
   };

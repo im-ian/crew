@@ -9,7 +9,7 @@ import { loadNotify, saveNotify } from "../notifyPref";
 import { loadWorktree, saveWorktree } from "../worktreePref";
 import type { ThemePref } from "../theme";
 import type { UpdaterApi } from "../updater";
-import type { AgentInfo, RemoteInfo } from "../types";
+import type { AgentInfo, Group, RemoteInfo } from "../types";
 import { Globe, Info, Keyboard, MessageSquare, Monitor, SlidersHorizontal } from "../icons";
 import { Field } from "./Field";
 import { Modal } from "./Modal";
@@ -33,6 +33,7 @@ type Props = {
   updater: UpdaterApi;
   remotes: RemoteInfo[];
   agents: AgentInfo[];
+  groups: Group[];
   onSetRemote: (change: RemoteChange) => Promise<void>;
   onLeaveRemote: (alias: string) => void;
   onAddRemote: () => void;
@@ -60,6 +61,7 @@ export function SettingsPane({
   updater,
   remotes,
   agents,
+  groups,
   onSetRemote,
   onLeaveRemote,
   onAddRemote,
@@ -282,6 +284,7 @@ export function SettingsPane({
             <RemoteSettings
               remotes={remotes}
               agents={agents}
+              groups={groups}
               active={open && section === "remote"}
               onSet={onSetRemote}
               onLeave={onLeaveRemote}

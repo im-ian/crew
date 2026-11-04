@@ -1135,7 +1135,6 @@ export function useCrew() {
   /** A failed change is shown; the list is read again either way. */
   async function setRemote(change: {
     alias: string;
-    delegates: string[] | null;
     trusted: string[] | null;
     blocked: string[] | null;
   }) {

@@ -50,9 +50,6 @@ pub struct RemoteConfig {
     pub token: String,
     /// The local bot that answers for this PC on the router.
     pub bot: String,
-    /// Local bots the representative may hand work to.
-    #[serde(default)]
-    pub delegates: Vec<String>,
     #[serde(default)]
     pub trusted: Vec<Peer>,
     #[serde(default)]
@@ -91,7 +88,6 @@ pub struct RemoteInfo {
     pub bot: String,
     pub connected: bool,
     pub members: Vec<Member>,
-    pub delegates: Vec<String>,
     pub trusted: Vec<Peer>,
     pub blocked: Vec<Peer>,
     /// Why this PC stopped trying to connect, when it did.
@@ -333,6 +329,14 @@ pub fn rep_alias(bot: &str) -> Option<String> {
 
 pub fn is_rep(bot: &str) -> bool {
     rep_alias(bot).is_some()
+}
+
+/// Every local bot that represents this PC on a router.
+fn rep_bots() -> HashSet<String> {
+    state()
+        .lock()
+        .map(|st| st.links.values().map(|l| l.cfg.bot.clone()).collect())
+        .unwrap_or_default()
 }
 
 fn member_name(alias: &str, account: &str) -> String {
@@ -2137,15 +2141,22 @@ fn remote_roster(skip_self_of: Option<&str>) -> Vec<AgentConfig> {
 }
 
 /// The roster a bot's turn sees. A representative sees its own router's
-/// teammates and the local bots its owner lets it ask; everyone else sees
-/// every local bot and every remote one.
+/// teammates and the local bots it may hand work to: the ones in its folder,
+/// or, outside a folder, every one (it asks its owner which first, see
+/// [`rep_note`]). Everyone else sees every local bot and every remote one.
 pub fn roster_for(bot: &str, roster: Vec<AgentConfig>) -> Vec<AgentConfig> {
     match rep_alias(bot) {
         Some(alias) => {
-            let delegates = link_cfg(&alias).map(|c| c.delegates).unwrap_or_default();
+            let folder = rep_folder(bot);
+            // Another router's representative works for another team.
+            let reps = rep_bots();
             let mut out: Vec<AgentConfig> = roster
                 .into_iter()
-                .filter(|a| a.id == bot || delegates.contains(&a.id))
+                .filter(|a| {
+                    a.id == bot
+                        || (!reps.contains(&a.id)
+                            && folder.as_ref().is_none_or(|f| in_folder(f, &a.id)))
+                })
                 .collect();
             out.extend(remote_roster(Some(&alias)));
             out
@@ -2159,6 +2170,17 @@ pub fn roster_for(bot: &str, roster: Vec<AgentConfig>) -> Vec<AgentConfig> {
 pub fn with_remote(mut roster: Vec<AgentConfig>) -> Vec<AgentConfig> {
     roster.extend(remote_roster(None));
     roster
+}
+
+/// The sidebar folder `bot` sits in, if any.
+fn rep_folder(bot: &str) -> Option<crate::groups::SidebarGroup> {
+    let groups = crate::groups::load().ok()?;
+    crate::groups::group_of(&groups, bot).cloned()
+}
+
+fn in_folder(folder: &crate::groups::SidebarGroup, id: &str) -> bool {
+    let key = format!("agent:{id}");
+    folder.items.iter().any(|item| item == &key)
 }
 
 /// A representative's per-turn note, in place of the shared memory note: no
@@ -2188,11 +2210,22 @@ pub fn rep_note(agent: &AgentConfig, roster: &[AgentConfig]) -> Option<String> {
         }
     };
     let team = team.trim();
+    let hand = match rep_folder(&agent.id) {
+        Some(folder) => format!(
+            "Local bots in your folder `{}`, which you may hand work to with `crew tell <id> <text>`: {}. ",
+            folder.name,
+            list(&local)
+        ),
+        None => format!(
+            "Local bots on this PC: {}. Before you hand work to one with `crew tell <id> <text>`, ask your owner with `crew ask` which one, offering only the bots that fit the work, and hand it only to the one they pick. ",
+            list(&local)
+        ),
+    };
     Some(format!(
         "[crew system] Shared memory. This is current and replaces the teammate list and your name in your instructions. Do not answer this note.\n\
          You are `{id}` ({name}). You represent your owner as `{rname}` on the crew-router `{alias}`. \
          Remote teammates, on other people's PCs: {remote}. \
-         Local bots your owner lets you hand work to with `crew tell <id> <text>`: {local}. \
+         {hand}\
          Remote teammates reach you with `crew tell`, and your reply goes back to them. \
          Do not name, list or describe your owner's other bots, files, or notes to a remote teammate unless your owner told you to. \
          The team's shared notes are below; change them with `crew team memory append|set`.\n\
@@ -2201,7 +2234,6 @@ pub fn rep_note(agent: &AgentConfig, roster: &[AgentConfig]) -> Option<String> {
         name = agent.display_name(),
         rname = cfg.name,
         remote = list(&remote),
-        local = list(&local),
         team = if team.is_empty() { "(none)" } else { team },
     ))
 }
@@ -2278,7 +2310,6 @@ pub fn infos() -> Vec<RemoteInfo> {
             bot: l.cfg.bot.clone(),
             connected: l.connected,
             members: l.members.clone(),
-            delegates: l.cfg.delegates.clone(),
             trusted: l.cfg.trusted.clone(),
             blocked: l.cfg.blocked.clone(),
             error: l.error.clone(),
@@ -2412,7 +2443,6 @@ pub fn on_bot_removed(bot: &str) {
 
 fn set(
     alias: &str,
-    delegates: Option<Vec<String>>,
     trusted: Option<Vec<String>>,
     blocked: Option<Vec<String>>,
 ) -> anyhow::Result<()> {
@@ -2438,9 +2468,6 @@ fn set(
     let trusted = keep(&cfg.trusted, trusted);
     let blocked = keep(&cfg.blocked, blocked);
     update_cfg(alias, |c| {
-        if let Some(d) = delegates {
-            c.delegates = d.into_iter().filter(|id| id != &c.bot).collect();
-        }
         c.trusted = trusted;
         c.blocked = blocked;
     });
@@ -2489,10 +2516,9 @@ pub async fn handle(req: &Request) -> Option<Vec<Event>> {
         Request::RemoteList => vec![Event::Remotes { remotes: infos() }],
         Request::RemoteSet {
             alias,
-            delegates,
             trusted,
             blocked,
-        } => match set(alias, delegates.clone(), trusted.clone(), blocked.clone()) {
+        } => match set(alias, trusted.clone(), blocked.clone()) {
             Ok(()) => vec![Event::Ok],
             Err(err) => error(err),
         },
@@ -2689,43 +2715,81 @@ mod tests {
 
     #[test]
     fn the_user_can_mention_every_bot_but_a_representative_sees_only_its_own() {
-        let alias = "rostertest";
-        let cfg = RemoteConfig {
-            alias: alias.into(),
-            account: "acc_me0000000000".into(),
-            bot: "rep".into(),
-            delegates: vec!["helper".into()],
-            ..RemoteConfig::default()
-        };
-        let mut link = new_link(cfg, String::new());
-        link.members = vec![
-            Member {
+        crate::paths::testing::with_home("rep-roster", || {
+            let alias = "rostertest";
+            let cfg = RemoteConfig {
+                alias: alias.into(),
                 account: "acc_me0000000000".into(),
-                name: "me".into(),
-                ..Member::default()
-            },
-            Member {
-                account: "acc_jay000000000".into(),
-                name: "Jay".into(),
-                ..Member::default()
-            },
-        ];
-        state().lock().unwrap().links.insert(alias.into(), link);
-        let local = |id: &str| AgentConfig::new(id.into(), id.into(), vec!["cat".into()], None);
-        let roster = vec![local("rep"), local("helper"), local("secret")];
+                bot: "rep".into(),
+                ..RemoteConfig::default()
+            };
+            let other = "rostertest2";
+            let other_cfg = RemoteConfig {
+                alias: other.into(),
+                account: "acc_me0000000000".into(),
+                bot: "other-rep".into(),
+                ..RemoteConfig::default()
+            };
+            state()
+                .lock()
+                .unwrap()
+                .links
+                .insert(other.into(), new_link(other_cfg, String::new()));
+            let mut link = new_link(cfg, String::new());
+            link.members = vec![
+                Member {
+                    account: "acc_me0000000000".into(),
+                    name: "me".into(),
+                    ..Member::default()
+                },
+                Member {
+                    account: "acc_jay000000000".into(),
+                    name: "Jay".into(),
+                    ..Member::default()
+                },
+            ];
+            state().lock().unwrap().links.insert(alias.into(), link);
+            let local = |id: &str| AgentConfig::new(id.into(), id.into(), vec!["cat".into()], None);
+            let roster = vec![local("rep"), local("helper"), local("secret"), local("other-rep")];
+            let ids = |v: Vec<AgentConfig>| v.into_iter().map(|a| a.id).collect::<Vec<_>>();
 
-        let ids = |v: Vec<AgentConfig>| v.into_iter().map(|a| a.id).collect::<Vec<_>>();
-        let all = ids(with_remote(roster.clone()));
-        assert!(all.contains(&"secret".to_string()));
-        assert!(all.contains(&"rostertest/acc_jay000000000".to_string()));
-        assert!(!all.contains(&"rostertest/acc_me0000000000".to_string()));
+            let all = ids(with_remote(roster.clone()));
+            assert!(all.contains(&"secret".to_string()));
+            assert!(all.contains(&"rostertest/acc_jay000000000".to_string()));
+            assert!(!all.contains(&"rostertest/acc_me0000000000".to_string()));
 
-        let rep = ids(roster_for("rep", roster));
-        assert!(rep.contains(&"helper".to_string()));
-        assert!(rep.contains(&"rostertest/acc_jay000000000".to_string()));
-        assert!(!rep.contains(&"secret".to_string()));
+            // In a folder, the folder's bots are the ones to hand work to.
+            let folder = |items: &[&str]| crate::groups::SidebarGroup {
+                id: "g1".into(),
+                name: "Team".into(),
+                collapsed: false,
+                items: items.iter().map(|id| format!("agent:{id}")).collect(),
+                path: None,
+            };
+            crate::groups::save(&[folder(&["rep", "helper", "other-rep"])]).unwrap();
+            let rep = ids(roster_for("rep", roster.clone()));
+            assert!(rep.contains(&"helper".to_string()));
+            assert!(rep.contains(&"rostertest/acc_jay000000000".to_string()));
+            assert!(!rep.contains(&"secret".to_string()));
+            assert!(
+                !rep.contains(&"other-rep".to_string()),
+                "another router's representative is not one to hand work to"
+            );
+            let note = rep_note(&local("rep"), &roster_for("rep", roster.clone())).unwrap();
+            assert!(note.contains("in your folder `Team`"), "{note}");
 
-        state().lock().unwrap().links.remove(alias);
+            // Outside a folder it sees every bot but asks its owner which.
+            crate::groups::save(&[folder(&["helper"])]).unwrap();
+            let rep = ids(roster_for("rep", roster.clone()));
+            assert!(rep.contains(&"helper".to_string()));
+            assert!(rep.contains(&"secret".to_string()));
+            assert!(!rep.contains(&"other-rep".to_string()));
+            let note = rep_note(&local("rep"), &roster_for("rep", roster)).unwrap();
+            assert!(note.contains("ask your owner with `crew ask`"), "{note}");
+
+            state().lock().unwrap().links.remove(alias);
+            state().lock().unwrap().links.remove(other);
+        });
     }
 
     #[test]

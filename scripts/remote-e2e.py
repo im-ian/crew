@@ -209,7 +209,8 @@ class World:
         for n in team:
             n.rpc({"type": "remote_set", "alias": ALIAS,
                    "trusted": [m.account for m in team if m is not n]})
-        a.rpc({"type": "remote_set", "alias": ALIAS, "delegates": [self.helper]})
+        # A's representative hands work to the bots in its folder.
+        a.cli("group", "add", "--name", "Team", "--bot", a.rep, "--bot", self.helper)
 
     def __getitem__(self, k):
         return self.nodes[k]

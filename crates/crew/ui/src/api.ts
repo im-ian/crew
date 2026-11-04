@@ -210,7 +210,6 @@ export const api = {
   /** Null leaves that list as it is. Trusted and blocked are account ids. */
   remoteSet: (args: {
     alias: string;
-    delegates: string[] | null;
     trusted: string[] | null;
     blocked: string[] | null;
   }) => invoke<void>("remote_set", args),

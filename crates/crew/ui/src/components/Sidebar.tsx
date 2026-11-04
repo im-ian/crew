@@ -710,6 +710,10 @@ export function Sidebar({
     }
     if (t.remote) {
       keepRemoteLayout(placeRep(remoteLayout, sections, t.remote, parsed.id, beforeId));
+      // Out of its folder too: a folder is who a representative hands work to.
+      if (groups.some((g) => g.items.includes(d.key))) {
+        onMoveRef.current(parsed.kind, parsed.id, null, null);
+      }
       return;
     }
     if (placed.has(parsed.id)) keepRemoteLayout(unplaceRep(remoteLayout, sections, parsed.id));

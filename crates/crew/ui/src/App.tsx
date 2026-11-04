@@ -551,6 +551,7 @@ export function App() {
         updater={updater}
         remotes={crew.remotes}
         agents={crew.agents}
+        groups={crew.groups}
         onSetRemote={crew.setRemote}
         onLeaveRemote={(alias) => {
           setLeaveAlias(alias);
