@@ -143,6 +143,8 @@ export type RemoteLayout = {
  * One rail section per router, in the order the daemon lists them. Bots go
  * in the order this PC saved, then by name. An alias that only the bot list
  * has (the router list failed, or is a poll behind) still gets its section.
+ * This PC's representative sits in its own router's section once it was put
+ * there, which is its id in that router's saved order.
  */
 export function remoteSections(
   agents: AgentInfo[],
@@ -157,11 +159,13 @@ export function remoteSections(
     if (list) list.push(a);
     else byAlias.set(a.remote, [a]);
   }
-  const out: RemoteSection[] = remotes.map((r) => ({
-    alias: r.alias,
-    remote: r,
-    bots: byAlias.get(r.alias) ?? [],
-  }));
+  const out: RemoteSection[] = remotes.map((r) => {
+    const rep = (saved[r.alias] ?? []).includes(r.bot)
+      ? agents.find((a) => a.id === r.bot && !a.remote)
+      : undefined;
+    const bots = byAlias.get(r.alias) ?? [];
+    return { alias: r.alias, remote: r, bots: rep ? [rep, ...bots] : bots };
+  });
   const listed = new Set(remotes.map((r) => r.alias));
   for (const alias of byAlias.keys()) {
     if (!listed.has(alias)) out.push({ alias, remote: null, bots: byAlias.get(alias) ?? [] });
@@ -278,6 +282,46 @@ export function moveRemoteBot(
   return { sections: saved.sections, bots };
 }
 
+/** Bots on this PC that sit in a router's section instead of the local list. */
+export function placedReps(sections: RemoteSection[]): Set<string> {
+  return new Set(sections.flatMap((s) => s.bots.filter((b) => !b.remote).map((b) => b.id)));
+}
+
+/**
+ * The saved layout after this PC's representative `id` was put in `alias`'s
+ * section before `beforeId`, or last. It leaves any other router it was in.
+ */
+export function placeRep(
+  saved: RemoteLayout,
+  sections: RemoteSection[],
+  alias: string,
+  id: string,
+  beforeId: string | null,
+): RemoteLayout {
+  const bots = unplaceRep(saved, sections, id).bots;
+  const ids = (sections.find((s) => s.alias === alias)?.bots ?? [])
+    .map((b) => b.id)
+    .filter((b) => b !== id);
+  ids.splice(beforeId && ids.includes(beforeId) ? ids.indexOf(beforeId) : ids.length, 0, id);
+  bots[alias] = ids;
+  return { sections: saved.sections, bots };
+}
+
+/** The saved layout after this PC's representative `id` went back to the local list. */
+export function unplaceRep(
+  saved: RemoteLayout,
+  sections: RemoteSection[],
+  id: string,
+): RemoteLayout {
+  const bots = keptBots(saved.bots, sections);
+  for (const [alias, ids] of Object.entries(bots)) {
+    const rest = ids.filter((b) => b !== id);
+    if (rest.length) bots[alias] = rest;
+    else delete bots[alias];
+  }
+  return { sections: saved.sections, bots };
+}
+
 /**
  * Rows for ⌘[ and ⌘], top to bottom as the rail stacks folders, loose bots
  * and routers. A collapsed folder or a folded router is skipped.
@@ -290,11 +334,13 @@ export function chatOrder(
   saved: RemoteLayout,
 ): { kind: Kind; id: string }[] {
   const rows = new Map<string, { kind: Kind; id: string }[]>();
-  for (const row of railOrder(rail.groups, rail.ungrouped, localAgents(agents))) {
+  const sections = remoteSections(agents, remotes, undefined, saved.bots);
+  const placed = placedReps(sections);
+  const local = localAgents(agents).filter((a) => !placed.has(a.id));
+  for (const row of railOrder(rail.groups, rail.ungrouped, local)) {
     const key = groupIdOf(rail.groups, row.kind, row.id) ?? UNGROUPED_ID;
     rows.set(key, [...(rows.get(key) ?? []), row]);
   }
-  const sections = remoteSections(agents, remotes, undefined, saved.bots);
   for (const s of sections) {
     if (folded.includes(s.alias)) continue;
     rows.set(

@@ -209,7 +209,8 @@ class World:
         for n in team:
             n.rpc({"type": "remote_set", "alias": ALIAS,
                    "trusted": [m.account for m in team if m is not n]})
-        a.rpc({"type": "remote_set", "alias": ALIAS, "delegates": [self.helper]})
+        # A's representative hands work to the bots in its folder.
+        a.cli("group", "add", "--name", "Team", "--bot", a.rep, "--bot", self.helper)
 
     def __getitem__(self, k):
         return self.nodes[k]
@@ -448,6 +449,35 @@ def delegate_while_another_asks(w):
     wait(lambda: has(c.texts(c.rid(a)), "ACK sub T11"), 30, "C hears the helper's work")
     got(d, a, "T11-D", 30)
     assert not has(d.texts(d.rid(a)), "sub T11"), "D got C's delegated answer"
+    settled(w, 30)
+
+
+def hand_on_card(w):
+    """A's representative outside its folder: handing work on waits for its
+    owner's pick on a card, and keeping it wakes the representative."""
+    a, c = w["A"], w["C"]
+    a.cli("group", "add", "--name", "Solo", "--bot", a.rep)
+    try:
+        tell(c, a, "DELEGATE T12")
+        wait(lambda: a.pending_cards(), 20, "A's owner gets the hand-on card")
+        card = a.pending_cards()[0]
+        q = card["choice"]["questions"][0]
+        labels = [o["label"] for o in q["options"]]
+        assert labels[0] == "Helper", labels
+        assert not has(c.texts(c.rid(a)), "ACK sub T12"), "went on before the pick"
+        a.answer(card, "A")
+        wait(lambda: has(c.texts(c.rid(a)), "ACK sub T12"), 30, "C hears the helper's work")
+
+        tell(c, a, "DELEGATE T13")
+        wait(lambda: a.pending_cards(), 20, "the second card")
+        card = a.pending_cards()[0]
+        keep = chr(ord("A") + len(card["choice"]["questions"][0]["options"]) - 1)
+        a.answer(card, keep)
+        wait(lambda: any("ACK" in t and ("직접" in t or "yourself" in t)
+                         for t in c.texts(c.rid(a))), 30, "C hears A answer itself")
+        assert not has(c.texts(c.rid(a)), "ACK sub T13"), "kept work still went on"
+    finally:
+        a.cli("group", "add", "--name", "Team", "--bot", a.rep, "--bot", w.helper)
     settled(w, 30)
 
 
@@ -704,6 +734,7 @@ SCENARIOS = [
     ("처음 보는 E·F가 동시에 (카드 2장, 허용/거절)", two_newcomers_two_cards),
     ("A 대표 봇이 로컬 봇에게 위임", delegate_then_answer),
     ("위임 중에 D가 끼어듦", delegate_while_another_asks),
+    ("폴더 밖 A 대표 봇의 위임은 주인이 고름", hand_on_card),
     ("A 주인이 원격 일을 도중에 정지", owner_stops_a_remote_turn),
     ("C가 A가 처리 중인 일을 취소", sender_cancels_a_running_turn),
     ("C가 A에 대기 중인 일을 취소 (D 일은 계속)", sender_cancels_a_queued_one),

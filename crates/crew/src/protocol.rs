@@ -225,8 +225,6 @@ pub enum Request {
     RemoteSet {
         alias: String,
         #[serde(default)]
-        delegates: Option<Vec<String>>,
-        #[serde(default)]
         trusted: Option<Vec<String>>,
         #[serde(default)]
         blocked: Option<Vec<String>>,

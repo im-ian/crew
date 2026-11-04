@@ -5035,24 +5035,54 @@ button.mention-chip:active {
 @media (prefers-reduced-motion: reduce) {
   .settings-body { animation: none; }
 }
-/* Settings → Remote: a card per router, a line between two. */
+/* Settings → Remote: a card per router, folded to its head, a line under each. */
 .remote-cards {
   display: flex;
   flex-direction: column;
 }
-.remote-card + .remote-card {
-  margin-top: var(--space-24);
-  padding-top: var(--space-24);
-  border-top: 1px solid var(--line);
+.remote-card {
+  border-bottom: 1px solid var(--line);
 }
 .remote-card-head {
   display: flex;
   align-items: center;
   gap: var(--space-8);
-  margin-bottom: var(--space-12);
+  width: 100%;
+  margin: 0;
+  padding: var(--space-12) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.remote-card-head:hover { background: var(--hover); }
+.remote-card-chevron {
+  flex: none;
+  color: var(--muted);
+  transform: rotate(-90deg);
+  transition: transform 0.12s ease;
+}
+.remote-card.open .remote-card-chevron { transform: rotate(0deg); }
+.remote-card-me {
+  margin-left: auto;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.remote-card-body {
+  padding: var(--space-4) var(--space-4) var(--space-24) calc(var(--space-4) + 24px);
+}
+.remote-cards-foot {
+  margin-top: var(--space-16);
 }
 .remote-card-error {
-  margin: calc(var(--space-4) * -1) 0 var(--space-12);
+  margin: 0 0 var(--space-12) calc(var(--space-4) + 24px);
 }
 .remote-card-alias {
   color: var(--ink);
@@ -5079,36 +5109,6 @@ button.mention-chip:active {
 .remote-facts-sub {
   margin-left: var(--space-8);
   color: var(--faint);
-}
-.remote-picks {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  max-width: 340px;
-}
-.remote-pick {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-  padding: var(--space-4) var(--space-6);
-  border-radius: var(--radius-md);
-  color: var(--ink);
-  font-size: var(--text-lg);
-  cursor: pointer;
-  user-select: none;
-}
-.remote-pick:hover { background: var(--hover); }
-.remote-pick input { accent-color: var(--working); margin: 0; }
-.remote-pick-avatar {
-  width: 20px;
-  height: 20px;
-  font-size: 9px;
-}
-.remote-pick-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .remote-people {
   list-style: none;

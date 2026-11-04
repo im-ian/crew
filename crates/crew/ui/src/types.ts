@@ -144,8 +144,6 @@ export type RemoteInfo = {
   bot: string;
   connected: boolean;
   members: RemoteMember[];
-  /** Local bots the representative may hand work to. */
-  delegates: string[];
   trusted: RemoteAccount[];
   blocked: RemoteAccount[];
   /** Why this PC stopped trying to connect: same account elsewhere, or removed. */

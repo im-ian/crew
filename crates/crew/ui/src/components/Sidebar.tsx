@@ -25,12 +25,15 @@ import {
   localAgents,
   moveRailSection,
   moveRemoteBot,
+  placedReps,
+  placeRep,
   railSections,
   remoteKey,
   remoteSections,
   representing,
   saveRemoteFolds,
   saveRemoteLayout,
+  unplaceRep,
   type RemoteLayout,
   type RemoteSection,
 } from "../remote";
@@ -112,6 +115,8 @@ type RailDrop =
       beforeKey: string | null;
       into: boolean;
       line: DropLine | null;
+      /** The router section it lands in: only this PC's representative goes there. */
+      remote?: string;
     }
   | {
       kind: "group";
@@ -162,7 +167,12 @@ function pickClosest(stack: Element[], sel: string): HTMLElement | null {
   return null;
 }
 
-function rowDrop(row: HTMLElement, y: number, dragKey: string, groupId: string | null): RailDrop {
+function rowDrop(
+  row: HTMLElement,
+  y: number,
+  dragKey: string,
+  groupId: string | null,
+): Extract<RailDrop, { kind: "item" }> {
   const key = row.dataset.railRow || null;
   const rect = row.getBoundingClientRect();
   const inset = 8;
@@ -190,12 +200,27 @@ function rowDrop(row: HTMLElement, y: number, dragKey: string, groupId: string |
   };
 }
 
-function hitRailTarget(x: number, y: number, dragKey: string): RailDrop | null {
+/**
+ * Where a bot on this PC lands. A router's section takes only the bot that
+ * represents this PC there (`reps`, its aliases); for any other it is no drop.
+ */
+function hitRailTarget(
+  x: number,
+  y: number,
+  dragKey: string,
+  reps: readonly string[],
+): RailDrop | null {
   const stack = document.elementsFromPoint(x, y);
+  const router = pickClosest(stack, "[data-rail-remote]");
+  if (router) {
+    const alias = router.dataset.railRemote || "";
+    if (!reps.includes(alias)) return null;
+    const row = pickClosest(stack, "[data-rail-row]");
+    if (row && router.contains(row)) return { ...rowDrop(row, y, dragKey, null), remote: alias };
+    return { kind: "item", groupId: null, beforeKey: null, into: true, line: null, remote: alias };
+  }
   const row = pickClosest(stack, "[data-rail-row]");
   if (row) {
-    // A router's rows are the router's; a bot on this PC does not go there.
-    if (row.closest("[data-rail-remote]")) return null;
     const groupEl = row.closest("[data-rail-group]");
     const groupId =
       groupEl instanceof HTMLElement ? groupEl.dataset.railGroup || null : null;
@@ -397,12 +422,17 @@ export function Sidebar({
   const { locale } = useLocale();
   // Rebuilding the list numbers every duplicate name and re-sorts each group;
   // a drag re-renders this on every pointermove and none of it can change.
-  const built = useMemo(() => toItems(localAgents(agents)), [agents]);
   // Where routers and their bots sit is this PC's, so it is kept here.
   const [remoteLayout, setRemoteLayout] = useState(loadRemoteLayout);
   const sections = useMemo(
     () => remoteSections(agents, remotes, locale, remoteLayout.bots),
     [agents, remotes, locale, remoteLayout.bots],
+  );
+  // A representative put in its router's section is not in the local list too.
+  const placed = useMemo(() => placedReps(sections), [sections]);
+  const built = useMemo(
+    () => toItems(localAgents(agents).filter((a) => !placed.has(a.id))),
+    [agents, placed],
   );
   const railKeys = useMemo(
     () =>
@@ -674,11 +704,20 @@ export function Sidebar({
     const parsed = parseItemKey(d.key);
     if (!parsed) return;
     const alias = d.item.agent?.remote;
+    const beforeId = t.beforeKey ? (parseItemKey(t.beforeKey)?.id ?? null) : null;
     if (alias) {
-      const beforeId = t.beforeKey ? (parseItemKey(t.beforeKey)?.id ?? null) : null;
       keepRemoteLayout(moveRemoteBot(remoteLayout, sections, alias, parsed.id, beforeId));
       return;
     }
+    if (t.remote) {
+      keepRemoteLayout(placeRep(remoteLayout, sections, t.remote, parsed.id, beforeId));
+      // Out of its folder too: a folder is who a representative hands work to.
+      if (groups.some((g) => g.items.includes(d.key))) {
+        onMoveRef.current(parsed.kind, parsed.id, null, null);
+      }
+      return;
+    }
+    if (placed.has(parsed.id)) keepRemoteLayout(unplaceRep(remoteLayout, sections, parsed.id));
     onMoveRef.current(parsed.kind, parsed.id, t.groupId, t.beforeKey);
     if (t.into && t.groupId) {
       const collapsed = document.querySelector(
@@ -767,6 +806,7 @@ export function Sidebar({
   function onRowPointerDown(e: ReactPointerEvent<HTMLButtonElement>, item: RailItem) {
     const rect = e.currentTarget.getBoundingClientRect();
     const alias = item.agent?.remote;
+    const reps = alias ? [] : representing(item.id, remotes);
     beginDrag(
       e,
       {
@@ -780,7 +820,8 @@ export function Sidebar({
         width: rect.width,
         armed: false,
       },
-      (x, y) => (alias ? hitRemoteRow(x, y, item.key, alias) : hitRailTarget(x, y, item.key)),
+      (x, y) =>
+        alias ? hitRemoteRow(x, y, item.key, alias) : hitRailTarget(x, y, item.key, reps),
     );
   }
 
@@ -938,6 +979,9 @@ export function Sidebar({
         key={key}
         className={
           "rail-section grouped remote-section" +
+          (drop?.kind === "item" && drop.remote === section.alias && drop.into
+            ? " drop-into"
+            : "") +
           (drag?.kind === "group" && drag.key === key && drag.armed ? " dragging" : "")
         }
         data-rail-section={key}
@@ -962,6 +1006,7 @@ export function Sidebar({
               item={item}
               compact={folded}
               agents={agents}
+              represents={item.agent?.remote ? undefined : representing(item.id, remotes)}
               active={selectedKind === item.kind && selected === item.id}
               unread={unread.includes(item.key)}
               drafting={drafting.includes(item.id)}

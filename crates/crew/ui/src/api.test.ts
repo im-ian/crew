@@ -113,10 +113,10 @@ describe("remote router commands", () => {
   });
 
   it("sends remote_set with the lists it leaves alone as null", async () => {
-    await api.remoteSet({ alias: "team", delegates: ["impl"], trusted: null, blocked: null });
+    await api.remoteSet({ alias: "team", trusted: ["acc_k3j9"], blocked: null });
     expect(mocks.invoke.mock.calls[0]).toEqual([
       "remote_set",
-      { alias: "team", delegates: ["impl"], trusted: null, blocked: null },
+      { alias: "team", trusted: ["acc_k3j9"], blocked: null },
     ]);
   });
 
