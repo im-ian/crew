@@ -3553,11 +3553,13 @@ fn tell_remote(
         crate::transcript::push_remote_tell(&rid, asker, text, Some(asker.to_string()));
         let peer = parent.as_ref().and_then(|p| asked_by(p, asker));
         crate::transcript::push_notice(asker, &format!("to:{rid}"), text, peer);
+    } else if let Some(owner) = mention_owner.as_deref() {
+        // Typed in another bot's chat, so it is not the user's line here: it
+        // is the delivery a local bot's chat leaves, which the chat hides.
+        crate::transcript::push_remote_tell(&rid, "user", text, None);
+        crate::transcript::push_mention_notice(owner, &format!("to:{rid}"), text);
     } else {
         crate::transcript::push_user(&rid, "user", text);
-        if let Some(owner) = mention_owner.as_deref() {
-            crate::transcript::push_mention_notice(owner, &format!("to:{rid}"), text);
-        }
     }
     let _ = events().send(Event::Told {
         from,
@@ -4671,6 +4673,53 @@ mod daemon_tests {
                 clear_inbox(id);
                 remove_agent(id).unwrap();
             }
+        });
+    }
+
+    /// The user wrote `@team/acc_… 에게 인사` in a local bot's chat. The remote
+    /// bot gets it, but its chat keeps it as the hidden delivery a local bot's
+    /// chat keeps, not as a line the user typed there.
+    #[test]
+    fn a_user_mention_of_a_remote_bot_is_not_their_line_in_its_chat() {
+        paths::testing::with_home("mention-remote", || {
+            paths::write_notifications_enabled(false);
+            let chat = test_id("mention-chat");
+            claude_bot(&chat);
+            let alias = "mentionremote";
+            let mut rx = crate::remote::test_link(alias);
+            let rid = format!("{alias}/acc_k3j9000000000");
+            let text = format!("@{rid} 에게 인사 ㄱㄱ");
+
+            tell_agent_origin(
+                "user",
+                &rid,
+                &text,
+                Some(TurnOrigin::mention_tell(&chat)),
+                false,
+                &mut VecDeque::new(),
+            )
+            .unwrap();
+
+            let frame = rx.try_recv().expect("the tell went to the router");
+            assert_eq!(frame["type"], "tell");
+            let rows = crate::transcript::messages(&rid);
+            assert!(
+                rows.iter().all(|m| m.role != Role::User),
+                "not the user's line in the remote chat: {rows:?}"
+            );
+            let copy = rows.iter().find(|m| m.from == "user").expect("delivery");
+            assert_eq!(copy.role, Role::System);
+            assert_eq!(copy.kind, Some(crate::protocol::MessageKind::Received));
+            assert!(
+                crate::transcript::messages(&chat)
+                    .iter()
+                    .any(|m| m.from == format!("to:{rid}") && m.mention),
+                "the chat it was typed in shows it was sent"
+            );
+
+            crate::remote::drop_test_link(alias);
+            crate::transcript::drop_agent(&rid);
+            remove_agent(&chat).unwrap();
         });
     }
 

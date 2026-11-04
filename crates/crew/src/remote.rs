@@ -616,6 +616,32 @@ fn new_link(cfg: RemoteConfig, team: String) -> Link {
     }
 }
 
+/// A connected router for tests elsewhere: what goes out to it lands in the
+/// returned receiver. [`drop_test_link`] takes it away again.
+#[cfg(test)]
+pub(crate) fn test_link(alias: &str) -> mpsc::UnboundedReceiver<Value> {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let mut link = new_link(
+        RemoteConfig {
+            alias: alias.into(),
+            account: "acc_me0000000000".into(),
+            ..RemoteConfig::default()
+        },
+        String::new(),
+    );
+    link.tx = Some(tx);
+    link.connected = true;
+    state().lock().unwrap().links.insert(alias.into(), link);
+    rx
+}
+
+#[cfg(test)]
+pub(crate) fn drop_test_link(alias: &str) {
+    let mut st = state().lock().unwrap();
+    st.links.remove(alias);
+    st.jobs.out.retain(|job| job.alias != alias);
+}
+
 fn link_cfg(alias: &str) -> Option<RemoteConfig> {
     state().lock().ok()?.links.get(alias).map(|l| l.cfg.clone())
 }
