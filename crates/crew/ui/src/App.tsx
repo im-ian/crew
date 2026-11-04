@@ -20,6 +20,7 @@ import { Island } from "./components/Island";
 import { chatOrder, loadRemoteFolds, loadRemoteLayout, representing } from "./remote";
 import { copyText } from "./components/CopyButton";
 import { useT } from "./LocaleContext";
+import { BotLabelProvider } from "./BotLabelContext";
 import type { TFn } from "./i18n";
 import { isTypingTarget, shortcutId } from "./shortcuts";
 import { popoverIsOpen } from "./usePopover";
@@ -294,7 +295,7 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [helpOpen, settingsOpen, skillsOpen, peek, leaveOpen]);
 
-  return (
+  const app = (
     <div className="app">
       <Sidebar
         agents={crew.agents}
@@ -588,6 +589,15 @@ export function App() {
         onClose={crew.closeIsland}
       />
     </div>
+  );
+  // Bots in the open chat's group go by their name; the rest say their group.
+  return (
+    <BotLabelProvider
+      groups={crew.groups}
+      viewer={crew.selectedKind === "agent" ? crew.selected : null}
+    >
+      {app}
+    </BotLabelProvider>
   );
 }
 

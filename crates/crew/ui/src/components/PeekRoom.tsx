@@ -10,6 +10,7 @@ import {
 import { resolveFace } from "../avatar";
 import { splitBubbles } from "../bubbles";
 import { useT } from "../LocaleContext";
+import { useBotLabel } from "../BotLabelContext";
 import { messageDefinitions } from "../markdown";
 import { Lock, X } from "../icons";
 import { displayWho, peekMessages, subagentFace } from "../peek";
@@ -42,6 +43,7 @@ export function PeekRoom({
   onClose,
 }: Props) {
   const t = useT();
+  const labelOf = useBotLabel();
   const roomRef = useRef<HTMLDivElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const [preferred, setPreferred] = useState<number | null>(null);
@@ -154,7 +156,7 @@ export function PeekRoom({
   const peer =
     agents.find((a) => a.id === peerId) ?? subagentFace(peerId, t);
   const selfName = self.name || self.id;
-  const peerName = displayWho(peerId, peer, t);
+  const peerName = displayWho(peerId, peer, t, labelOf);
 
   // Beside the thread the reader may be partway up an old run when a new
   // note lands; only follow the tail if they were already at it.
@@ -246,7 +248,7 @@ export function PeekRoom({
               agents.find((a) => a.id === m.from) ??
               (m.from === self.id ? self : m.from === peerId ? peer : null);
             const who =
-              m.from === "user" ? t("thread.you") : displayWho(m.from, agent, t);
+              m.from === "user" ? t("thread.you") : displayWho(m.from, agent, t, labelOf);
             return (
               <PeekBubble
                 key={m.id}

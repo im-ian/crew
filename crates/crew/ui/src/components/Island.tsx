@@ -3,6 +3,7 @@ import { resolveFace } from "../avatar";
 import { Check, X } from "../icons";
 import { koSubject, noticeStays, type IslandNotice } from "../island";
 import { useLocale } from "../LocaleContext";
+import { useBotLabel } from "../BotLabelContext";
 import type { AgentInfo } from "../types";
 import { BotFace } from "./BotFace";
 
@@ -40,6 +41,7 @@ type Phase = "off" | "show" | "open" | "leave";
  */
 export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
   const { locale, t } = useLocale();
+  const labelOf = useBotLabel();
   const [phase, setPhase] = useState<Phase>("off");
   const [shown, setShown] = useState<IslandNotice | null>(null);
   const [swap, setSwap] = useState(false);
@@ -75,7 +77,7 @@ export function Island({ notice, visible, agents, onOpenBot, onClose }: Props) {
 
   const bot =
     shown && "botId" in shown ? (agents.find((a) => a.id === shown.botId) ?? null) : null;
-  const name = bot ? bot.name || bot.id : "";
+  const name = bot ? labelOf(bot) : "";
 
   // Open exactly as wide as what it says.
   useLayoutEffect(() => {

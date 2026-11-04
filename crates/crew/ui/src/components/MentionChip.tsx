@@ -1,15 +1,18 @@
 import type { AgentInfo } from "../types";
-import { mentionLabel } from "../mentions";
+import { useBotLabel } from "../BotLabelContext";
 import { Avatar } from "./Avatar";
 
 type Props = {
   agent?: AgentInfo;
   onClick?: (id: string) => void;
+  /** For a chip drawn off the tree, where no group or open chat reaches it. */
+  label?: string;
 };
 
-export function MentionChip({ agent, onClick }: Props) {
+export function MentionChip({ agent, onClick, label: given }: Props) {
+  const labelOf = useBotLabel();
   if (!agent) return null;
-  const label = mentionLabel(agent);
+  const label = given ?? labelOf(agent);
   const inner = (
     <>
       <Avatar
