@@ -1803,7 +1803,11 @@ header .who-name {
 }
 .thread {
   min-height: 0;
-  /* A hovered chip hangs outside its balloon. Clip that axis so the hang cannot scroll the thread sideways. */
+  /* Beside overflow-y: auto this clip computes to hidden, so anything that
+     hangs past the padding edge gives the thread a sideways range that a
+     scrollIntoView or a focus can use, sliding the faces off the left edge.
+     The strips are capped to end at that edge; useStick puts scrollLeft back
+     to 0 for what is left, like a chip with no room in a very thin thread. */
   overflow-x: clip;
   overflow-y: auto;
   container-type: inline-size;
@@ -2409,7 +2413,8 @@ button.sys-note:focus-visible {
   left: 100%;
 }
 /* The chip hangs outside the balloon it belongs to. This strip is that
-   whole side, tall as the balloon, so the pointer can reach the chip. */
+   whole side, tall as the balloon, so the pointer can reach the chip. Like
+   the chip, it stops at the thread's padding edge. */
 .bubble-row.has-actions::after,
 .xfer-chip::after,
 .xfer::after,
@@ -2425,6 +2430,14 @@ button.sys-note:focus-visible {
 .xfer-chip::after,
 .xfer::after {
   left: 100%;
+}
+.bubble-row.has-actions::after {
+  max-width: calc(100cqw - 42px - 100% + var(--content-pad));
+}
+/* Centered, so the room on the right is half of what the box does not use. */
+.xfer-chip::after,
+.xfer::after {
+  max-width: calc((100cqw - 100%) / 2 + var(--content-pad));
 }
 .me-msg::after {
   right: 100%;
