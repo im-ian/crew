@@ -107,19 +107,7 @@ fn parse_cli_option(raw: &str, i: usize) -> Option<ChoiceOption> {
     if raw.is_empty() {
         return None;
     }
-    let (label, description) = if let Some((a, b)) = raw.split_once(": ") {
-        (
-            a.trim(),
-            Some(b.trim()).filter(|s| !s.is_empty()).map(str::to_string),
-        )
-    } else if let Some((a, b)) = raw.split_once(" — ") {
-        (
-            a.trim(),
-            Some(b.trim()).filter(|s| !s.is_empty()).map(str::to_string),
-        )
-    } else {
-        (raw, None)
-    };
+    let (label, description) = split_option_text(raw);
     if label.is_empty() {
         return None;
     }
@@ -128,6 +116,42 @@ fn parse_cli_option(raw: &str, i: usize) -> Option<ChoiceOption> {
         label: label.to_string(),
         description: description.filter(|d| d != label),
     })
+}
+
+/// `Title: subtitle` and `Title — subtitle` are a label and a description.
+/// A colon inside parentheses stays in the label, so `색 (전: #e6e6e6)` is one line.
+fn split_option_text(raw: &str) -> (&str, Option<String>) {
+    let (label, rest) = if let Some(i) = sep_outside_parens(raw, ": ") {
+        (&raw[..i], &raw[i + ": ".len()..])
+    } else if let Some(i) = sep_outside_parens(raw, " — ") {
+        (&raw[..i], &raw[i + " — ".len()..])
+    } else {
+        return (raw, None);
+    };
+    let label = label.trim();
+    let description = rest.trim();
+    (
+        label,
+        Some(description.to_string()).filter(|s| !s.is_empty()),
+    )
+}
+
+fn sep_outside_parens(raw: &str, sep: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut i = 0;
+    while i < raw.len() {
+        let ch = raw[i..].chars().next()?;
+        if depth == 0 && raw[i..].starts_with(sep) {
+            return Some(i);
+        }
+        match ch {
+            '(' | '（' => depth += 1,
+            ')' | '）' if depth > 0 => depth -= 1,
+            _ => {}
+        }
+        i += ch.len_utf8();
+    }
+    None
 }
 
 fn parse_cli_input(raw: &str, i: usize) -> Option<ChoiceField> {
@@ -816,9 +840,32 @@ mod tests {
             Some("wait")
         );
         assert_eq!(card.questions[0].options[2].label, "Ship it");
+        assert_eq!(
+            card.questions[0].options[2].description.as_deref(),
+            Some("merge now")
+        );
         assert!(card_from_cli("Q", &["only-one".into()], &[], None).is_err());
         assert!(card_from_cli("Q", &["only-one".into()], &["아이디".into()], None).is_err());
         assert!(card_from_cli("", &["A".into(), "B".into()], &[], None).is_err());
+    }
+
+    #[test]
+    fn colon_inside_parentheses_stays_in_the_label() {
+        let card = card_from_cli(
+            "어디까지 롤백할까요?",
+            &[
+                "방금 그룹 색만 (전: #e6e6e6)".into(),
+                "Login (prod): use the new host".into(),
+            ],
+            &[],
+            None,
+        )
+        .unwrap();
+        let opts = &card.questions[0].options;
+        assert_eq!(opts[0].label, "방금 그룹 색만 (전: #e6e6e6)");
+        assert!(opts[0].description.is_none());
+        assert_eq!(opts[1].label, "Login (prod)");
+        assert_eq!(opts[1].description.as_deref(), Some("use the new host"));
     }
 
     #[test]
