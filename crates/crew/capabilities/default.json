@@ -12,6 +12,7 @@
   },
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
     "allow-list-agents",
     "allow-send-message",
     "allow-stop-agent",

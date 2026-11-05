@@ -215,7 +215,7 @@ export function PeekRoom({
       tabIndex={-1}
     >
       <div className="titlebar-align" data-tauri-drag-region />
-      <header className="peek-head">
+      <header className="peek-head" data-tauri-drag-region="deep">
         <h2 id="peek-title" className="sr-only">
           {selfName} · {peerName}
         </h2>

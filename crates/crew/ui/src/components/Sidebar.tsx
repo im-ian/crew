@@ -1185,7 +1185,7 @@ export function Sidebar({
   return (
     <aside className={folded ? "folded" : undefined}>
       <div className="drag-top" data-tauri-drag-region />
-      <div className="search-row">
+      <div className="search-row" data-tauri-drag-region="deep">
         {/* A folded rail keeps the field in the tree so ⌘K can still reach
             it; focusing it opens the rail. */}
         <input
