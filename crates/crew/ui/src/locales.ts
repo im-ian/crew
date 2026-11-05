@@ -270,7 +270,6 @@ export const KO = {
   "memory.sharedNote": "모든 봇이 매 턴 읽는 메모입니다. 봇만 고칠 수 있습니다.",
   "memory.sharedLabel": "공유 메모리",
   "memory.sharedPlaceholder": "아직 공유 메모가 없습니다",
-  "memory.sharedTeam": "지금 봇 목록: {team}",
 
   "field.name": "이름",
   "field.group": "그룹",
@@ -704,7 +703,6 @@ export const EN: { [K in MessageKey]: string } = {
   "memory.sharedNote": "Every bot reads this every turn. Only bots can edit it.",
   "memory.sharedLabel": "Shared memory",
   "memory.sharedPlaceholder": "No shared notes yet",
-  "memory.sharedTeam": "Bots now: {team}",
 
   "field.name": "Name",
   "field.group": "Group",

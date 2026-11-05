@@ -473,7 +473,6 @@ export function App() {
           onRunRoutine={crew.runRoutine}
           onLoadMemory={crew.loadMemory}
           onSaveMemory={crew.saveMemory}
-          agents={crew.agents}
           onLoadShared={crew.loadShared}
         />
         {peek && crew.currentAgent ? (

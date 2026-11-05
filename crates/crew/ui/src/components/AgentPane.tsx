@@ -33,7 +33,6 @@ type Props = {
   onRunRoutine: (r: Routine) => Promise<void>;
   onLoadMemory: (id: string) => Promise<string>;
   onSaveMemory: (text: string, base: string) => Promise<boolean>;
-  agents: AgentInfo[];
   onLoadShared: () => Promise<string>;
 };
 
@@ -52,7 +51,6 @@ export function AgentPane({
   onRunRoutine,
   onLoadMemory,
   onSaveMemory,
-  agents,
   onLoadShared,
 }: Props) {
   const t = useT();
@@ -112,7 +110,6 @@ export function AgentPane({
             <MemoryTab
               open={open}
               agent={agent}
-              agents={agents}
               onLoad={onLoadMemory}
               onSave={onSaveMemory}
               onLoadShared={onLoadShared}
@@ -127,14 +124,12 @@ export function AgentPane({
 function MemoryTab({
   open,
   agent,
-  agents,
   onLoad,
   onSave,
   onLoadShared,
 }: {
   open: boolean;
   agent: AgentInfo | null;
-  agents: AgentInfo[];
   onLoad: (id: string) => Promise<string>;
   onSave: (text: string, base: string) => Promise<boolean>;
   onLoadShared: () => Promise<string>;
@@ -145,11 +140,6 @@ function MemoryTab({
   // The text as loaded. Save only goes through if the file still matches it.
   const base = useRef("");
   const [shared, setShared] = useState("");
-  const team = agents
-    .slice()
-    .sort((a, b) => a.id.localeCompare(b.id))
-    .map((a) => `${a.name} (${a.id})`)
-    .join(", ");
 
   useEffect(() => {
     if (!open || !agent) return;
@@ -206,7 +196,6 @@ function MemoryTab({
         </button>
       </div>
       <p className="apply-note">{t("memory.sharedNote")}</p>
-      {team ? <p className="apply-note">{t("memory.sharedTeam", { team })}</p> : null}
       <Field label={t("memory.sharedLabel")} htmlFor="pane-shared">
         <textarea
           id="pane-shared"
