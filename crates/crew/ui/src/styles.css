@@ -487,14 +487,30 @@ html.peek-resizing * {
 .plan-usage-cell.warn { color: var(--blocked); }
 .plan-usage-cell.warn .plan-usage-meter > span { background: var(--blocked); }
 .rail-foot .icon-btn:hover { color: var(--ink); }
-.settings-action {
-  display: block;
-  width: 100%;
-  text-align: center;
+/* Settings' buttons are as wide as their words and sit at the start of the
+   row, with an icon in front where it says more than the words. Adding
+   something new is the one that wears .primary. The element in the selector
+   puts it over the .ghost, .primary and .danger sizes declared later. */
+button.settings-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  gap: var(--space-6);
+  height: 30px;
+  padding: 0 var(--space-12);
+  font-size: var(--text-md);
+  font-weight: 550;
 }
+button.settings-action:has(> svg:first-child) { padding-left: var(--space-10); }
+button.settings-action.ghost {
+  background: var(--field);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+}
+button.settings-action.ghost:hover:not(:disabled) { background: var(--hover); }
 .update-actions {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: var(--space-8);
 }
 .conn-banner {
@@ -5260,7 +5276,6 @@ button.mention-chip:active {
 }
 /* A wide page would stretch a two-way switch across the whole row. */
 .settings-body .seg,
-.settings-body .settings-action,
 .settings-body .update-actions {
   max-width: 340px;
 }
@@ -5312,6 +5327,13 @@ button.mention-chip:active {
 }
 .remote-card-body {
   padding: var(--space-4) var(--space-4) var(--space-24) calc(var(--space-4) + 24px);
+}
+.remote-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-md);
+  line-height: 1.5;
+  word-break: keep-all;
 }
 .remote-cards-foot {
   margin-top: var(--space-16);
