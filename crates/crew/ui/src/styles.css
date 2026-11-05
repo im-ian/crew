@@ -42,6 +42,7 @@
   --field-hover: #3a3a3c;
   --field-focus: #4a4a4c;
   --shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  --bubble-them: var(--menu);
   --bubble-edge: none;
   --group: #19191c;
   --group-hover: #212125;
@@ -114,55 +115,59 @@ html, body, #root {
 html { color-scheme: dark; }
 html[data-theme="light"] {
   color-scheme: light;
-  --bg: #f8f8fa;
-  --rail: #eeeef1;
-  --ink: #1c1c1e;
-  --muted: #66666d;
-  --faint: #737379;
-  --line: #e2e2e7;
-  --hover: #e6e6eb;
-  --active: #dddde4;
-  --field: #ffffff;
-  --elevated: #ffffff;
+  /* Neutral greys after the Mac App Store: a #efefef sidebar, a white page,
+     #f7f7f8 cards, a #dbdadc selected row. The blue and the secondary grey sit a step darker
+     than Apple's so they keep AA on white and on the group layer. */
+  --bg: #ffffff;
+  --rail: #efefef;
+  --ink: #1d1d1f;
+  --muted: #636366;
+  --faint: #737373;
+  --line: #e5e5e5;
+  --hover: #e5e5e5;
+  --active: #dbdadc;
+  --field: #f4f4f5;
+  --elevated: #f7f7f8;
   --menu: #ffffff;
   --btn: #3a3a3c;
   --btn-hover: #2c2c2e;
-  --chip: #e8e8ed;
-  --chip-hover: #dedee5;
+  --chip: #ebebeb;
+  --chip-hover: #e0e0e0;
   --chip-me: #c4d3ea;
   --chip-me-hover: #b6c8e3;
-  --btn-disabled: #ececf1;
-  --btn-disabled-ink: #909098;
+  --btn-disabled: #efefef;
+  --btn-disabled-ink: #8e8e93;
   --user: #d9e4f5;
   --idle: #248a3d;
   --working: #0071e3;
   --blocked: #d70015;
-  --exited: #86868e;
+  --exited: #8e8e93;
   --on-ink: #fff;
-  --link: #0058d0;
+  --link: #0066cc;
   --link-me: #0b4aa2;
-  --bubble-me-ink: #1c1c1e;
-  --pre-bg: #f1f1f5;
+  --bubble-me-ink: #1d1d1f;
+  --pre-bg: #e6e6e6;
   --pre-me-bg: #c9d6ea;
   --code-bg: rgba(0, 0, 0, 0.05);
   --code-me-bg: rgba(0, 0, 0, 0.07);
   --drop-line: #1c1c1e;
   --drop-dot: #1c1c1e;
   --drop-into: rgba(0, 0, 0, 0.035);
-  --resize: #c2c2ca;
+  --resize: #c7c7c7;
   --who-hover-bg: #1c1c1c;
   --who-hover-ink: #f5f5f5;
   --danger-line: #f0b6b4;
-  --field-hover: #d5d5dc;
-  --field-focus: #a8a8b0;
-  --shadow: 0 8px 24px rgba(20, 20, 32, 0.1);
+  --field-hover: #d6d6d6;
+  --field-focus: #a9a9a9;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
   /* Rows on the group layer lift toward white: a darker grey than the layer
      would sink the preview text under AA. */
-  --group: #e4e4e9;
-  --group-hover: #ececf0;
-  --group-active: #fafafc;
-  /* A white balloon on a near-white thread needs an edge to read as one. */
-  --bubble-edge: 0 0 0 1px rgba(20, 20, 32, 0.06), 0 1px 2px rgba(20, 20, 32, 0.04);
+  --group: #e6e6e6;
+  --group-hover: #ececec;
+  --group-active: #fafafa;
+  /* A grey balloon on the white thread, filled rather than outlined. */
+  --bubble-them: #f0f0f0;
+  --bubble-edge: none;
 }
 html[data-theme="light"],
 html[data-theme="light"] body,
@@ -1960,6 +1965,17 @@ header .who-name {
 }
 .jump-question svg { display: block; }
 .jump-question:hover { background: var(--btn-hover); }
+/* Light: white buttons with dark ink, like the island above the thread. */
+html[data-theme="light"] .jump-bottom,
+html[data-theme="light"] .jump-question {
+  background: var(--menu);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 4px 14px rgba(0, 0, 0, 0.1);
+}
+html[data-theme="light"] .jump-bottom:hover,
+html[data-theme="light"] .jump-question:hover {
+  background: var(--chip);
+}
 .empty-chat {
   margin: auto;
   display: flex;
@@ -2221,7 +2237,7 @@ button.channel-who:hover {
   max-width: 100%;
   padding: var(--space-10) var(--space-14);
   border-radius: 18px;
-  background: var(--menu);
+  background: var(--bubble-them);
   color: var(--ink);
   box-shadow: var(--bubble-edge);
 }
@@ -5949,11 +5965,9 @@ textarea.textin.skill-body {
     inset 0 0 0 1px color-mix(in srgb, var(--k) 38%, transparent),
     0 6px 18px rgba(0, 0, 0, 0.35);
 }
-html[data-theme="light"] .island { background: #1c1c1e; }
 /* About a bot, the whole pill opens that bot's chat. */
 .island.is-link { cursor: pointer; }
 .island.is-link:hover { background: #111; }
-html[data-theme="light"] .island.is-link:hover { background: #2a2a2d; }
 .island-row {
   position: absolute;
   left: 0;
@@ -6067,6 +6081,22 @@ html[data-theme="light"] .island.is-link:hover { background: #2a2a2d; }
   background: transparent;
 }
 .island-x:hover { background: #2c2c2e; color: #fff; }
+/* Light: a white pill with dark words, lifted by a soft shadow instead of
+   sitting black on the white page. */
+html[data-theme="light"] .island {
+  --island-ink: var(--ink);
+  background: var(--menu);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+html[data-theme="light"] .island.is-open {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--k) 38%, transparent),
+    0 6px 18px rgba(0, 0, 0, 0.12);
+}
+html[data-theme="light"] .island.is-link:hover { background: var(--chip); }
+html[data-theme="light"] .island-lead { --bg: var(--menu); }
+html[data-theme="light"] .island-words span { color: var(--muted); }
+html[data-theme="light"] .island-x:hover { background: var(--chip); color: var(--ink); }
 .avatar-file { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .island,
