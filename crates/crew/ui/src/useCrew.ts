@@ -880,6 +880,20 @@ export function useCrew() {
     }
   }
 
+  async function renameAgent(id: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const agent = agentsRef.current.find((a) => a.id === id);
+    if (!agent || agent.remote) return;
+    if (trimmed === (agent.name || agent.id)) return;
+    try {
+      await api.setName(id, trimmed);
+      await refreshList();
+    } catch (err) {
+      showError(err);
+    }
+  }
+
   async function saveAgentInfo(fields: {
     name: string;
     model: string;
@@ -1612,6 +1626,7 @@ export function useCrew() {
     sendQueued,
     approveAgent,
     answerChoice,
+    renameAgent,
     saveAgentInfo,
     saveAgentCli,
     saveAgentFace,

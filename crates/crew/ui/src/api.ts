@@ -129,6 +129,23 @@ export const api = {
     cmd?: string | null;
     cwd?: string | null;
   }) => invoke<string>("add_agent", { ...args, cwd: args.cwd ?? null }),
+  /** Display name only. The other set_agent fields stay as they are. */
+  setName: (id: string, name: string) =>
+    invoke<void>("set_agent", {
+      id,
+      model: null,
+      effort: null,
+      unsetModel: false,
+      unsetEffort: false,
+      title: null,
+      description: null,
+      role: null,
+      unsetTitle: false,
+      unsetDescription: false,
+      unsetRole: false,
+      name,
+      unsetCwd: false,
+    }),
   /** Working folder only. The other set_agent fields stay as they are. */
   setCwd: (id: string, cwd: string) =>
     invoke<void>("set_agent", {

@@ -322,6 +322,11 @@ export function App() {
         onGroupNewBot={crew.openNewBot}
         onToggleGroup={crew.toggleGroup}
         onRenameGroup={crew.renameGroup}
+        onStartRenameGroup={(id) => {
+          crew.clearPendingRename();
+          setRenameId(id);
+        }}
+        onRenameAgent={(id, name) => void crew.renameAgent(id, name)}
         onRenameDone={finishRename}
         onMove={crew.moveToGroup}
         onReorderGroup={crew.reorderGroup}
@@ -357,6 +362,7 @@ export function App() {
           onOpenInfo={() => {
             if (crew.selected) crew.openInfo(crew.selected);
           }}
+          onRenameAgent={(id, name) => void crew.renameAgent(id, name)}
         />
         <ChatThread
           messages={crew.messages}
