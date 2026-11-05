@@ -1,11 +1,15 @@
-export type ThemePref = "dark" | "light" | "system";
+export type ThemePref = "dark" | "light" | "system" | "glass";
 
 const KEY = "crew.theme";
 
+export function parseThemePref(v: string | null): ThemePref {
+  if (v === "light" || v === "dark" || v === "system" || v === "glass") return v;
+  return "dark";
+}
+
 export function loadThemePref(): ThemePref {
   try {
-    const v = localStorage.getItem(KEY);
-    if (v === "light" || v === "dark" || v === "system") return v;
+    return parseThemePref(localStorage.getItem(KEY));
   } catch {
     /* private mode */
   }
@@ -20,19 +24,24 @@ export function saveThemePref(pref: ThemePref) {
   }
 }
 
+/** Glass is the dark palette with its panes cleared, so it resolves to dark. */
 export function resolvedTheme(pref: ThemePref): "light" | "dark" {
   if (pref === "system") {
     return window.matchMedia("(prefers-color-scheme: light)").matches
       ? "light"
       : "dark";
   }
-  return pref;
+  return pref === "light" ? "light" : "dark";
 }
 
 export function applyTheme(pref: ThemePref) {
   const resolved = resolvedTheme(pref);
   const root = document.documentElement;
   root.dataset.theme = resolved;
+  // Glass clears the panes so the window's material (tauri.conf.json
+  // windowEffects) shows through.
+  if (pref === "glass") root.dataset.glass = "";
+  else delete root.dataset.glass;
   root.style.colorScheme = resolved;
   void syncWindowTheme(pref, resolved);
 }
