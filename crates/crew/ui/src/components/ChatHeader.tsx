@@ -91,7 +91,8 @@ export function ChatHeader({
   );
 
   return (
-    <header>
+    // `deep` moves the window from the empty header. Buttons stay clicks.
+    <header data-tauri-drag-region="deep">
       <div className="head-identity">
         {identity}
         {line ? (
