@@ -410,10 +410,11 @@ fn arm_first_output_watch(session: Arc<HeadlessSession>, generation: u64, cli: C
 /// No stdout within the CLI's limit: it is stuck, not thinking. A line already arrived
 /// and the process is quiet because a tool is running, so that turn stays.
 ///
-/// A resumed session can be what hangs (grok waits forever on a background
-/// task its last process left behind), and every later resume hangs the same
-/// way. That session is dropped and the prompt goes again, once, on a new one
-/// that reads the chat as a recap. A new session that hangs too is parked.
+/// A resumed session can be what hangs (grok never opens a session whose
+/// last process was killed while a `monitor` ran), and every later resume
+/// hangs the same way. That session is dropped and the prompt goes again,
+/// once, on a new one that reads the chat as a recap. A new session that
+/// hangs too is parked.
 fn give_back_if_unheard(session: Arc<HeadlessSession>, generation: u64) {
     let Some(pulled) = pull_turn(&session, Some(generation), true) else {
         return;
@@ -452,15 +453,45 @@ fn drop_stuck_session(session: &HeadlessSession, msg_ids: &[String]) {
     }
 }
 
+/// How long a stopped CLI gets to close its session before it is killed.
+/// grok takes about a second: it stops the background tasks it started and
+/// saves the session. Killed outright while a `monitor` ran, it left a session
+/// no later resume could open.
+const STOP_GRACE: Duration = Duration::from_secs(3);
+
 /// The CLI and what it started. npm's codex is a node launcher, and killing
 /// the launcher alone left the CLI under it running on the bot's session.
 fn kill_all(child: &mut Child) {
+    let group = child.id() as libc::pid_t;
     // Not reaped yet, so its pid still names the group it leads.
     unsafe {
-        libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
+        libc::killpg(group, libc::SIGTERM);
+    }
+    let deadline = Instant::now() + STOP_GRACE;
+    while !has_exited(group) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // Still unreaped, so the group is still this one. What stayed goes now.
+    unsafe {
+        libc::killpg(group, libc::SIGKILL);
     }
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// Whether `pid` exited, without reaping it.
+fn has_exited(pid: libc::pid_t) -> bool {
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let rc = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            pid as libc::id_t,
+            &mut info,
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+        )
+    };
+    // With WNOHANG a running child leaves the pid at zero.
+    rc != 0 || unsafe { info.si_pid() } != 0
 }
 
 pub fn is_interrupted(session: &HeadlessSession) -> bool {
@@ -833,13 +864,19 @@ fn spawn_and_stream(
         .with_context(|| format!("spawn {} ({})", session.id, argv.join(" ")))?;
     let stdout = child.stdout.take().context("take stdout")?;
     let stderr = child.stderr.take();
-    {
+    let cancelled = {
         let mut inner = session.inner.lock().expect("headless inner");
         if inner.generation != generation {
-            kill_all(&mut child);
-            anyhow::bail!("turn cancelled");
+            Some(child)
+        } else {
+            inner.child = Some(child);
+            None
         }
-        inner.child = Some(child);
+    };
+    // Outside the lock: the CLI gets a moment to close.
+    if let Some(mut child) = cancelled {
+        kill_all(&mut child);
+        anyhow::bail!("turn cancelled");
     }
 
     let stderr_handle = stderr.map(|err| {
@@ -2710,6 +2747,56 @@ mod tests {
         for program in ["gemini", "agy", "copilot", "opencode", "/usr/local/bin/my-bot"] {
             assert_eq!(first_output_limit(CliKind::from_program(program)), None, "{program}");
         }
+    }
+
+    /// A shell in its own group, as a turn's CLI runs, once it printed `ready`.
+    fn group_shell(script: &str) -> (Child, BufReader<std::process::ChildStdout>) {
+        let mut child = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(script)
+            .stdout(Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let mut out = BufReader::new(child.stdout.take().unwrap());
+        let mut line = String::new();
+        out.read_line(&mut line).unwrap();
+        assert_eq!(line.trim(), "ready");
+        (child, out)
+    }
+
+    /// grok closes its session and its `monitor` tasks on SIGTERM. Killed
+    /// outright, it left a session no resume could open.
+    #[test]
+    fn a_stop_lets_the_cli_close_before_the_kill() {
+        let dir = std::env::temp_dir().join(format!("crew-stop-grace-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let closed = dir.join("closed");
+        let (mut child, _out) = group_shell(&format!(
+            "trap 'echo saved > \"{}\"; exit 0' TERM; echo ready; while :; do sleep 0.05; done",
+            closed.display()
+        ));
+        let started = Instant::now();
+        kill_all(&mut child);
+        assert_eq!(fs::read_to_string(&closed).unwrap().trim(), "saved");
+        assert!(started.elapsed() < STOP_GRACE, "{:?}", started.elapsed());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The CLI is gone, and what it left in its group that would not stop goes too.
+    #[test]
+    fn what_the_cli_leaves_in_its_group_is_killed() {
+        let (mut child, mut out) =
+            group_shell("(trap '' TERM; exec sleep 30) & echo ready; echo $!; wait");
+        let mut line = String::new();
+        out.read_line(&mut line).unwrap();
+        let stray: libc::pid_t = line.trim().parse().unwrap();
+        kill_all(&mut child);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while unsafe { libc::kill(stray, 0) } == 0 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_ne!(unsafe { libc::kill(stray, 0) }, 0, "the stray outlived the stop");
     }
 
     #[test]
