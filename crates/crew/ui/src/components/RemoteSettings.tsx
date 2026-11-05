@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, errMsg } from "../api";
-import { ChevronDown } from "../icons";
+import { ChevronDown, Plus } from "../icons";
 import { useT } from "../LocaleContext";
 import { toggled } from "../remote";
 import type { AgentInfo, RemoteAccount, RemoteInfo } from "../types";
@@ -31,15 +31,21 @@ type Props = {
 export function RemoteSettings({ remotes, agents, active, onSet, onLeave, onAdd }: Props) {
   const t = useT();
   const [open, setOpen] = useState<string[]>([]);
+  // With nothing joined yet, adding is the only thing to do here.
   const add = (
-    <button type="button" className="ghost settings-action" onClick={onAdd}>
+    <button
+      type="button"
+      className={(remotes.length ? "ghost" : "primary") + " settings-action"}
+      onClick={onAdd}
+    >
+      <Plus size={15} />
       {t("menu.addRemote")}
     </button>
   );
   if (!remotes.length) {
     return (
       <div className="form-stack">
-        <p className="empty-routines">{t("remote.empty")}</p>
+        <p className="remote-empty">{t("remote.empty")}</p>
         {add}
       </div>
     );
@@ -286,7 +292,7 @@ function TeamMemoryField({ alias, active }: { alias: string; active: boolean }) 
         )}
         <button
           type="button"
-          className="ghost"
+          className="ghost settings-action"
           disabled={saving || version === null || text === base}
           onClick={() => void save()}
         >
