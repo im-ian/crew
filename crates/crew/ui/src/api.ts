@@ -176,10 +176,6 @@ export const api = {
     invoke<void>("set_routine_enabled", { agent, key, enabled }),
   runRoutine: (agent: string, key: string) =>
     invoke<void>("run_routine", { agent, key }),
-  getMemory: (agent: string) => invoke<string>("get_memory", { agent }),
-  setMemory: (agent: string, text: string, base: string) =>
-    invoke<boolean>("set_memory", { agent, text, base }),
-  getSharedMemory: () => invoke<string>("get_shared_memory"),
   getGroupMemory: (group: string) => invoke<string>("get_group_memory", { group }),
   setGroupMemory: (group: string, text: string, base: string) =>
     invoke<boolean>("set_group_memory", { group, text, base }),

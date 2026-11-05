@@ -195,8 +195,6 @@ mockIPC(
         const list = models[String(a.cli)] ?? [];
         return { models: list, default: list[0] ?? null, installed: true };
       }
-      case "get_memory": return "";
-      case "get_shared_memory": return "";
       case "get_group_memory": return "";
       case "peek_pending_focus":
       case "take_pending_focus": return null;

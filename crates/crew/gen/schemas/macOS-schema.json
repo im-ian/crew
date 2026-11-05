@@ -243,22 +243,10 @@
           "markdownDescription": "Enables the get_group_memory command without any pre-configured scope."
         },
         {
-          "description": "Enables the get_memory command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-get-memory",
-          "markdownDescription": "Enables the get_memory command without any pre-configured scope."
-        },
-        {
           "description": "Enables the get_messages command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-messages",
           "markdownDescription": "Enables the get_messages command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the get_shared_memory command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-get-shared-memory",
-          "markdownDescription": "Enables the get_shared_memory command without any pre-configured scope."
         },
         {
           "description": "Enables the get_snapshot command without any pre-configured scope.",
@@ -477,12 +465,6 @@
           "markdownDescription": "Enables the set_locale command without any pre-configured scope."
         },
         {
-          "description": "Enables the set_memory command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-set-memory",
-          "markdownDescription": "Enables the set_memory command without any pre-configured scope."
-        },
-        {
           "description": "Enables the set_notifications command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-notifications",
@@ -597,22 +579,10 @@
           "markdownDescription": "Denies the get_group_memory command without any pre-configured scope."
         },
         {
-          "description": "Denies the get_memory command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-get-memory",
-          "markdownDescription": "Denies the get_memory command without any pre-configured scope."
-        },
-        {
           "description": "Denies the get_messages command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-messages",
           "markdownDescription": "Denies the get_messages command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the get_shared_memory command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-get-shared-memory",
-          "markdownDescription": "Denies the get_shared_memory command without any pre-configured scope."
         },
         {
           "description": "Denies the get_snapshot command without any pre-configured scope.",
@@ -829,12 +799,6 @@
           "type": "string",
           "const": "deny-set-locale",
           "markdownDescription": "Denies the set_locale command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the set_memory command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-set-memory",
-          "markdownDescription": "Denies the set_memory command without any pre-configured scope."
         },
         {
           "description": "Denies the set_notifications command without any pre-configured scope.",

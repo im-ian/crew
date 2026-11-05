@@ -998,39 +998,6 @@ export function useCrew() {
     }
   }
 
-  async function loadMemory(id: string) {
-    try {
-      return await api.getMemory(id);
-    } catch (err) {
-      showError(err);
-      return "";
-    }
-  }
-
-  async function loadShared() {
-    try {
-      return await api.getSharedMemory();
-    } catch (err) {
-      showError(err);
-      return "";
-    }
-  }
-
-  async function saveMemory(text: string, base: string): Promise<boolean> {
-    const id = selectedRef.current.id;
-    if (!id || selectedRef.current.kind !== "agent") return false;
-    try {
-      if (await api.setMemory(id, text, base)) {
-        showToast(t("memory.saved"));
-        return true;
-      }
-      showToast(t("memory.changed"), "warn");
-    } catch (err) {
-      showError(err);
-    }
-    return false;
-  }
-
   async function runRoutine(r: Routine) {
     const id = routineTarget();
     if (!id || !r) return;
@@ -1633,9 +1600,6 @@ export function useCrew() {
     toggleRoutine,
     deleteRoutine,
     runRoutine,
-    loadMemory,
-    saveMemory,
-    loadShared,
     showError,
     showToast,
   };
