@@ -174,6 +174,54 @@ html[data-theme="light"] body,
 html[data-theme="light"] #root {
   color-scheme: light;
 }
+/* Glass: the dark palette in frosted panes over whatever sits behind the
+   window. The window is transparent and always carries the sidebar material
+   (tauri.conf.json windowEffects), which blurs the desktop; the other themes
+   paint over it, and here the panes clear so it shows through. --rail and --bg
+   stay opaque because rings, pills and ink borrow them; the panes clear their
+   own fill instead. Lines, row fills, chips and balloons turn translucent so
+   they read on any backdrop. */
+html[data-glass] {
+  --ink: #fbfaff;
+  --muted: rgba(255, 255, 255, 0.68);
+  --faint: rgba(255, 255, 255, 0.52);
+  --line: rgba(255, 255, 255, 0.12);
+  --hover: rgba(255, 255, 255, 0.07);
+  --active: rgba(255, 255, 255, 0.12);
+  --field: rgba(255, 255, 255, 0.08);
+  --field-hover: rgba(255, 255, 255, 0.14);
+  --field-focus: rgba(255, 255, 255, 0.22);
+  --chip: rgba(255, 255, 255, 0.12);
+  --chip-hover: rgba(255, 255, 255, 0.18);
+  --user: rgba(255, 255, 255, 0.18);
+  --bubble-them: rgba(255, 255, 255, 0.1);
+  --bubble-me-ink: #ffffff;
+  --pre-bg: rgba(0, 0, 0, 0.28);
+  --pre-me-bg: rgba(0, 0, 0, 0.22);
+  --group: rgba(255, 255, 255, 0.05);
+  --group-hover: rgba(255, 255, 255, 0.09);
+  --group-active: rgba(255, 255, 255, 0.14);
+  --glass-rail: transparent;
+  --glass-main: rgba(24, 24, 28, 0.12);
+  --glass-edge: rgba(255, 255, 255, 0.14);
+}
+html[data-glass],
+html[data-glass] body,
+html[data-glass] #root,
+html[data-glass] .composer,
+html[data-glass] .peek-room {
+  background: transparent;
+}
+html[data-glass] aside {
+  background: var(--glass-rail);
+}
+html[data-glass] .rail-section.drop-into {
+  background: var(--drop-into);
+}
+html[data-glass] main {
+  background: var(--glass-main);
+  box-shadow: inset 0 1px 0 var(--glass-edge);
+}
 button, input, textarea, select {
   font-family: inherit;
 }

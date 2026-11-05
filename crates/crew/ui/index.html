@@ -14,6 +14,7 @@
               ? "light"
               : "dark";
           }
+          if (t === "glass") document.documentElement.dataset.glass = "";
           if (resolved !== "light" && resolved !== "dark") resolved = "dark";
           document.documentElement.dataset.theme = resolved;
           document.documentElement.style.colorScheme = resolved;

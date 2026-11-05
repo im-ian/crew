@@ -96,13 +96,16 @@ export function SettingsPane({
     { value: "dark", label: t("settings.theme.dark") },
     { value: "light", label: t("settings.theme.light") },
     { value: "system", label: t("settings.theme.system") },
+    { value: "glass", label: t("settings.theme.glass") },
   ];
   const themeNote =
     theme === "system"
       ? t("settings.theme.note.system")
       : theme === "light"
         ? t("settings.theme.note.light")
-        : t("settings.theme.note.dark");
+        : theme === "glass"
+          ? t("settings.theme.note.glass")
+          : t("settings.theme.note.dark");
 
   const sections: { id: Section; label: string; icon: ReactNode }[] = [
     { id: "general", label: t("settings.group.general"), icon: <SlidersHorizontal /> },
