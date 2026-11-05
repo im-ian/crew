@@ -1521,6 +1521,20 @@ button.avatar {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.agent-name-input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  border: 0;
+  background: var(--field);
+  color: var(--ink);
+  font-size: var(--text-lg);
+  font-weight: 590;
+  line-height: 1.25;
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-4);
+  outline: none;
+}
 /* The router a local bot stands in for: a quiet tag after the name, so the
    row still reads as that bot first. */
 .rep-mark {
@@ -3920,6 +3934,23 @@ button.choice-option:active:not(:disabled) .choice-badge {
   text-overflow: ellipsis;
   min-width: 0;
 }
+.who-btn.is-renaming { cursor: text; }
+.who-name-input {
+  flex: 1;
+  min-width: 4em;
+  width: 8em;
+  height: 24px;
+  border: 0;
+  background: var(--field);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  line-height: 1.2;
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-6);
+  outline: none;
+}
+header .who-name-input { font-size: var(--text-xl); }
 button.who-btn:hover,
 button.who-btn:focus-visible {
   background: var(--who-hover-bg);

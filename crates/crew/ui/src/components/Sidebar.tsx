@@ -14,6 +14,7 @@ import { useLocale, useT } from "../LocaleContext";
 import { groupOrderChanges, itemKey, parseItemKey, railSlots, UNGROUPED_ID } from "../groups";
 import type { AgentInfo, Group, Kind, RemoteInfo, SearchHit } from "../types";
 import { listStamp } from "../clock";
+import { NAME_CLICK_MS } from "../rename";
 import { mentionRuns, mentionText } from "../mentions";
 import { foldsAt, numberDuplicateNames, RAIL_FOLDED } from "../rail";
 import {
@@ -38,6 +39,7 @@ import {
   type RemoteSection,
 } from "../remote";
 import { Avatar } from "./Avatar";
+import { RenameField } from "./RenameField";
 import { MentionChip } from "./MentionChip";
 import { BotLabelProvider } from "../BotLabelContext";
 import { botSearchText } from "../botLabel";
@@ -365,6 +367,8 @@ type Props = {
   onGroupNewBot: (id: string) => void;
   onToggleGroup: (id: string) => void;
   onRenameGroup: (id: string, name: string) => void;
+  onStartRenameGroup: (id: string) => void;
+  onRenameAgent: (id: string, name: string) => void;
   onRenameDone: () => void;
   onMove: (kind: Kind, id: string, groupId: string | null, beforeKey?: string | null) => void;
   onReorderGroup: (id: string, beforeId: string | null) => void;
@@ -433,6 +437,8 @@ export function Sidebar({
   onGroupNewBot,
   onToggleGroup,
   onRenameGroup,
+  onStartRenameGroup,
+  onRenameAgent,
   onRenameDone,
   onMove,
   onReorderGroup,
@@ -570,12 +576,15 @@ export function Sidebar({
     if (on && query) onQuery("");
   }
 
-  // A group name being edited needs the open rail to be readable.
+  const [renamingAgent, setRenamingAgent] = useState<string | null>(null);
+  // A name being edited needs the open rail to be readable.
   useEffect(() => {
-    if (folded && renamingId && groups.some((g) => g.id === renamingId)) {
-      setFolded(false, true);
-    }
-  }, [folded, renamingId, groups]);
+    const groupOpen = !!renamingId && groups.some((g) => g.id === renamingId);
+    if (folded && (groupOpen || renamingAgent)) setFolded(false, true);
+  }, [folded, renamingId, renamingAgent, groups]);
+  useEffect(() => {
+    if (renamingId) setRenamingAgent(null);
+  }, [renamingId]);
 
   useEffect(() => {
     function onWin() {
@@ -944,6 +953,29 @@ export function Sidebar({
     );
   }
 
+  function startAgentRename(id: string) {
+    if (renamingId) onRenameDone();
+    setRenamingAgent(id);
+  }
+
+  function renameProps(item: RailItem) {
+    const remote = !!item.agent?.remote;
+    const editing = !remote && renamingAgent === item.id;
+    return {
+      renaming: editing,
+      onStartRename: remote ? undefined : () => startAgentRename(item.id),
+      onRename: (name: string) => {
+        setRenamingAgent(null);
+        void onRenameAgent(item.id, name);
+      },
+      onCancelRename: () => setRenamingAgent((cur) => (cur === item.id ? null : cur)),
+      onPointerDown:
+        searching || editing
+          ? undefined
+          : (e: ReactPointerEvent<HTMLButtonElement>) => onRowPointerDown(e, item),
+    };
+  }
+
   function renderFolder({ group, items }: { group: Group; items: RailItem[] }) {
     if (searching && !items.length) return null;
     const hidden = !searching && group.collapsed;
@@ -980,6 +1012,10 @@ export function Sidebar({
               ? undefined
               : (e) => onGroupPointerDown(e, group.id, group.name, group.collapsed)
           }
+          onStartRename={() => {
+            setRenamingAgent(null);
+            onStartRenameGroup(group.id);
+          }}
           onRename={(name) => {
             onRenameGroup(group.id, name);
             onRenameDone();
@@ -1010,9 +1046,7 @@ export function Sidebar({
                 select(item);
               }}
               onContextMenu={(e) => ctx(e, item)}
-              onPointerDown={
-                searching ? undefined : (e) => onRowPointerDown(e, item)
-              }
+              {...renameProps(item)}
             />
           ))
         )}
@@ -1045,7 +1079,7 @@ export function Sidebar({
             select(item);
           }}
           onContextMenu={(e) => ctx(e, item)}
-          onPointerDown={searching ? undefined : (e) => onRowPointerDown(e, item)}
+          {...renameProps(item)}
         />
       </section>
     );
@@ -1081,9 +1115,7 @@ export function Sidebar({
               select(item);
             }}
             onContextMenu={(e) => ctx(e, item)}
-            onPointerDown={
-              searching ? undefined : (e) => onRowPointerDown(e, item)
-            }
+            {...renameProps(item)}
           />
         ))}
         {!ungroupedItems.length && localDrag ? (
@@ -1140,9 +1172,7 @@ export function Sidebar({
                 select(item);
               }}
               onContextMenu={(e) => ctx(e, item)}
-              onPointerDown={
-                searching ? undefined : (e) => onRowPointerDown(e, item)
-              }
+              {...renameProps(item)}
             />
           ))
         ) : folded ? null : (
@@ -1331,6 +1361,7 @@ function GroupHead({
   searching,
   dropInto,
   onToggle,
+  onStartRename,
   onRename,
   onCancelRename,
   onContextMenu,
@@ -1345,6 +1376,7 @@ function GroupHead({
   searching: boolean;
   dropInto?: boolean;
   onToggle: () => void;
+  onStartRename: () => void;
   onRename: (name: string) => void;
   onCancelRename: () => void;
   onContextMenu: (e: MouseEvent) => void;
@@ -1353,26 +1385,37 @@ function GroupHead({
   onPointerDown?: (e: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
   const t = useT();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [draft, setDraft] = useState(group.name);
+  const clickTimer = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (!renaming) return;
-    setDraft(group.name);
-    const t = window.setTimeout(() => {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    }, 0);
-    return () => window.clearTimeout(t);
-  }, [renaming, group.name]);
+  useEffect(
+    () => () => {
+      if (clickTimer.current) window.clearTimeout(clickTimer.current);
+    },
+    [],
+  );
 
-  function commit() {
-    const name = draft.trim();
-    if (!name || name === group.name) {
-      onCancelRename();
+  function onNameClick(e: MouseEvent) {
+    if (e.detail > 1) {
+      if (clickTimer.current) {
+        window.clearTimeout(clickTimer.current);
+        clickTimer.current = null;
+      }
       return;
     }
-    onRename(name);
+    if (clickTimer.current) window.clearTimeout(clickTimer.current);
+    clickTimer.current = window.setTimeout(() => {
+      clickTimer.current = null;
+      onToggle();
+    }, NAME_CLICK_MS);
+  }
+
+  function onNameDoubleClick(e: MouseEvent) {
+    e.preventDefault();
+    if (clickTimer.current) {
+      window.clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+    }
+    onStartRename();
   }
 
   return (
@@ -1408,26 +1451,21 @@ function GroupHead({
         <ChevronDown className="group-chevron" size={14} />
       </button>
       {renaming ? (
-        <input
-          ref={inputRef}
+        <RenameField
+          value={group.name}
           className="group-name-input"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              commit();
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              onCancelRename();
-            }
-          }}
+          label={t("menu.rename")}
+          onCommit={onRename}
+          onCancel={onCancelRename}
         />
       ) : (
         <>
-          <button type="button" className="group-name" onClick={onToggle}>
+          <button
+            type="button"
+            className="group-name"
+            onClick={onNameClick}
+            onDoubleClick={onNameDoubleClick}
+          >
             <span className="group-name-text">{group.name}</span>
           </button>
           <button
@@ -1529,10 +1567,14 @@ function ItemRow({
   drafting,
   dragging,
   ghost,
+  renaming,
   represents = [],
   onSelect,
   onContextMenu,
   onPointerDown,
+  onStartRename,
+  onRename,
+  onCancelRename,
 }: {
   item: RailItem;
   agents: AgentInfo[];
@@ -1545,9 +1587,13 @@ function ItemRow({
   drafting?: boolean;
   dragging?: boolean;
   ghost?: boolean;
+  renaming?: boolean;
   onSelect?: () => void;
   onContextMenu?: (e: MouseEvent) => void;
   onPointerDown?: (e: ReactPointerEvent<HTMLButtonElement>) => void;
+  onStartRename?: () => void;
+  onRename?: (name: string) => void;
+  onCancelRename?: () => void;
 }) {
   const a = item.agent;
   const t = useT();
@@ -1585,7 +1631,30 @@ function ItemRow({
       <div className="rail-row-text">
         <div className="agent-name">
           <span className="agent-name-label">
-            <span className="agent-name-text">{item.name}</span>
+            {renaming ? (
+              <RenameField
+                value={item.name}
+                className="agent-name-input"
+                label={t("menu.rename")}
+                onCommit={(name) => onRename?.(name)}
+                onCancel={() => onCancelRename?.()}
+              />
+            ) : (
+              <span
+                className="agent-name-text"
+                onDoubleClick={
+                  onStartRename
+                    ? (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onStartRename();
+                      }
+                    : undefined
+                }
+              >
+                {item.name}
+              </span>
+            )}
             {drafting ? (
               <span className="draft-mark" title={t("sidebar.draft")} aria-label={t("sidebar.draft")}>
                 <Ellipsis size={14} />
@@ -1636,26 +1705,42 @@ function ItemRow({
       </div>
     );
   }
+  const rowClass =
+    "rail-row" +
+    (compact ? " compact" : "") +
+    (active ? " active" : "") +
+    (unread ? " unread" : "") +
+    (dragging ? " dragging" : "") +
+    (online ? "" : " is-offline");
+  const rowTitle = compact ? label : remote ? `${a?.remote}/${item.name}` : undefined;
+  const onRowContext = (e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onContextMenu?.(e);
+  };
+  // An input cannot sit inside the row button.
+  if (renaming) {
+    return (
+      <div
+        className={rowClass}
+        data-rail-row={item.key}
+        title={rowTitle}
+        aria-label={compact ? label : undefined}
+        onContextMenu={onRowContext}
+      >
+        {inner}
+      </div>
+    );
+  }
   return (
     <button
       type="button"
-      className={
-        "rail-row" +
-        (compact ? " compact" : "") +
-        (active ? " active" : "") +
-        (unread ? " unread" : "") +
-        (dragging ? " dragging" : "") +
-        (online ? "" : " is-offline")
-      }
+      className={rowClass}
       data-rail-row={item.key}
-      title={compact ? label : remote ? `${a?.remote}/${item.name}` : undefined}
+      title={rowTitle}
       aria-label={compact ? label : undefined}
       onClick={onSelect}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onContextMenu?.(e);
-      }}
+      onContextMenu={onRowContext}
       onPointerDown={onPointerDown}
       onDragStart={(e) => e.preventDefault()}
     >

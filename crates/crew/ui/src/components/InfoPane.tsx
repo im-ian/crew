@@ -52,20 +52,38 @@ export function InfoPane({
     setCommand(formatCmd(agent?.cmd));
   }, [open, agent?.id, agent?.headless, cmdKey]);
 
+  const seenAgent = useRef(agent?.id);
+  const externalName = useRef<string | null>(null);
+  const nameOpen = useRef(open);
   useEffect(() => {
     if (!open || !agent) return;
-    setName(agent.name || agent.id || "");
     setModel(agent.model || "");
     setEffort(agent.effort || "");
     setCwd(agent.cwd || "");
   }, [open, agent?.id]);
+
+  // A rail or header rename updates this field, unless a draft is already in it.
+  useEffect(() => {
+    if (!open || !agent) {
+      nameOpen.current = open;
+      return;
+    }
+    const next = agent.name || agent.id || "";
+    const switched = seenAgent.current !== agent.id || !nameOpen.current;
+    nameOpen.current = true;
+    seenAgent.current = agent.id;
+    setName((cur) =>
+      switched || externalName.current === null || cur === externalName.current ? next : cur,
+    );
+    externalName.current = next;
+  }, [open, agent?.id, agent?.name]);
 
   function scheduleSave(next?: Partial<typeof fieldsRef.current>) {
     const merged = { ...fieldsRef.current, ...next };
     fieldsRef.current = merged;
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
-      void onSave(merged);
+      void onSave(fieldsRef.current);
     }, 400);
   }
 

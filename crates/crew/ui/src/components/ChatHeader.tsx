@@ -10,11 +10,13 @@ import { Info } from "../icons";
 type Props = {
   currentAgent: AgentInfo | null;
   onOpenInfo: () => void;
+  onRenameAgent: (id: string, name: string) => void;
 };
 
 export function ChatHeader({
   currentAgent,
   onOpenInfo,
+  onRenameAgent,
 }: Props) {
   const t = useT();
   const cli = currentAgent ? cliFromCmd(currentAgent.cmd, currentAgent.headless) : null;
@@ -78,6 +80,11 @@ export function ChatHeader({
       who={remote ? remoteLabel(currentAgent) : currentAgent.name || currentAgent.id}
       title={t("header.botInfo")}
       onClick={remote ? undefined : onOpenInfo}
+      onRename={
+        currentAgent && !remote
+          ? (name) => onRenameAgent(currentAgent.id, name)
+          : undefined
+      }
     />
   ) : (
     <span className="head-empty">{t("header.pickChat")}</span>
