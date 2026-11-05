@@ -1806,7 +1806,8 @@ header .who-name {
   /* Beside overflow-y: auto this clip computes to hidden, so anything that
      hangs past the padding edge gives the thread a sideways range that a
      scrollIntoView or a focus can use, sliding the faces off the left edge.
-     The chips and their strips are capped to end at that edge instead. */
+     The strips are capped to end at that edge; useStick puts scrollLeft back
+     to 0 for what is left, like a chip with no room in a very thin thread. */
   overflow-x: clip;
   overflow-y: auto;
   container-type: inline-size;
@@ -2440,7 +2441,6 @@ button.sys-note:focus-visible {
 }
 .me-msg::after {
   right: 100%;
-  max-width: calc(100cqw - 100% + var(--content-pad));
 }
 .msg-time {
   display: inline-flex;

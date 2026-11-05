@@ -986,7 +986,8 @@ export function ChatThread({
 /**
  * Whether a thread is at its bottom, for the thread and the side chat alike.
  * The side chat once kept its own copy without the button, and new notes
- * piled up out of sight there with nothing to say so.
+ * piled up out of sight there with nothing to say so. It also undoes a
+ * sideways slide: see .thread in styles.css.
  */
 export function useStick(
   ref: RefObject<HTMLDivElement | null>,
@@ -997,6 +998,7 @@ export function useStick(
   function sync() {
     const el = ref.current;
     if (!el) return;
+    if (el.scrollLeft !== 0) el.scrollLeft = 0;
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
     const overflow = el.scrollHeight - el.clientHeight > 8;
     onStick(gap < STICK_PX);
