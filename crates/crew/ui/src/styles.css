@@ -300,8 +300,20 @@ html.peek-resizing * {
   flex: 1;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: var(--rail-pad);
+  padding: var(--space-12) var(--rail-pad);
   min-height: 0;
+  /* Rows fade out before the search box and the buttons below instead of
+     being cut against them. Both fades sit inside the padding, so nothing
+     fades until it has scrolled. */
+  --rail-fade: linear-gradient(
+    to bottom,
+    transparent,
+    #000 var(--space-12),
+    #000 calc(100% - var(--space-12)),
+    transparent
+  );
+  -webkit-mask-image: var(--rail-fade);
+  mask-image: var(--rail-fade);
   /* WebKit still selects the text inside a `user-select: none` button,
      so every descendant has to opt out. */
   -webkit-user-select: none;
@@ -320,7 +332,8 @@ html.peek-resizing * {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  padding: var(--space-4) var(--rail-pad) var(--space-10);
+  /* Clear of the window's rounded corner. */
+  padding: var(--space-4) var(--rail-pad) var(--space-14);
 }
 .rail-foot .icon-btn {
   color: var(--muted);
