@@ -508,6 +508,12 @@ button.settings-action.ghost {
   box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
 }
 button.settings-action.ghost:hover:not(:disabled) { background: var(--hover); }
+/* The blue the unread dot wears, so the one thing to do here reads as such. */
+button.settings-action.primary:not(:disabled) {
+  background: var(--working);
+  border-color: var(--working);
+  color: var(--on-ink);
+}
 .update-actions {
   display: flex;
   flex-wrap: wrap;
