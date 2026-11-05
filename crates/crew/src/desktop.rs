@@ -243,31 +243,6 @@ fn remove_group_memory(group: String) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-fn get_memory(agent: String) -> Result<String, String> {
-    let agent = agent.trim();
-    if agent.is_empty() {
-        return Err("agent is required".into());
-    }
-    Ok(crate::memory::read(agent))
-}
-
-/// `base` is the text the tab loaded; false means the bot changed it since and
-/// nothing was written.
-#[tauri::command]
-fn set_memory(agent: String, text: String, base: String) -> Result<bool, String> {
-    let agent = agent.trim();
-    if agent.is_empty() {
-        return Err("agent is required".into());
-    }
-    crate::memory::write_if_unchanged(agent, &base, &text).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_shared_memory() -> Result<String, String> {
-    Ok(crate::memory::read_shared())
-}
-
 #[tauri::command(async)]
 fn get_messages(agent: String) -> Result<Vec<ChatMessage>, String> {
     match client::rpc(Request::Messages { agent }) {
@@ -1083,9 +1058,6 @@ pub fn run() -> anyhow::Result<()> {
             run_routine,
             edit_routine,
             list_routine_runs,
-            get_memory,
-            set_memory,
-            get_shared_memory,
             get_group_memory,
             set_group_memory,
             remove_group_memory,

@@ -1,16 +1,13 @@
-import { useEffect, useRef, useState } from "react";
 import { handleBackdropPointerDown } from "../dialogLayer";
 import { useT } from "../LocaleContext";
 import type { AgentInfo, CliKind, PaneTab, Routine } from "../types";
-import { Field } from "./Field";
 import { InfoPane } from "./InfoPane";
 import { RoutinesModal } from "./RoutinesModal";
 import { X } from "../icons";
 
-const TABS: { id: PaneTab; labelKey: "pane.tab.info" | "pane.tab.routines" | "pane.tab.memory" }[] = [
+const TABS: { id: PaneTab; labelKey: "pane.tab.info" | "pane.tab.routines" }[] = [
   { id: "info", labelKey: "pane.tab.info" },
   { id: "routines", labelKey: "pane.tab.routines" },
-  { id: "memory", labelKey: "pane.tab.memory" },
 ];
 
 type Props = {
@@ -31,9 +28,6 @@ type Props = {
   onToggleRoutine: (r: Routine) => Promise<void>;
   onDeleteRoutine: (r: Routine) => Promise<void>;
   onRunRoutine: (r: Routine) => Promise<void>;
-  onLoadMemory: (id: string) => Promise<string>;
-  onSaveMemory: (text: string, base: string) => Promise<boolean>;
-  onLoadShared: () => Promise<string>;
 };
 
 export function AgentPane({
@@ -49,9 +43,6 @@ export function AgentPane({
   onToggleRoutine,
   onDeleteRoutine,
   onRunRoutine,
-  onLoadMemory,
-  onSaveMemory,
-  onLoadShared,
 }: Props) {
   const t = useT();
   return (
@@ -106,105 +97,8 @@ export function AgentPane({
               onRun={onRunRoutine}
             />
           </div>
-          <div hidden={tab !== "memory"}>
-            <MemoryTab
-              open={open}
-              agent={agent}
-              onLoad={onLoadMemory}
-              onSave={onSaveMemory}
-              onLoadShared={onLoadShared}
-            />
-          </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function MemoryTab({
-  open,
-  agent,
-  onLoad,
-  onSave,
-  onLoadShared,
-}: {
-  open: boolean;
-  agent: AgentInfo | null;
-  onLoad: (id: string) => Promise<string>;
-  onSave: (text: string, base: string) => Promise<boolean>;
-  onLoadShared: () => Promise<string>;
-}) {
-  const t = useT();
-  const [memory, setMemory] = useState("");
-  const edited = useRef(false);
-  // The text as loaded. Save only goes through if the file still matches it.
-  const base = useRef("");
-  const [shared, setShared] = useState("");
-
-  useEffect(() => {
-    if (!open || !agent) return;
-    setMemory("");
-    edited.current = false;
-    void onLoad(agent.id).then((text) => {
-      base.current = text;
-      setMemory(text);
-    });
-    setShared("");
-    void onLoadShared().then(setShared);
-  }, [open, agent?.id]);
-
-  // The bot keeps its own memory, so a finished turn may have changed it.
-  // Show that unless the user is mid-edit.
-  useEffect(() => {
-    if (!open || !agent || agent.status === "working") return;
-    if (!edited.current) {
-      void onLoad(agent.id).then((text) => {
-        if (edited.current) return;
-        base.current = text;
-        setMemory(text);
-      });
-    }
-    void onLoadShared().then(setShared);
-  }, [agent?.status]);
-
-  return (
-    <div className="form-stack">
-      <p className="apply-note">{t("memory.note")}</p>
-      <Field label={t("memory.label")} htmlFor="pane-memory">
-        <textarea
-          id="pane-memory"
-          className="textin memory"
-          placeholder={t("memory.placeholder")}
-          value={memory}
-          onChange={(e) => {
-            setMemory(e.target.value);
-            edited.current = true;
-          }}
-        />
-      </Field>
-      <div className="actions">
-        <button
-          type="button"
-          className="primary wide"
-          onClick={async () => {
-            if (!(await onSave(memory, base.current))) return;
-            base.current = memory;
-            edited.current = false;
-          }}
-        >
-          {t("common.save")}
-        </button>
-      </div>
-      <p className="apply-note">{t("memory.sharedNote")}</p>
-      <Field label={t("memory.sharedLabel")} htmlFor="pane-shared">
-        <textarea
-          id="pane-shared"
-          className="textin memory"
-          placeholder={t("memory.sharedPlaceholder")}
-          readOnly
-          value={shared}
-        />
-      </Field>
     </div>
   );
 }

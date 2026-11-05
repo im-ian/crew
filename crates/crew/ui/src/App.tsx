@@ -471,9 +471,6 @@ export function App() {
           onToggleRoutine={crew.toggleRoutine}
           onDeleteRoutine={crew.deleteRoutine}
           onRunRoutine={crew.runRoutine}
-          onLoadMemory={crew.loadMemory}
-          onSaveMemory={crew.saveMemory}
-          onLoadShared={crew.loadShared}
         />
         {peek && crew.currentAgent ? (
           <PeekRoom
