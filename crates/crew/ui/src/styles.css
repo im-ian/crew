@@ -2912,10 +2912,14 @@ button.sys-note:focus-visible {
   border-radius: 50%;
   background: var(--faint);
 }
+/* Each option is its own filled row; a pick rings it and checks it, and the
+   answered card keeps that look as the record. */
 .choice-list,
 .choice-picked {
   display: flex;
   flex-direction: column;
+  gap: var(--space-6);
+  padding: 0 var(--space-12) var(--space-12);
 }
 .choice-option {
   display: flex;
@@ -2924,9 +2928,10 @@ button.sys-note:focus-visible {
   width: 100%;
   margin: 0;
   border: 0;
-  border-top: 1px solid var(--line);
-  background: transparent;
-  padding: var(--space-10) var(--space-12);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--ink) 6%, var(--elevated));
+  box-shadow: inset 0 0 0 1px transparent;
+  padding: var(--space-8) var(--space-12) var(--space-8) var(--space-8);
   text-align: left;
   font: inherit;
   color: var(--ink);
@@ -2934,7 +2939,7 @@ button.sys-note:focus-visible {
 }
 button.choice-option:hover:not(:disabled),
 .choice-other:focus-within {
-  background: color-mix(in srgb, var(--working) 10%, var(--elevated));
+  background: color-mix(in srgb, var(--ink) 10%, var(--elevated));
 }
 button.choice-option:disabled {
   cursor: default;
@@ -2942,6 +2947,17 @@ button.choice-option:disabled {
 .choice-option.is-on,
 button.choice-option.is-on:hover:not(:disabled) {
   background: color-mix(in srgb, var(--working) 16%, var(--elevated));
+  box-shadow: inset 0 0 0 1px var(--working);
+}
+.choice-check {
+  flex: none;
+  display: flex;
+  align-self: center;
+  margin-left: auto;
+  color: var(--working);
+}
+.choice-card.is-pending .choice-check {
+  animation: choice-pop 0.32s var(--ease-out);
 }
 .choice-badge {
   flex: none;
@@ -2987,7 +3003,9 @@ button.choice-option.is-on:hover:not(:disabled) {
 }
 /* Hover tints the row and lifts the badge; a press sinks it; a pick pops it. */
 .choice-option {
-  transition: background-color var(--dur) var(--ease);
+  transition:
+    background-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
 }
 .choice-badge {
   transition:
@@ -3025,7 +3043,8 @@ button.choice-option:active:not(:disabled) .choice-badge {
   .choice-other:focus-within .choice-badge {
     transform: none;
   }
-  .choice-card.is-pending .choice-option.is-on .choice-badge { animation: none; }
+  .choice-card.is-pending .choice-option.is-on .choice-badge,
+  .choice-card.is-pending .choice-check { animation: none; }
 }
 .choice-copy {
   display: flex;

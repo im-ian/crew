@@ -85,7 +85,7 @@ import {
   type JumpFrame,
   type JumpMode,
 } from "../questionJump";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, Reply, X } from "../icons";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, Reply, X } from "../icons";
 import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
 import { MdBody } from "./MdBody";
@@ -2282,6 +2282,11 @@ function ChoiceCard({
                       ) : null}
                     </span>
                   ) : null}
+                  {on ? (
+                    <span className="choice-check">
+                      <Check size={14} />
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
@@ -2303,6 +2308,11 @@ function ChoiceCard({
                   onChange={(next) => setOther(qi, next)}
                   onEnter={enter}
                 />
+                {other.trim() ? (
+                  <span className="choice-check">
+                    <Check size={14} />
+                  </span>
+                ) : null}
               </label>
             ) : null}
           </div>
@@ -2318,6 +2328,9 @@ function ChoiceCard({
                       <span className="choice-label">{view.title}</span>
                     </span>
                   ) : null}
+                  <span className="choice-check">
+                    <Check size={14} />
+                  </span>
                 </div>
               );
             })}
@@ -2334,6 +2347,9 @@ function ChoiceCard({
                       ),
                     )}
                   </span>
+                </span>
+                <span className="choice-check">
+                  <Check size={14} />
                 </span>
               </div>
             ) : null}
