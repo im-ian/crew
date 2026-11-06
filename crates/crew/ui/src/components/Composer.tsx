@@ -14,6 +14,7 @@ import { composerAfterSend } from "../sendGate";
 import { stepQueuePick } from "../queuePick";
 import { oneLine, wrapReply, type ReplyTarget } from "../reply";
 import { caretClientPoint, type CaretPoint } from "../caretPoint";
+import { dropPathsText } from "../dropPaths";
 import { MentionChip } from "./MentionChip";
 import { MentionMenu } from "./MentionMenu";
 import {
@@ -466,6 +467,39 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     fit();
   }, [placeholder]);
 
+  const dropRef = useRef<(paths: string[]) => void>(() => {});
+  dropRef.current = (paths) => {
+    // A dialog over the chat keeps its focus. The drop is not for the field under it.
+    if (document.querySelector(".modal.open, [aria-modal='true']")) return;
+    if (!insertDroppedPaths(inputRef.current, paths)) return;
+    refreshEmpty();
+    fit();
+  };
+
+  // The window takes a file dropped from Finder before the page sees it, and
+  // hands over where it is. That path is typed in, so the bot reads the file
+  // where it sits.
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let gone = false;
+    void (async () => {
+      try {
+        const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+        const unlisten = await getCurrentWebview().onDragDropEvent((e) => {
+          if (e.payload.type === "drop") dropRef.current(e.payload.paths);
+        });
+        if (gone) unlisten();
+        else off = unlisten;
+      } catch {
+        /* browser preview */
+      }
+    })();
+    return () => {
+      gone = true;
+      off?.();
+    };
+  }, []);
+
   useEffect(() => {
     setMentionIdx(0);
   }, [mention?.start, mention?.query]);
@@ -482,19 +516,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   return (
     <form
       className="composer"
-      onDragOver={(e) => {
-        if (e.dataTransfer?.types?.includes("Files")) {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "copy";
-        }
-      }}
-      onDrop={(e) => {
-        const files = e.dataTransfer?.files;
-        if (files && files.length) {
-          e.preventDefault();
-          void attachFiles(files);
-        }
-      }}
       onSubmit={async (e) => {
         e.preventDefault();
         const el = inputRef.current;
@@ -990,6 +1011,43 @@ function insertSkillBody(editor: HTMLElement | null, body: string): boolean {
     after.collapse(false);
     sel.addRange(after);
   }
+  return true;
+}
+
+/** Types dropped paths at the caret, or at the end when the caret is elsewhere. */
+function insertDroppedPaths(editor: HTMLElement | null, paths: string[]): boolean {
+  if (!editor) return false;
+  const sel = window.getSelection();
+  const inside = !!sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode);
+  editor.focus();
+  if (sel && !inside) {
+    const end = document.createRange();
+    end.selectNodeContents(editor);
+    end.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(end);
+  }
+  const ctx = caretTextContext(editor);
+  const before = ctx
+    ? ctx.node.textContent?.slice(0, ctx.offset) ?? ""
+    : inside
+      ? ""
+      : editor.textContent ?? "";
+  const text = dropPathsText(paths, before);
+  if (!text) return false;
+  if (document.execCommand("insertText", false, text)) return true;
+  if (!sel || sel.rangeCount === 0) {
+    editor.append(document.createTextNode(text));
+    return true;
+  }
+  const range = sel.getRangeAt(0);
+  range.deleteContents();
+  const node = document.createTextNode(text);
+  range.insertNode(node);
+  range.setStartAfter(node);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
   return true;
 }
 
