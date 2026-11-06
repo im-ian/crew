@@ -1392,10 +1392,26 @@ fn apply_grok_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSe
     );
     args.push("--output-format".into());
     args.push("streaming-json".into());
+    // A headless grok waits 10 minutes for its `monitor`s after the last turn,
+    // then stops them. CI often takes longer, and the bot never heard it end.
+    if !has_flag(
+        args,
+        &[
+            "--background-wait-timeout",
+            "--background-shell-timeout",
+            "--no-wait-for-background",
+        ],
+    ) {
+        args.push("--background-wait-timeout".into());
+        args.push(GROK_BACKGROUND_WAIT_SECS.to_string());
+    }
     apply_session_flags(args, session, "--resume", "--session-id");
     args.push("-p".into());
     args.push(prompt.to_string());
 }
+
+/// How long a grok turn waits on the background work it started.
+const GROK_BACKGROUND_WAIT_SECS: u64 = 60 * 60;
 
 fn apply_claude_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSession>) {
     remove_switch(
@@ -1777,6 +1793,30 @@ mod tests {
         let argv = c.turn_cmd("hi", Some(&fresh), &[], "");
         assert!(argv.contains(&"--session-id".to_string()));
         assert!(!argv.contains(&"--resume".to_string()));
+    }
+
+    /// grok's own 10 minutes stopped CI watches before CI finished.
+    #[test]
+    fn grok_waits_an_hour_for_its_background_work() {
+        let c = cfg(&["grok", "--always-approve"], None, None);
+        let argv = c.turn_cmd("hello", None, &[], "");
+        let at = argv
+            .iter()
+            .position(|a| a == "--background-wait-timeout")
+            .expect("--background-wait-timeout");
+        assert_eq!(argv[at + 1], "3600");
+        for own in [
+            &["grok", "--background-wait-timeout=60"][..],
+            &["grok", "--background-shell-timeout", "60"][..],
+            &["grok", "--no-wait-for-background"][..],
+        ] {
+            let argv = cfg(own, None, None).turn_cmd("hello", None, &[], "");
+            let waits = argv
+                .iter()
+                .filter(|a| a.starts_with("--background-") || *a == "--no-wait-for-background")
+                .count();
+            assert_eq!(waits, 1, "{argv:?}");
+        }
     }
 
     #[test]

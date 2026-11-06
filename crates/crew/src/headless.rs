@@ -724,12 +724,18 @@ fn run_turn(
                     }
                 }
             }
-            if !outcome.got_text {
-                if let Some(err) = outcome.error.as_deref() {
-                    let cleaned = strip_tui_noise(err);
-                    if !cleaned.is_empty() {
-                        crate::transcript::on_assistant_delta(&session.id, &cleaned);
-                    }
+            let error = outcome
+                .error
+                .as_deref()
+                .map(strip_tui_noise)
+                .filter(|err| !err.is_empty());
+            if let Some(err) = error {
+                if outcome.got_text {
+                    // After the answer, such as grok stopping the CI watch it
+                    // said it would report on. Silence read as still watching.
+                    crate::transcript::push_system(&session.id, "crew", &err, None);
+                } else {
+                    crate::transcript::on_assistant_delta(&session.id, &err);
                 }
             }
         }
@@ -965,6 +971,9 @@ fn spawn_and_stream(
             }
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
                 turn_end = is_turn_end(cli, &v);
+                if let Some(err) = json_error(&v) {
+                    state.error = Some(err);
+                }
             }
         } else if cli != CliKind::Other {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
@@ -1069,6 +1078,9 @@ fn spawn_and_stream(
             };
             error = Some(error.unwrap_or(msg));
         }
+    } else if status.is_some_and(|s| s.success()) {
+        // It answered and exited well: an error it got past is not news.
+        error = None;
     }
 
     Ok(TurnOutcome {
