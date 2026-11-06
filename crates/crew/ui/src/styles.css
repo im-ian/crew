@@ -3219,8 +3219,10 @@ button.choice-option:active:not(:disabled) .choice-badge {
   word-break: break-word;
   cursor: text;
 }
+/* The zero-width space keeps a line box when there is no placeholder, or an
+   empty field shrinks to its padding and the caret hangs below it. */
 .mention-field.is-empty::before {
-  content: attr(data-placeholder);
+  content: attr(data-placeholder) "\200b";
   color: var(--faint);
   pointer-events: none;
 }
