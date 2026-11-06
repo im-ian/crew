@@ -22,6 +22,12 @@ describe("sendSteers", () => {
     expect(sendSteers(true, "interrupt", true)).toBe(true);
   });
 
+  it("waits for a bot that only watches background work, unless the shortcut cuts in", () => {
+    expect(sendSteers(false, "interrupt", true, true)).toBe(false);
+    expect(sendSteers(true, "interrupt", true, true)).toBe(true);
+    expect(sendSteers(false, "queue", true, true)).toBe(false);
+  });
+
   it("does not steer once the bot is idle", () => {
     expect(sendSteers(true, "interrupt", false)).toBe(false);
     expect(sendSteers(false, "queue", false)).toBe(false);

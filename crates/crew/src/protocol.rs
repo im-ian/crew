@@ -379,6 +379,19 @@ pub struct AgentInfo {
     /// That bot's PC is connected to the router, and so is this one.
     #[serde(default, skip_serializing_if = "is_false")]
     pub remote_online: bool,
+    /// The bot answered and its CLI is up only for this background work, such
+    /// as a CI watch. A message waits for it instead of stopping it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub watch: Vec<Watch>,
+}
+
+/// One task a bot left running after it answered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Watch {
+    /// The task's own description, such as "Watch PR 1352 CI until it finishes".
+    pub what: String,
+    /// When it started, in ms since the epoch.
+    pub since: u64,
 }
 
 fn is_false(v: &bool) -> bool {

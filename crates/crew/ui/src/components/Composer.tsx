@@ -52,6 +52,8 @@ type Props = {
   busy?: boolean;
   /** The bot is mid-turn, so a message can stop it and go now instead of waiting. */
   canSteer?: boolean;
+  /** The bot answered and only watches background work: a send waits for it. */
+  watching?: boolean;
   /** Queue waits behind a working bot. Interrupt cuts in on a normal send. */
   delivery?: Delivery;
   onStop?: () => void;
@@ -92,6 +94,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   onEditWaiting,
   busy = false,
   canSteer = false,
+  watching = false,
   delivery = "interrupt",
   onStop,
   onOpenSkills,
@@ -496,7 +499,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         e.preventDefault();
         const el = inputRef.current;
         if (!el) return;
-        const steer = sendSteers(pendingSteer.current, delivery, canSteer);
+        const steer = sendSteers(pendingSteer.current, delivery, canSteer, watching);
         pendingSteer.current = false;
         const text = mentionIds(serializeEditor(el).trim(), agents);
         const files = attaches.map(attachMarkdown).filter(Boolean);
@@ -779,7 +782,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           role="textbox"
           aria-multiline="true"
           data-placeholder={
-            busy ? t("composer.busy") : placeholder
+            watching
+              ? t("composer.watching")
+              : busy
+                ? t("composer.busy")
+                : placeholder
           }
           onInput={() => {
             refreshEmpty();

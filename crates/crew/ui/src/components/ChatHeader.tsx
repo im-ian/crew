@@ -6,6 +6,7 @@ import { isOnline, remoteLabel } from "../remote";
 import type { AgentInfo, CliKind } from "../types";
 import { WhoButton } from "./WhoButton";
 import { Info } from "../icons";
+import { isWatching, watchLabel } from "../watchView";
 
 type Props = {
   currentAgent: AgentInfo | null;
@@ -62,6 +63,7 @@ export function ChatHeader({
         : t("header.remoteOffline")
       : modelLine(currentAgent, cli ? defaults[cli] : null, t);
   const status = currentAgent?.status;
+  const watching = !remote && isWatching(currentAgent);
   const statusKey =
     remote && currentAgent?.asking
       ? "header.statusOwner"
@@ -72,7 +74,17 @@ export function ChatHeader({
           : status === "exited"
             ? "header.statusExited"
             : null;
-  const statusClass = remote && currentAgent?.asking ? "blocked" : status;
+  const statusClass = watching
+    ? "watching"
+    : remote && currentAgent?.asking
+      ? "blocked"
+      : status;
+  const statusText =
+    watching && currentAgent
+      ? watchLabel(currentAgent, Date.now(), t)
+      : statusKey
+        ? t(statusKey)
+        : null;
 
   const identity = currentAgent ? (
     <WhoButton
@@ -103,8 +115,13 @@ export function ChatHeader({
             {line}
           </span>
         ) : null}
-        {statusKey ? (
-          <span className={"head-status is-" + statusClass}>{t(statusKey)}</span>
+        {statusText ? (
+          <span
+            className={"head-status is-" + statusClass}
+            title={watching ? statusText : undefined}
+          >
+            <span className="head-status-text">{statusText}</span>
+          </span>
         ) : null}
       </div>
       {currentAgent && !remote ? (
