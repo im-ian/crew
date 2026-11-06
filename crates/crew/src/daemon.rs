@@ -5179,6 +5179,66 @@ mod daemon_tests {
         bin.display().to_string()
     }
 
+    /// grok answers, then its wait on a CI `monitor` runs out and it stops the
+    /// watch. The answer stays, and the chat says the watch is over.
+    #[test]
+    fn an_error_after_the_answer_is_said_in_the_chat() {
+        use std::os::unix::fs::PermissionsExt;
+        paths::testing::with_home("error-after-answer", || {
+            paths::write_notifications_enabled(false);
+            let bin = paths::home_dir().join("grok");
+            let stopped = "the wait for background work ran out after 3600 s and exit stopped 1 background task (t-1).";
+            fs::write(
+                &bin,
+                format!(
+                    "#!/bin/sh\nprintf '%s\\n' '{{\"type\":\"text\",\"data\":\"CI 끝나면 머지할게요\"}}' '{{\"type\":\"error\",\"message\":\"{stopped}\"}}'\nexit 1\n"
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+            let bot = test_id("bgwait");
+            insert_spawned_agent(AgentConfig::new(
+                bot.clone(),
+                bot.clone(),
+                vec![bin.display().to_string()],
+                Some(paths::home_dir().display().to_string()),
+            ))
+            .unwrap();
+            wait_idle(&bot);
+            send_agent(&bot, "머지해줘").unwrap();
+            eventually(Duration::from_secs(5), "the stop was not said", || {
+                system_said(&bot, stopped)
+            });
+            assert!(crate::transcript::messages(&bot)
+                .iter()
+                .any(|m| m.role == Role::Assistant && m.text.contains("CI 끝나면 머지할게요")));
+            assert!(!turn_failed(&bot), "a turn that answered was marked failed");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// An error the CLI got past, in a run that answered and exited well, is
+    /// not said: the chat would read it as the end of the work.
+    #[test]
+    fn an_error_the_cli_got_past_is_not_said() {
+        paths::testing::with_home("error-got-past", || {
+            let bot = test_id("gotpast");
+            fake_bot(
+                &bot,
+                r#"{"type":"assistant","message":{"content":[{"type":"text","text":"다 됐어요"}]}}
+{"type":"error","message":"a retry that worked"}"#,
+            );
+            wait_idle(&bot);
+            send_agent(&bot, "해줘").unwrap();
+            eventually(Duration::from_secs(5), "never answered", || {
+                told(&bot, "다 됐어요")
+            });
+            wait_idle(&bot);
+            assert!(!system_said(&bot, "a retry that worked"));
+            remove_agent(&bot).unwrap();
+        });
+    }
+
     /// A bot on `fake_claude` that prints `lines` as its turn.
     fn fake_bot(id: &str, lines: &str) {
         fake_bot_running(id, &format!("cat <<'EOF'\n{lines}\nEOF"));
