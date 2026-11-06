@@ -27,11 +27,14 @@ export function saveDelivery(mode: Delivery) {
 /**
  * A normal send waits, unless the setting says to cut in.
  * The steer shortcut cuts in either way. Neither applies once the bot is idle.
+ * A bot that already answered and only watches background work, such as CI,
+ * is not cut into by the setting: that would stop the watch.
  */
 export function sendSteers(
   shortcut: boolean,
   mode: Delivery,
   canSteer: boolean,
+  watching = false,
 ): boolean {
-  return canSteer && (shortcut || mode === "interrupt");
+  return canSteer && (shortcut || (mode === "interrupt" && !watching));
 }

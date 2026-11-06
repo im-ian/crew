@@ -105,6 +105,16 @@ export type AgentInfo = {
   remote?: string;
   /** The teammate's PC is connected to the router. */
   remote_online?: boolean;
+  /** It answered, and its CLI is up only for this background work, such as a CI watch. */
+  watch?: Watch[];
+};
+
+/** One task a bot left running after it answered. */
+export type Watch = {
+  /** The task's own description. */
+  what: string;
+  /** When it started, in ms since the epoch. */
+  since: number;
 };
 
 export type SignupMode = "open" | "invite" | "closed";

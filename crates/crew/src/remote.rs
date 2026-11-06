@@ -2501,6 +2501,7 @@ pub fn agent_infos() -> Vec<AgentInfo> {
                 asking: online && m.status == "asking",
                 remote: Some(link.cfg.alias.clone()),
                 remote_online: online,
+                watch: Vec::new(),
             });
         }
     }

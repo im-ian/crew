@@ -6,6 +6,7 @@ import {
   useState,
   type MouseEvent,
 } from "react";
+import { isWatching } from "./watchView";
 import { api, errMsg, newestOnly, oneAtATime } from "./api";
 import {
   applyStop,
@@ -1352,9 +1353,11 @@ export function useCrew() {
     }
     void tickList();
     void tickMessages();
+    // A bot that only watches CI is not about to say anything.
     const working =
       selectedKind === "agent" &&
       !!currentAgent &&
+      !isWatching(currentAgent) &&
       (currentAgent.status === "working" ||
         currentAgent.status === "blocked");
     const lastRole = messages[messages.length - 1]?.role;

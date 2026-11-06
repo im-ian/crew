@@ -1851,6 +1851,20 @@ header .who-name {
   background: currentColor;
 }
 .head-status.is-working { color: var(--working); }
+/* What it watches can be long. It takes only the room the name and the
+   model line leave, so it is what gets cut. */
+.head-status.is-watching {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--working);
+}
+.head-status.is-watching::before { flex-shrink: 0; opacity: 0.55; }
+.head-status.is-watching .head-status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .head-status.is-blocked { color: var(--blocked); }
 .head-status.is-exited { color: var(--faint); }
 .head-empty {

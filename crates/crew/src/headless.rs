@@ -13,7 +13,7 @@ use serde_json::Value;
 
 use crate::config::{AgentConfig, TurnSession};
 use crate::paths;
-use crate::protocol::AgentStatus;
+use crate::protocol::{AgentStatus, Watch};
 
 pub struct HeadlessSession {
     pub id: String,
@@ -37,6 +37,9 @@ pub struct HeadlessInner {
     pub in_flight: Option<InFlight>,
     /// Replaces this CLI's `first_output_limit`, for tests that cannot wait.
     pub first_output_timeout: Option<Duration>,
+    /// The reply is done and the CLI is up only for this background work.
+    /// The agent stays working, so a send waits, but the chat is not waiting.
+    pub watch: Vec<Watch>,
 }
 
 /// How long a turn may sit before its first stdout line. Later silence is a
@@ -101,6 +104,7 @@ pub fn open(
             interrupted: false,
             in_flight: None,
             first_output_timeout: None,
+            watch: Vec::new(),
         }),
     }))
 }
@@ -375,6 +379,7 @@ fn pull_turn(
     }
     inner.generation = inner.generation.wrapping_add(1);
     inner.interrupted = true;
+    inner.watch.clear();
     if inner.status != AgentStatus::Exited {
         inner.status = AgentStatus::Idle;
     }
@@ -916,12 +921,35 @@ fn spawn_and_stream(
     }
     let mut plain = String::new();
     let mut sealed = false;
-    let reader = BufReader::new(stdout);
-    for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
-            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(err) => return Err(err.into()),
+    // Grok answered and is up only for background work. Its reply is closed,
+    // and what it says next is a new reply, once that work is done.
+    let mut grok_watching = false;
+    let lines = read_lines(stdout);
+    loop {
+        let line = match lines.recv_timeout(GROK_REPLY_SETTLE) {
+            Ok(Ok(l)) => l,
+            Ok(Err(err)) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+            Ok(Err(err)) => return Err(err.into()),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            // Grok has no event for this: a model response closed with no tool
+            // call after it, and background work still keeps the process up.
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if cli == CliKind::Grok
+                    && !sealed
+                    && !grok_watching
+                    && state.grok_after_usage
+                    && !state.background.is_empty()
+                    && !is_stale(session, generation)
+                {
+                    settle_grok_reply(session, &mut state);
+                    if state.got_text {
+                        end_turn_early(session, generation, *turn, true);
+                        show_watch(session, generation, watch_list(&state));
+                        grok_watching = true;
+                    }
+                }
+                continue;
+            }
         };
         // Keep draining so the CLI never blocks on a full pipe while it exits.
         // A stopped CLI's last lines are still in the pipe: read now, they land
@@ -943,8 +971,12 @@ fn spawn_and_stream(
                         *turn = reopen_turn(session, generation);
                         state.start_reply();
                         sealed = false;
+                        show_watch(session, generation, Vec::new());
                     }
-                    Ok(v) => note_claude_background(&v, &mut state),
+                    Ok(v) => {
+                        note_claude_background(&v, &mut state);
+                        show_watch(session, generation, watch_list(&state));
+                    }
                     Err(_) => {}
                 },
                 _ => {}
@@ -963,6 +995,28 @@ fn spawn_and_stream(
         // CLI chatter and must never become the answer. A text CLI's stdout is
         // the reply, so a line that starts with `{` or `[` stays.
         if cli == CliKind::Grok {
+            if let Ok(v) = serde_json::from_str::<Value>(line.trim()) {
+                note_grok_background(&v, &mut state);
+                let ty = v.get("type").and_then(Value::as_str).unwrap_or("");
+                state.grok_after_usage =
+                    ty == "usage" || (ty == "available_commands" && state.grok_after_usage);
+                if grok_watching {
+                    if !matches!(
+                        ty,
+                        "thought" | "text" | "tool_call" | "plan" | "end" | "error"
+                    ) {
+                        // A task ending, or grok's own bookkeeping: still watching.
+                        show_watch(session, generation, watch_list(&state));
+                        continue;
+                    }
+                    grok_watching = false;
+                    show_watch(session, generation, Vec::new());
+                    if ty != "end" && ty != "error" {
+                        *turn = reopen_turn(session, generation);
+                        state.start_reply();
+                    }
+                }
+            }
             if apply_grok_stdout(session, &mut state, &line).is_some() {
                 if let Ok(mut inner) = session.inner.lock() {
                     inner.last_output = Instant::now();
@@ -1025,18 +1079,19 @@ fn spawn_and_stream(
         }
         // Without text the exit path still has an error to post, so wait for it.
         if turn_end && state.got_text {
-            end_turn_early(session, generation, *turn, state.claude_background > 0);
+            let background = !state.background.is_empty();
+            end_turn_early(session, generation, *turn, background);
+            if background && cli == CliKind::Claude {
+                show_watch(session, generation, watch_list(&state));
+            }
             sealed = true;
         }
     }
+    // The CLI is gone, and what it ran with it.
+    show_watch(session, generation, Vec::new());
 
     if cli == CliKind::Grok {
-        release_held_reply(&mut state);
-        if let Some(chunk) = state.parent_release.take() {
-            feed_text(cli, session, &chunk);
-            state.got_text = true;
-        }
-        flush_held_tools(session, &mut state);
+        settle_grok_reply(session, &mut state);
     }
     // A compact after the last line, such as one past the reply.
     if cli == CliKind::Codex {
@@ -1089,6 +1144,35 @@ fn spawn_and_stream(
         error,
         compacted: state.compacted,
     })
+}
+
+/// How long grok stays quiet after a model response before the reply counts
+/// as over. Its tool calls follow that response's `usage` line at once.
+const GROK_REPLY_SETTLE: Duration = Duration::from_secs(3);
+
+/// The CLI's stdout, a line at a time, so the reader can also notice silence.
+fn read_lines(
+    stdout: std::process::ChildStdout,
+) -> std::sync::mpsc::Receiver<std::io::Result<String>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if tx.send(line).is_err() {
+                return;
+            }
+        }
+    });
+    rx
+}
+
+/// Show the parent text and tool cards grok's spawns were holding back.
+fn settle_grok_reply(session: &HeadlessSession, state: &mut ParseState) {
+    release_held_reply(state);
+    if let Some(chunk) = state.parent_release.take() {
+        feed_text(CliKind::Grok, session, &chunk);
+        state.got_text = true;
+    }
+    flush_held_tools(session, state);
 }
 
 /// A compact the chat has not shown yet gets its line, above the reply.
@@ -1187,10 +1271,109 @@ fn note_claude_background(v: &Value, state: &mut ParseState) {
     {
         return;
     }
-    state.claude_background = v
-        .get("tasks")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len);
+    let tasks = v.get("tasks").and_then(Value::as_array);
+    let next = tasks
+        .into_iter()
+        .flatten()
+        .map(|task| {
+            let key = task
+                .get("task_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let what = task
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            (key, what.to_string())
+        })
+        .collect();
+    keep_background(state, next);
+}
+
+/// Replace the running list, keeping when each task that stays started.
+fn keep_background(state: &mut ParseState, next: Vec<(String, String)>) {
+    let now = now_ms();
+    state.background = next
+        .into_iter()
+        .map(|(key, what)| {
+            let since = state
+                .background
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map_or(now, |(_, w)| w.since);
+            (key, Watch { what, since })
+        })
+        .collect();
+}
+
+/// The background tasks grok starts and finishes, from its tool calls.
+/// `monitor` and a shell moved to the background both complete their call
+/// when they start; the same call gets its result again when the task ends.
+fn note_grok_background(v: &Value, state: &mut ParseState) {
+    let ty = v.get("type").and_then(Value::as_str);
+    let Some(call) = v.get("toolCallId").and_then(Value::as_str) else {
+        return;
+    };
+    if ty == Some("tool_call") {
+        let input = v.get("rawInput");
+        let what = input
+            .and_then(|i| i.get("description"))
+            .or_else(|| input.and_then(|i| i.get("command")))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        state.grok_calls.insert(call.to_string(), what.to_string());
+        return;
+    }
+    if ty != Some("tool_call_update") {
+        return;
+    }
+    let Some(output) = v.get("rawOutput").filter(|o| !o.is_null()) else {
+        return;
+    };
+    let kind = output.get("type").and_then(Value::as_str);
+    if matches!(kind, Some("Monitor" | "BackgroundTaskStarted")) {
+        if !state.background.iter().any(|(k, _)| k == call) {
+            let what = state.grok_calls.get(call).cloned().unwrap_or_default();
+            state.background.push((
+                call.to_string(),
+                Watch {
+                    what,
+                    since: now_ms(),
+                },
+            ));
+        }
+    } else {
+        state.background.retain(|(k, _)| k != call);
+    }
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
+/// Show what the CLI still runs after its reply, or clear it with an empty list.
+fn show_watch(session: &HeadlessSession, generation: u64, watch: Vec<Watch>) {
+    let changed = {
+        let Ok(mut inner) = session.inner.lock() else {
+            return;
+        };
+        if inner.generation != generation || inner.watch == watch {
+            return;
+        }
+        inner.watch = watch;
+        inner.seq += 1;
+        true
+    };
+    if changed {
+        crate::daemon::emit_agent_frame(&session.id);
+    }
+}
+
+fn watch_list(state: &ParseState) -> Vec<Watch> {
+    state.background.iter().map(|(_, w)| w.clone()).collect()
 }
 
 fn feed_text(cli: CliKind, session: &HeadlessSession, chunk: &str) {
@@ -1310,8 +1493,14 @@ struct ParseState {
     background_calls: HashSet<String>,
     /// Parent text waiting until a foreground spawn no longer owns the stream.
     held_reply: String,
-    /// Claude tasks running in the background, from its latest list.
-    claude_background: usize,
+    /// Background work still running, keyed by the CLI's task or call id:
+    /// claude's latest task list, grok's `monitor`s and backgrounded shells.
+    background: Vec<(String, Watch)>,
+    /// Grok tool calls → what each said it does, for the task it may start.
+    grok_calls: HashMap<String, String>,
+    /// Grok's last line closed a model response. With no tool call after it,
+    /// the reply is over, and what still runs is background work.
+    grok_after_usage: bool,
     /// Parent speech to show on the event that released `held_reply`.
     parent_release: Option<String>,
     /// Tool calls that belong to a child session.
@@ -3454,6 +3643,7 @@ mod tests {
                 interrupted: false,
                 in_flight: None,
                 first_output_timeout: None,
+                watch: Vec::new(),
             }),
         }
     }

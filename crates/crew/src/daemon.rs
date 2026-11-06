@@ -78,6 +78,14 @@ impl LiveAgent {
         }
     }
 
+    /// What a headless bot that already answered is still running.
+    fn watch(&self) -> Vec<crate::protocol::Watch> {
+        match self {
+            Self::Pty(_) => Vec::new(),
+            Self::Headless(s) => s.inner.lock().map(|i| i.watch.clone()).unwrap_or_default(),
+        }
+    }
+
     fn is_live(&self) -> bool {
         self.status() != AgentStatus::Exited
     }
@@ -3222,6 +3230,7 @@ fn list_agents() -> Vec<AgentInfo> {
                 asking: false,
                 remote: None,
                 remote_online: false,
+                watch: s.watch(),
             }
         })
         .collect();
@@ -6964,6 +6973,104 @@ exec sleep 1"#,
                 wait_idle(id);
                 remove_agent(id).unwrap();
             }
+        });
+    }
+
+    fn watch_of(id: &str) -> Vec<String> {
+        list_agents()
+            .into_iter()
+            .find(|a| a.id == id)
+            .map(|a| a.watch.into_iter().map(|w| w.what).collect())
+            .unwrap_or_default()
+    }
+
+    fn assistant_texts(id: &str) -> Vec<String> {
+        crate::transcript::messages(id)
+            .into_iter()
+            .filter(|m| m.role == Role::Assistant)
+            .map(|m| m.text)
+            .collect()
+    }
+
+    /// Claude answered and left a task in the background. The bot shows what
+    /// it watches until the task ends and claude answers again.
+    #[test]
+    fn claude_shows_what_it_watches_after_answering() {
+        paths::testing::with_home("claude-watch", || {
+            let bot = test_id("cwatch");
+            fake_bot_running(
+                &bot,
+                r#"printf '%s\n' '{"type":"system","subtype":"init","session_id":"s1"}' '{"type":"assistant","message":{"content":[{"type":"text","text":"CI 끝나면 알려줄게요"}]}}' '{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"t1","description":"Watch PR 12 CI"}]}' '{"type":"result","subtype":"success","result":"CI 끝나면 알려줄게요"}'
+sleep 2
+printf '%s\n' '{"type":"system","subtype":"background_tasks_changed","tasks":[]}' '{"type":"system","subtype":"init","session_id":"s1"}' '{"type":"assistant","message":{"content":[{"type":"text","text":"CI 통과했어요"}]}}' '{"type":"result","subtype":"success","result":"CI 통과했어요"}'"#,
+            );
+            wait_idle(&bot);
+            send_agent(&bot, "머지해줘").unwrap();
+            eventually(Duration::from_secs(3), "the watch was not shown", || {
+                watch_of(&bot) == ["Watch PR 12 CI"]
+            });
+            assert!(agent_busy(&bot).unwrap(), "a watching bot took a new turn");
+            send_agent(&bot, "다음 거").unwrap();
+            assert_eq!(queued_text(&bot), ["다음 거"], "a send stopped the watch");
+            eventually(
+                Duration::from_secs(5),
+                "the later answer was dropped",
+                || told(&bot, "CI 통과했어요"),
+            );
+            eventually(
+                Duration::from_secs(5),
+                "the waiting send never went",
+                || queued_text(&bot).is_empty(),
+            );
+            wait_idle(&bot);
+            assert!(watch_of(&bot).is_empty(), "the watch outlived the task");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// Grok has no event for "the reply is over". A response with no tool call
+    /// after it, while a `monitor` runs, is that. The reply closes, the bot
+    /// shows the watch, and grok's answer when the watch ends is a new reply.
+    #[test]
+    fn grok_shows_what_it_watches_after_answering() {
+        use std::os::unix::fs::PermissionsExt;
+        paths::testing::with_home("grok-watch", || {
+            paths::write_notifications_enabled(false);
+            let bin = paths::home_dir().join("grok");
+            let script = r#"#!/bin/sh
+printf '%s\n' '{"type":"text","data":"CI 끝나면 머지할게요"}' '{"type":"usage"}' '{"type":"tool_call","toolCallId":"c1","title":"monitor","kind":"monitor","toolName":"monitor","rawInput":{"command":"watch.sh","description":"Watch PR 12 CI"}}' '{"type":"tool_call_update","toolCallId":"c1","status":"completed","rawOutput":{"type":"Monitor","taskId":"t1"}}' '{"type":"available_commands"}' '{"type":"usage"}'
+sleep 5
+printf '%s\n' '{"type":"tool_call_update","toolCallId":"c1","status":null,"rawOutput":{"type":"Bash","exit_code":0}}' '{"type":"thought","data":"CI passed"}' '{"type":"text","data":"CI 통과, 머지했어요"}' '{"type":"usage"}' '{"type":"end","stopReason":"end_turn"}'
+"#;
+            fs::write(&bin, script).unwrap();
+            fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+            let bot = test_id("gwatch");
+            insert_spawned_agent(AgentConfig::new(
+                bot.clone(),
+                bot.clone(),
+                vec![bin.display().to_string()],
+                Some(paths::home_dir().display().to_string()),
+            ))
+            .unwrap();
+            wait_idle(&bot);
+            send_agent(&bot, "머지해줘").unwrap();
+            eventually(Duration::from_secs(5), "the watch was not shown", || {
+                watch_of(&bot) == ["Watch PR 12 CI"]
+            });
+            assert!(agent_busy(&bot).unwrap(), "a watching bot took a new turn");
+            eventually(
+                Duration::from_secs(6),
+                "the later answer was dropped",
+                || told(&bot, "CI 통과, 머지했어요"),
+            );
+            assert_eq!(
+                assistant_texts(&bot),
+                ["CI 끝나면 머지할게요", "CI 통과, 머지했어요"],
+                "the answer after the watch was glued onto the first reply"
+            );
+            wait_idle(&bot);
+            assert!(watch_of(&bot).is_empty(), "the watch outlived the CLI");
+            remove_agent(&bot).unwrap();
         });
     }
 
