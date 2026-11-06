@@ -24,6 +24,9 @@ pub struct TurnOrigin {
     /// A first question like "what should I do?" must not become an allow/deny
     /// card. Relays start a fresh origin, so they still can.
     pub skip_judgment: bool,
+    /// Crew started this turn after grok stopped the watch the last one left.
+    /// A watch this turn leaves gets no second such turn.
+    pub watch_wake: bool,
 }
 
 impl TurnOrigin {

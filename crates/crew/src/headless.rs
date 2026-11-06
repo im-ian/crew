@@ -738,7 +738,10 @@ fn run_turn(
                 if outcome.got_text {
                     // After the answer, such as grok stopping the CI watch it
                     // said it would report on. Silence read as still watching.
-                    crate::transcript::push_system(&session.id, "crew", &err, None);
+                    let row = crate::transcript::push_system(&session.id, "crew", &err, None);
+                    if watch_ran_out(&err) {
+                        crate::daemon::wake_after_watch(&session.id, &outcome.watched, row.id);
+                    }
                 } else {
                     crate::transcript::on_assistant_delta(&session.id, &err);
                 }
@@ -838,6 +841,8 @@ struct TurnOutcome {
     error: Option<String>,
     /// The CLI compacted the session during this turn.
     compacted: bool,
+    /// What the CLI still ran after its reply when it exited.
+    watched: Vec<String>,
 }
 
 fn spawn_and_stream(
@@ -1087,6 +1092,11 @@ fn spawn_and_stream(
             sealed = true;
         }
     }
+    let watched = session
+        .inner
+        .lock()
+        .map(|inner| inner.watch.iter().map(|w| w.what.clone()).collect())
+        .unwrap_or_default();
     // The CLI is gone, and what it ran with it.
     show_watch(session, generation, Vec::new());
 
@@ -1143,7 +1153,14 @@ fn spawn_and_stream(
         got_text: state.got_text,
         error,
         compacted: state.compacted,
+        watched,
     })
+}
+
+/// grok's exit after its wait on background work ran out, such as `the wait for
+/// background work ran out after 3600 s and exit stopped 1 background task (t-1).`
+fn watch_ran_out(err: &str) -> bool {
+    err.contains("wait for background work ran out")
 }
 
 /// How long grok stays quiet after a model response before the reply counts
