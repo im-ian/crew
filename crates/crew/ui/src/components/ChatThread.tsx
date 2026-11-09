@@ -30,6 +30,7 @@ import { displayWho, noteRef, sentTarget, subagentFace } from "../peek";
 import {
   dotsAfter,
   momentStamp,
+  oneCompactNote,
   rowTs,
   runPeer,
   threadRows,
@@ -2846,7 +2847,7 @@ function visibleMessages(
   showTools: boolean,
   selfId: string | null = null,
 ): ChatMessage[] {
-  return messages.filter((m, i) => {
+  const shown = messages.filter((m, i) => {
     if (isSelfMentionDelivery(m, selfId)) return false;
     if (!shownInThread(m)) return false;
     if (m.kind === "tool") return showTools;
@@ -2856,4 +2857,5 @@ function visibleMessages(
     if (isPlainEcho(raw, messages, i)) return false;
     return stripCrewMarkers(raw).length > 0 || !!m.choice;
   });
+  return oneCompactNote(shown);
 }
