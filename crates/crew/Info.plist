@@ -4,5 +4,7 @@
 <dict>
   <key>NSLocalNetworkUsageDescription</key>
   <string>Crew connects to a crew-router on your network so your bots can work with teammates' bots.</string>
+  <key>NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac</key>
+  <true/>
 </dict>
 </plist>
