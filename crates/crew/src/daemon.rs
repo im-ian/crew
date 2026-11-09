@@ -2124,6 +2124,8 @@ struct SavedTell {
     routine: Option<String>,
     #[serde(default)]
     skip_judgment: bool,
+    #[serde(default)]
+    watch_wake: bool,
 }
 
 /// One teammate a queued user line still has to message.
@@ -2239,6 +2241,7 @@ fn remember_tell(id: &str, item: &PendingDelivery) {
             reply_agent: item.origin.reply_agent.clone(),
             routine: item.origin.routine.clone(),
             skip_judgment: item.origin.skip_judgment,
+            watch_wake: item.origin.watch_wake,
         });
     });
 }
@@ -2398,6 +2401,7 @@ fn restore_waiting(cfg: &Config) {
                     hops: meta.hops,
                     wake_spent: meta.wake_spent,
                     skip_judgment: meta.skip_judgment,
+                    watch_wake: meta.watch_wake,
                 },
                 then: VecDeque::new(),
                 parked: false,
@@ -4251,6 +4255,44 @@ fn note_routine_switch(id: &str, name: &str, enabled: bool) {
     }
 }
 
+/// grok stopped the watch a bot left after answering, before the watch ended.
+/// The bot said what it would do then, and it would never hear the end. It
+/// gets one turn to look again, tied to `row`, the line that says the watch
+/// stopped. A watch that turn leaves gets no second turn, so a bot that
+/// watches again and runs out again stops there.
+pub(crate) fn wake_after_watch(id: &str, watched: &[String], row: String) {
+    if get_origin(id).is_some_and(|o| o.watch_wake) {
+        return;
+    }
+    let note = crate::protocol::system_envelope(&watch_wake_text(watched));
+    let origin = TurnOrigin {
+        watch_wake: true,
+        ..TurnOrigin::user()
+    };
+    if let Err(err) = submit_delivery(id, &note, true, Some(row), origin) {
+        eprintln!("[crew] watch wake for {id}: {err:#}");
+    }
+}
+
+fn watch_wake_text(watched: &[String]) -> String {
+    let what: Vec<&str> = watched
+        .iter()
+        .map(|w| w.trim())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let head = if what.is_empty() {
+        "Your background watch stopped before it finished.".to_string()
+    } else {
+        format!(
+            "Your background watch stopped before it finished: {}.",
+            what.join("; ")
+        )
+    };
+    format!(
+        "{head} The CLI's wait for background work ran out, so nothing told you how it ended. Check where that work stands now. Then do what you said you would do when it finished, or say what is in the way."
+    )
+}
+
 fn run_routine(target: &str, key: &str) -> anyhow::Result<()> {
     let routines = read_routines(target)?;
     let idx = find_routine_index(&routines, key)
@@ -5222,6 +5264,62 @@ mod daemon_tests {
                 .iter()
                 .any(|m| m.role == Role::Assistant && m.text.contains("CI 끝나면 머지할게요")));
             assert!(!turn_failed(&bot), "a turn that answered was marked failed");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// grok's wait on the CI watch runs out after it said it would merge. Crew
+    /// wakes it once to look again. The woken turn runs out too, and stops there.
+    #[test]
+    fn a_watch_that_ran_out_wakes_the_bot_once() {
+        use std::os::unix::fs::PermissionsExt;
+        paths::testing::with_home("watch-ran-out", || {
+            paths::write_notifications_enabled(false);
+            let home = paths::home_dir();
+            let bin = home.join("grok");
+            let calls = home.join("calls");
+            let stopped = "the wait for background work ran out after 3600 s and exit stopped 1 background task (t-1).";
+            fs::write(
+                &bin,
+                format!(
+                    "#!/bin/sh\nfor a; do last=$a; done\nprintf '%s\\n---\\n' \"$last\" >> '{calls}'\nif [ $(grep -c '^---$' '{calls}') -eq 1 ]; then said='CI 끝나면 머지할게요'; else said='CI 아직 돌아요'; fi\nprintf '%s\\n' \"{{\\\"type\\\":\\\"text\\\",\\\"data\\\":\\\"$said\\\"}}\" '{{\"type\":\"error\",\"message\":\"{stopped}\"}}'\nexit 1\n",
+                    calls = calls.display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+            let bot = test_id("ranout");
+            insert_spawned_agent(AgentConfig::new(
+                bot.clone(),
+                bot.clone(),
+                vec![bin.display().to_string()],
+                Some(home.display().to_string()),
+            ))
+            .unwrap();
+            wait_idle(&bot);
+            send_agent(&bot, "머지해줘").unwrap();
+            eventually(
+                Duration::from_secs(10),
+                "the woken turn never answered",
+                || told(&bot, "CI 아직 돌아요"),
+            );
+            wait_idle(&bot);
+            std::thread::sleep(Duration::from_millis(500));
+            wait_idle(&bot);
+            let log = fs::read_to_string(&calls).unwrap();
+            let prompts: Vec<&str> = log.split("\n---\n").filter(|p| !p.is_empty()).collect();
+            assert_eq!(prompts.len(), 2, "{log}");
+            assert!(prompts[1].contains("[crew system]"), "{}", prompts[1]);
+            assert!(
+                prompts[1].contains("stopped before it finished"),
+                "{}",
+                prompts[1]
+            );
+            let stops = crate::transcript::messages(&bot)
+                .iter()
+                .filter(|m| m.role == Role::System && m.text == stopped)
+                .count();
+            assert_eq!(stops, 2);
             remove_agent(&bot).unwrap();
         });
     }
