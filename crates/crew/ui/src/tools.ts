@@ -25,6 +25,14 @@ export type ThreadRow =
   | { kind: "tools"; msgs: ChatMessage[] }
   | { kind: "notes"; peerId: string; msgs: ChatMessage[] };
 
+/**
+ * One compact note for a run of them. A long turn can compact several times,
+ * and with its tool cards hidden the notes would stack with nothing between.
+ */
+export function oneCompactNote(list: ChatMessage[]): ChatMessage[] {
+  return list.filter((m, i) => m.kind !== "compact" || list[i - 1]?.kind !== "compact");
+}
+
 /** When a row was written: its message, or the first one of a folded run. */
 export function rowTs(row: ThreadRow): number {
   return row.kind === "msg" ? row.msg.ts : row.msgs[0].ts;

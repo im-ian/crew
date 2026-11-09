@@ -3,6 +3,7 @@ import { sideOnlyPeer } from "./components/ChatThread";
 import {
   dotsAfter,
   momentStamp,
+  oneCompactNote,
   threadRows,
   toolNames,
   toolSummary,
@@ -22,6 +23,28 @@ const roster = [agent("jordy"), agent("chunsik")];
 function note(id: string, from: string, kind: ChatMessage["kind"]): ChatMessage {
   return { id, role: "system", from, text: "hi", ts: 1, kind };
 }
+
+describe("oneCompactNote", () => {
+  it("keeps the first of compact notes in a row", () => {
+    const ids = oneCompactNote([
+      msg("a"),
+      msg("c1", "compact"),
+      msg("c2", "compact"),
+      msg("c3", "compact"),
+      msg("b"),
+    ]).map((m) => m.id);
+    expect(ids).toEqual(["a", "c1", "b"]);
+  });
+
+  it("keeps compact notes with a shown row between", () => {
+    const ids = oneCompactNote([
+      msg("c1", "compact"),
+      msg("t1", "tool"),
+      msg("c2", "compact"),
+    ]).map((m) => m.id);
+    expect(ids).toEqual(["c1", "t1", "c2"]);
+  });
+});
 
 describe("threadRows", () => {
   it("folds a run of tool cards into one row", () => {
