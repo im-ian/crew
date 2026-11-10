@@ -758,8 +758,9 @@ html.rail-dragging {
   background: transparent;
   border: 0;
   color: inherit;
-  padding: var(--space-8);
-  margin-bottom: 1px;
+  /* 4px apart, so two filled rows (open chat, hover) read as two. */
+  padding: var(--space-10) var(--space-8);
+  margin-bottom: var(--space-4);
   cursor: pointer;
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr);

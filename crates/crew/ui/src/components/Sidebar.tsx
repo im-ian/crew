@@ -227,6 +227,21 @@ function rowDrop(
  * Where a bot on this PC lands. A router's section takes only the bot that
  * represents this PC there (`reps`, its aliases); for any other it is no drop.
  */
+/**
+ * The row under the pointer. Rows sit a few pixels apart, and a pointer in
+ * that gap still means the row next to it, not the end of the group.
+ */
+function rowNear(stack: Element[], x: number, y: number): HTMLElement | null {
+  return (
+    pickClosest(stack, "[data-rail-row]") ??
+    pickClosest(document.elementsFromPoint(x, y - ROW_GAP_REACH), "[data-rail-row]") ??
+    pickClosest(document.elementsFromPoint(x, y + ROW_GAP_REACH), "[data-rail-row]")
+  );
+}
+
+// Half of .rail-row's margin-bottom, and one more, so every point in the gap reaches a row.
+const ROW_GAP_REACH = 3;
+
 function hitRailTarget(
   x: number,
   y: number,
@@ -238,11 +253,11 @@ function hitRailTarget(
   if (router) {
     const alias = router.dataset.railRemote || "";
     if (!reps.includes(alias)) return null;
-    const row = pickClosest(stack, "[data-rail-row]");
+    const row = rowNear(stack, x, y);
     if (row && router.contains(row)) return { ...rowDrop(row, y, dragKey, null), remote: alias };
     return { kind: "item", groupId: null, beforeKey: null, into: true, line: null, remote: alias };
   }
-  const row = pickClosest(stack, "[data-rail-row]");
+  const row = rowNear(stack, x, y);
   if (row) {
     const groupEl = row.closest("[data-rail-group]");
     const groupId =
@@ -290,7 +305,7 @@ function hitRailTarget(
 
 /** A router's bot moves among that router's bots and nowhere else. */
 function hitRemoteRow(x: number, y: number, dragKey: string, alias: string): RailDrop | null {
-  const row = pickClosest(document.elementsFromPoint(x, y), "[data-rail-row]");
+  const row = rowNear(document.elementsFromPoint(x, y), x, y);
   const section = row?.closest<HTMLElement>("[data-rail-remote]");
   if (!row || section?.dataset.railRemote !== alias) return null;
   return rowDrop(row, y, dragKey, null);
