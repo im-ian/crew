@@ -6,7 +6,7 @@ import { Avatar } from "./Avatar";
 
 /**
  * The bots `@` offers. A mouse pick keeps the caret in the box it was typed in.
- * The first `near` share the open chat's group; a labelled line sets the others apart.
+ * The first `near` share the open chat's group; a labelled line sets the others apart, and each half is named.
  */
 export function MentionMenu({
   bots,
@@ -25,12 +25,15 @@ export function MentionMenu({
 }) {
   const labelOf = useBotLabel();
   const t = useT();
+  // Both halves are there, so each gets its label.
+  const split = near > 0 && near < bots.length;
   return (
     <div className={"mention-menu" + (className ? " " + className : "")} role="listbox" style={style}>
       {bots.map((a, i) => (
         <Fragment key={a.id}>
-          {i > 0 && i === near ? (
-            <div className="mention-sep" role="separator">
+          {split && i === 0 ? <div className="mention-head">{t("mention.sameGroup")}</div> : null}
+          {split && i === near ? (
+            <div className="mention-head mention-sep" role="separator">
               {t("mention.otherGroups")}
             </div>
           ) : null}
