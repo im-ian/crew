@@ -66,7 +66,13 @@ export function App() {
   const [queuePick, setQueuePick] = useState<string | null>(null);
   const waiting = useMemo(() => waitingIds(crew.messages), [crew.messages]);
   // A send while the bot waits on a question asks first; `agent` is the chat it was in.
-  const [askHold, setAskHold] = useState<{ agent: string; resolve: (pick: AskPick) => void } | null>(null);
+  // `busy` while "send anyway" closes the questions: the dialog stays up and
+  // holds the keys until the send goes.
+  const [askHold, setAskHold] = useState<{
+    agent: string;
+    resolve: (pick: AskPick) => void;
+    busy?: boolean;
+  } | null>(null);
   const askHoldRef = useRef(askHold);
   askHoldRef.current = askHold;
   const openAsks = useMemo(
@@ -169,20 +175,15 @@ export function App() {
 
   async function pickAsk(pick: AskPick) {
     const hold = askHoldRef.current;
-    if (!hold) return;
-    // A held Enter repeats. The first press decides.
-    askHoldRef.current = null;
-    setAskHold(null);
+    // The first pick decides; one already under way takes no other.
+    if (!hold || hold.busy) return;
     const c = crewRef.current;
     const here = c.selectedKind === "agent" && c.selected === hold.agent;
     const asks = here && c.messagesFor === hold.agent ? openQuestionIds(c.messages) : [];
-    if (pick === "go") {
-      const last = asks[asks.length - 1];
-      if (last) goToQuestion(last);
-      hold.resolve("go");
-      return;
-    }
     if (pick === "send") {
+      const busy = { ...hold, busy: true };
+      askHoldRef.current = busy;
+      setAskHold(busy);
       // Closed first, so a bot that cannot be cut into is not left asking.
       // A bot that can is stopped by the send, which closes them too.
       await Promise.all(
@@ -190,6 +191,17 @@ export function App() {
           c.answerChoice(hold.agent, id, [], [], [], true).catch(() => undefined),
         ),
       );
+    }
+    askHoldRef.current = null;
+    setAskHold(null);
+    if (pick === "go") {
+      const last = asks[asks.length - 1];
+      // Answered or closed while the dialog was up: back to the draft.
+      if (!last) {
+        hold.resolve("cancel");
+        return;
+      }
+      goToQuestion(last);
     }
     hold.resolve(pick);
   }
@@ -549,7 +561,11 @@ export function App() {
           />
         ) : null}
       </main>
-      <AskHoldDialog open={!!askHold} onPick={(pick) => void pickAsk(pick)} />
+      <AskHoldDialog
+        open={!!askHold}
+        busy={!!askHold?.busy}
+        onPick={(pick) => void pickAsk(pick)}
+      />
       <ConfirmDialog
         open={crew.confirmOpen}
         kind={crew.confirmKind}

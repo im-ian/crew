@@ -126,6 +126,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   const fileRef = useRef<HTMLInputElement>(null);
   const plusRef = useRef<HTMLDivElement>(null);
   const pendingSteer = useRef(false);
+  // A send waiting on the question dialog. Another Enter does not ask again.
+  const holding = useRef(false);
   const onDraftsRef = useRef(onDrafts);
   onDraftsRef.current = onDrafts;
 
@@ -559,9 +561,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         }
         let steerNow = steer;
         if (askHold) {
+          if (holding.current) return;
           // The dialog takes the keys. Typing must not go on behind it.
           el.blur();
-          const pick = await askHold();
+          holding.current = true;
+          let pick: AskPick;
+          try {
+            pick = await askHold();
+          } finally {
+            holding.current = false;
+          }
           if (pick === "cancel") focusEditor();
           if (pick !== "send") return;
           // Another chat opened while it was up; this draft is not its send.

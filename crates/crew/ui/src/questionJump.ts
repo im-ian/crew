@@ -78,7 +78,6 @@ export function jumpFrames(from: JumpMode, to: JumpMode, reduce = false): JumpFr
   return [jumpEnd(to)];
 }
 
-/** The latest question card still waiting on the user. */
 /** Questions in this chat still waiting for the user, oldest first. */
 export function openQuestionIds(messages: readonly ChatMessage[]): string[] {
   return messages.filter((m) => m.choice?.state === "pending").map((m) => m.id);
@@ -96,6 +95,7 @@ export function questionFocusTarget(card: ParentNode): HTMLElement | null {
   return null;
 }
 
+/** The latest question card still waiting on the user. */
 export function pendingQuestionId(rows: readonly ThreadRow[]): string | null {
   for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i];

@@ -11,9 +11,12 @@ export type AskPick = "go" | "send" | "cancel";
  */
 export function AskHoldDialog({
   open,
+  busy = false,
   onPick,
 }: {
   open: boolean;
+  /** Sending anyway is under way. */
+  busy?: boolean;
   onPick: (pick: AskPick) => void;
 }) {
   const t = useT();
@@ -27,8 +30,14 @@ export function AskHoldDialog({
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing) return;
       if (e.key === "Enter") {
+        // A button reached with Tab takes Enter as its own click.
+        const onButton =
+          !e.metaKey && !e.ctrlKey && e.target instanceof Element && !!e.target.closest(".ask-hold-actions button");
+        if (onButton) return;
         e.preventDefault();
         e.stopPropagation();
+        // The Enter that sent is still held: its repeats are not a pick.
+        if (e.repeat) return;
         pickRef.current(e.metaKey || e.ctrlKey ? "send" : "go");
       } else if (e.key === "Escape") {
         e.preventDefault();
@@ -44,11 +53,11 @@ export function AskHoldDialog({
     <Modal open={open} title={t("askHold.title")} onClose={() => onPick("cancel")}>
       <p>{t("askHold.body")}</p>
       <div className="actions ask-hold-actions">
-        <button type="button" className="ghost" onClick={() => onPick("send")}>
+        <button type="button" className="ghost" disabled={busy} onClick={() => onPick("send")}>
           {t("askHold.send")}
           <kbd>⌘↵</kbd>
         </button>
-        <button type="button" className="primary" onClick={() => onPick("go")}>
+        <button type="button" className="primary" disabled={busy} onClick={() => onPick("go")}>
           {t("askHold.go")}
           <kbd>↵</kbd>
         </button>
