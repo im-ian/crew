@@ -6177,9 +6177,13 @@ textarea.textin.skill-body {
   width: max-content;
   /* A long error stays one line and ends in an ellipsis; the title holds it all. */
   max-width: min(600px, calc(100vw - 160px));
-  padding: 0 var(--space-6) 0 5px;
+  padding: 0 var(--space-6) 0 var(--space-10);
   white-space: nowrap;
+  transition: left 0.5s var(--ease-out);
 }
+/* While it is still a dot, the face sits in the middle of it; the room on
+   its left opens as the pill widens. The width it measures keeps the room. */
+.island:not(.is-open) .island-row { left: calc(-1 * var(--space-10)); }
 .island-lead {
   /* The question mark's halo is drawn in --bg; here it has to match the island. */
   --bg: #000;
@@ -6346,6 +6350,7 @@ html[data-theme="light"] .island-ghost-2 {
   .island-slot,
   .island-slot.is-leaving { animation-duration: 0.01ms; animation-delay: 0s; }
   .island,
+  .island-row,
   .island-words,
   .island-acts,
   .island-lead { transition-duration: 0.01ms; }
