@@ -6086,6 +6086,10 @@ textarea.textin.skill-body {
   min-width: 148px;
   z-index: 31;
 }
+.ctx.subs-left .ctx.nested {
+  left: auto;
+  right: calc(100% - 6px);
+}
 .ctx-sub:hover > .ctx.nested,
 .ctx-sub:focus-within > .ctx.nested { display: block; }
 /* The island: notices stacked just under the titlebar, newest on top. Each
