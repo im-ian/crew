@@ -1,11 +1,12 @@
 import { Fragment, type CSSProperties } from "react";
 import { useBotLabel } from "../BotLabelContext";
+import { useT } from "../LocaleContext";
 import type { AgentInfo } from "../types";
 import { Avatar } from "./Avatar";
 
 /**
  * The bots `@` offers. A mouse pick keeps the caret in the box it was typed in.
- * The first `near` share the open chat's group; a line sets the others apart.
+ * The first `near` share the open chat's group; a labelled line sets the others apart.
  */
 export function MentionMenu({
   bots,
@@ -23,11 +24,16 @@ export function MentionMenu({
   style?: CSSProperties;
 }) {
   const labelOf = useBotLabel();
+  const t = useT();
   return (
     <div className={"mention-menu" + (className ? " " + className : "")} role="listbox" style={style}>
       {bots.map((a, i) => (
         <Fragment key={a.id}>
-          {i > 0 && i === near ? <div className="mention-sep" role="separator" /> : null}
+          {i > 0 && i === near ? (
+            <div className="mention-sep" role="separator">
+              {t("mention.otherGroups")}
+            </div>
+          ) : null}
           <button
             type="button"
             role="option"
