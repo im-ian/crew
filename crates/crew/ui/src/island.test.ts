@@ -6,7 +6,10 @@ import {
   lifeAfterHover,
   noticeLife,
   noticeStays,
-  topNotice,
+  byRank,
+  mostPressing,
+  pushNotice,
+  type IslandNotice,
   type BotSnap,
 } from "./island";
 import type { AgentInfo } from "./types";
@@ -76,16 +79,69 @@ describe("botNotices", () => {
   });
 });
 
-describe("topNotice", () => {
-  it("picks what waits on the user first", () => {
+describe("byRank", () => {
+  it("puts what waits on the user last, so it lands on top", () => {
     expect(
-      topNotice([
-        { botId: "a", kind: "success" as const },
-        { botId: "b", kind: "blocked" as const },
+      byRank([
+        { botId: "a", kind: "blocked" as const },
+        { botId: "b", kind: "success" as const },
         { botId: "c", kind: "failure" as const },
-      ]),
-    ).toEqual({ botId: "b", kind: "blocked" });
-    expect(topNotice([])).toBeNull();
+      ]).map((n) => n.botId),
+    ).toEqual(["b", "c", "a"]);
+  });
+});
+
+describe("mostPressing", () => {
+  it("picks what waits on the user, however old", () => {
+    const n = (kind: IslandNotice["kind"]): IslandNotice => ({ seq: 1, stays: true, piled: true, kind, text: "" }) as IslandNotice;
+    expect(mostPressing([n("ok"), n("success"), n("question"), n("warn")])).toBe("question");
+    expect(mostPressing([n("ok"), n("warn")])).toBe("warn");
+  });
+});
+
+describe("pushNotice", () => {
+  const plain = (seq: number, text: string): IslandNotice => ({ seq, stays: false, piled: false, kind: "ok", text });
+  const about = (seq: number, botId: string): IslandNotice => ({
+    seq,
+    stays: false,
+    piled: false,
+    kind: "success",
+    botId,
+  });
+  const seqs = (ns: IslandNotice[]) => ns.map((n) => n.seq);
+
+  it("stacks the newest on top", () => {
+    const { stack, dropped } = pushNotice([plain(1, "a")], about(2, "x"));
+    expect(seqs(stack)).toEqual([2, 1]);
+    expect(dropped).toEqual([]);
+  });
+
+  it("lets a newer word about the same bot, or the same words, take the old one's place", () => {
+    const start = [about(2, "x"), plain(1, "a")];
+    let r = pushNotice(start, about(3, "x"));
+    expect(seqs(r.stack)).toEqual([3, 1]);
+    expect(seqs(r.dropped)).toEqual([2]);
+    r = pushNotice(start, plain(4, "a"));
+    expect(seqs(r.stack)).toEqual([4, 2]);
+    expect(seqs(r.dropped)).toEqual([1]);
+  });
+
+  it("lets the same words of another kind stand on their own", () => {
+    const err: IslandNotice = { seq: 1, stays: true, piled: false, kind: "error", text: "a" };
+    expect(seqs(pushNotice([err], plain(2, "a")).stack)).toEqual([2, 1]);
+  });
+
+  it("past the limit, drops passing news before what waits on the user", () => {
+    const asked: IslandNotice = { seq: 1, stays: true, piled: true, kind: "question", botId: "q" };
+    const { stack, dropped } = pushNotice([plain(2, "b"), asked], plain(3, "c"), 2);
+    expect(seqs(stack)).toEqual([3, 1]);
+    expect(seqs(dropped)).toEqual([2]);
+  });
+
+  it("pushes the oldest out past the limit", () => {
+    const { stack, dropped } = pushNotice([plain(2, "b"), plain(1, "a")], plain(3, "c"), 2);
+    expect(seqs(stack)).toEqual([3, 2]);
+    expect(seqs(dropped)).toEqual([1]);
   });
 });
 
@@ -97,10 +153,19 @@ describe("notice timing", () => {
     expect(noticeStays("ok")).toBe(false);
   });
 
-  it("stays long enough to read, within 2 to 7 seconds", () => {
-    expect(noticeLife("저장됨")).toBe(2000);
-    expect(noticeLife("가".repeat(40))).toBe(3600);
-    expect(noticeLife("가".repeat(200))).toBe(7000);
+  it("gives a brief confirmation 3 seconds and the rest 5", () => {
+    expect(noticeLife("ok", "auto", true)).toBe(3000);
+    expect(noticeLife("ok", "auto")).toBe(5000);
+    expect(noticeLife("warn", "auto")).toBe(5000);
+    expect(noticeLife("success", "auto")).toBe(5000);
+  });
+
+  it("keeps what waits on the user, and everything but a brief word when Settings say so", () => {
+    expect(noticeLife("question", "auto")).toBeNull();
+    expect(noticeLife("error", "auto")).toBeNull();
+    expect(noticeLife("success", "keep")).toBeNull();
+    expect(noticeLife("ok", "keep")).toBeNull();
+    expect(noticeLife("ok", "keep", true)).toBe(3000);
   });
 
   it("goes on where it stopped once the pointer leaves, with a beat to spare", () => {

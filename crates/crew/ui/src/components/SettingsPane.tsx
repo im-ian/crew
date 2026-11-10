@@ -6,6 +6,8 @@ import type { Locale } from "../i18n";
 import type { ChatWidth } from "../chatWidth";
 import type { Delivery } from "../deliveryPref";
 import { loadNotify, saveNotify } from "../notifyPref";
+import { loadNoticeKeep, saveNoticeKeep } from "../noticeKeepPref";
+import type { NoticeKeep } from "../island";
 import { loadWorktree, saveWorktree } from "../worktreePref";
 import type { ThemePref } from "../theme";
 import type { UpdaterApi } from "../updater";
@@ -67,6 +69,12 @@ export function SettingsPane({
   const t = useT();
   const { locale, setLocale } = useLocale();
   const [notify, setNotify] = useState(loadNotify);
+  const [noticeKeep, setNoticeKeep] = useState(loadNoticeKeep);
+
+  function changeNoticeKeep(next: NoticeKeep) {
+    setNoticeKeep(next);
+    saveNoticeKeep(next);
+  }
   const [worktree, setWorktree] = useState(loadWorktree);
   const [botDefault, setBotDefault] = useState(loadBotDefault);
 
@@ -187,6 +195,21 @@ export function SettingsPane({
                 {notify
                   ? t("settings.notifications.note.on")
                   : t("settings.notifications.note.off")}
+              </p>
+              <Field label={t("settings.noticeKeep")}>
+                <Seg
+                  value={noticeKeep}
+                  options={[
+                    { value: "auto", label: t("settings.noticeKeep.auto") },
+                    { value: "keep", label: t("settings.noticeKeep.keep") },
+                  ]}
+                  onChange={changeNoticeKeep}
+                />
+              </Field>
+              <p className="apply-note">
+                {noticeKeep === "keep"
+                  ? t("settings.noticeKeep.note.keep")
+                  : t("settings.noticeKeep.note.auto")}
               </p>
               <div className="settings-notify">
                 <label className="field" htmlFor="settings-worktree">

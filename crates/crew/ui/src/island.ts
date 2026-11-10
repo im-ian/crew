@@ -6,9 +6,17 @@ export type BotNoticeKind = "question" | "blocked" | "failure" | "success";
 /** How a message that is not about a bot reads: done, careful, or broken. */
 export type PlainTone = "ok" | "warn" | "error";
 
+/**
+ * `stays`: it waits for the user to close it instead of fading on its own.
+ * `piled`: it has been up for a while and folded into the pile under the
+ * titlebar, so it no longer takes a row of its own.
+ */
 export type IslandNotice =
-  | { seq: number; kind: BotNoticeKind; botId: string }
-  | { seq: number; kind: PlainTone; text: string };
+  | { seq: number; stays: boolean; piled: boolean; kind: BotNoticeKind; botId: string }
+  | { seq: number; stays: boolean; piled: boolean; kind: PlainTone; text: string };
+
+/** How many notices the island holds, pile included; a newer one pushes the oldest out. */
+export const STACK_MAX = 30;
 
 /** What the island needs to remember about a bot between two lists. */
 export type BotSnap = {
@@ -67,10 +75,56 @@ export function botNotices(
   return { notices, snaps };
 }
 
-/** The one notice to show out of several at once: the most pressing. */
-export function topNotice<T extends { kind: BotNoticeKind }>(notices: T[]): T | null {
-  let top: T | null = null;
-  for (const n of notices) if (!top || RANK[n.kind] > RANK[top.kind]) top = n;
+/** Several at once, least pressing first, so what waits on the user lands on top. */
+export function byRank<T extends { kind: BotNoticeKind }>(notices: T[]): T[] {
+  return [...notices].sort((a, b) => RANK[a.kind] - RANK[b.kind]);
+}
+
+/**
+ * The stack with `next` on top. A newer word about the same bot, or the same
+ * words again, takes the old one's place instead of stacking twice; past
+ * `STACK_MAX` the oldest goes. `dropped` is what left, for its clock.
+ */
+export function pushNotice(
+  stack: readonly IslandNotice[],
+  next: IslandNotice,
+  max = STACK_MAX,
+): { stack: IslandNotice[]; dropped: IslandNotice[] } {
+  const same = (n: IslandNotice) =>
+    "botId" in next
+      ? "botId" in n && n.botId === next.botId
+      : "text" in n && n.text === next.text && n.kind === next.kind;
+  const all = [next, ...stack.filter((n) => !same(n))];
+  const dropped = stack.filter(same);
+  // Past the limit, what only passed on news goes before what waits on the user.
+  while (all.length > max) {
+    let at = all.length - 1;
+    for (let i = all.length - 1; i > 0; i--) {
+      if (!noticeStays(all[i].kind)) {
+        at = i;
+        break;
+      }
+    }
+    dropped.push(...all.splice(at, 1));
+  }
+  return { stack: all, dropped };
+}
+
+// How much a notice asks of the user, for the one that tints the pile.
+const URGENCY: Record<IslandNotice["kind"], number> = {
+  question: 6,
+  blocked: 5,
+  failure: 4,
+  error: 4,
+  warn: 3,
+  success: 2,
+  ok: 1,
+};
+
+/** The kind that most needs the user, out of a non-empty list. */
+export function mostPressing(notices: readonly IslandNotice[]): IslandNotice["kind"] {
+  let top = notices[0].kind;
+  for (const n of notices) if (URGENCY[n.kind] > URGENCY[top]) top = n.kind;
   return top;
 }
 
@@ -79,10 +133,27 @@ export function noticeStays(kind: IslandNotice["kind"]): boolean {
   return kind === "question" || kind === "blocked" || kind === "failure" || kind === "error";
 }
 
-/** How long a passing notice stays: long enough to read it, 2–7 seconds. */
-export function noticeLife(text: string): number {
-  return Math.min(7000, Math.max(2000, 1200 + text.length * 60));
+/** How a passing notice leaves: on its own, or when the user closes it. A Settings choice. */
+export type NoticeKeep = "auto" | "keep";
+
+/**
+ * How long a passing notice stays, or null for until it is closed: such a
+ * notice folds into the pile after `NOTICE_LIFE_MS` instead. A brief word like
+ * "Copied" goes quickly whatever Settings say; it only confirms what the user
+ * just did.
+ */
+export function noticeLife(
+  kind: IslandNotice["kind"],
+  keep: NoticeKeep,
+  brief = false,
+): number | null {
+  if (brief) return BRIEF_LIFE_MS;
+  if (noticeStays(kind) || keep === "keep") return null;
+  return NOTICE_LIFE_MS;
 }
+
+export const BRIEF_LIFE_MS = 3000;
+export const NOTICE_LIFE_MS = 5000;
 
 /** What is left of a notice's life when the pointer leaves it: never less than a beat to go. */
 export function lifeAfterHover(left: number): number {
