@@ -349,7 +349,7 @@ function IslandPill({
       }}
     >
       <div className="island-row" ref={rowRef}>
-        <span className="island-lead">{lead}</span>
+        <span className={"island-lead" + (bot ? "" : " is-dot")}>{lead}</span>
         <span className="island-words">{words}</span>
         <span className="island-acts">
           {kind === "success" || kind === "ok" ? (

@@ -6193,6 +6193,14 @@ textarea.textin.skill-body {
   width: 26px;
   height: 26px;
 }
+/* A status dot is smaller than a face; it sits toward the words instead of
+   in the middle of the face's room. Only once open: as a dot it stays centered. */
+.island-lead.is-dot { transition: padding 0.5s var(--ease-out); }
+.island.is-open .island-lead.is-dot {
+  justify-items: end;
+  padding-right: 3px;
+  box-sizing: border-box;
+}
 .island-face,
 .island-img {
   width: 26px;
