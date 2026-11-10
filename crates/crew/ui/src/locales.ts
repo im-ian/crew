@@ -97,7 +97,7 @@ export const KO = {
   "key.space": "스페이스",
 
   "sidebar.search": "검색",
-  "sidebar.searchTitle": "검색 ⌘K",
+  "sidebar.searchTitle": "검색 ⌘F",
   "sidebar.add": "추가",
   "sidebar.noResults": "검색 결과가 없습니다",
   "sidebar.empty": "대화가 없습니다",
@@ -529,7 +529,7 @@ export const EN: { [K in MessageKey]: string } = {
   "key.space": "Space",
 
   "sidebar.search": "Search",
-  "sidebar.searchTitle": "Search ⌘K",
+  "sidebar.searchTitle": "Search ⌘F",
   "sidebar.add": "Add",
   "sidebar.noResults": "No search results",
   "sidebar.empty": "No chats yet",
