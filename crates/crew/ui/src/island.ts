@@ -125,7 +125,7 @@ export function noticeLife(
 }
 
 export const BRIEF_LIFE_MS = 3000;
-export const NOTICE_LIFE_MS = 7000;
+export const NOTICE_LIFE_MS = 5000;
 
 /** What is left of a notice's life when the pointer leaves it: never less than a beat to go. */
 export function lifeAfterHover(left: number): number {

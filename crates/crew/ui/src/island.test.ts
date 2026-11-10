@@ -132,11 +132,11 @@ describe("notice timing", () => {
     expect(noticeStays("ok")).toBe(false);
   });
 
-  it("gives a brief confirmation 3 seconds and the rest 7", () => {
+  it("gives a brief confirmation 3 seconds and the rest 5", () => {
     expect(noticeLife("ok", "auto", true)).toBe(3000);
-    expect(noticeLife("ok", "auto")).toBe(7000);
-    expect(noticeLife("warn", "auto")).toBe(7000);
-    expect(noticeLife("success", "auto")).toBe(7000);
+    expect(noticeLife("ok", "auto")).toBe(5000);
+    expect(noticeLife("warn", "auto")).toBe(5000);
+    expect(noticeLife("success", "auto")).toBe(5000);
   });
 
   it("keeps what waits on the user, and everything but a brief word when Settings say so", () => {
