@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import { botSearchText } from "../botLabel";
+import { botSearchText, groupOfBot } from "../botLabel";
 import { mentionMatches } from "../mentions";
 import type { AgentInfo, Group } from "../types";
 
@@ -20,21 +20,28 @@ export function mentionAtCaret(editor: HTMLElement | null): MentionQuery | null 
   return { start: before.length - m[2].length - 1, query: m[2] };
 }
 
-/** The bots the @ menu offers for `query`. The row shows the group too, so the group's name finds it. */
+/**
+ * The bots the @ menu offers for `query`, and how many at the top sit in the
+ * same group as `skip`, the bot whose chat it is. Those come first; the rest
+ * follow under a line. The row shows the group too, so the group's name finds it.
+ */
 export function mentionCandidates(
   agents: readonly AgentInfo[],
   groups: readonly Group[],
   query: string,
   skip?: string | null,
-): AgentInfo[] {
+): { bots: AgentInfo[]; near: number } {
   const q = query.toLowerCase();
-  return agents
-    .filter(
-      (a) =>
-        a.id !== skip &&
-        (mentionMatches(a, query) || botSearchText(a, groups).toLowerCase().includes(q)),
-    )
-    .slice(0, 8);
+  const found = agents.filter(
+    (a) =>
+      a.id !== skip &&
+      (mentionMatches(a, query) || botSearchText(a, groups).toLowerCase().includes(q)),
+  );
+  const home = skip ? groupOfBot(groups, skip) : null;
+  const isNear = (a: AgentInfo) => !!home && !a.remote && groupOfBot(groups, a.id)?.id === home.id;
+  const near = found.filter(isNear);
+  const bots = [...near, ...found.filter((a) => !isNear(a))].slice(0, 8);
+  return { bots, near: Math.min(near.length, bots.length) };
 }
 export function insertChip(
   editor: HTMLElement | null,

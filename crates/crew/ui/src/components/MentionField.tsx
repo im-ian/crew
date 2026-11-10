@@ -78,7 +78,8 @@ export function MentionField({
     });
   }, [value, agents, labelOf]);
 
-  const bots = query && !disabled ? mentionCandidates(agents, groups, query.query, skip) : [];
+  const { bots, near } =
+    query && !disabled ? mentionCandidates(agents, groups, query.query, skip) : { bots: [], near: 0 };
   const open = bots.length > 0;
 
   useEffect(() => {
@@ -221,7 +222,7 @@ export function MentionField({
       {open && spot
         ? createPortal(
             <div ref={menuRef} className="mention-float" style={spot}>
-              <MentionMenu bots={bots} active={active} onPick={pick} className="is-floating" />
+              <MentionMenu bots={bots} near={near} active={active} onPick={pick} className="is-floating" />
             </div>,
             document.body,
           )

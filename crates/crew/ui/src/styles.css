@@ -4551,6 +4551,12 @@ html.peek-resizing .peek-resize::after {
 }
 .mention-item.active,
 .mention-item:hover { background: var(--chip); }
+/* Between the open chat's groupmates and the bots of other groups. */
+.mention-sep {
+  height: 1px;
+  margin: var(--space-4) var(--space-10);
+  background: var(--line);
+}
 /* Off a question card, which clips what sticks out of it. The field places
    the holder; the menu inside keeps its own pop. */
 .mention-float {
