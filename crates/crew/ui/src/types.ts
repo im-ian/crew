@@ -55,6 +55,10 @@ export type SearchHit = {
   id: string;
   title: string;
   snippet: string;
+  /** The bot the hit is in. */
+  bot?: string;
+  /** When a message was written; 0 for a routine. */
+  ts?: number;
 };
 
 export type FocusTarget = {
