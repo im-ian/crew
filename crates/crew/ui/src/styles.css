@@ -6088,17 +6088,44 @@ textarea.textin.skill-body {
 }
 .ctx-sub:hover > .ctx.nested,
 .ctx-sub:focus-within > .ctx.nested { display: block; }
-/* The island. It hangs just under the titlebar, its center a fixed distance
-   below it, and moves up by half its height, so it grows as much above as
-   below. It widens first and
-   gets taller a beat later; the words come in once there is room. Keep the
-   timings in step with OPEN_DELAY_MS, CLOSE_MS and SWAP_MS in Island.tsx. */
-.island {
-  --island-ink: #f0f0f2;
+/* The island: notices stacked just under the titlebar, newest on top. Each
+   sits centered in a slot as tall as an open pill, so it grows as much above
+   as below. It widens first and gets taller a beat later; the words come in
+   once there is room. Leaving, it folds to a dot and shrinks away, then its
+   slot closes and the ones under it move up. Keep the timings in step with
+   OPEN_DELAY_MS and CLOSE_MS in Island.tsx. */
+.island-stack {
   position: fixed;
-  top: calc(var(--titlebar) + 26px);
+  top: calc(var(--titlebar) + 8px);
   left: 50%;
   z-index: 40;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Only the pills take clicks; the gaps between them belong to the page. */
+  pointer-events: none;
+}
+.island-slot {
+  height: 36px;
+  margin-bottom: var(--space-6);
+  display: grid;
+  place-items: center;
+  animation: island-slot-in 0.3s var(--ease-out);
+}
+.island-slot.is-leaving {
+  animation: island-slot-out 0.2s 0.45s var(--ease) forwards;
+}
+@keyframes island-slot-in {
+  from { height: 0; margin-bottom: 0; }
+}
+@keyframes island-slot-out {
+  to { height: 0; margin-bottom: 0; }
+}
+.island {
+  --island-ink: #f0f0f2;
+  position: relative;
+  pointer-events: auto;
   width: 26px;
   height: 26px;
   border-radius: var(--radius-pill);
@@ -6106,7 +6133,7 @@ textarea.textin.skill-body {
   background: #000;
   color: var(--island-ink);
   font-size: var(--text-lg);
-  transform: translate(-50%, -50%) scale(0.55);
+  transform: scale(0.55);
   opacity: 0;
   box-shadow: inset 0 0 0 1px transparent;
   animation: island-in 0.38s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
@@ -6116,18 +6143,18 @@ textarea.textin.skill-body {
     box-shadow 0.4s var(--ease);
 }
 @keyframes island-in {
-  to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  to { transform: scale(1); opacity: 1; }
 }
 /* Leaving: it folds back to the dot, then the dot shrinks away. */
 .island.is-leaving {
   /* The notice is already gone; a click here is meant for what is under it. */
   pointer-events: none;
-  transform: translate(-50%, -50%) scale(1);
+  transform: scale(1);
   opacity: 1;
   animation: island-out 0.24s 0.2s var(--ease) forwards;
 }
 @keyframes island-out {
-  to { transform: translate(-50%, -50%) scale(0.55); opacity: 0; }
+  to { transform: scale(0.55); opacity: 0; }
 }
 .island.is-open {
   width: var(--w);
@@ -6216,12 +6243,6 @@ textarea.textin.skill-body {
 }
 .island.is-open .island-words { opacity: 1; transition: opacity 0.2s 0.22s var(--ease); }
 .island.is-open .island-acts { opacity: 1; transition: opacity 0.2s 0.3s var(--ease); }
-.island.is-swap .island-lead,
-.island.is-swap .island-words,
-.island.is-swap .island-acts {
-  opacity: 0;
-  transition: opacity 0.1s var(--ease);
-}
 .island-lead { transition: opacity 0.2s var(--ease); }
 .island-check {
   display: inline-flex;
@@ -6271,7 +6292,9 @@ html[data-theme="light"] .island-x:hover { background: var(--chip); color: var(-
 .avatar-file { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .island,
-  .island.is-leaving { animation-duration: 0.01ms; animation-delay: 0s; }
+  .island.is-leaving,
+  .island-slot,
+  .island-slot.is-leaving { animation-duration: 0.01ms; animation-delay: 0s; }
   .island,
   .island-words,
   .island-acts,

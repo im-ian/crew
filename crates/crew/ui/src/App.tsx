@@ -576,12 +576,11 @@ export function App() {
       <SkillsPane open={skillsOpen} onClose={() => setSkillsOpen(false)} />
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
       <Island
-        notice={crew.island}
-        visible={crew.islandOpen}
+        notices={crew.islands}
         agents={crew.agents}
         onOpenBot={(id) => {
           // The bot may already be open behind a blurred window; the click answers it either way.
-          crew.closeIsland();
+          crew.closeBotNotices(id);
           crew.selectAgent(id);
         }}
         onClose={crew.closeIsland}
@@ -688,7 +687,7 @@ function menuItems(
         onClick: () => {
           crew.hideCtx();
           void copyText("@" + remote.id).then((ok) => {
-            if (ok) crew.showToast(t("common.copied"));
+            if (ok) crew.showToast(t("common.copied"), "ok", true);
           });
         },
       },

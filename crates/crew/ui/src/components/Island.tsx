@@ -1,19 +1,19 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { resolveFace } from "../avatar";
 import { Check, X } from "../icons";
-import { koSubject, noticeStays, type IslandNotice } from "../island";
+import { koSubject, type IslandNotice } from "../island";
 import { useLocale } from "../LocaleContext";
 import { useBotLabel } from "../BotLabelContext";
 import type { AgentInfo } from "../types";
 import { BotFace } from "./BotFace";
 
 type Props = {
-  notice: IslandNotice | null;
-  visible: boolean;
+  /** Newest first: the top of the stack, right under the titlebar. */
+  notices: IslandNotice[];
   agents: AgentInfo[];
   onOpenBot: (id: string) => void;
-  onClose: () => void;
-  /** The pointer came onto the island or left it: its clock stops meanwhile. */
+  onClose: (seq: number) => void;
+  /** The pointer came onto a notice or left it: every clock stops meanwhile. */
   onHold: () => void;
   onRelease: () => void;
 };
@@ -29,60 +29,101 @@ const TINT: Record<IslandNotice["kind"], string> = {
   error: "#ff453a",
 };
 
-// Keep these in step with the transitions on .island in styles.css.
+// Keep these in step with the transitions on .island and .island-slot in styles.css.
 const OPEN_DELAY_MS = 180;
-const CLOSE_MS = 450;
-const SWAP_MS = 130;
+const CLOSE_MS = 650;
 
-type Phase = "off" | "show" | "open" | "leave";
+type Phase = "show" | "open" | "leave";
+
+type Shown = { notice: IslandNotice; leaving: boolean };
 
 /**
- * A pill just under the titlebar that grows out of a dot to say one thing.
- * About a bot, it wears that bot's face with the matching expression, and a
- * click anywhere on it opens that bot's chat; otherwise a status dot. A new notice while it is open changes the words in
- * place instead of closing and opening again.
+ * The notices stacked under the titlebar, newest on top. One that goes keeps
+ * its place while it folds away, then the ones under it move up.
  */
-export function Island({ notice, visible, agents, onOpenBot, onClose, onHold, onRelease }: Props) {
+export function Island({ notices, agents, onOpenBot, onClose, onHold, onRelease }: Props) {
+  const [shown, setShown] = useState<Shown[]>([]);
+
+  useEffect(() => {
+    setShown((prev) => {
+      const live = new Set(notices.map((n) => n.seq));
+      const had = new Set(prev.map((s) => s.notice.seq));
+      const fresh = notices.filter((n) => !had.has(n.seq)).map((notice) => ({ notice, leaving: false }));
+      const kept = prev.map((s) => (live.has(s.notice.seq) ? s : { ...s, leaving: true }));
+      return [...fresh, ...kept];
+    });
+  }, [notices]);
+
+  const gone = (seq: number) => setShown((prev) => prev.filter((s) => s.notice.seq !== seq));
+
+  if (!shown.length) return null;
+  return (
+    <div className="island-stack">
+      {shown.map((s) => (
+        <IslandPill
+          key={s.notice.seq}
+          notice={s.notice}
+          leaving={s.leaving}
+          agents={agents}
+          onOpenBot={onOpenBot}
+          onClose={() => onClose(s.notice.seq)}
+          onGone={() => gone(s.notice.seq)}
+          onHold={onHold}
+          onRelease={onRelease}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * One notice: a pill that grows out of a dot to say one thing. About a bot,
+ * it wears that bot's face with the matching expression, and a click anywhere
+ * on it opens that bot's chat; otherwise a status dot.
+ */
+function IslandPill({
+  notice,
+  leaving,
+  agents,
+  onOpenBot,
+  onClose,
+  onGone,
+  onHold,
+  onRelease,
+}: {
+  notice: IslandNotice;
+  leaving: boolean;
+  agents: AgentInfo[];
+  onOpenBot: (id: string) => void;
+  onClose: () => void;
+  onGone: () => void;
+  onHold: () => void;
+  onRelease: () => void;
+}) {
   const { locale, t } = useLocale();
   const labelOf = useBotLabel();
-  const [phase, setPhase] = useState<Phase>("off");
-  const [shown, setShown] = useState<IslandNotice | null>(null);
-  const [swap, setSwap] = useState(false);
+  const [phase, setPhase] = useState<Phase>("show");
   const [width, setWidth] = useState(0);
-  const phaseRef = useRef<Phase>("off");
-  phaseRef.current = phase;
   const rowRef = useRef<HTMLDivElement>(null);
   const hovered = useRef(false);
   const releaseRef = useRef(onRelease);
   releaseRef.current = onRelease;
+  const goneRef = useRef(onGone);
+  goneRef.current = onGone;
+  const shown = notice;
 
   useEffect(() => {
-    if (!visible || !notice) {
-      if (phaseRef.current === "off") return;
+    if (leaving) {
       setPhase("leave");
-      const off = window.setTimeout(() => setPhase("off"), CLOSE_MS);
+      const off = window.setTimeout(() => goneRef.current(), CLOSE_MS);
       return () => window.clearTimeout(off);
     }
-    if (phaseRef.current === "open") {
-      // The words fade out, the width moves, the new words fade in. The new
-      // content goes in now, so a cancelled timer cannot leave them faded out.
-      setSwap(true);
-      setShown(notice);
-      const back = window.setTimeout(() => setSwap(false), SWAP_MS);
-      return () => {
-        window.clearTimeout(back);
-        setSwap(false);
-      };
-    }
-    setShown(notice);
-    setSwap(false);
-    setPhase("show");
     const grow = window.setTimeout(() => setPhase("open"), OPEN_DELAY_MS);
     return () => window.clearTimeout(grow);
-  }, [visible, notice?.seq]);
+  }, [leaving]);
 
   const bot =
-    shown && "botId" in shown ? (agents.find((a) => a.id === shown.botId) ?? null) : null;
+    "botId" in shown ? (agents.find((a) => a.id === shown.botId) ?? null) : null;
   const name = bot ? labelOf(bot) : "";
 
   // Open exactly as wide as what it says.
@@ -93,7 +134,7 @@ export function Island({ notice, visible, agents, onOpenBot, onClose, onHold, on
 
   // The pointer only holds the island while it can be pointed at. Folding
   // away, gone, or the window put aside sends no mouseleave, so let go here.
-  const live = (phase === "show" || phase === "open") && !!shown && !("botId" in shown && !bot);
+  const live = phase !== "leave" && !("botId" in shown && !bot);
   useEffect(() => {
     const letGo = () => {
       if (!hovered.current) return;
@@ -111,11 +152,14 @@ export function Island({ notice, visible, agents, onOpenBot, onClose, onHold, on
     };
   }, [live]);
 
-  if (phase === "off" || !shown) return null;
+  // A bot removed meanwhile has nothing left to say; its notice goes.
+  useEffect(() => {
+    if ("botId" in shown && !bot && !leaving) onClose();
+  }, [!!bot]);
   if ("botId" in shown && !bot) return null;
 
   const kind = shown.kind;
-  const stays = noticeStays(kind);
+  const stays = shown.stays;
   let lead;
   let words;
   let full: string;
@@ -148,12 +192,12 @@ export function Island({ notice, visible, agents, onOpenBot, onClose, onHold, on
   }
 
   return (
+    <div className={"island-slot" + (phase === "leave" ? " is-leaving" : "")}>
     <div
       className={
         "island" +
         (phase === "open" ? " is-open" : "") +
         (phase === "leave" ? " is-leaving" : "") +
-        (swap ? " is-swap" : "") +
         (bot ? " is-link" : "")
       }
       style={{ "--k": TINT[kind], "--w": `${width}px` } as CSSProperties}
@@ -202,6 +246,7 @@ export function Island({ notice, visible, agents, onOpenBot, onClose, onHold, on
           ) : null}
         </span>
       </div>
+    </div>
     </div>
   );
 }

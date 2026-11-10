@@ -22,13 +22,14 @@ import { openPendingOnFocus } from "./focusChat";
 import { useT } from "./LocaleContext";
 import { loadLastChat, pickOpenAgent, saveLastChat } from "./lastChat";
 import { loadNotify } from "./notifyPref";
+import { loadNoticeKeep } from "./noticeKeepPref";
 import { publishBotSignals, publishBotUnread } from "./botSignals";
 import {
   botNotices,
+  byRank,
   lifeAfterHover,
   noticeLife,
-  noticeStays,
-  topNotice,
+  pushNotice,
   type BotNoticeKind,
   type BotSnap,
   type IslandNotice,
@@ -107,8 +108,7 @@ export function useCrew() {
   const [remoteAddOpen, setRemoteAddOpen] = useState(false);
   const { remotes, refreshRemotes } = useRemotes();
   const [groupSettingsId, setGroupSettingsId] = useState<string | null>(null);
-  const [island, setIsland] = useState<IslandNotice | null>(null);
-  const [islandOpen, setIslandOpen] = useState(false);
+  const [islands, setIslands] = useState<IslandNotice[]>([]);
   const [ctx, setCtx] = useState<Ctx>({
     open: false,
     x: 0,
@@ -152,13 +152,14 @@ export function useCrew() {
   const groupsRef = useRef<RailLayout>({ groups, ungrouped, order });
   groupsRef.current = order ? { groups, ungrouped, order } : { groups, ungrouped };
   const groupsLoaded = useRef(false);
-  const islandTimer = useRef<number | null>(null);
-  // While the pointer is on the island its clock stands still: when it would
-  // have closed, and how much was left when the pointer came.
-  const islandEnd = useRef(0);
-  const islandLeft = useRef<number | null>(null);
+  // Each notice in the stack has its own clock. While the pointer is on the
+  // stack every clock stands still: `end` is when it would have closed,
+  // `left` how much was left when the pointer came.
+  const islandClocks = useRef(
+    new Map<number, { timer: number | null; end: number; left: number | null }>(),
+  );
   const islandHeld = useRef(false);
-  const islandRef = useRef<IslandNotice | null>(null);
+  const islandsRef = useRef<IslandNotice[]>([]);
   const islandSeq = useRef(0);
   const botSnaps = useRef(new Map<string, BotSnap>());
   const cancelling = useRef(new Set<string>());
@@ -205,10 +206,7 @@ export function useCrew() {
 
   // Opening the bot the island talks about, by any route, answers it.
   useEffect(() => {
-    const cur = islandRef.current;
-    if (selectedKind === "agent" && cur && "botId" in cur && cur.botId === selected) {
-      closeIsland();
-    }
+    if (selectedKind === "agent" && selected) closeBotNotices(selected);
   }, [selected, selectedKind]);
 
   // The faces keep a finished run's reaction going until the chat is seen.
@@ -251,59 +249,75 @@ export function useCrew() {
     return hit.body;
   }
 
-  // One notice at a time in the titlebar island; a newer one takes its place.
+  // The notices under the titlebar, newest on top.
+  function setStack(next: IslandNotice[]) {
+    islandsRef.current = next;
+    setIslands(next);
+  }
+
   function raiseIsland(
     next:
       | { kind: PlainTone; text: string }
       | { kind: BotNoticeKind; botId: string },
-    life: number,
+    life: number | null,
   ) {
     islandSeq.current += 1;
-    const notice = { ...next, seq: islandSeq.current } as IslandNotice;
-    islandRef.current = notice;
-    setIsland(notice);
-    setIslandOpen(true);
-    stopIslandClock();
-    islandLeft.current = null;
-    if (noticeStays(next.kind)) return;
-    if (islandHeld.current) islandLeft.current = life;
-    else startIslandClock(life);
+    const notice = { ...next, seq: islandSeq.current, stays: life === null } as IslandNotice;
+    const { stack, dropped } = pushNotice(islandsRef.current, notice);
+    for (const n of dropped) stopIslandClock(n.seq);
+    setStack(stack);
+    if (life === null) return;
+    if (islandHeld.current) {
+      islandClocks.current.set(notice.seq, { timer: null, end: 0, left: life });
+    } else startIslandClock(notice.seq, life);
   }
 
-  function startIslandClock(life: number) {
-    islandEnd.current = Date.now() + life;
-    islandTimer.current = window.setTimeout(() => closeIsland(), life);
+  function startIslandClock(seq: number, life: number) {
+    const timer = window.setTimeout(() => closeIsland(seq), life);
+    islandClocks.current.set(seq, { timer, end: Date.now() + life, left: null });
   }
 
-  function stopIslandClock() {
-    if (islandTimer.current) window.clearTimeout(islandTimer.current);
-    islandTimer.current = null;
+  function stopIslandClock(seq: number) {
+    const clock = islandClocks.current.get(seq);
+    if (clock?.timer) window.clearTimeout(clock.timer);
+    islandClocks.current.delete(seq);
   }
 
   function holdIsland() {
-    if (!islandRef.current) return;
+    if (islandHeld.current) return;
     islandHeld.current = true;
-    if (islandTimer.current === null) return;
-    stopIslandClock();
-    islandLeft.current = Math.max(0, islandEnd.current - Date.now());
+    const now = Date.now();
+    for (const clock of islandClocks.current.values()) {
+      if (clock.timer === null) continue;
+      window.clearTimeout(clock.timer);
+      clock.timer = null;
+      clock.left = Math.max(0, clock.end - now);
+    }
   }
 
   function releaseIsland() {
+    if (!islandHeld.current) return;
     islandHeld.current = false;
-    const left = islandLeft.current;
-    islandLeft.current = null;
-    if (left !== null && islandRef.current) startIslandClock(lifeAfterHover(left));
+    for (const [seq, clock] of [...islandClocks.current]) {
+      if (clock.left !== null) startIslandClock(seq, lifeAfterHover(clock.left));
+    }
   }
 
-  function closeIsland() {
-    stopIslandClock();
-    islandLeft.current = null;
-    islandRef.current = null;
-    setIslandOpen(false);
+  function closeIsland(seq: number) {
+    stopIslandClock(seq);
+    if (!islandsRef.current.some((n) => n.seq === seq)) return;
+    setStack(islandsRef.current.filter((n) => n.seq !== seq));
   }
 
-  function showToast(text: string, tone: PlainTone = "ok") {
-    raiseIsland({ kind: tone, text }, noticeLife(text));
+  function closeBotNotices(botId: string) {
+    for (const n of islandsRef.current) {
+      if ("botId" in n && n.botId === botId) closeIsland(n.seq);
+    }
+  }
+
+  /** `brief`: a word like "Copied" that only confirms what the user just did. */
+  function showToast(text: string, tone: PlainTone = "ok", brief = false) {
+    raiseIsland({ kind: tone, text }, noticeLife(tone, loadNoticeKeep(), brief));
   }
 
   function showError(err: unknown) {
@@ -318,21 +332,20 @@ export function useCrew() {
     const sel = selectedRef.current;
     const watching = (id: string) =>
       sel.kind === "agent" && sel.id === id && document.hasFocus() && !document.hidden;
-    const top = topNotice(notices.filter((n) => !watching(n.botId)));
-    if (top) {
-      raiseIsland(top, 4000);
-      return;
-    }
+    const keep = loadNoticeKeep();
+    const fresh = notices.filter((n) => !watching(n.botId));
+    for (const n of byRank(fresh)) raiseIsland(n, noticeLife(n.kind, keep));
     // A question answered or an approval given somewhere else lets its notice go.
-    const cur = islandRef.current;
-    if (cur && "botId" in cur) {
+    const said = new Set(fresh.map((n) => n.botId));
+    for (const cur of islandsRef.current) {
+      if (!("botId" in cur) || said.has(cur.botId)) continue;
       const snap = snaps.get(cur.botId);
       const over =
         !snap ||
         (cur.kind === "question" && !snap.asking) ||
         (cur.kind === "blocked" && snap.status !== "blocked") ||
         (cur.kind === "failure" && snap.status === "working");
-      if (over) closeIsland();
+      if (over) closeIsland(cur.seq);
     }
   }
 
@@ -569,7 +582,7 @@ export function useCrew() {
         }
       }
     }
-    showToast(t("memory.saved"));
+    showToast(t("memory.saved"), "ok", true);
     return true;
   }
 
@@ -1543,9 +1556,9 @@ export function useCrew() {
     remotes,
     refreshRemotes,
     groupSettingsId,
-    island,
-    islandOpen,
+    islands,
     closeIsland,
+    closeBotNotices,
     holdIsland,
     releaseIsland,
     ctx,
