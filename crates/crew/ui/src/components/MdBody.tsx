@@ -92,11 +92,13 @@ export function MdBody({
   const zoomLabel = t("image.preview");
   const nodes = useMemo(() => {
     const html = injectMentionChips(renderMarkdown(text, defs), agents);
-    const handleAgent = onMention
+    // Read through the ref: a parent hands a new handler each render, and the
+    // parse must not run again for that.
+    const handleAgent = clickable
       ? (id: string) => onMentionRef.current?.(id)
       : undefined;
     return htmlToReact(html, agents, handleAgent, baseDir, openPreview, zoomLabel);
-  }, [text, defs, agents, clickable, baseDir, onMention, zoomLabel, openPreview]);
+  }, [text, defs, agents, clickable, baseDir, zoomLabel, openPreview]);
   return (
     <div className={className}>
       {nodes}

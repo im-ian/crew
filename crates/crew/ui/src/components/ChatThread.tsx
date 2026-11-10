@@ -111,6 +111,9 @@ function indexOfRow(list: readonly ThreadRow[], id: string | null | undefined): 
 }
 
 /** A waiting user line is pulled under the reply. It is not part of the scrolled history. */
+/** One empty list, so a hint is not parsed again on every render. */
+const NO_AGENTS: AgentInfo[] = [];
+
 function isPinned(row: ThreadRow): boolean {
   return row.kind === "msg" && !!row.msg.queued;
 }
@@ -2197,7 +2200,7 @@ function ChoiceCard({
           ) : null}
         </div>
         {hint && card.state !== "closed" ? (
-          <MdBody className="choice-hint md" text={hint} agents={[]} />
+          <MdBody className="choice-hint md" text={hint} agents={NO_AGENTS} />
         ) : null}
         {q.multi && open && (q.options || []).length ? (
           <div className="choice-multi">
