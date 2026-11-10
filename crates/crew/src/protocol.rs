@@ -533,6 +533,10 @@ pub struct ChatMessage {
     /// and forwarded to another bot, so a side chat must not speak it again.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub mention: bool,
+    /// A question card's answer, sent on as the user's line. The card shows
+    /// the answer, so the thread does not show this line too.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub answer: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -877,9 +881,12 @@ mod tests {
             approval: None,
             choice: None,
             mention: false,
+            answer: false,
         };
         let line = serde_json::to_string(&msg).unwrap();
         assert!(line.contains("\"role\":\"user\""));
+        // Left off when unset, so a daemon from before it reads the line as it was.
+        assert!(!line.contains("answer"), "{line}");
         let back: ChatMessage = serde_json::from_str(&line).unwrap();
         assert_eq!(back.text, "hello");
         assert_eq!(back.role, Role::User);

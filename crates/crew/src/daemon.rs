@@ -3337,7 +3337,12 @@ fn send_user_line(
     }
     ensure_accepts_turn(id)?;
     let roster = crate::remote::with_remote(roster_vec());
-    let msg = crate::transcript::push_user(id, "user", shown);
+    // Only a card's answer goes without tells, and its card already shows it.
+    let msg = if tells {
+        crate::transcript::push_user(id, "user", shown)
+    } else {
+        crate::transcript::push_answer(id, shown)
+    };
     // The teammates named here answer after this message's turn, so they ride
     // with it instead of waiting on whatever the bot is doing now.
     let (mut then, delivered) = if tells {
@@ -5009,6 +5014,7 @@ mod daemon_tests {
             approval: None,
             choice: None,
             mention: false,
+            answer: false,
         }
     }
 
@@ -6181,6 +6187,14 @@ exec sleep 5"#,
                 assert!(item.then.is_empty(), "the named bot was told");
                 assert!(!item.text.contains("[crew system]"), "{}", item.text);
             }
+            // The card shows the answer, so its user line is marked to stay out of the thread.
+            let line = crate::transcript::messages(&bot)
+                .into_iter()
+                .rev()
+                .find(|m| m.role == Role::User)
+                .expect("the answer is a user line");
+            assert!(line.answer, "{}", line.text);
+            assert!(line.text.contains(&other), "{}", line.text);
 
             session.inner.lock().unwrap().status = AgentStatus::Idle;
             clear_inbox(&bot);

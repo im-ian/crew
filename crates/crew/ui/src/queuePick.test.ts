@@ -15,6 +15,15 @@ describe("waitingIds", () => {
       ]),
     ).toEqual(["a", "d"]);
   });
+
+  it("leaves out a card's answer, which the thread does not draw", () => {
+    expect(
+      waitingIds([
+        { id: "a", role: "user", queued: true, answer: true },
+        { id: "b", role: "user", queued: true },
+      ]),
+    ).toEqual(["b"]);
+  });
 });
 
 describe("stepQueuePick", () => {

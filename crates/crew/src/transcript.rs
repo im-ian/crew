@@ -737,6 +737,7 @@ pub fn push_tool(agent: &str, call_id: Option<&str>, name: &str, detail: &str) -
                 approval: None,
                 choice: None,
                 mention: false,
+                answer: false,
             };
         }
         // Unrecognised payload: still show a tool row so the turn isn't silent.
@@ -794,6 +795,7 @@ fn push_in_turn(
         approval: None,
         choice: None,
         mention: false,
+        answer: false,
     };
     if let Ok(mut map) = chats().lock() {
         let chat = map
@@ -856,6 +858,7 @@ pub fn push_compact_note(agent: &str) -> ChatMessage {
         approval: None,
         choice: None,
         mention: false,
+        answer: false,
     };
     if let Ok(mut map) = chats().lock() {
         let chat = map
@@ -977,6 +980,7 @@ fn pin_ask_tool(agent: &str, call_id: Option<&str>) {
         approval: None,
         choice: None,
         mention: false,
+        answer: false,
     };
     chat.messages.push(m.clone());
     chat.pending_idx = Some(chat.messages.len() - 1);
@@ -1011,6 +1015,7 @@ pub fn attach_choice(agent: &str, call_id: Option<&str>, mut card: ChoiceCard) -
                     approval: None,
                     choice: Some(card),
                     mention: false,
+                    answer: false,
                 };
             }
         };
@@ -1089,6 +1094,7 @@ pub fn attach_choice(agent: &str, call_id: Option<&str>, mut card: ChoiceCard) -
                 approval: None,
                 choice: Some(card),
                 mention: false,
+                answer: false,
             };
             chat.messages.push(m.clone());
             if let Some(id) = call_id {
@@ -1281,7 +1287,32 @@ fn push_role(
         approval: None,
         choice: None,
         mention,
+        answer: false,
     };
+    commit_row(agent, msg, expect)
+}
+
+/// A question card's answer, going on to the bot as the user's line. The card
+/// already shows it, so the thread does not draw this row again.
+pub fn push_answer(agent: &str, text: &str) -> ChatMessage {
+    let msg = ChatMessage {
+        id: new_id(),
+        role: Role::User,
+        from: "user".to_string(),
+        text: text.to_string(),
+        ts: now_ms(),
+        queued: false,
+        peer: None,
+        kind: None,
+        approval: None,
+        choice: None,
+        mention: false,
+        answer: true,
+    };
+    commit_row(agent, msg, true)
+}
+
+fn commit_row(agent: &str, msg: ChatMessage, expect: bool) -> ChatMessage {
     let sealed = match chats().lock() {
         Ok(mut map) => {
             let chat = map
@@ -1524,6 +1555,7 @@ pub fn set_pending_assistant(agent: &str, text: &str) {
                 approval: None,
                 choice: None,
                 mention: false,
+                answer: false,
             };
             chat.messages.push(m);
             chat.pending_idx = Some(chat.messages.len() - 1);
@@ -1601,6 +1633,7 @@ pub fn on_pty_bytes(agent: &str, bytes: &[u8]) {
                 approval: None,
                 choice: None,
                 mention: false,
+                answer: false,
             };
             chat.messages.push(m);
             chat.pending_idx = Some(chat.messages.len() - 1);
@@ -2009,6 +2042,7 @@ mod tests {
             approval: None,
             choice: None,
             mention: false,
+            answer: false,
         };
         let msgs = vec![
             row(
@@ -2820,6 +2854,7 @@ Severity must be one of: bug.";
             approval: None,
             choice: None,
             mention: false,
+            answer: false,
         };
         let line = serde_json::to_string(&msg).unwrap();
         assert!(!line.contains("queued"), "{line}");

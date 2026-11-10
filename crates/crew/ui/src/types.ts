@@ -238,6 +238,8 @@ export type ChatMessage = {
   choice?: ChoiceCard | null;
   /** Sent receipt of a user's @mention. A side chat leaves that sentence where it was typed. */
   mention?: boolean;
+  /** A question card's answer, sent on as the user's line. The card shows it, so the thread does not. */
+  answer?: boolean;
 };
 
 export type PendingAvatar = {
