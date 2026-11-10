@@ -845,12 +845,19 @@ function useImageZoom(
       e.preventDefault();
       setLive(false);
     };
+    // A smaller window shrinks the room a zoomed picture may move in.
+    const onResize = () => {
+      const s = sizes();
+      if (s) setView((v) => clampView(v, s.picture, s.room));
+    };
+    window.addEventListener("resize", onResize);
     stage.addEventListener("wheel", onWheel, { passive: false });
     stage.addEventListener("gesturestart", onGestureStart);
     stage.addEventListener("gesturechange", onGestureChange);
     stage.addEventListener("gestureend", onGestureEnd);
     return () => {
       window.clearTimeout(settle);
+      window.removeEventListener("resize", onResize);
       stage.removeEventListener("wheel", onWheel);
       stage.removeEventListener("gesturestart", onGestureStart);
       stage.removeEventListener("gesturechange", onGestureChange);
