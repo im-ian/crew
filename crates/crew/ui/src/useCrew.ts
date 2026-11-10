@@ -210,6 +210,21 @@ export function useCrew() {
     if (selectedKind === "agent" && selected) closeBotNotices(selected);
   }, [selected, selectedKind]);
 
+  // So does coming back to the window with that bot's chat already open: a
+  // notice raised while the window was away is read the moment it is seen.
+  useEffect(() => {
+    const seen = () => {
+      const sel = selectedRef.current;
+      if (sel.kind === "agent" && sel.id && !document.hidden) closeBotNotices(sel.id);
+    };
+    window.addEventListener("focus", seen);
+    document.addEventListener("visibilitychange", seen);
+    return () => {
+      window.removeEventListener("focus", seen);
+      document.removeEventListener("visibilitychange", seen);
+    };
+  }, []);
+
   // The faces keep a finished run's reaction going until the chat is seen.
   useEffect(() => {
     const keys = new Set(unread);
