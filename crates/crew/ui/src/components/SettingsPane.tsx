@@ -1,10 +1,11 @@
-import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { api } from "../api";
 import { loadBotDefault, saveBotDefault, type BotDefault } from "../botDefault";
 import { useLocale, useT } from "../LocaleContext";
 import type { Locale } from "../i18n";
 import type { ChatWidth } from "../chatWidth";
 import type { Delivery } from "../deliveryPref";
+import { applyFont, canvasMeasure, loadFont, missingFonts, saveFont } from "../fontPref";
 import { loadNotify, saveNotify } from "../notifyPref";
 import { loadNoticeKeep, saveNoticeKeep } from "../noticeKeepPref";
 import type { NoticeKeep } from "../island";
@@ -76,6 +77,9 @@ export function SettingsPane({
     saveNoticeKeep(next);
   }
   const [worktree, setWorktree] = useState(loadWorktree);
+  const [font, setFont] = useState(loadFont);
+  const measure = useMemo(canvasMeasure, []);
+  const missing = useMemo(() => missingFonts(font, measure), [font, measure]);
   const [botDefault, setBotDefault] = useState(loadBotDefault);
 
   function changeBotDefault(next: Partial<BotDefault>) {
@@ -267,6 +271,26 @@ export function SettingsPane({
                 {chatWidth === "narrow"
                   ? t("settings.chatWidth.note.narrow")
                   : t("settings.chatWidth.note.full")}
+              </p>
+              <Field label={t("settings.font")} htmlFor="settings-font">
+                <input
+                  id="settings-font"
+                  className="textin"
+                  placeholder={t("settings.font.placeholder")}
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={font}
+                  onChange={(e) => {
+                    setFont(e.target.value);
+                    applyFont(e.target.value);
+                    saveFont(e.target.value);
+                  }}
+                />
+              </Field>
+              <p className={"apply-note" + (missing.length ? " is-error" : "")}>
+                {missing.length
+                  ? t("settings.font.missing", { names: missing.join(", ") })
+                  : t("settings.font.note")}
               </p>
             </div>
           ) : section === "chat" ? (

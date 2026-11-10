@@ -83,6 +83,8 @@
   --text-2xl: 16px;
   --text-3xl: 18px;
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Helvetica Neue", sans-serif;
   --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --dur-fast: 0.12s;
@@ -108,8 +110,8 @@ html, body, #root {
   overscroll-behavior: none;
   background: var(--rail);
   color: var(--ink);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
-    "Helvetica Neue", sans-serif;
+  /* The font typed in Settings, when there is one (`fontPref.ts`). */
+  font-family: var(--font-user, var(--sans));
   font-size: var(--text-xl);
 }
 html { color-scheme: dark; }
