@@ -60,7 +60,6 @@ import { isSelfMentionDelivery, mentionRuns, mentionText } from "../mentions";
 import { MentionChip } from "./MentionChip";
 import { focusField, MentionField } from "./MentionField";
 import { clockLabels, messageClockParts } from "../clock";
-import type { CaretPoint } from "../caretPoint";
 import { threadFaceId } from "../threadFace";
 import {
   acceptHeight,
@@ -226,8 +225,8 @@ type Props = {
   showTools?: boolean;
   /** A routine run opens the routines pane instead of quoting its prompt. */
   onOpenRoutines?: () => void;
-  /** Caret in the composer, while this bot is idle. */
-  lookAt?: CaretPoint | null;
+  /** The bot's face follows the composer caret: it is idle. */
+  lookAtCaret?: boolean;
 };
 
 export function ChatThread({
@@ -257,7 +256,7 @@ export function ChatThread({
   onPeek,
   showTools = false,
   onOpenRoutines,
-  lookAt = null,
+  lookAtCaret = false,
 }: Props) {
   const { locale } = useLocale();
   const ref = useRef<HTMLDivElement>(null);
@@ -778,7 +777,7 @@ export function ChatThread({
             onJump={onJump}
             flash={flash}
             faceId={faceId}
-            lookAt={lookAt}
+            lookAtCaret={lookAtCaret}
           />
         );
     }
@@ -939,7 +938,7 @@ export function ChatThread({
           rows.map((row) => oneRow(row, startOf(row)))
         )}
         {pinned.map((row) => oneRow(row, startOf(row)))}
-        {empty ? <EmptyChat agent={currentAgent} lookAt={lookAt} /> : null}
+        {empty ? <EmptyChat agent={currentAgent} lookAtCaret={lookAtCaret} /> : null}
         {placeholders.map((agent) => {
           const id = "working-" + agent.id;
           const start = arrive.get(id);
@@ -965,7 +964,7 @@ export function ChatThread({
                 openName={false}
                 showName={false}
                 showFace
-                lookAt={lookAt}
+                lookAtCaret={lookAtCaret}
                 onSelectAgent={openAgent}
               />
             </MsgSlot>
@@ -1244,10 +1243,10 @@ export const JumpBottom = forwardRef<
 
 function EmptyChat({
   agent,
-  lookAt = null,
+  lookAtCaret = false,
 }: {
   agent: AgentInfo | null;
-  lookAt?: CaretPoint | null;
+  lookAtCaret?: boolean;
 }) {
   const t = useT();
   if (agent) {
@@ -1260,7 +1259,7 @@ function EmptyChat({
           shape={agent.avatar_shape}
           color={agent.avatar_color}
           status={agent.status}
-          lookAt={lookAt}
+          lookAtCaret={lookAtCaret}
         />
         <strong>{agent.name || agent.id}</strong>
         <span>{t("thread.startChat")}</span>
@@ -1550,7 +1549,7 @@ function Incoming({
   openName = true,
   showFace = true,
   showName = true,
-  lookAt = null,
+  lookAtCaret = false,
   onSelectAgent,
   onApprove,
   onAnswerChoice,
@@ -1568,7 +1567,7 @@ function Incoming({
   showFace?: boolean;
   /** The name beside a message. A 1:1 room leaves it off. */
   showName?: boolean;
-  lookAt?: CaretPoint | null;
+  lookAtCaret?: boolean;
   onSelectAgent?: (id: string) => void;
   onApprove?: (allow: boolean, always?: boolean) => void;
   onAnswerChoice?: (
@@ -1622,7 +1621,7 @@ function Incoming({
           status={agent.status}
           title={who}
           onClick={open}
-          lookAt={lookAt}
+          lookAtCaret={lookAtCaret}
         />
       ) : agent ? (
         <div className="msg-avatar" aria-hidden="true" />
@@ -2504,7 +2503,7 @@ function Bubble({
   onJump,
   flash = false,
   faceId = null,
-  lookAt = null,
+  lookAtCaret = false,
 }: {
   message: ChatMessage;
   agents: AgentInfo[];
@@ -2528,7 +2527,7 @@ function Bubble({
   onJump?: (id: string) => void;
   flash?: boolean;
   faceId?: string | null;
-  lookAt?: CaretPoint | null;
+  lookAtCaret?: boolean;
 }) {
   const t = useT();
   const labelOf = useBotLabel();
@@ -2548,7 +2547,7 @@ function Bubble({
         openName={!self}
         showName={!self}
         showFace={!self || m.id === faceId}
-        lookAt={self && m.id === faceId ? lookAt : null}
+        lookAtCaret={self && m.id === faceId && lookAtCaret}
         onSelectAgent={onSelectAgent}
         onApprove={onApprove}
         onAnswerChoice={onAnswerChoice}

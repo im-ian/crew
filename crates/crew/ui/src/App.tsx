@@ -34,7 +34,7 @@ import { loadChatWidth, saveChatWidth } from "./chatWidth";
 import { loadDelivery, saveDelivery } from "./deliveryPref";
 import { loadShowTools, saveShowTools } from "./tools";
 import { waitingEdit, waitingIds } from "./queuePick";
-import { samePoint, type CaretPoint } from "./caretPoint";
+import { publishCaret } from "./caretPoint";
 import { stopTurn } from "./sendGate";
 import { useCrew } from "./useCrew";
 import { useUpdater } from "./updater";
@@ -62,8 +62,6 @@ export function App() {
   const [delivery, setDelivery] = useState(loadDelivery);
   const [jumpSeq, setJumpSeq] = useState(0);
   const [queuePick, setQueuePick] = useState<string | null>(null);
-  const [caretAt, setCaretAt] = useState<CaretPoint | null>(null);
-  const caretRef = useRef<CaretPoint | null>(null);
   const waiting = useMemo(() => waitingIds(crew.messages), [crew.messages]);
   // `focus` is the run that was clicked, flashed where it sits; the panel
   // opens at the bottom. A search hit is opened on instead (`openAtFocus`).
@@ -409,12 +407,10 @@ export function App() {
                   if (crew.selected) crew.openRoutines(crew.selected);
                 }
           }
-          lookAt={
-            crew.currentAgent?.status === "working" ||
-            crew.currentAgent?.status === "blocked" ||
-            crew.currentAgent?.status === "exited"
-              ? null
-              : caretAt
+          lookAtCaret={
+            crew.currentAgent?.status !== "working" &&
+            crew.currentAgent?.status !== "blocked" &&
+            crew.currentAgent?.status !== "exited"
           }
         />
         <Composer
@@ -445,11 +441,7 @@ export function App() {
           delivery={delivery}
           onStop={() => stopTurn(() => void crew.stopAgent())}
           onOpenSkills={() => setSkillsOpen(true)}
-          onCaret={(point) => {
-            if (samePoint(caretRef.current, point)) return;
-            caretRef.current = point;
-            setCaretAt(point);
-          }}
+          onCaret={publishCaret}
           onDrafts={(ids) =>
             setDrafting((prev) =>
               prev.length === ids.length && prev.every((id, i) => id === ids[i])
