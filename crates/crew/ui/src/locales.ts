@@ -248,6 +248,11 @@ export const KO = {
   "thread.peekClose": "채팅 닫기",
   "thread.peekResize": "사이드 채팅 너비 조절",
 
+  "askHold.title": "질문에 아직 답하지 않았어요",
+  "askHold.body": "그냥 보내면 질문은 닫히고, 봇은 하던 일을 멈추고 이 메시지를 바로 받아요.",
+  "askHold.go": "질문으로 이동",
+  "askHold.send": "무시하고 보내기",
+
   "confirm.reset.title": "대화를 지울까요?",
   "confirm.reset.body": "봇 설정은 그대로 두고, 지금까지의 대화만 지웁니다.",
   "confirm.reset.ok": "지우기",
@@ -698,6 +703,11 @@ export const EN: { [K in MessageKey]: string } = {
   "thread.peekReadOnly": "This chat is view-only",
   "thread.peekClose": "Close chat",
   "thread.peekResize": "Resize side chat",
+
+  "askHold.title": "The question is still waiting",
+  "askHold.body": "Send anyway and the question closes. The bot stops what it was doing and takes this message now.",
+  "askHold.go": "Go to question",
+  "askHold.send": "Send anyway",
 
   "confirm.reset.title": "Clear this chat?",
   "confirm.reset.body": "Bot settings stay. Only the conversation is cleared.",

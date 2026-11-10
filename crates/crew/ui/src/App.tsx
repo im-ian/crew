@@ -41,6 +41,8 @@ import { useUpdater } from "./updater";
 import { api } from "./api";
 import { escapeLayerOpen } from "./escapeLayer";
 import { isWatching } from "./watchView";
+import { AskHoldDialog, type AskPick } from "./components/AskHoldDialog";
+import { openQuestionIds, questionFocusTarget } from "./questionJump";
 
 export function App() {
   const t = useT();
@@ -63,6 +65,17 @@ export function App() {
   const [jumpSeq, setJumpSeq] = useState(0);
   const [queuePick, setQueuePick] = useState<string | null>(null);
   const waiting = useMemo(() => waitingIds(crew.messages), [crew.messages]);
+  // A send while the bot waits on a question asks first; `agent` is the chat it was in.
+  const [askHold, setAskHold] = useState<{ agent: string; resolve: (pick: AskPick) => void } | null>(null);
+  const askHoldRef = useRef(askHold);
+  askHoldRef.current = askHold;
+  const openAsks = useMemo(
+    () =>
+      crew.selectedKind === "agent" && crew.selected && crew.messagesFor === crew.selected
+        ? openQuestionIds(crew.messages)
+        : [],
+    [crew.selectedKind, crew.selected, crew.messagesFor, crew.messages],
+  );
   // `focus` is the run that was clicked, flashed where it sits; the panel
   // opens at the bottom. A search hit is opened on instead (`openAtFocus`).
   const [peek, setPeek] = useState<{
@@ -129,6 +142,58 @@ export function App() {
     crew.highlightId,
   ]);
 
+  function holdForQuestion(agent: string): Promise<AskPick> {
+    return new Promise((resolve) => setAskHold({ agent, resolve }));
+  }
+
+  /** Brings the question into view, with the keys on its first answer. */
+  function goToQuestion(id: string) {
+    crew.highlightMessage(id);
+    let tries = 0;
+    // The row may mount only after the thread scrolls to it.
+    const step = () => {
+      const card = document.querySelector(
+        `[data-msg-id="${CSS.escape(id)}"] .choice-card.is-pending`,
+      );
+      const target = card ? questionFocusTarget(card) : null;
+      if (target) {
+        target.focus({ preventScroll: true });
+        return;
+      }
+      if (++tries < 30) requestAnimationFrame(step);
+      // Answered elsewhere, or never drawn: the keys go back to the draft.
+      else composerRef.current?.focus();
+    };
+    requestAnimationFrame(step);
+  }
+
+  async function pickAsk(pick: AskPick) {
+    const hold = askHoldRef.current;
+    if (!hold) return;
+    // A held Enter repeats. The first press decides.
+    askHoldRef.current = null;
+    setAskHold(null);
+    const c = crewRef.current;
+    const here = c.selectedKind === "agent" && c.selected === hold.agent;
+    const asks = here && c.messagesFor === hold.agent ? openQuestionIds(c.messages) : [];
+    if (pick === "go") {
+      const last = asks[asks.length - 1];
+      if (last) goToQuestion(last);
+      hold.resolve("go");
+      return;
+    }
+    if (pick === "send") {
+      // Closed first, so a bot that cannot be cut into is not left asking.
+      // A bot that can is stopped by the send, which closes them too.
+      await Promise.all(
+        asks.map((id) =>
+          c.answerChoice(hold.agent, id, [], [], [], true).catch(() => undefined),
+        ),
+      );
+    }
+    hold.resolve(pick);
+  }
+
   function togglePeek(peer: string, focus: string[] = []) {
     setPeek((cur) =>
       cur && cur.peer === peer && cur.focus[0] === focus[0]
@@ -180,8 +245,8 @@ export function App() {
     function onKey(e: KeyboardEvent) {
       if (e.isComposing) return;
       // The skills window handles its own Escape, and no shortcut should act
-      // on the app hidden behind it.
-      if (skillsOpen) return;
+      // on the app hidden behind it. The question dialog takes its own keys too.
+      if (skillsOpen || askHoldRef.current) return;
       if (leaveOpen) {
         if (e.key === "Escape") {
           e.preventDefault();
@@ -442,6 +507,11 @@ export function App() {
           onStop={() => stopTurn(() => void crew.stopAgent())}
           onOpenSkills={() => setSkillsOpen(true)}
           onCaret={publishCaret}
+          askHold={
+            openAsks.length && crew.selected
+              ? holdForQuestion.bind(null, crew.selected)
+              : undefined
+          }
           onDrafts={(ids) =>
             setDrafting((prev) =>
               prev.length === ids.length && prev.every((id, i) => id === ids[i])
@@ -479,6 +549,7 @@ export function App() {
           />
         ) : null}
       </main>
+      <AskHoldDialog open={!!askHold} onPick={(pick) => void pickAsk(pick)} />
       <ConfirmDialog
         open={crew.confirmOpen}
         kind={crew.confirmKind}

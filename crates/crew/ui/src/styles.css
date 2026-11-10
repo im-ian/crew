@@ -6491,3 +6491,18 @@ html[data-theme="light"] .island-ghost-2 {
     filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.4));
   }
 }
+
+/* Key hints on the buttons of the "question still waiting" dialog. */
+.ask-hold-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+.ask-hold-actions kbd {
+  padding: var(--space-2) var(--space-6);
+  border-radius: 5px;
+  background: rgba(127, 127, 127, 0.18);
+  color: inherit;
+  font: 600 11px/1.2 inherit;
+  opacity: 0.8;
+}
