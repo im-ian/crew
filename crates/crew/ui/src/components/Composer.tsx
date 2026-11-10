@@ -15,6 +15,7 @@ import { stepQueuePick } from "../queuePick";
 import { oneLine, wrapReply, type ReplyTarget } from "../reply";
 import { caretClientPoint, type CaretPoint } from "../caretPoint";
 import { dropPathsText } from "../dropPaths";
+import type { AskPick } from "./AskHoldDialog";
 import { MentionChip } from "./MentionChip";
 import { MentionMenu } from "./MentionMenu";
 import {
@@ -64,6 +65,8 @@ type Props = {
   onDrafts?: (ids: string[]) => void;
   /** Caret while a prompt is being typed. Null when the field is idle. */
   onCaret?: (point: CaretPoint | null) => void;
+  /** Set while the bot waits on a question: a send asks first what to do. */
+  askHold?: () => Promise<AskPick>;
 };
 
 type Mention = { start: number; query: string };
@@ -102,6 +105,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   onJump,
   onDrafts,
   onCaret,
+  askHold,
 }, ref) {
   const t = useT();
   const labelOf = useBotLabel();
@@ -122,6 +126,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   const fileRef = useRef<HTMLInputElement>(null);
   const plusRef = useRef<HTMLDivElement>(null);
   const pendingSteer = useRef(false);
+  // A send waiting on the question dialog. Another Enter does not ask again.
+  const holding = useRef(false);
   const onDraftsRef = useRef(onDrafts);
   onDraftsRef.current = onDrafts;
 
@@ -553,6 +559,26 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           }
           return;
         }
+        let steerNow = steer;
+        if (askHold) {
+          if (holding.current) return;
+          // The dialog takes the keys. Typing must not go on behind it.
+          el.blur();
+          holding.current = true;
+          let pick: AskPick;
+          try {
+            pick = await askHold();
+          } finally {
+            holding.current = false;
+          }
+          if (pick === "cancel") focusEditor();
+          if (pick !== "send") return;
+          // Another chat opened while it was up; this draft is not its send.
+          if (prevKey.current !== chatKey) return;
+          // Over the question, the message cuts in whatever the setting says.
+          steerNow = true;
+          queueMicrotask(focusEditor);
+        }
         const key = chatKey;
         const snapshot: Draft = {
           html: el.innerHTML,
@@ -568,7 +594,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         fit();
         let accepted = false;
         try {
-          accepted = await onSend(raw, steer);
+          accepted = await onSend(raw, steerNow);
         } catch {
           accepted = false;
         }

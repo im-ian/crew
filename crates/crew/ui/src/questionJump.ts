@@ -1,4 +1,5 @@
 import type { ThreadRow } from "./tools";
+import type { ChatMessage } from "./types";
 
 export type AskJump = "up" | "down";
 
@@ -75,6 +76,23 @@ export function jumpFrames(from: JumpMode, to: JumpMode, reduce = false): JumpFr
     ];
   }
   return [jumpEnd(to)];
+}
+
+/** Questions in this chat still waiting for the user, oldest first. */
+export function openQuestionIds(messages: readonly ChatMessage[]): string[] {
+  return messages.filter((m) => m.choice?.state === "pending").map((m) => m.id);
+}
+
+/** Where the keys go in an open question card: its first answer control in view. */
+export const QUESTION_FOCUS =
+  ".choice-fields .mention-field[contenteditable='true'], .choice-option:not([disabled]), .choice-other-input[contenteditable='true']";
+
+export function questionFocusTarget(card: ParentNode): HTMLElement | null {
+  for (const el of card.querySelectorAll<HTMLElement>(QUESTION_FOCUS)) {
+    // A stacked card holds the questions behind the front one inert.
+    if (!el.closest("[inert]")) return el;
+  }
+  return null;
 }
 
 /** The latest question card still waiting on the user. */

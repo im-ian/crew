@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { jumpFrames, jumpMode, pendingQuestionId, questionJumpDir } from "./questionJump";
+import {
+  jumpFrames,
+  jumpMode,
+  openQuestionIds,
+  pendingQuestionId,
+  questionJumpDir,
+} from "./questionJump";
 import type { ThreadRow } from "./tools";
 import type { ChatMessage, ChoiceState } from "./types";
 
@@ -146,5 +152,18 @@ describe("questionJumpDir", () => {
         rowBottom: 80,
       }),
     ).toBeNull();
+  });
+});
+
+describe("openQuestionIds", () => {
+  it("lists every question still waiting, oldest first", () => {
+    const rows = [row("a", "pending"), row("b", "answered"), row("c", null), row("d", "pending"), row("e", "closed")];
+    const messages = rows.flatMap((r) => (r.kind === "msg" ? [r.msg] : []));
+    expect(openQuestionIds(messages)).toEqual(["a", "d"]);
+  });
+
+  it("is empty when nothing waits", () => {
+    const messages = [row("a", "answered"), row("b", null)].flatMap((r) => (r.kind === "msg" ? [r.msg] : []));
+    expect(openQuestionIds(messages)).toEqual([]);
   });
 });
