@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allPicked,
+  answerLineHidden,
   answerSummary,
   answeredOptionView,
   blankDraft,
@@ -151,5 +152,20 @@ describe("select all", () => {
     expect(allPicked(three, ["C", "A", "B"])).toBe(true);
     expect(toggleAll(three, ["C", "A", "B"])).toEqual([]);
     expect(allPicked([], [])).toBe(false);
+  });
+});
+
+describe("answerLineHidden", () => {
+  it("hides a card's answer once it has gone to the bot", () => {
+    expect(answerLineHidden({ answer: true })).toBe(true);
+  });
+
+  it("shows it while it waits, so it can be taken back", () => {
+    expect(answerLineHidden({ answer: true, queued: true })).toBe(false);
+  });
+
+  it("leaves a typed line alone", () => {
+    expect(answerLineHidden({})).toBe(false);
+    expect(answerLineHidden({ queued: true })).toBe(false);
   });
 });

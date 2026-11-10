@@ -3313,31 +3313,40 @@ fn send_agent_shown(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
 /// it is the one the answer means, not someone to message, so no tell goes
 /// out, the same as when `crew ask` takes the answer itself.
 fn send_answer(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
-    send_user_line(id, shown, text, false, false)
+    send_user_line(id, shown, text, false, true)
 }
 
 /// `steer` stops a turn under way and starts this message in its place, ahead
 /// of what was waiting. Without it, the message waits its turn.
 fn send_from_user(id: &str, shown: &str, text: &str, steer: bool) -> anyhow::Result<()> {
-    send_user_line(id, shown, text, steer, true)
+    send_user_line(id, shown, text, steer, false)
 }
 
-/// `tells`: whether the teammates the line @names hear it too.
+/// `answer`: the line is a question card's answer. The teammates it @names are
+/// not told, and its row is marked, since the card already shows it.
 fn send_user_line(
     id: &str,
     shown: &str,
     text: &str,
     steer: bool,
-    tells: bool,
+    answer: bool,
 ) -> anyhow::Result<()> {
+    let tells = !answer;
+    let push = || {
+        if answer {
+            crate::transcript::push_answer(id, shown)
+        } else {
+            crate::transcript::push_user(id, "user", shown)
+        }
+    };
     let action = apply_user_interrupt(id, text, steer)?;
     if action == UserSendAction::Stop {
-        crate::transcript::push_user(id, "user", shown);
+        push();
         return Ok(());
     }
     ensure_accepts_turn(id)?;
     let roster = crate::remote::with_remote(roster_vec());
-    let msg = crate::transcript::push_user(id, "user", shown);
+    let msg = push();
     // The teammates named here answer after this message's turn, so they ride
     // with it instead of waiting on whatever the bot is doing now.
     let (mut then, delivered) = if tells {
@@ -5009,6 +5018,7 @@ mod daemon_tests {
             approval: None,
             choice: None,
             mention: false,
+            answer: false,
         }
     }
 
@@ -6181,6 +6191,14 @@ exec sleep 5"#,
                 assert!(item.then.is_empty(), "the named bot was told");
                 assert!(!item.text.contains("[crew system]"), "{}", item.text);
             }
+            // The card shows the answer, so its user line is marked to stay out of the thread.
+            let line = crate::transcript::messages(&bot)
+                .into_iter()
+                .rev()
+                .find(|m| m.role == Role::User)
+                .expect("the answer is a user line");
+            assert!(line.answer, "{}", line.text);
+            assert!(line.text.contains(&other), "{}", line.text);
 
             session.inner.lock().unwrap().status = AgentStatus::Idle;
             clear_inbox(&bot);

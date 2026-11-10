@@ -180,6 +180,7 @@ mod tests {
             approval: None,
             choice: None,
             mention: false,
+            answer: false,
         }
     }
 
