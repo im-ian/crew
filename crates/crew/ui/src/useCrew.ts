@@ -37,6 +37,7 @@ import {
 import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
 import { isOnline, localAgents, remoteLabel } from "./remote";
 import { useRemotes } from "./useRemotes";
+import { keepSame } from "./stableList";
 import {
   adoptNewGroups,
   firstOpenAgent,
@@ -714,7 +715,8 @@ export function useCrew() {
     // Before the list state, so a face sees its status and signal together.
     publishBotSignals(list);
     noticeBots(list);
-    setAgents(list);
+    // A bot at work is polled five times a second, mostly to the same answer.
+    setAgents((prev) => keepSame(prev, list));
     if (groupsLoaded.current) {
       const pruned = pruneLayout(groupsRef.current, localAgents(list));
       if (layoutChanged(pruned, groupsRef.current)) persistLayout(pruned);
@@ -731,7 +733,8 @@ export function useCrew() {
     const next = await getMessages(id);
     if (!next) return;
     // A send the daemon has not answered stays held, and stays off the bubble path.
-    setMessages(withUnaccepted(next, heldFor(id, heldSends.current)));
+    const shown = withUnaccepted(next, heldFor(id, heldSends.current));
+    setMessages((prev) => keepSame(prev, shown));
     setMessagesFor(id);
   }, []);
 
