@@ -233,7 +233,8 @@ pub fn preview(agent: &str) -> Option<String> {
 /// has not gone out, so the line before it stays. A reply in a side chat was
 /// not said here.
 fn preview_line(msg: &ChatMessage) -> Option<String> {
-    if msg.queued || !is_news(msg) {
+    // A card's answer is not drawn in the thread, so the list does not quote it.
+    if msg.queued || msg.answer || !is_news(msg) {
         return None;
     }
     let shown = crate::rows::display_text(msg);
@@ -1275,7 +1276,27 @@ fn push_role(
     peer: Option<String>,
     mention: bool,
 ) -> ChatMessage {
-    let msg = ChatMessage {
+    let msg = new_row(role, from, text, kind, peer, mention);
+    commit_row(agent, msg, expect)
+}
+
+/// A question card's answer, going on to the bot as the user's line. The card
+/// already shows it, so the thread does not draw this row again.
+pub fn push_answer(agent: &str, text: &str) -> ChatMessage {
+    let mut msg = new_row(Role::User, "user", text, None, None, false);
+    msg.answer = true;
+    commit_row(agent, msg, true)
+}
+
+fn new_row(
+    role: Role,
+    from: &str,
+    text: &str,
+    kind: Option<MessageKind>,
+    peer: Option<String>,
+    mention: bool,
+) -> ChatMessage {
+    ChatMessage {
         id: new_id(),
         role,
         from: from.to_string(),
@@ -1288,28 +1309,7 @@ fn push_role(
         choice: None,
         mention,
         answer: false,
-    };
-    commit_row(agent, msg, expect)
-}
-
-/// A question card's answer, going on to the bot as the user's line. The card
-/// already shows it, so the thread does not draw this row again.
-pub fn push_answer(agent: &str, text: &str) -> ChatMessage {
-    let msg = ChatMessage {
-        id: new_id(),
-        role: Role::User,
-        from: "user".to_string(),
-        text: text.to_string(),
-        ts: now_ms(),
-        queued: false,
-        peer: None,
-        kind: None,
-        approval: None,
-        choice: None,
-        mention: false,
-        answer: true,
-    };
-    commit_row(agent, msg, true)
+    }
 }
 
 fn commit_row(agent: &str, msg: ChatMessage, expect: bool) -> ChatMessage {

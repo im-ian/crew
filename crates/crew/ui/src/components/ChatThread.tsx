@@ -40,6 +40,7 @@ import {
   type ThreadRow,
 } from "../tools";
 import {
+  answerLineHidden,
   answeredOptionView,
   optionView,
   otherBadge,
@@ -2852,8 +2853,7 @@ function visibleMessages(
   const shown = messages.filter((m, i) => {
     if (isSelfMentionDelivery(m, selfId)) return false;
     if (!shownInThread(m)) return false;
-    // The card it answers already shows it.
-    if (m.answer) return false;
+    if (answerLineHidden(m)) return false;
     if (m.kind === "tool") return showTools;
     if (m.role !== "assistant") return true;
     const raw = m.text || "";

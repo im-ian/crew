@@ -3313,36 +3313,40 @@ fn send_agent_shown(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
 /// it is the one the answer means, not someone to message, so no tell goes
 /// out, the same as when `crew ask` takes the answer itself.
 fn send_answer(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
-    send_user_line(id, shown, text, false, false)
+    send_user_line(id, shown, text, false, true)
 }
 
 /// `steer` stops a turn under way and starts this message in its place, ahead
 /// of what was waiting. Without it, the message waits its turn.
 fn send_from_user(id: &str, shown: &str, text: &str, steer: bool) -> anyhow::Result<()> {
-    send_user_line(id, shown, text, steer, true)
+    send_user_line(id, shown, text, steer, false)
 }
 
-/// `tells`: whether the teammates the line @names hear it too.
+/// `answer`: the line is a question card's answer. The teammates it @names are
+/// not told, and its row is marked, since the card already shows it.
 fn send_user_line(
     id: &str,
     shown: &str,
     text: &str,
     steer: bool,
-    tells: bool,
+    answer: bool,
 ) -> anyhow::Result<()> {
+    let tells = !answer;
+    let push = || {
+        if answer {
+            crate::transcript::push_answer(id, shown)
+        } else {
+            crate::transcript::push_user(id, "user", shown)
+        }
+    };
     let action = apply_user_interrupt(id, text, steer)?;
     if action == UserSendAction::Stop {
-        crate::transcript::push_user(id, "user", shown);
+        push();
         return Ok(());
     }
     ensure_accepts_turn(id)?;
     let roster = crate::remote::with_remote(roster_vec());
-    // Only a card's answer goes without tells, and its card already shows it.
-    let msg = if tells {
-        crate::transcript::push_user(id, "user", shown)
-    } else {
-        crate::transcript::push_answer(id, shown)
-    };
+    let msg = push();
     // The teammates named here answer after this message's turn, so they ride
     // with it instead of waiting on whatever the bot is doing now.
     let (mut then, delivered) = if tells {

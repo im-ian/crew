@@ -130,3 +130,12 @@ export function allPicked(options: ChoiceOption[], row: string[] = []): boolean 
 export function toggleAll(options: ChoiceOption[], row: string[] = []): string[] {
   return allPicked(options, row) ? [] : options.map((o) => o.id);
 }
+
+/**
+ * A question card's answer goes on to the bot as the user's line. Once it has
+ * gone, the answered card says it, so the line is not drawn too. While it
+ * waits for a busy bot, it shows, so it can still be taken back.
+ */
+export function answerLineHidden(m: { answer?: boolean; queued?: boolean }): boolean {
+  return !!m.answer && !m.queued;
+}

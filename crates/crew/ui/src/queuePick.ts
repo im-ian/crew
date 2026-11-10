@@ -5,10 +5,9 @@ import type { AgentInfo } from "./types";
 
 /** User lines still waiting, oldest first. ArrowUp walks them toward the older ones. */
 export function waitingIds(
-  messages: { id: string; role: string; queued?: boolean; answer?: boolean }[],
+  messages: { id: string; role: string; queued?: boolean }[],
 ): string[] {
-  // A card's answer is not drawn, so the arrows do not land on it.
-  return messages.filter((m) => m.queued && m.role === "user" && !m.answer).map((m) => m.id);
+  return messages.filter((m) => m.queued && m.role === "user").map((m) => m.id);
 }
 
 /**
