@@ -24,13 +24,17 @@ export function sameValue(a: unknown, b: unknown): boolean {
  * it changed, and the old rows that did not, so React skips the redraw and a
  * memo keyed on a row keeps what it made.
  */
-export function keepSame<T>(prev: readonly T[], next: readonly T[]): T[] {
+export function keepSame<T extends { id: string }>(prev: readonly T[], next: readonly T[]): T[] {
+  // By id, not by place: a row taken out of the middle must not make every
+  // row after it look new.
+  const byId = new Map<string, T>();
+  for (const row of prev) if (!byId.has(row.id)) byId.set(row.id, row);
   let changed = prev.length !== next.length;
   const out = next.map((row, i) => {
-    const old = prev[i];
-    if (i < prev.length && sameValue(old, row)) return old;
-    changed = true;
-    return row;
+    const old = byId.get(row.id);
+    const kept = old !== undefined && sameValue(old, row) ? old : row;
+    if (kept !== prev[i]) changed = true;
+    return kept;
   });
   return changed ? out : (prev as T[]);
 }

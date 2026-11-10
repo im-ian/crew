@@ -27,6 +27,22 @@ describe("keepSame", () => {
     expect(out[1]).toBe(next[1]);
   });
 
+  it("matches rows by id when one is taken out of the middle", () => {
+    const prev = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    const out = keepSame(prev, [{ id: "a" }, { id: "c" }]);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toBe(prev[0]);
+    expect(out[1]).toBe(prev[2]);
+  });
+
+  it("sees a reorder of the same rows as a change", () => {
+    const prev = [{ id: "a" }, { id: "b" }];
+    const out = keepSame(prev, [{ id: "b" }, { id: "a" }]);
+    expect(out).not.toBe(prev);
+    expect(out[0]).toBe(prev[1]);
+    expect(out[1]).toBe(prev[0]);
+  });
+
   it("takes a longer or shorter list", () => {
     const prev = [{ id: "a" }];
     const longer = keepSame(prev, [{ id: "a" }, { id: "b" }]);
