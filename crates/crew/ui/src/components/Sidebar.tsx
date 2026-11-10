@@ -42,7 +42,8 @@ import { Avatar } from "./Avatar";
 import { RenameField } from "./RenameField";
 import { MentionChip } from "./MentionChip";
 import { BotLabelProvider } from "../BotLabelContext";
-import { botSearchText } from "../botLabel";
+import { botLabel, botSearchText } from "../botLabel";
+import { listedHits, matchRuns } from "../searchView";
 import { PlanUsageButton } from "./PlanUsageBar";
 import { ChevronDown, Ellipsis, Plus, Search, Settings } from "../icons";
 
@@ -513,6 +514,7 @@ export function Sidebar({
     .map((section) => ({ section, items: toItems(section.bots).filter(hit) }))
     .filter(({ items }) => !searching || items.length);
   const empty = !all.length && !remoteShown.length;
+  const hits = searching ? listedHits(searchHits) : [];
   const [remoteFolds, setRemoteFolds] = useState(loadRemoteFolds);
   const groupByKey = new Map(grouped.map((g) => [g.group.id, g]));
   const remoteByKey = new Map(remoteShown.map((r) => [remoteKey(r.section.alias), r]));
@@ -1186,7 +1188,7 @@ export function Sidebar({
     <aside className={folded ? "folded" : undefined}>
       <div className="drag-top" data-tauri-drag-region />
       <div className="search-row" data-tauri-drag-region="deep">
-        {/* A folded rail keeps the field in the tree so ⌘K can still reach
+        {/* A folded rail keeps the field in the tree so ⌘F can still reach
             it; focusing it opens the rail. */}
         <input
           ref={searchRef}
@@ -1198,6 +1200,13 @@ export function Sidebar({
           spellCheck={false}
           value={query}
           onChange={(e) => onQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== "Escape" || e.nativeEvent.isComposing) return;
+            // The first Escape clears the query, the next leaves the field.
+            e.preventDefault();
+            if (query) onQuery("");
+            else e.currentTarget.blur();
+          }}
           tabIndex={folded ? -1 : undefined}
           onFocus={() => {
             if (folded) setFolded(false, true);
@@ -1232,26 +1241,8 @@ export function Sidebar({
           <Plus />
         </button>
       </div>
-      {searchHits.length && !folded ? (
-        <div className="search-hits">
-          {searchHits.slice(0, 12).map((hit) => (
-            <button
-              key={hit.kind + hit.id}
-              type="button"
-              className="search-hit"
-              onClick={() => onSearchHit?.(hit)}
-            >
-              <span className="search-hit-kind">{hit.kind}</span>
-              <span className="search-hit-title">{hit.title}</span>
-              {hit.snippet ? (
-                <span className="search-hit-snippet">{hit.snippet}</span>
-              ) : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
       <div className="rail-lists">
-        {empty ? (
+        {empty && hits.length ? null : empty ? (
           <div className="empty-rail">
             {agents.length ? t("sidebar.noResults") : t("sidebar.empty")}
           </div>
@@ -1268,6 +1259,24 @@ export function Sidebar({
             })}
           </>
         )}
+        {hits.length ? (
+          <section className="search-hits" aria-label={t("search.messages")}>
+            <div className="search-hits-head">
+              {t("search.messages")}
+              <span className="search-hits-count">{hits.length}</span>
+            </div>
+            {hits.map((hit) => (
+              <SearchHitRow
+                key={hit.kind + hit.id}
+                hit={hit}
+                query={query}
+                agent={agents.find((a) => a.id === hit.bot)}
+                groups={groups}
+                onOpen={() => onSearchHit?.(hit)}
+              />
+            ))}
+          </section>
+        ) : null}
       </div>
       {onOpenSettings ? (
         <div className="rail-foot">
@@ -1555,6 +1564,56 @@ function RemoteHead({
         )}
       </button>
     </div>
+  );
+}
+
+function SearchHitRow({
+  hit,
+  query,
+  agent,
+  groups,
+  onOpen,
+}: {
+  hit: SearchHit;
+  query: string;
+  agent?: AgentInfo;
+  groups: Group[];
+  onOpen: () => void;
+}) {
+  const t = useT();
+  const { locale } = useLocale();
+  const ts = hit.ts || 0;
+  const stamp = listStamp(ts, locale);
+  const routine = hit.kind === "routine";
+  const label = agent ? botLabel(agent, groups) : hit.title;
+  const tag = routine ? t("search.routine") : hit.kind === "tool" ? t("search.tool") : "";
+  return (
+    <button type="button" className="search-hit" onClick={onOpen}>
+      <Avatar
+        id={agent?.id ?? hit.bot ?? hit.id}
+        name={label}
+        src={agent?.avatar}
+        shape={agent?.avatar_shape}
+        color={agent?.avatar_color}
+      />
+      <span className="search-hit-text">
+        <span className="search-hit-head">
+          <span className="search-hit-title">{label}</span>
+          {tag ? <span className="search-hit-kind">{tag}</span> : null}
+          {stamp ? (
+            <time className="rail-stamp" dateTime={new Date(ts).toISOString()}>
+              {stamp}
+            </time>
+          ) : null}
+        </span>
+        <span className="search-hit-snippet">
+          {routine ? <b className="search-hit-name">{hit.title}</b> : null}
+          {matchRuns(hit.snippet, query).map((run, i) =>
+            run.match ? <mark key={i}>{run.text}</mark> : run.text,
+          )}
+        </span>
+      </span>
+    </button>
   );
 }
 

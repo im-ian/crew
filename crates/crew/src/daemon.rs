@@ -1978,6 +1978,8 @@ fn last_status() -> &'static Mutex<HashMap<String, AgentStatus>> {
 
 fn search_corpus(query: &str) -> Vec<crate::search::SearchHit> {
     let roster = roster_vec();
+    // Teammates' bots on other PCs are in the list too, so their chats count.
+    let remote = crate::remote::agent_infos();
     let bots: Vec<_> = roster
         .iter()
         .map(|a| crate::search::SearchBot {
@@ -1985,6 +1987,11 @@ fn search_corpus(query: &str) -> Vec<crate::search::SearchHit> {
             name: a.name.as_str(),
             role: a.role.as_deref(),
         })
+        .chain(remote.iter().map(|a| crate::search::SearchBot {
+            id: a.id.as_str(),
+            name: a.name.as_str(),
+            role: a.role.as_deref(),
+        }))
         .collect();
     let routines: Vec<_> = roster
         .iter()
@@ -2005,6 +2012,7 @@ fn search_corpus(query: &str) -> Vec<crate::search::SearchHit> {
             id: m.id.as_str(),
             from: m.from.as_str(),
             text: m.text.as_str(),
+            ts: m.ts,
             tool: m.kind == Some(crate::protocol::MessageKind::Tool),
         })
         .collect();
