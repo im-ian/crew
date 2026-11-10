@@ -584,6 +584,7 @@ export function App() {
           crew.selectAgent(id);
         }}
         onClose={crew.closeIsland}
+        onClearPile={crew.clearPile}
         onHold={crew.holdIsland}
         onRelease={crew.releaseIsland}
       />

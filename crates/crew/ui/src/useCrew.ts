@@ -29,6 +29,7 @@ import {
   byRank,
   lifeAfterHover,
   noticeLife,
+  NOTICE_LIFE_MS,
   pushNotice,
   type BotNoticeKind,
   type BotSnap,
@@ -262,19 +263,38 @@ export function useCrew() {
     life: number | null,
   ) {
     islandSeq.current += 1;
-    const notice = { ...next, seq: islandSeq.current, stays: life === null } as IslandNotice;
+    const notice = {
+      ...next,
+      seq: islandSeq.current,
+      stays: life === null,
+      piled: false,
+    } as IslandNotice;
     const { stack, dropped } = pushNotice(islandsRef.current, notice);
     for (const n of dropped) stopIslandClock(n.seq);
     setStack(stack);
-    if (life === null) return;
+    // One that stays still gives up its row after a while, into the pile.
+    const ms = life ?? NOTICE_LIFE_MS;
     if (islandHeld.current) {
-      islandClocks.current.set(notice.seq, { timer: null, end: 0, left: life });
-    } else startIslandClock(notice.seq, life);
+      islandClocks.current.set(notice.seq, { timer: null, end: 0, left: ms });
+    } else startIslandClock(notice.seq, ms);
   }
 
   function startIslandClock(seq: number, life: number) {
-    const timer = window.setTimeout(() => closeIsland(seq), life);
+    const timer = window.setTimeout(() => {
+      const n = islandsRef.current.find((x) => x.seq === seq);
+      if (n?.stays) pileIsland(seq);
+      else closeIsland(seq);
+    }, life);
     islandClocks.current.set(seq, { timer, end: Date.now() + life, left: null });
+  }
+
+  function pileIsland(seq: number) {
+    stopIslandClock(seq);
+    setStack(islandsRef.current.map((n) => (n.seq === seq ? { ...n, piled: true } : n)));
+  }
+
+  function clearPile() {
+    setStack(islandsRef.current.filter((n) => !n.piled));
   }
 
   function stopIslandClock(seq: number) {
@@ -1559,6 +1579,7 @@ export function useCrew() {
     islands,
     closeIsland,
     closeBotNotices,
+    clearPile,
     holdIsland,
     releaseIsland,
     ctx,

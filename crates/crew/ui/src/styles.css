@@ -6273,6 +6273,51 @@ textarea.textin.skill-body {
   background: transparent;
 }
 .island-x:hover { background: #2c2c2e; color: #fff; }
+/* The pile: one pill for every notice that has been up a while, with two
+   edges peeking under it like a stack of cards. Laid out, the edges go. */
+.island-pile-slot {
+  position: relative;
+  margin-bottom: 16px;
+  transition: margin-bottom 0.2s var(--ease);
+}
+.island-pile-slot.is-open { margin-bottom: var(--space-6); }
+.island-pile { z-index: 2; }
+.island-ghost {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  height: 36px;
+  border-radius: var(--radius-pill);
+  background: #000;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 4px 12px rgba(0, 0, 0, 0.3);
+  transform: translateX(-50%);
+  transition:
+    width 0.5s var(--ease-out),
+    top 0.2s var(--ease),
+    opacity 0.2s var(--ease);
+}
+/* Dark: the cards behind are a lighter grey than the black pill, so they
+   read on the dark page. */
+.island-ghost-1 { z-index: 1; top: 5px; width: max(0px, calc(var(--w) - 20px)); background: #3a3a3c; }
+.island-ghost-2 { top: 10px; width: max(0px, calc(var(--w) - 40px)); background: #2c2c2e; }
+.island-pile-slot.is-open .island-ghost { top: 0; opacity: 0; }
+.island-faces {
+  width: auto;
+  display: flex;
+}
+.island-faces > * + * { margin-left: -6px; }
+.island-chev {
+  display: inline-flex;
+  padding: 0 var(--space-2);
+  color: #8e8e93;
+}
+.island-pile-list {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
 /* Light: a white pill with dark words, lifted by a soft shadow instead of
    sitting black on the white page. */
 html[data-theme="light"] .island {
@@ -6289,6 +6334,11 @@ html[data-theme="light"] .island.is-link:hover { background: var(--chip); }
 html[data-theme="light"] .island-lead { --bg: var(--menu); }
 html[data-theme="light"] .island-words span { color: var(--muted); }
 html[data-theme="light"] .island-x:hover { background: var(--chip); color: var(--ink); }
+html[data-theme="light"] .island-ghost-1,
+html[data-theme="light"] .island-ghost-2 {
+  background: var(--menu);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.08);
+}
 .avatar-file { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .island,

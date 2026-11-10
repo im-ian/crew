@@ -6,13 +6,17 @@ export type BotNoticeKind = "question" | "blocked" | "failure" | "success";
 /** How a message that is not about a bot reads: done, careful, or broken. */
 export type PlainTone = "ok" | "warn" | "error";
 
-/** `stays`: it waits for the user to close it instead of fading on its own. */
+/**
+ * `stays`: it waits for the user to close it instead of fading on its own.
+ * `piled`: it has been up for a while and folded into the pile under the
+ * titlebar, so it no longer takes a row of its own.
+ */
 export type IslandNotice =
-  | { seq: number; stays: boolean; kind: BotNoticeKind; botId: string }
-  | { seq: number; stays: boolean; kind: PlainTone; text: string };
+  | { seq: number; stays: boolean; piled: boolean; kind: BotNoticeKind; botId: string }
+  | { seq: number; stays: boolean; piled: boolean; kind: PlainTone; text: string };
 
-/** How many notices stack under the titlebar; a newer one pushes the oldest out. */
-export const STACK_MAX = 5;
+/** How many notices the island holds, pile included; a newer one pushes the oldest out. */
+export const STACK_MAX = 30;
 
 /** What the island needs to remember about a bot between two lists. */
 export type BotSnap = {
@@ -105,9 +109,10 @@ export function noticeStays(kind: IslandNotice["kind"]): boolean {
 export type NoticeKeep = "auto" | "keep";
 
 /**
- * How long a passing notice stays, or null for until it is closed. A brief
- * word like "Copied" goes quickly whatever Settings say; it only confirms
- * what the user just did.
+ * How long a passing notice stays, or null for until it is closed: such a
+ * notice folds into the pile after `NOTICE_LIFE_MS` instead. A brief word like
+ * "Copied" goes quickly whatever Settings say; it only confirms what the user
+ * just did.
  */
 export function noticeLife(
   kind: IslandNotice["kind"],

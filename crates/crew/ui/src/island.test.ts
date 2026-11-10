@@ -91,10 +91,11 @@ describe("byRank", () => {
 });
 
 describe("pushNotice", () => {
-  const plain = (seq: number, text: string): IslandNotice => ({ seq, stays: false, kind: "ok", text });
+  const plain = (seq: number, text: string): IslandNotice => ({ seq, stays: false, piled: false, kind: "ok", text });
   const about = (seq: number, botId: string): IslandNotice => ({
     seq,
     stays: false,
+    piled: false,
     kind: "success",
     botId,
   });

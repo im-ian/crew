@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { resolveFace } from "../avatar";
-import { Check, X } from "../icons";
+import { Check, ChevronDown, ChevronUp, X } from "../icons";
 import { koSubject, type IslandNotice } from "../island";
 import { useLocale } from "../LocaleContext";
 import { useBotLabel } from "../BotLabelContext";
@@ -13,6 +13,8 @@ type Props = {
   agents: AgentInfo[];
   onOpenBot: (id: string) => void;
   onClose: (seq: number) => void;
+  /** Closes everything in the pile at once. */
+  onClearPile: () => void;
   /** The pointer came onto a notice or left it: every clock stops meanwhile. */
   onHold: () => void;
   onRelease: () => void;
@@ -38,40 +40,171 @@ type Phase = "show" | "open" | "leave";
 type Shown = { notice: IslandNotice; leaving: boolean };
 
 /**
- * The notices stacked under the titlebar, newest on top. One that goes keeps
- * its place while it folds away, then the ones under it move up.
+ * The notices under the titlebar. A new one gets a row of its own; one that
+ * stays folds after a while into the pile at the top, so a long day of
+ * notices takes one row. New rows open under the pile, newest first. One that
+ * goes keeps its place while it folds away, then the ones under it move up.
  */
-export function Island({ notices, agents, onOpenBot, onClose, onHold, onRelease }: Props) {
+export function Island({
+  notices,
+  agents,
+  onOpenBot,
+  onClose,
+  onClearPile,
+  onHold,
+  onRelease,
+}: Props) {
   const [shown, setShown] = useState<Shown[]>([]);
+  const [pileOpen, setPileOpen] = useState(false);
+  const piled = notices.filter((n) => n.piled);
 
   useEffect(() => {
+    const rows = notices.filter((n) => !n.piled);
     setShown((prev) => {
-      const live = new Set(notices.map((n) => n.seq));
+      const live = new Set(rows.map((n) => n.seq));
       const had = new Set(prev.map((s) => s.notice.seq));
-      const fresh = notices.filter((n) => !had.has(n.seq)).map((notice) => ({ notice, leaving: false }));
+      const fresh = rows.filter((n) => !had.has(n.seq)).map((notice) => ({ notice, leaving: false }));
       const kept = prev.map((s) => (live.has(s.notice.seq) ? s : { ...s, leaving: true }));
       return [...fresh, ...kept];
     });
   }, [notices]);
 
-  const gone = (seq: number) => setShown((prev) => prev.filter((s) => s.notice.seq !== seq));
+  useEffect(() => {
+    if (!piled.length) setPileOpen(false);
+  }, [piled.length]);
 
-  if (!shown.length) return null;
+  const gone = (seq: number) => setShown((prev) => prev.filter((s) => s.notice.seq !== seq));
+  const pill = (notice: IslandNotice, leaving: boolean) => (
+    <IslandPill
+      key={notice.seq}
+      notice={notice}
+      leaving={leaving}
+      agents={agents}
+      onOpenBot={onOpenBot}
+      onClose={() => onClose(notice.seq)}
+      onGone={() => gone(notice.seq)}
+      onHold={onHold}
+      onRelease={onRelease}
+    />
+  );
+
+  if (!shown.length && !piled.length) return null;
   return (
     <div className="island-stack">
-      {shown.map((s) => (
-        <IslandPill
-          key={s.notice.seq}
-          notice={s.notice}
-          leaving={s.leaving}
+      {piled.length ? (
+        <IslandPile
+          notices={piled}
           agents={agents}
-          onOpenBot={onOpenBot}
-          onClose={() => onClose(s.notice.seq)}
-          onGone={() => gone(s.notice.seq)}
-          onHold={onHold}
-          onRelease={onRelease}
+          open={pileOpen}
+          onToggle={() => setPileOpen((o) => !o)}
+          onClear={onClearPile}
         />
-      ))}
+      ) : null}
+      {pileOpen ? <div className="island-pile-list">{piled.map((n) => pill(n, false))}</div> : null}
+      {shown.map((s) => pill(s.notice, s.leaving))}
+    </div>
+  );
+}
+
+/**
+ * The pile: one pill that says how many notices folded into it, with the
+ * faces of the bots they are about and two edges under it, like a stack of
+ * cards. A click lays them out under it, and the ✕ clears them all.
+ */
+function IslandPile({
+  notices,
+  agents,
+  open,
+  onToggle,
+  onClear,
+}: {
+  notices: IslandNotice[];
+  agents: AgentInfo[];
+  open: boolean;
+  onToggle: () => void;
+  onClear: () => void;
+}) {
+  const { locale, t } = useLocale();
+  const [width, setWidth] = useState(0);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const bots: AgentInfo[] = [];
+  for (const n of notices) {
+    if (!("botId" in n) || bots.some((b) => b.id === n.botId)) continue;
+    const bot = agents.find((a) => a.id === n.botId);
+    if (bot) bots.push(bot);
+    if (bots.length === 3) break;
+  }
+  // The most pressing kind in it tints the pile, so a waiting question shows through.
+  const tint = TINT[notices.find((n) => n.stays && n.kind !== "success")?.kind ?? notices[0].kind];
+  const label = t("island.pile", { n: notices.length });
+
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    if (row) setWidth(row.offsetWidth);
+  }, [notices.length, bots.map((b) => b.id).join(), locale, open]);
+
+  return (
+    <div
+      className={"island-slot island-pile-slot" + (open ? " is-open" : "")}
+      style={{ "--k": tint, "--w": `${width}px` } as CSSProperties}
+    >
+      <span className="island-ghost island-ghost-2" aria-hidden />
+      <span className="island-ghost island-ghost-1" aria-hidden />
+      <div
+        className="island is-open is-link island-pile"
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        title={open ? t("island.pileClose") : t("island.pileOpen")}
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          onToggle();
+        }}
+      >
+        <div className="island-row" ref={rowRef}>
+          <span className="island-lead island-faces">
+            {bots.length ? (
+              bots.map((bot) => {
+                const face = resolveFace(bot.id, bot.avatar_shape, bot.avatar_color);
+                return bot.avatar ? (
+                  <img key={bot.id} className="island-img" src={bot.avatar} alt="" />
+                ) : (
+                  <BotFace
+                    key={bot.id}
+                    id={bot.id}
+                    shape={face.shape}
+                    color={face.color}
+                    className="island-face"
+                    status="idle"
+                  />
+                );
+              })
+            ) : (
+              <span className="island-dot" />
+            )}
+          </span>
+          <span className="island-words">
+            <b>{label}</b>
+          </span>
+          <span className="island-acts">
+            <span className="island-chev">{open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</span>
+            <button
+              type="button"
+              className="island-x"
+              title={t("island.clearAll")}
+              aria-label={t("island.clearAll")}
+              onClick={(e) => {
+                e.stopPropagation();
+                onClear();
+              }}
+            >
+              <X size={14} />
+            </button>
+          </span>
+        </div>
+      </div>
     </div>
   );
 }
