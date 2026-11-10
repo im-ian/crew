@@ -6,6 +6,12 @@ pub struct SearchHit {
     pub id: String,
     pub title: String,
     pub snippet: String,
+    /// The bot the hit belongs to, so the list can show its face.
+    #[serde(default)]
+    pub bot: String,
+    /// When a message was written. Zero for bots and routines.
+    #[serde(default)]
+    pub ts: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -27,11 +33,17 @@ pub struct SearchRoutine<'a> {
 pub struct SearchMessage<'a> {
     pub scope: &'a str,
     pub id: &'a str,
-    pub from: &'a str,
     pub text: &'a str,
+    pub ts: u64,
     /// A tool card, so the UI can drop it while tool cards are hidden.
     pub tool: bool,
 }
+
+/// Message hits past this many are dropped, newest kept.
+const MAX_MESSAGES: usize = 100;
+/// Characters kept ahead of the match, so the snippet reads in context.
+const LEAD: usize = 24;
+const SNIPPET: usize = 120;
 
 pub fn search(
     query: &str,
@@ -43,41 +55,60 @@ pub fn search(
     if q.is_empty() {
         return Vec::new();
     }
+    let name_of = |id: &str| {
+        bots.iter()
+            .find(|b| b.id == id)
+            .map(|b| if b.name.is_empty() { b.id } else { b.name })
+    };
     let mut hits = Vec::new();
     for b in bots {
         if matches_q(&q, &[b.id, b.name, b.role.unwrap_or("")]) {
             hits.push(SearchHit {
                 kind: "bot".into(),
                 id: b.id.to_string(),
-                title: if b.name.is_empty() {
-                    b.id.to_string()
-                } else {
-                    b.name.to_string()
-                },
+                title: name_of(b.id).unwrap_or(b.id).to_string(),
                 snippet: b.role.unwrap_or("").to_string(),
+                bot: b.id.to_string(),
+                ts: 0,
             });
         }
     }
     for r in routines {
-        if matches_q(&q, &[r.id, r.name, r.prompt, r.agent]) {
+        // A routine of a bot that is gone is not on screen anywhere.
+        if name_of(r.agent).is_none() {
+            continue;
+        }
+        if matches_q(&q, &[r.id, r.name, r.prompt]) {
             hits.push(SearchHit {
                 kind: "routine".into(),
                 id: format!("{}:{}", r.agent, r.id),
                 title: r.name.to_string(),
-                snippet: r.prompt.chars().take(80).collect(),
+                snippet: snippet(r.prompt, &q),
+                bot: r.agent.to_string(),
+                ts: 0,
             });
         }
     }
+    let mut found = Vec::new();
     for m in messages {
-        if matches_q(&q, &[m.from, m.text, m.scope]) {
-            hits.push(SearchHit {
+        // A removed bot's chat can linger in memory; only chats in the list count.
+        let Some(name) = name_of(m.scope) else {
+            continue;
+        };
+        if matches_q(&q, &[m.text]) {
+            found.push(SearchHit {
                 kind: if m.tool { "tool" } else { "message" }.into(),
                 id: format!("{}:{}", m.scope, m.id),
-                title: m.scope.to_string(),
+                title: name.to_string(),
                 snippet: snippet(m.text, &q),
+                bot: m.scope.to_string(),
+                ts: m.ts,
             });
         }
     }
+    found.sort_by(|a, b| b.ts.cmp(&a.ts));
+    found.truncate(MAX_MESSAGES);
+    hits.extend(found);
     hits
 }
 
@@ -95,18 +126,23 @@ fn matches_q(q: &str, fields: &[&str]) -> bool {
     fields.iter().any(|f| f.to_lowercase().contains(q))
 }
 
+/// One line of the text around the first match, with a little lead-in.
 fn snippet(text: &str, q: &str) -> String {
-    let lower = text.to_lowercase();
-    let idx = lower.find(q).unwrap_or(0);
-    let start = text
-        .char_indices()
-        .map(|(i, _)| i)
-        .take_while(|i| *i + 1 <= idx)
-        .last()
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lower = flat.to_lowercase();
+    // Lowercasing keeps the character count for all but a few letters, so the
+    // match's character index in `lower` is close enough to `flat`'s.
+    let at = lower
+        .find(q)
+        .map(|i| lower[..i].chars().count())
         .unwrap_or(0);
-    let slice = text.get(start..).unwrap_or(text);
-    let clipped: String = slice.chars().take(80).collect();
-    clipped
+    let start = at.saturating_sub(LEAD);
+    let clipped: String = flat.chars().skip(start).take(SNIPPET).collect();
+    if start > 0 {
+        format!("…{clipped}")
+    } else {
+        clipped
+    }
 }
 
 #[cfg(test)]
@@ -130,15 +166,15 @@ mod tests {
             SearchMessage {
                 scope: "alpha",
                 id: "m1",
-                from: "user",
                 text: "please review the login bug",
+                ts: 1,
                 tool: false,
             },
             SearchMessage {
                 scope: "alpha",
                 id: "m2",
-                from: "Read",
                 text: "{\"file_path\":\"login.rs\"}",
+                ts: 2,
                 tool: true,
             },
         ];
@@ -161,6 +197,47 @@ mod tests {
         assert_eq!(brief[0].kind, "routine");
         assert!(search("   ", &bots, &routines, &messages).is_empty());
         assert!(search("nope-xyz", &bots, &routines, &messages).is_empty());
+    }
+
+    #[test]
+    fn skips_chats_of_bots_not_in_the_list() {
+        let bots = [SearchBot {
+            id: "alpha",
+            name: "Alpha",
+            role: None,
+        }];
+        let routines = [SearchRoutine {
+            agent: "gone",
+            id: "r1",
+            name: "daily",
+            prompt: "1초 report",
+        }];
+        let msg = |scope, id, text, ts| SearchMessage {
+            scope,
+            id,
+            text,
+            ts,
+            tool: false,
+        };
+        let messages = [
+            msg("gone", "m1", "1초 뒤에 다시", 3),
+            msg("alpha", "m2", "older 1초", 1),
+            msg("alpha", "m3", "newer 1초", 2),
+        ];
+        let hits = search("1초", &bots, &routines, &messages);
+        let ids: Vec<_> = hits.iter().map(|h| h.id.as_str()).collect();
+        assert_eq!(ids, ["alpha:m3", "alpha:m2"], "{hits:?}");
+        assert!(hits.iter().all(|h| h.title == "Alpha" && h.bot == "alpha"));
+        assert_eq!(hits[0].ts, 2);
+    }
+
+    #[test]
+    fn snippet_leads_in_and_flattens_lines() {
+        let text = format!("{}\nthe 1초 limit", "x".repeat(60));
+        let got = snippet(&text, "1초");
+        assert!(got.starts_with('…'), "{got}");
+        assert!(got.contains("x the 1초 limit"), "{got}");
+        assert_eq!(snippet("short 1초", "1초"), "short 1초");
     }
 
     #[test]
