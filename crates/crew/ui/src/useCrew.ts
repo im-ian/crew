@@ -215,7 +215,9 @@ export function useCrew() {
   useEffect(() => {
     const seen = () => {
       const sel = selectedRef.current;
-      if (sel.kind === "agent" && sel.id && !document.hidden) closeBotNotices(sel.id);
+      // Seen means in front: on screen and focused, as `watching` reads it.
+      if (sel.kind !== "agent" || !sel.id || document.hidden || !document.hasFocus()) return;
+      closeBotNotices(sel.id);
     };
     window.addEventListener("focus", seen);
     document.addEventListener("visibilitychange", seen);

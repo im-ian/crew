@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { resolveFace } from "../avatar";
 import { Check, ChevronDown, ChevronUp, X } from "../icons";
-import { koSubject, type IslandNotice } from "../island";
+import { koSubject, mostPressing, type IslandNotice } from "../island";
 import { useLocale } from "../LocaleContext";
 import { useBotLabel } from "../BotLabelContext";
 import type { AgentInfo } from "../types";
@@ -73,6 +73,7 @@ export function Island({
     if (!piled.length) setPileOpen(false);
   }, [piled.length]);
 
+  const rowSeqs = new Set(shown.map((s) => s.notice.seq));
   const gone = (seq: number) => setShown((prev) => prev.filter((s) => s.notice.seq !== seq));
   const pill = (notice: IslandNotice, leaving: boolean) => (
     <IslandPill
@@ -100,7 +101,12 @@ export function Island({
           onClear={onClearPile}
         />
       ) : null}
-      {pileOpen ? <div className="island-pile-list">{piled.map((n) => pill(n, false))}</div> : null}
+      {pileOpen ? (
+        <div className="island-pile-list">
+          {/* One still folding out of its row joins the list once it is gone. */}
+          {piled.filter((n) => !rowSeqs.has(n.seq)).map((n) => pill(n, false))}
+        </div>
+      ) : null}
       {shown.map((s) => pill(s.notice, s.leaving))}
     </div>
   );
@@ -135,7 +141,7 @@ function IslandPile({
     if (bots.length === 3) break;
   }
   // The most pressing kind in it tints the pile, so a waiting question shows through.
-  const tint = TINT[notices.find((n) => n.stays && n.kind !== "success")?.kind ?? notices[0].kind];
+  const tint = TINT[mostPressing(notices)];
   const label = t("island.pile", { n: notices.length });
 
   useLayoutEffect(() => {
@@ -158,6 +164,8 @@ function IslandPile({
         title={open ? t("island.pileClose") : t("island.pileOpen")}
         onClick={onToggle}
         onKeyDown={(e) => {
+          // The ✕ inside handles its own keys.
+          if (e.target !== e.currentTarget) return;
           if (e.key !== "Enter" && e.key !== " ") return;
           e.preventDefault();
           onToggle();
@@ -243,7 +251,6 @@ function IslandPill({
   releaseRef.current = onRelease;
   const goneRef = useRef(onGone);
   goneRef.current = onGone;
-  const shown = notice;
 
   useEffect(() => {
     if (leaving) {
@@ -256,18 +263,18 @@ function IslandPill({
   }, [leaving]);
 
   const bot =
-    "botId" in shown ? (agents.find((a) => a.id === shown.botId) ?? null) : null;
+    "botId" in notice ? (agents.find((a) => a.id === notice.botId) ?? null) : null;
   const name = bot ? labelOf(bot) : "";
 
   // Open exactly as wide as what it says.
   useLayoutEffect(() => {
     const row = rowRef.current;
     if (row) setWidth(row.offsetWidth);
-  }, [shown, name, locale, bot?.avatar]);
+  }, [notice, name, locale, bot?.avatar]);
 
   // The pointer only holds the island while it can be pointed at. Folding
   // away, gone, or the window put aside sends no mouseleave, so let go here.
-  const live = phase !== "leave" && !("botId" in shown && !bot);
+  const live = phase !== "leave" && !("botId" in notice && !bot);
   useEffect(() => {
     const letGo = () => {
       if (!hovered.current) return;
@@ -285,19 +292,17 @@ function IslandPill({
     };
   }, [live]);
 
-  // A bot removed meanwhile has nothing left to say; its notice goes.
-  useEffect(() => {
-    if ("botId" in shown && !bot && !leaving) onClose();
-  }, [!!bot]);
-  if ("botId" in shown && !bot) return null;
+  // A bot missing from the list draws nothing. Gone for good, the island
+  // closes its notices (useCrew's noticeBots); a list that blinks empty does not.
+  if ("botId" in notice && !bot) return null;
 
-  const kind = shown.kind;
-  const stays = shown.stays;
+  const kind = notice.kind;
+  const stays = notice.stays;
   let lead;
   let words;
   let full: string;
-  if (bot && "botId" in shown) {
-    const said = t(`island.${shown.kind}`);
+  if (bot && "botId" in notice) {
+    const said = t(`island.${notice.kind}`);
     const face = resolveFace(bot.id, bot.avatar_shape, bot.avatar_color);
     lead = bot.avatar ? (
       <img className="island-img" src={bot.avatar} alt="" />
@@ -308,7 +313,7 @@ function IslandPill({
         color={face.color}
         className="island-face"
         status={kind === "blocked" ? "blocked" : "idle"}
-        mood={shown.kind === "blocked" ? null : shown.kind}
+        mood={notice.kind === "blocked" ? null : notice.kind}
       />
     );
     const who = locale === "ko" ? koSubject(name) : name;
@@ -320,7 +325,7 @@ function IslandPill({
     full = `${who} ${said}`;
   } else {
     lead = <span className="island-dot" />;
-    words = "text" in shown ? shown.text : "";
+    words = "text" in notice ? notice.text : "";
     full = words;
   }
 

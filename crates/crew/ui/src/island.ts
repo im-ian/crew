@@ -91,13 +91,41 @@ export function pushNotice(
   max = STACK_MAX,
 ): { stack: IslandNotice[]; dropped: IslandNotice[] } {
   const same = (n: IslandNotice) =>
-    "botId" in next ? "botId" in n && n.botId === next.botId : "text" in n && n.text === next.text;
-  const kept = stack.filter((n) => !same(n));
-  const all = [next, ...kept];
-  return {
-    stack: all.slice(0, max),
-    dropped: [...stack.filter(same), ...all.slice(max)],
-  };
+    "botId" in next
+      ? "botId" in n && n.botId === next.botId
+      : "text" in n && n.text === next.text && n.kind === next.kind;
+  const all = [next, ...stack.filter((n) => !same(n))];
+  const dropped = stack.filter(same);
+  // Past the limit, what only passed on news goes before what waits on the user.
+  while (all.length > max) {
+    let at = all.length - 1;
+    for (let i = all.length - 1; i > 0; i--) {
+      if (!noticeStays(all[i].kind)) {
+        at = i;
+        break;
+      }
+    }
+    dropped.push(...all.splice(at, 1));
+  }
+  return { stack: all, dropped };
+}
+
+// How much a notice asks of the user, for the one that tints the pile.
+const URGENCY: Record<IslandNotice["kind"], number> = {
+  question: 6,
+  blocked: 5,
+  failure: 4,
+  error: 4,
+  warn: 3,
+  success: 2,
+  ok: 1,
+};
+
+/** The kind that most needs the user, out of a non-empty list. */
+export function mostPressing(notices: readonly IslandNotice[]): IslandNotice["kind"] {
+  let top = notices[0].kind;
+  for (const n of notices) if (URGENCY[n.kind] > URGENCY[top]) top = n.kind;
+  return top;
 }
 
 /** A notice the user has to act on stays until they do; the rest fade on their own. */

@@ -6336,7 +6336,6 @@ textarea.textin.skill-body {
   overscroll-behavior: contain;
   padding: var(--space-2) var(--space-10) var(--space-10);
   margin: calc(-1 * var(--space-2)) 0 0;
-  pointer-events: auto;
 }
 /* Light: a white pill with dark words, lifted by a soft shadow instead of
    sitting black on the white page. */

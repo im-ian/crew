@@ -7,6 +7,7 @@ import {
   noticeLife,
   noticeStays,
   byRank,
+  mostPressing,
   pushNotice,
   type IslandNotice,
   type BotSnap,
@@ -90,6 +91,14 @@ describe("byRank", () => {
   });
 });
 
+describe("mostPressing", () => {
+  it("picks what waits on the user, however old", () => {
+    const n = (kind: IslandNotice["kind"]): IslandNotice => ({ seq: 1, stays: true, piled: true, kind, text: "" }) as IslandNotice;
+    expect(mostPressing([n("ok"), n("success"), n("question"), n("warn")])).toBe("question");
+    expect(mostPressing([n("ok"), n("warn")])).toBe("warn");
+  });
+});
+
 describe("pushNotice", () => {
   const plain = (seq: number, text: string): IslandNotice => ({ seq, stays: false, piled: false, kind: "ok", text });
   const about = (seq: number, botId: string): IslandNotice => ({
@@ -115,6 +124,18 @@ describe("pushNotice", () => {
     r = pushNotice(start, plain(4, "a"));
     expect(seqs(r.stack)).toEqual([4, 2]);
     expect(seqs(r.dropped)).toEqual([1]);
+  });
+
+  it("lets the same words of another kind stand on their own", () => {
+    const err: IslandNotice = { seq: 1, stays: true, piled: false, kind: "error", text: "a" };
+    expect(seqs(pushNotice([err], plain(2, "a")).stack)).toEqual([2, 1]);
+  });
+
+  it("past the limit, drops passing news before what waits on the user", () => {
+    const asked: IslandNotice = { seq: 1, stays: true, piled: true, kind: "question", botId: "q" };
+    const { stack, dropped } = pushNotice([plain(2, "b"), asked], plain(3, "c"), 2);
+    expect(seqs(stack)).toEqual([3, 1]);
+    expect(seqs(dropped)).toEqual([2]);
   });
 
   it("pushes the oldest out past the limit", () => {
