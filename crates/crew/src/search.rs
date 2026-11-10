@@ -33,13 +33,16 @@ pub struct SearchRoutine<'a> {
 pub struct SearchMessage<'a> {
     pub scope: &'a str,
     pub id: &'a str,
+    /// Who wrote it; for a tool card, the tool's name.
+    pub from: &'a str,
     pub text: &'a str,
     pub ts: u64,
     /// A tool card, so the UI can drop it while tool cards are hidden.
     pub tool: bool,
 }
 
-/// Message hits past this many are dropped, newest kept.
+/// Message hits past this many are dropped, newest kept. Tool cards count
+/// apart, so a hidden pile of them does not push messages out.
 const MAX_MESSAGES: usize = 100;
 /// Characters kept ahead of the match, so the snippet reads in context.
 const LEAD: usize = 24;
@@ -95,7 +98,10 @@ pub fn search(
         let Some(name) = name_of(m.scope) else {
             continue;
         };
-        if matches_q(&q, &[m.text]) {
+        // A message's sender is a name or "user", which every row would match;
+        // a tool card's is the tool, which is worth finding by.
+        let from = if m.tool { m.from } else { "" };
+        if matches_q(&q, &[m.text, from]) {
             found.push(SearchHit {
                 kind: if m.tool { "tool" } else { "message" }.into(),
                 id: format!("{}:{}", m.scope, m.id),
@@ -107,7 +113,16 @@ pub fn search(
         }
     }
     found.sort_by(|a, b| b.ts.cmp(&a.ts));
-    found.truncate(MAX_MESSAGES);
+    let (mut said, mut tools) = (0, 0);
+    found.retain(|h| {
+        let n = if h.kind == "tool" {
+            &mut tools
+        } else {
+            &mut said
+        };
+        *n += 1;
+        *n <= MAX_MESSAGES
+    });
     hits.extend(found);
     hits
 }
@@ -166,6 +181,7 @@ mod tests {
             SearchMessage {
                 scope: "alpha",
                 id: "m1",
+                from: "user",
                 text: "please review the login bug",
                 ts: 1,
                 tool: false,
@@ -173,6 +189,7 @@ mod tests {
             SearchMessage {
                 scope: "alpha",
                 id: "m2",
+                from: "Read",
                 text: "{\"file_path\":\"login.rs\"}",
                 ts: 2,
                 tool: true,
@@ -192,6 +209,11 @@ mod tests {
         let file = search("login.rs", &bots, &routines, &messages);
         assert_eq!(file.len(), 1);
         assert_eq!(file[0].kind, "tool");
+        let by_tool = search("read", &bots, &routines, &messages);
+        assert_eq!(by_tool.len(), 1, "{by_tool:?}");
+        assert_eq!(by_tool[0].kind, "tool");
+        // "user" wrote m1, but a sender is not what a search is after.
+        assert!(search("user", &bots, &routines, &messages).is_empty());
         let brief = search("브리핑", &bots, &routines, &messages);
         assert_eq!(brief.len(), 1);
         assert_eq!(brief[0].kind, "routine");
@@ -215,6 +237,7 @@ mod tests {
         let msg = |scope, id, text, ts| SearchMessage {
             scope,
             id,
+            from: "user",
             text,
             ts,
             tool: false,
@@ -229,6 +252,42 @@ mod tests {
         assert_eq!(ids, ["alpha:m3", "alpha:m2"], "{hits:?}");
         assert!(hits.iter().all(|h| h.title == "Alpha" && h.bot == "alpha"));
         assert_eq!(hits[0].ts, 2);
+    }
+
+    #[test]
+    fn tool_cards_do_not_crowd_out_messages() {
+        let bots = [SearchBot {
+            id: "alpha",
+            name: "Alpha",
+            role: None,
+        }];
+        let ids: Vec<String> = (0..MAX_MESSAGES + 5).map(|i| format!("t{i}")).collect();
+        let mut messages: Vec<_> = ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| SearchMessage {
+                scope: "alpha",
+                id,
+                from: "Bash",
+                text: "grep needle",
+                ts: 100 + i as u64,
+                tool: true,
+            })
+            .collect();
+        messages.push(SearchMessage {
+            scope: "alpha",
+            id: "m1",
+            from: "user",
+            text: "the needle is here",
+            ts: 1,
+            tool: false,
+        });
+        let hits = search("needle", &bots, &[], &messages);
+        assert_eq!(
+            hits.iter().filter(|h| h.kind == "tool").count(),
+            MAX_MESSAGES
+        );
+        assert!(hits.iter().any(|h| h.id == "alpha:m1"), "{}", hits.len());
     }
 
     #[test]

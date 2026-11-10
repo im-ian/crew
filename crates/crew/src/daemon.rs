@@ -2010,6 +2010,7 @@ fn search_corpus(query: &str) -> Vec<crate::search::SearchHit> {
         .map(|(scope, m)| crate::search::SearchMessage {
             scope: scope.as_str(),
             id: m.id.as_str(),
+            from: m.from.as_str(),
             text: m.text.as_str(),
             ts: m.ts,
             tool: m.kind == Some(crate::protocol::MessageKind::Tool),
