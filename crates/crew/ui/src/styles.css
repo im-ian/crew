@@ -3814,18 +3814,62 @@ button.choice-option:active:not(:disabled) .choice-badge {
   place-items: center;
   padding: 64px 28px 28px;
   background: rgba(0, 0, 0, 0.78);
+  overflow: hidden;
+  touch-action: none;
 }
-.img-preview-count {
+/* Zoom out, the scale (a click fits it again), zoom in, and the album count. */
+.img-preview-bar {
   position: absolute;
-  left: 0;
-  right: 0;
+  left: 50%;
   bottom: 16px;
-  margin: 0;
-  text-align: center;
+  z-index: 1;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(30, 30, 32, 0.82);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   color: #fff;
-  font-size: 13px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.img-preview-bar button {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
-  pointer-events: none;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.img-preview-bar button:hover:not(:disabled),
+.img-preview-bar button:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+  outline: none;
+}
+.img-preview-bar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.img-preview-bar .img-preview-scale { min-width: 52px; }
+.img-preview-bar .img-preview-scale:disabled { opacity: 0.75; }
+.img-preview-count {
+  padding: 0 10px 0 8px;
+  margin-left: 2px;
+  border-left: 1px solid rgba(255, 255, 255, 0.18);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.8);
 }
 .img-preview img {
   max-width: min(1100px, calc(100vw - 56px));
@@ -3835,9 +3879,16 @@ button.choice-option:active:not(:disabled) .choice-badge {
   object-fit: contain;
   border-radius: 12px;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
-  cursor: default;
+  cursor: zoom-in;
+  transform-origin: center;
+  transition: transform 0.16s var(--ease-out);
+  will-change: transform;
 }
+.img-preview img.is-zoomed { cursor: grab; }
+.img-preview.is-live img { transition: none; }
+.img-preview.is-live img.is-zoomed:active { cursor: grabbing; }
 .img-preview-close {
+  z-index: 1;
   position: absolute;
   top: 14px;
   right: 14px;
