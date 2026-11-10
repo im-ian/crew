@@ -585,13 +585,20 @@ function MediaPreview({
   return createPortal(
     <div
       ref={stageRef}
-      className={"img-preview" + (zoom.live ? " is-live" : "")}
+      className={
+        "img-preview" +
+        (zoom.live ? " is-live" : "") +
+        (zoom.space ? " is-space" : "") +
+        (zoom.view.scale > MIN_SCALE ? " is-zoomed" : "")
+      }
       role="dialog"
       aria-modal="true"
       aria-label={label}
+      onPointerDown={zoom.onPointerDown}
       onClick={(e) => {
-        // A drag that ends off the picture still clicks the backdrop.
-        if (zoom.takeDrag()) return;
+        // A drag that ends off the picture still clicks the backdrop, and
+        // a click with Space held is a hand on the picture, not a dismissal.
+        if (zoom.takeDrag() || zoom.space) return;
         if (e.target === e.currentTarget) onClose();
       }}
     >
@@ -616,7 +623,6 @@ function MediaPreview({
             transform: `translate(${zoom.view.x}px, ${zoom.view.y}px) scale(${zoom.view.scale})`,
           }}
           onMouseDown={keep}
-          onPointerDown={zoom.onPointerDown}
           onDoubleClick={zoom.onDoubleClick}
         />
       ) : null}
@@ -680,8 +686,8 @@ function MediaPreview({
 
 /**
  * Zoom for the picture in the preview: a trackpad pinch, ⌘-scroll, the bar's
- * buttons, a double click, or + − 0. A zoomed picture moves with a drag or a
- * plain scroll. A new picture starts fitted.
+ * buttons, a double click, or + − 0. A zoomed picture moves with a drag, a
+ * Space drag from anywhere, or a plain scroll. A new picture starts fitted.
  */
 function useImageZoom(
   src: string | null,
@@ -695,6 +701,39 @@ function useImageZoom(
   viewRef.current = view;
   const drag = useRef<{ id: number; x: number; y: number; from: ZoomView; moved: boolean } | null>(null);
   const dragged = useRef(false);
+  // Space held: a hand that moves the picture from anywhere in the window.
+  const [space, setSpace] = useState(false);
+  const spaceRef = useRef(false);
+  spaceRef.current = space;
+
+  useEffect(() => {
+    if (!src) return;
+    const isSpace = (e: KeyboardEvent) => e.key === " " || e.code === "Space";
+    // Both halves are taken: the focused close button would otherwise take
+    // the press as a click and close the preview.
+    const onDown = (e: KeyboardEvent) => {
+      if (!isSpace(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setSpace(true);
+    };
+    const onUp = (e: KeyboardEvent) => {
+      if (!isSpace(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setSpace(false);
+    };
+    const onBlur = () => setSpace(false);
+    window.addEventListener("keydown", onDown, true);
+    window.addEventListener("keyup", onUp, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onDown, true);
+      window.removeEventListener("keyup", onUp, true);
+      window.removeEventListener("blur", onBlur);
+      setSpace(false);
+    };
+  }, [src]);
 
   useEffect(() => {
     setView(FIT);
@@ -819,12 +858,19 @@ function useImageZoom(
     };
   }, [stageRef, src, sizes, zoomBy, zoomTo, pointAt]);
 
+  /**
+   * A drag on the zoomed picture, or anywhere with Space held, moves it.
+   * The stage listens, so a Space drag can start on the backdrop.
+   */
   const onPointerDown = useCallback(
-    (e: ReactPointerEvent<HTMLImageElement>) => {
+    (e: ReactPointerEvent<HTMLElement>) => {
       dragged.current = false;
       if (e.button !== 0 || viewRef.current.scale <= MIN_SCALE) return;
-      const img = e.currentTarget;
-      img.setPointerCapture(e.pointerId);
+      const target = e.target as HTMLElement;
+      if (target.closest("button")) return;
+      if (!spaceRef.current && target !== imgRef.current) return;
+      const el = e.currentTarget;
+      el.setPointerCapture(e.pointerId);
       drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, from: viewRef.current, moved: false };
       setLive(true);
       const onMove = (ev: PointerEvent) => {
@@ -844,15 +890,15 @@ function useImageZoom(
         dragged.current = d.moved;
         drag.current = null;
         setLive(false);
-        img.removeEventListener("pointermove", onMove);
-        img.removeEventListener("pointerup", onUp);
-        img.removeEventListener("pointercancel", onUp);
+        el.removeEventListener("pointermove", onMove);
+        el.removeEventListener("pointerup", onUp);
+        el.removeEventListener("pointercancel", onUp);
       };
-      img.addEventListener("pointermove", onMove);
-      img.addEventListener("pointerup", onUp);
-      img.addEventListener("pointercancel", onUp);
+      el.addEventListener("pointermove", onMove);
+      el.addEventListener("pointerup", onUp);
+      el.addEventListener("pointercancel", onUp);
     },
-    [sizes],
+    [sizes, imgRef],
   );
 
   const onDoubleClick = useCallback(
@@ -875,7 +921,7 @@ function useImageZoom(
   }, []);
 
   return useMemo(
-    () => ({ view, live, step, fit, onPointerDown, onDoubleClick, takeDrag }),
-    [view, live, step, fit, onPointerDown, onDoubleClick, takeDrag],
+    () => ({ view, live, space, step, fit, onPointerDown, onDoubleClick, takeDrag }),
+    [view, live, space, step, fit, onPointerDown, onDoubleClick, takeDrag],
   );
 }

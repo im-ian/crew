@@ -3887,6 +3887,11 @@ button.choice-option:active:not(:disabled) .choice-badge {
 .img-preview img.is-zoomed { cursor: grab; }
 .img-preview.is-live img { transition: none; }
 .img-preview.is-live img.is-zoomed:active { cursor: grabbing; }
+/* Space held over a zoomed picture: the whole window is a hand. */
+.img-preview.is-space.is-zoomed,
+.img-preview.is-space.is-zoomed img { cursor: grab; }
+.img-preview.is-space.is-zoomed.is-live,
+.img-preview.is-space.is-zoomed.is-live img { cursor: grabbing; }
 .img-preview-close {
   z-index: 1;
   position: absolute;
