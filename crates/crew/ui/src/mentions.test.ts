@@ -9,6 +9,7 @@ import {
   mentionRuns,
   mentionText,
   resolveMention,
+  sameMentionAgents,
   trimMentionPunct,
 } from "./mentions";
 import type { AgentInfo } from "./types";
@@ -18,6 +19,19 @@ function agent(id: string, name: string): AgentInfo {
 }
 
 const agents = [agent("alpha", "Alpha"), agent("gamma", "춘식이")];
+
+describe("sameMentionAgents", () => {
+  it("ignores what a chip does not draw", () => {
+    const next = agents.map((a) => ({ ...a, status: "working" as const, preview: "…", last_ts: 9 }));
+    expect(sameMentionAgents(agents, next)).toBe(true);
+  });
+
+  it("sees a rename, a new face, or a bot more", () => {
+    expect(sameMentionAgents(agents, [{ ...agents[0], name: "Al" }, agents[1]])).toBe(false);
+    expect(sameMentionAgents(agents, [{ ...agents[0], avatar_shape: "cat" }, agents[1]])).toBe(false);
+    expect(sameMentionAgents(agents, [...agents, agent("beta", "Beta")])).toBe(false);
+  });
+});
 
 describe("resolveMention", () => {
   it("matches an id or a display name, either case", () => {

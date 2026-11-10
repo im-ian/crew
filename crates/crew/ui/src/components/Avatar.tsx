@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNo
 import { avatarColor, avatarPhase, initialOf, resolveFace } from "../avatar";
 import type { AgentStatus } from "../types";
 import { useBotSignal } from "../botSignals";
+import { useCaret } from "../caretPoint";
 import { useOrbitRoll } from "../orbitRoll";
 import { useWorkLook, type WorkLook } from "../workLook";
 import { BotFace } from "./BotFace";
@@ -21,8 +22,8 @@ type Props = {
   overlay?: ReactNode;
   as?: "div" | "button" | "span";
   onClick?: (e: MouseEvent) => void;
-  /** Client point an idle face follows. */
-  lookAt?: { x: number; y: number } | null;
+  /** An idle face follows the composer caret. */
+  lookAtCaret?: boolean;
   /** Holds one working look. Only the catalog pages set it, the app draws one itself. */
   workLook?: WorkLook | null;
 };
@@ -84,7 +85,7 @@ export function Avatar({
   overlay,
   as = "div",
   onClick,
-  lookAt = null,
+  lookAtCaret = false,
   workLook = null,
 }: Props) {
   const [broken, setBroken] = useState(false);
@@ -97,6 +98,7 @@ export function Avatar({
   const live = faceStatus(status, badge);
   const drawn = useWorkLook(live === "working", id);
   const signal = useBotSignal(id);
+  const lookAt = useCaret(lookAtCaret && showFace);
   const root = useRef<HTMLElement | null>(null);
   const setRoot = useCallback((el: HTMLElement | null) => {
     root.current = el;
