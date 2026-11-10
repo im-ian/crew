@@ -28,6 +28,30 @@ const BLOCK_TAGS = new Set([
   "TD",
 ]);
 
+/**
+ * Whether two bot lists draw the same mention chips. A chip reads only these
+ * fields, so a bot's status or preview changing does not parse a bubble again.
+ */
+export function sameMentionAgents(a: readonly AgentInfo[], b: readonly AgentInfo[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.id !== y.id ||
+      x.name !== y.name ||
+      x.remote !== y.remote ||
+      x.avatar !== y.avatar ||
+      x.avatar_shape !== y.avatar_shape ||
+      x.avatar_color !== y.avatar_color
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** A teammate's bot reads as `server · name`, the server its rail section is. */
 export function mentionLabel(agent: AgentInfo): string {
   const name = agent.name || agent.id;

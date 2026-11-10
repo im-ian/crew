@@ -1,7 +1,7 @@
 import { createElement, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import "katex/dist/katex.min.css";
-import { injectMentionChips } from "../mentions";
+import { injectMentionChips, sameMentionAgents } from "../mentions";
 import {
   isLocalHref,
   mediaKind,
@@ -90,15 +90,20 @@ export function MdBody({
     setPreview({ shots, index });
   }, []);
   const zoomLabel = t("image.preview");
+  // A new list on every poll while a bot works. Kept while the chips it draws
+  // stay the same, so the parse below does not run again for it.
+  const chipRef = useRef(agents);
+  if (!sameMentionAgents(chipRef.current, agents)) chipRef.current = agents;
+  const chipAgents = chipRef.current;
   const nodes = useMemo(() => {
-    const html = injectMentionChips(renderMarkdown(text, defs), agents);
+    const html = injectMentionChips(renderMarkdown(text, defs), chipAgents);
     // Read through the ref: a parent hands a new handler each render, and the
     // parse must not run again for that.
     const handleAgent = clickable
       ? (id: string) => onMentionRef.current?.(id)
       : undefined;
-    return htmlToReact(html, agents, handleAgent, baseDir, openPreview, zoomLabel);
-  }, [text, defs, agents, clickable, baseDir, zoomLabel, openPreview]);
+    return htmlToReact(html, chipAgents, handleAgent, baseDir, openPreview, zoomLabel);
+  }, [text, defs, chipAgents, clickable, baseDir, zoomLabel, openPreview]);
   return (
     <div className={className}>
       {nodes}

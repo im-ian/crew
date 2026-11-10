@@ -110,10 +110,10 @@ function indexOfRow(list: readonly ThreadRow[], id: string | null | undefined): 
   return list.findIndex((row) => rowHas(row, id));
 }
 
-/** A waiting user line is pulled under the reply. It is not part of the scrolled history. */
 /** One empty list, so a hint is not parsed again on every render. */
 const NO_AGENTS: AgentInfo[] = [];
 
+/** A waiting user line is pulled under the reply. It is not part of the scrolled history. */
 function isPinned(row: ThreadRow): boolean {
   return row.kind === "msg" && !!row.msg.queued;
 }
