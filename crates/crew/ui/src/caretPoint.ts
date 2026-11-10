@@ -46,7 +46,11 @@ function subscribe(fn: () => void) {
   };
 }
 
-/** The composer caret, or null while `follow` is off. */
+function stayPut() {
+  return () => {};
+}
+
+/** The composer caret, or null while `follow` is off. Only a following face listens. */
 export function useCaret(follow: boolean): CaretPoint | null {
-  return useSyncExternalStore(subscribe, () => (follow ? caret : null));
+  return useSyncExternalStore(follow ? subscribe : stayPut, () => (follow ? caret : null));
 }
