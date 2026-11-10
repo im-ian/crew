@@ -6325,10 +6325,18 @@ textarea.textin.skill-body {
   padding: 0 var(--space-2);
   color: #8e8e93;
 }
+/* A long pile scrolls inside the window. The padding leaves room for the
+   pills' rings and shadows, which the scroll box would otherwise clip. */
 .island-pile-list {
   display: flex;
   flex-direction: column;
   align-items: center;
+  max-height: calc(100vh - var(--titlebar) - 160px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-2) var(--space-10) var(--space-10);
+  margin: calc(-1 * var(--space-2)) 0 0;
+  pointer-events: auto;
 }
 /* Light: a white pill with dark words, lifted by a soft shadow instead of
    sitting black on the white page. */
