@@ -1,4 +1,4 @@
-import { Fragment, type CSSProperties } from "react";
+import { Fragment, useEffect, useRef, type CSSProperties } from "react";
 import { useBotLabel } from "../BotLabelContext";
 import { useT } from "../LocaleContext";
 import type { AgentInfo } from "../types";
@@ -6,7 +6,8 @@ import { Avatar } from "./Avatar";
 
 /**
  * The bots `@` offers. A mouse pick keeps the caret in the box it was typed in.
- * The first `near` share the open chat's group; a labelled line sets the others apart, and each half is named.
+ * The first `near` share the open chat's group; a labelled line sets the
+ * others apart, and each half is named.
  */
 export function MentionMenu({
   bots,
@@ -27,13 +28,30 @@ export function MentionMenu({
   const t = useT();
   // Both halves are there, so each gets its label.
   const split = near > 0 && near < bots.length;
+  const menuRef = useRef<HTMLDivElement>(null);
+  // The labels make the list taller than the menu, so the arrow keys bring
+  // the row they land on into view.
+  useEffect(() => {
+    menuRef.current
+      ?.querySelector<HTMLElement>(".mention-item.active")
+      ?.scrollIntoView?.({ block: "nearest" });
+  }, [active, bots]);
   return (
-    <div className={"mention-menu" + (className ? " " + className : "")} role="listbox" style={style}>
+    <div
+      ref={menuRef}
+      className={"mention-menu" + (className ? " " + className : "")}
+      role="listbox"
+      style={style}
+    >
       {bots.map((a, i) => (
         <Fragment key={a.id}>
-          {split && i === 0 ? <div className="mention-head">{t("mention.sameGroup")}</div> : null}
+          {split && i === 0 ? (
+            <div className="mention-head" role="presentation">
+              {t("mention.sameGroup")}
+            </div>
+          ) : null}
           {split && i === near ? (
-            <div className="mention-head mention-sep" role="separator">
+            <div className="mention-head mention-sep" role="presentation">
               {t("mention.otherGroups")}
             </div>
           ) : null}

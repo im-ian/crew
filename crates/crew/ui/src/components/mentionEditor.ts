@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { botSearchText, groupOfBot } from "../botLabel";
+import { itemKey } from "../groups";
 import { mentionMatches } from "../mentions";
 import type { AgentInfo, Group } from "../types";
 
@@ -38,9 +39,13 @@ export function mentionCandidates(
       (mentionMatches(a, query) || botSearchText(a, groups).toLowerCase().includes(q)),
   );
   const home = skip ? groupOfBot(groups, skip) : null;
-  const isNear = (a: AgentInfo) => !!home && !a.remote && groupOfBot(groups, a.id)?.id === home.id;
-  const near = found.filter(isNear);
-  const bots = [...near, ...found.filter((a) => !isNear(a))].slice(0, 8);
+  // `home.items` holds the group's own keys, so one lookup tells a groupmate.
+  const near: AgentInfo[] = [];
+  const far: AgentInfo[] = [];
+  for (const a of found) {
+    (home && !a.remote && home.items.includes(itemKey("agent", a.id)) ? near : far).push(a);
+  }
+  const bots = [...near, ...far].slice(0, 8);
   return { bots, near: Math.min(near.length, bots.length) };
 }
 export function insertChip(
