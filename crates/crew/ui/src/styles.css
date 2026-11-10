@@ -4551,6 +4551,19 @@ html.peek-resizing .peek-resize::after {
 }
 .mention-item.active,
 .mention-item:hover { background: var(--chip); }
+/* Names the open chat's groupmates and, under a line, the other groups.
+   --line is the menu's own grey in the dark theme, so the rule mixes in --muted. */
+.mention-head {
+  padding: var(--space-4) var(--space-10) var(--space-2);
+  color: var(--faint);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.mention-sep {
+  margin: var(--space-6) var(--space-10) 0;
+  padding: var(--space-8) 0 var(--space-2);
+  border-top: 1px solid color-mix(in srgb, var(--muted) 30%, transparent);
+}
 /* Off a question card, which clips what sticks out of it. The field places
    the holder; the menu inside keeps its own pop. */
 .mention-float {
@@ -4580,11 +4593,6 @@ html.peek-resizing .peek-resize::after {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.mention-id {
-  margin-left: auto;
-  color: var(--faint);
-  font-size: var(--text-sm);
 }
 .mention-chip {
   display: inline-flex;

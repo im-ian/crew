@@ -5,7 +5,7 @@ import type { AgentInfo, Group } from "./types";
 /** Between a group and a bot's name, as the screen reads them. */
 export const LABEL_SEP = " · ";
 
-function groupOfBot(groups: readonly Group[], id: string): Group | null {
+export function groupOfBot(groups: readonly Group[], id: string): Group | null {
   const key = itemKey("agent", id);
   return groups.find((g) => g.items.includes(key)) ?? null;
 }

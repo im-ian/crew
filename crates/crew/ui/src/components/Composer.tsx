@@ -168,11 +168,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     },
   }));
 
-  const matches = useMemo(
+  const { bots: matches, near: mentionNear } = useMemo(
     () =>
       mention
         ? mentionCandidates(agents, groups, mention.query, selectedKind === "agent" ? selected : null)
-        : [],
+        : { bots: [], near: 0 },
     [agents, groups, mention, selected, selectedKind],
   );
 
@@ -607,7 +607,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           </div>
         ) : null}
         {mentionOpen ? (
-          <MentionMenu bots={matches} active={mentionIdx} onPick={pickMention} />
+          <MentionMenu bots={matches} near={mentionNear} active={mentionIdx} onPick={pickMention} />
         ) : null}
         {editing ? (
           <div className="reply-bar">

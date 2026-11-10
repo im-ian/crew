@@ -14,7 +14,7 @@ const groups: Group[] = [
   { id: "g1", name: "Crew", collapsed: false, items: ["agent:dev", "agent:art"] },
   { id: "g2", name: "제이더플로어", collapsed: false, items: ["agent:jtf"] },
 ];
-const ids = (q: string, skip?: string) => mentionCandidates(agents, groups, q, skip).map((a) => a.id);
+const ids = (q: string, skip?: string) => mentionCandidates(agents, groups, q, skip).bots.map((a) => a.id);
 
 describe("mentionCandidates", () => {
   it("offers every bot but the one the text goes to", () => {
@@ -28,8 +28,25 @@ describe("mentionCandidates", () => {
     expect(ids("acme")).toEqual(["acme/acc_1"]);
   });
 
+  it("puts the open chat's groupmates first, the rest after a line", () => {
+    expect(ids("", "jtf")).toEqual(["dev", "art", "acme/acc_1"]);
+    expect(mentionCandidates(agents, groups, "", "jtf").near).toBe(0);
+    const g = [{ id: "g", name: "G", collapsed: false, items: ["agent:jtf", "agent:art"] }];
+    const r = mentionCandidates(agents, g, "", "jtf");
+    expect(r.bots.map((a) => a.id)).toEqual(["art", "dev", "acme/acc_1"]);
+    expect(r.near).toBe(1);
+  });
+
+  it("keeps groupmates inside the eight", () => {
+    const many = Array.from({ length: 12 }, (_, i) => bot(`b${i}`, `봇${i}`));
+    const g = [{ id: "g", name: "G", collapsed: false, items: ["agent:b0", "agent:b11"] }];
+    const r = mentionCandidates(many, g, "봇", "b0");
+    expect(r.bots[0].id).toBe("b11");
+    expect(r.near).toBe(1);
+  });
+
   it("offers eight at most", () => {
     const many = Array.from({ length: 12 }, (_, i) => bot(`b${i}`, `봇${i}`));
-    expect(mentionCandidates(many, [], "봇")).toHaveLength(8);
+    expect(mentionCandidates(many, [], "봇").bots).toHaveLength(8);
   });
 });
