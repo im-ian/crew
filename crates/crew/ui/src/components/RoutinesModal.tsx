@@ -76,11 +76,7 @@ export function RoutinesModal({
     const fromKey = !("clientX" in e);
     const x = fromKey ? box.left + 12 : e.clientX;
     const y = fromKey ? box.bottom - 8 : e.clientY;
-    setMenu({
-      x: Math.min(x, window.innerWidth - 184),
-      y: Math.min(y, window.innerHeight - 96),
-      r,
-    });
+    setMenu({ x, y, r });
   }
 
   return (
