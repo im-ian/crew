@@ -56,10 +56,6 @@ export function MentionMenu({
               color={a.avatar_color}
             />
             <span className="mention-name">{labelOf(a)}</span>
-            {/* A teammate's id is an account number; its server says more. */}
-            {!a.remote && a.name && a.name !== a.id ? (
-              <span className="mention-id">{a.id}</span>
-            ) : null}
           </button>
         </Fragment>
       ))}

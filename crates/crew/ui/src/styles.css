@@ -4594,11 +4594,6 @@ html.peek-resizing .peek-resize::after {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.mention-id {
-  margin-left: auto;
-  color: var(--faint);
-  font-size: var(--text-sm);
-}
 .mention-chip {
   display: inline-flex;
   align-items: center;
