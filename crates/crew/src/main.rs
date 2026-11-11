@@ -759,14 +759,23 @@ fn run_share(cmd: ShareCmd) -> anyhow::Result<()> {
             let agent = id
                 .as_ref()
                 .and_then(|id| cfg.agents.iter().find(|a| &a.id == id));
+            // Read once, so the teammate list and the group notes name one group.
+            let folder = id.as_deref().and_then(crate::groups::folder_of);
             print!(
                 "{}",
-                crate::config::shared_memory_body(agent, &cfg.agents, &crate::memory::read_shared())
+                crate::config::shared_memory_body(
+                    agent,
+                    &cfg.agents,
+                    &crate::memory::read_shared(),
+                    folder.as_ref(),
+                )
             );
-            if let Some(id) = &id {
+            if id.is_some() {
                 print!(
                     "{}",
-                    crate::config::group_memory_section(crate::memory::group_for(id).as_ref())
+                    crate::config::group_memory_section(
+                        crate::memory::group_notes(folder.as_ref()).as_ref()
+                    )
                 );
             }
             Ok(())

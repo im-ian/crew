@@ -4050,11 +4050,14 @@ fn inject_roster_update(skip: Option<&str>) {
             .collect(),
         Err(_) => return,
     };
+    // Read once for every bot here, not once per bot.
+    let groups = crate::groups::load().unwrap_or_default();
     for id in ids {
         let Some(agent) = roster.iter().find(|a| a.id == id) else {
             continue;
         };
-        let text = crate::protocol::system_envelope(&roster_update_text(agent, &roster));
+        let folder = crate::groups::group_of(&groups, &id);
+        let text = crate::protocol::system_envelope(&roster_update_text(agent, &roster, folder));
         if let Err(err) = write_agent(&id, &text, true) {
             eprintln!("[crew] roster update {id}: {err:#}");
         }
@@ -5514,7 +5517,12 @@ mod daemon_tests {
             let body = "고쳐줘\n\n[crew reply:1-2 from:bot]\n그 이미지\n\nPR은 따로";
             let joined = format!(
                 "{}\n\n{body}",
-                crate::config::shared_memory_note(agent, &cfg.agents, "")
+                crate::config::shared_memory_note(
+                    agent,
+                    &cfg.agents,
+                    "",
+                    crate::groups::folder_of(&agent.id).as_ref()
+                )
             );
             // A slash command still goes out alone, so /compact is not wrapped.
             assert_eq!(

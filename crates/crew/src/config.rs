@@ -1095,34 +1095,58 @@ pub fn team_rules_for(
 
 const MEMORY_HEADING: &str = "# Your memory";
 
-/// `id — name` list, in id order. `(none)` when this bot is alone.
-fn teammates_sentence(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
+/// The other bots as `id — name`, in id order, or `(none)` when this bot is
+/// alone. A bot in a `folder` with others sees that group first and the rest
+/// after, and is told to ask its group before the rest: one "ask the other
+/// bots" woke every bot on the PC.
+fn teammates_sentence(
+    agent: &AgentConfig,
+    roster: &[AgentConfig],
+    folder: Option<&crate::groups::SidebarGroup>,
+) -> String {
     let mut others: Vec<&AgentConfig> = roster.iter().filter(|a| a.id != agent.id).collect();
     others.sort_by(|a, b| a.id.cmp(&b.id));
     if others.is_empty() {
         return "Teammates: (none).".to_string();
     }
     let remote = others.iter().any(|a| a.id.contains('/'));
-    let parts: Vec<String> = others
+    let line = |list: &[&AgentConfig]| {
+        list.iter()
+            .map(|a| format!("{} — {}", a.id, a.display_name()))
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    let (mates, rest): (Vec<&AgentConfig>, Vec<&AgentConfig>) = others
         .into_iter()
-        .map(|a| format!("{} — {}", a.id, a.display_name()))
-        .collect();
+        .partition(|a| folder.is_some_and(|f| crate::groups::holds(f, &a.id)));
+    let mut s = match folder.filter(|_| !mates.is_empty()) {
+        Some(g) => {
+            let mut s = format!("Your group ({}): {}.", g.name, line(&mates));
+            if !rest.is_empty() {
+                s.push_str(&format!(" Other teammates: {}.", line(&rest)));
+            }
+            s.push_str(" When you need teammates and the user did not say which, ask only your group. Reach the others only when the user names them or the work is theirs.");
+            s
+        }
+        None => format!("Teammates: {}.", line(&rest)),
+    };
     if remote {
-        return format!(
-            "Teammates: {}. An id with a `/` is a bot on someone else's PC, reached through a crew-router: `crew tell` it the same way, and its reply comes back to you.",
-            parts.join("; ")
-        );
+        s.push_str(" An id with a `/` is a bot on someone else's PC, reached through a crew-router: `crew tell` it the same way, and its reply comes back to you.");
     }
-    format!("Teammates: {}.", parts.join("; "))
+    s
 }
 
 /// Short `[crew system]` note for running PTYs when the roster changes.
-pub fn roster_update_text(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
+pub fn roster_update_text(
+    agent: &AgentConfig,
+    roster: &[AgentConfig],
+    folder: Option<&crate::groups::SidebarGroup>,
+) -> String {
     format!(
         "You are `{}` ({}). {} A teammate is written `@<id>`, and Crew shows it as their name; write them that way in your reply too. When the user writes one they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>`. Do not ask the user to switch chats. Do not pretend.",
         agent.id,
         agent.display_name(),
-        teammates_sentence(agent, roster)
+        teammates_sentence(agent, roster, folder)
     )
 }
 
@@ -1141,7 +1165,13 @@ fn all_teammates_sentence(roster: &[AgentConfig]) -> String {
 
 /// What `crew share show` prints, and the body of the per-turn note. The
 /// teammate list is built from the live roster, not from the notes file.
-pub fn shared_memory_body(agent: Option<&AgentConfig>, roster: &[AgentConfig], notes: &str) -> String {
+/// `folder` is the group `agent` sits in.
+pub fn shared_memory_body(
+    agent: Option<&AgentConfig>,
+    roster: &[AgentConfig],
+    notes: &str,
+    folder: Option<&crate::groups::SidebarGroup>,
+) -> String {
     let mut s = String::new();
     if let Some(agent) = agent {
         s.push_str(&format!(
@@ -1149,7 +1179,7 @@ pub fn shared_memory_body(agent: Option<&AgentConfig>, roster: &[AgentConfig], n
             agent.id,
             agent.display_name()
         ));
-        s.push_str(&teammates_sentence(agent, roster));
+        s.push_str(&teammates_sentence(agent, roster, folder));
     } else {
         s.push_str(&all_teammates_sentence(roster));
     }
@@ -1182,10 +1212,15 @@ pub fn group_memory_section(group: Option<&(String, String)>) -> String {
 /// Live team list and shared notes. grok, claude, and codex keep the
 /// instructions from the turn the session started, so this note is the copy
 /// that is actually current.
-pub fn shared_memory_note(agent: &AgentConfig, roster: &[AgentConfig], notes: &str) -> String {
+pub fn shared_memory_note(
+    agent: &AgentConfig,
+    roster: &[AgentConfig],
+    notes: &str,
+    folder: Option<&crate::groups::SidebarGroup>,
+) -> String {
     format!(
         "[crew system] Shared memory. This is current and replaces the teammate list and your name in your instructions. Do not answer this note.\n{}",
-        shared_memory_body(Some(agent), roster, notes)
+        shared_memory_body(Some(agent), roster, notes, folder)
     )
 }
 
@@ -2407,16 +2442,21 @@ mod tests {
         alpha.role = Some("PM".into());
         let mut beta = AgentConfig::new("beta".into(), "Beta".into(), vec!["cat".into()], None);
         beta.role = Some("reviewer".into());
-        let text = roster_update_text(&alpha, &[alpha.clone(), beta.clone()]);
+        let text = roster_update_text(&alpha, &[alpha.clone(), beta.clone()], None);
         assert!(text.contains("You are `alpha` (Alpha)."));
         assert!(text.contains("beta — Beta"));
         assert!(!text.contains("reviewer"));
         assert!(!text.contains("alpha — Alpha"));
         assert!(text.contains("crew tell"));
         assert!(text.contains("@<id>"));
-        let solo = roster_update_text(&alpha, &[alpha.clone()]);
+        let solo = roster_update_text(&alpha, &[alpha.clone()], None);
         assert!(solo.contains("Teammates: (none)"));
-        let note = shared_memory_note(&alpha, &[alpha.clone(), beta.clone()], "harbor is closed");
+        let note = shared_memory_note(
+            &alpha,
+            &[alpha.clone(), beta.clone()],
+            "harbor is closed",
+            None,
+        );
         assert!(note.starts_with("[crew system] Shared memory."));
         assert!(note.contains("You are `alpha` (Alpha)."));
         assert!(note.contains("Teammates: beta — Beta."));
@@ -2425,12 +2465,48 @@ mod tests {
         assert!(!note.contains("crew tell"));
         assert!(!note.contains("reviewer"));
         assert!(!note.contains("alpha — Alpha"));
-        let empty = shared_memory_note(&alpha, &[alpha.clone()], "");
+        let empty = shared_memory_note(&alpha, &[alpha.clone()], "", None);
         assert!(empty.contains("# Notes\n(none)\n"));
-        let user = shared_memory_body(None, &[alpha.clone(), beta], "");
+        let user = shared_memory_body(None, &[alpha.clone(), beta], "", None);
         assert!(user.contains("alpha — Alpha"));
         assert!(user.contains("beta — Beta"));
         assert!(!user.contains("You are"));
+    }
+
+    /// "Ask the other bots" once woke every bot on the PC. A bot in a group
+    /// sees its group first and is told to ask only them by default.
+    #[test]
+    fn a_bot_in_a_group_is_told_to_ask_its_group_first() {
+        let bot = |id: &str, name: &str| {
+            AgentConfig::new(id.into(), name.into(), vec!["cat".into()], None)
+        };
+        let me = bot("me", "Me");
+        let roster = [me.clone(), bot("mate", "Mate"), bot("far", "Far")];
+        let folder = |name: &str, ids: &[&str]| crate::groups::SidebarGroup {
+            id: format!("g-{name}"),
+            name: name.into(),
+            collapsed: false,
+            items: ids.iter().map(|id| format!("agent:{id}")).collect(),
+            path: None,
+        };
+        let group = folder("Crew", &["me", "mate"]);
+        let s = teammates_sentence(&me, &roster, Some(&group));
+        assert!(s.starts_with("Your group (Crew): mate — Mate."), "{s}");
+        assert!(s.contains("Other teammates: far — Far."), "{s}");
+        assert!(s.contains("ask only your group"), "{s}");
+        assert!(!s.contains("me — Me"), "{s}");
+
+        // Everyone is in the group: no empty "Other teammates".
+        let all = folder("Crew", &["me", "mate", "far"]);
+        let s = teammates_sentence(&me, &roster, Some(&all));
+        assert!(!s.contains("Other teammates"), "{s}");
+
+        // Alone in its group, or in none: the plain list, no rule.
+        let alone = folder("Solo", &["me"]);
+        for g in [Some(&alone), None] {
+            let s = teammates_sentence(&me, &roster, g);
+            assert_eq!(s, "Teammates: far — Far; mate — Mate.");
+        }
     }
 
     #[test]

@@ -57,11 +57,11 @@ pub fn remove_group(group_id: &str) {
     let _ = fs::remove_file(paths::group_memory_path(group_id));
 }
 
-/// The group `agent_id` sits in and its notes, blank while it has none.
-pub fn group_for(agent_id: &str) -> Option<(String, String)> {
-    let groups = crate::groups::load().ok()?;
-    let group = crate::groups::group_of(&groups, agent_id)?;
-    Some((group.name.clone(), read_group(&group.id)))
+/// The name and notes of `folder`, the group a bot sits in. Notes are blank
+/// while it has none.
+pub fn group_notes(folder: Option<&crate::groups::SidebarGroup>) -> Option<(String, String)> {
+    let folder = folder?;
+    Some((folder.name.clone(), read_group(&folder.id)))
 }
 
 fn read_path(path: &Path) -> String {
@@ -217,14 +217,17 @@ mod tests {
                 path: None,
             }];
             crate::groups::save(&groups).unwrap();
-            assert_eq!(group_for("alpha"), Some(("app".into(), String::new())));
+            assert_eq!(
+                group_notes(crate::groups::folder_of("alpha").as_ref()),
+                Some(("app".into(), String::new()))
+            );
             write_group("g1", "ship on fridays").unwrap();
             assert_eq!(read_group("g1"), "ship on fridays");
             assert_eq!(
-                group_for("alpha"),
+                group_notes(crate::groups::folder_of("alpha").as_ref()),
                 Some(("app".into(), "ship on fridays".into()))
             );
-            assert_eq!(group_for("beta"), None);
+            assert_eq!(group_notes(crate::groups::folder_of("beta").as_ref()), None);
             write_group("g1", "  ").unwrap();
             assert!(!paths::group_memory_path("g1").exists());
             append_group("g1", "bot note").unwrap();

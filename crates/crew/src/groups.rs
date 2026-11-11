@@ -90,7 +90,19 @@ pub fn add_group(
     Ok(created)
 }
 
-/// The folder `agent_id` sits in. Loose bots have none.
+/// The folder `agent_id` sits in, read from disk. Loose bots have none.
+pub fn folder_of(agent_id: &str) -> Option<SidebarGroup> {
+    let groups = load().ok()?;
+    group_of(&groups, agent_id).cloned()
+}
+
+/// Whether bot `agent_id` sits in `folder`.
+pub fn holds(folder: &SidebarGroup, agent_id: &str) -> bool {
+    let key = format!("agent:{agent_id}");
+    folder.items.iter().any(|item| item == &key)
+}
+
+/// The folder `agent_id` sits in, out of `groups`. Loose bots have none.
 pub fn group_of<'a>(groups: &'a [SidebarGroup], agent_id: &str) -> Option<&'a SidebarGroup> {
     let key = format!("agent:{agent_id}");
     groups

@@ -2397,13 +2397,11 @@ pub fn with_remote(mut roster: Vec<AgentConfig>) -> Vec<AgentConfig> {
 
 /// The sidebar folder `bot` sits in, if any.
 fn rep_folder(bot: &str) -> Option<crate::groups::SidebarGroup> {
-    let groups = crate::groups::load().ok()?;
-    crate::groups::group_of(&groups, bot).cloned()
+    crate::groups::folder_of(bot)
 }
 
 fn in_folder(folder: &crate::groups::SidebarGroup, id: &str) -> bool {
-    let key = format!("agent:{id}");
-    folder.items.iter().any(|item| item == &key)
+    crate::groups::holds(folder, id)
 }
 
 /// A representative's per-turn note, in place of the shared memory note: no
