@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mentionCandidates } from "./mentionEditor";
+import { mentionBefore, mentionCandidates, typedHandle } from "./mentionEditor";
 import type { AgentInfo, Group } from "../types";
 
 const bot = (id: string, name: string, remote?: string) => ({ id, name, remote }) as AgentInfo;
@@ -48,5 +48,19 @@ describe("mentionCandidates", () => {
   it("offers eight at most", () => {
     const many = Array.from({ length: 12 }, (_, i) => bot(`b${i}`, `봇${i}`));
     expect(mentionCandidates(many, [], "봇").bots).toHaveLength(8);
+  });
+});
+
+describe("a # before the caret", () => {
+  it("opens the group menu the way @ opens the bot one", () => {
+    expect(mentionBefore("봐줘 #cr")).toEqual({ start: 3, query: "cr", sigil: "#" });
+    expect(mentionBefore("@de")).toEqual({ start: 0, query: "de", sigil: "@" });
+    expect(mentionBefore("issue#cr")).toBeNull();
+  });
+
+  it("turns a typed group name into its chip", () => {
+    expect(typedHandle("봐줘 #crew", agents, groups)).toEqual({ group: groups[0] });
+    expect(typedHandle("#233", agents, groups)).toBeNull();
+    expect(typedHandle("@dev", agents, groups)).toEqual({ agent: agents[0] });
   });
 });

@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useBotLabel, useLabelGroups } from "../BotLabelContext";
-import { mentionRuns, resolveMention, trimMentionPunct } from "../mentions";
-import type { AgentInfo } from "../types";
-import { MentionChip } from "./MentionChip";
+import { groupCandidates, mentionRuns } from "../mentions";
+import type { AgentInfo, Group } from "../types";
+import { GroupChip, MentionChip } from "./MentionChip";
 import { MentionMenu } from "./MentionMenu";
 import {
   caretTextContext,
@@ -12,6 +12,7 @@ import {
   mentionCandidates,
   renderChip,
   serializeEditor,
+  typedHandle,
   type MentionQuery,
 } from "./mentionEditor";
 
@@ -20,8 +21,9 @@ const MENU_ROOM = 260;
 const MENU_MIN_W = 280;
 
 /**
- * A typed answer that can @name a bot, the way the composer does. The text
- * it hands back has each chip as `@id`, which is what the bot reads.
+ * A typed answer that can @name a bot or #name a group, the way the composer
+ * does. The text it hands back has each chip as `@id` or `#id`, which is what
+ * the bot reads.
  */
 export function MentionField({
   id,
@@ -65,9 +67,13 @@ export function MentionField({
     queueMicrotask(() => {
       if (shown.current !== value) return;
       el.replaceChildren();
-      for (const run of mentionRuns(value, agents)) {
+      for (const run of mentionRuns(value, agents, groups)) {
         if (run.agent) {
           el.append(renderChip(<MentionChip agent={run.agent} label={labelOf(run.agent)} />));
+          continue;
+        }
+        if (run.group) {
+          el.append(renderChip(<GroupChip id={run.group.id} name={run.group.name} />));
           continue;
         }
         run.text.split("\n").forEach((line, i) => {
@@ -76,15 +82,19 @@ export function MentionField({
         });
       }
     });
-  }, [value, agents, labelOf]);
+  }, [value, agents, groups, labelOf]);
 
   const { bots, near } =
-    query && !disabled ? mentionCandidates(agents, groups, query.query, skip) : { bots: [], near: 0 };
-  const open = bots.length > 0;
+    query?.sigil === "@" && !disabled
+      ? mentionCandidates(agents, groups, query.query, skip)
+      : { bots: [], near: 0 };
+  const groupHits = query?.sigil === "#" && !disabled ? groupCandidates(groups, query.query) : [];
+  const count = bots.length + groupHits.length;
+  const open = count > 0;
 
   useEffect(() => {
     setActive(0);
-  }, [query?.start, query?.query]);
+  }, [query?.start, query?.query, query?.sigil]);
 
   // The menu is fixed to the screen, so it follows the box when the thread
   // under it scrolls or the window changes size.
@@ -134,11 +144,19 @@ export function MentionField({
     if (next) place();
   }
 
-  function pick(agent: AgentInfo) {
-    const chip = () => renderChip(<MentionChip agent={agent} label={labelOf(agent)} />);
-    if (!insertChip(ref.current, chip)) return;
+  function placeChip(chip: () => HTMLElement): boolean {
+    if (!insertChip(ref.current, chip)) return false;
     setQuery(null);
     send();
+    return true;
+  }
+
+  function pick(agent: AgentInfo) {
+    placeChip(() => renderChip(<MentionChip agent={agent} label={labelOf(agent)} />));
+  }
+
+  function pickGroup(group: Group) {
+    placeChip(() => renderChip(<GroupChip id={group.id} name={group.name} />));
   }
 
   return (
@@ -179,12 +197,16 @@ export function MentionField({
             if (e.key === "ArrowDown" || e.key === "ArrowUp") {
               e.preventDefault();
               const step = e.key === "ArrowDown" ? 1 : -1;
-              setActive((i) => (i + step + bots.length) % bots.length);
+              setActive((i) => (i + step + count) % count);
               return;
             }
             if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
               e.preventDefault();
-              pick(bots[active] ?? bots[0]);
+              const group = groupHits[active - bots.length];
+              if (bots[active]) pick(bots[active]);
+              else if (group) pickGroup(group);
+              else if (bots[0]) pick(bots[0]);
+              else if (groupHits[0]) pickGroup(groupHits[0]);
               return;
             }
             if (e.key === "Escape") {
@@ -205,16 +227,17 @@ export function MentionField({
             onEnter();
             return;
           }
-          // `@name` typed out and a space after it turns into the chip.
+          // `@name` or `#group` typed out and a space after it turns into the chip.
           if (e.key === " " && !composing.current) {
             const ctx = caretTextContext(ref.current);
             const before = ctx?.node.textContent?.slice(0, ctx.offset) ?? "";
-            const at = before.match(/(^|[\s])@(\S+)$/);
-            const token = at ? trimMentionPunct(at[2]) : "";
-            const agent = token ? resolveMention(token, agents) : undefined;
-            if (agent && agent.id !== skip) {
+            const hit = typedHandle(before, agents, groups);
+            if (hit && "group" in hit) {
               e.preventDefault();
-              pick(agent);
+              pickGroup(hit.group);
+            } else if (hit && hit.agent.id !== skip) {
+              e.preventDefault();
+              pick(hit.agent);
             }
           }
         }}
@@ -222,7 +245,15 @@ export function MentionField({
       {open && spot
         ? createPortal(
             <div ref={menuRef} className="mention-float" style={spot}>
-              <MentionMenu bots={bots} near={near} active={active} onPick={pick} className="is-floating" />
+              <MentionMenu
+                bots={bots}
+                groups={groupHits}
+                near={near}
+                active={active}
+                onPick={pick}
+                onPickGroup={pickGroup}
+                className="is-floating"
+              />
             </div>,
             document.body,
           )

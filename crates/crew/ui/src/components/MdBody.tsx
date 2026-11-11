@@ -24,6 +24,7 @@ import {
 import { api } from "../api";
 import type { AgentInfo } from "../types";
 import { useT } from "../LocaleContext";
+import { useLabelGroups } from "../BotLabelContext";
 import { CornerDownRight, Play, Terminal, X, ZoomIn, ZoomOut } from "../icons";
 import { GALLERY_CAP, galleryExtra, imageStep } from "../imageAlbum";
 import {
@@ -39,7 +40,7 @@ import {
   type ZoomView,
 } from "../imageZoom";
 import { CopyButton } from "./CopyButton";
-import { MentionChip } from "./MentionChip";
+import { GroupChip, MentionChip } from "./MentionChip";
 
 const TAGS = new Set([
   "P",
@@ -118,15 +119,16 @@ export function MdBody({
   const chipRef = useRef(agents);
   if (!sameMentionAgents(chipRef.current, agents)) chipRef.current = agents;
   const chipAgents = chipRef.current;
+  const groups = useLabelGroups();
   const nodes = useMemo(() => {
-    const html = injectMentionChips(renderMarkdown(text, defs), chipAgents);
+    const html = injectMentionChips(renderMarkdown(text, defs), chipAgents, groups);
     // Read through the ref: a parent hands a new handler each render, and the
     // parse must not run again for that.
     const handleAgent = clickable
       ? (id: string) => onMentionRef.current?.(id)
       : undefined;
     return htmlToReact(html, chipAgents, handleAgent, baseDir, openPreview, zoomLabel);
-  }, [text, defs, chipAgents, clickable, baseDir, zoomLabel, openPreview]);
+  }, [text, defs, chipAgents, groups, clickable, baseDir, zoomLabel, openPreview]);
   return (
     <div className={className}>
       {nodes}
@@ -229,6 +231,10 @@ function nodeToReact(
     // Old transcripts can still carry a room chip. Show the name; do not open a room.
     const channelId = el.getAttribute("data-channel") || "";
     if (channelId) return <span key={key}>#{channelId}</span>;
+    const groupId = el.getAttribute("data-group") || "";
+    if (groupId) {
+      return <GroupChip key={key} id={groupId} name={el.getAttribute("data-label") || groupId} />;
+    }
     const id = el.getAttribute("data-mention") || "";
     const agent = agents.find((a) => a.id === id);
     if (agent) {

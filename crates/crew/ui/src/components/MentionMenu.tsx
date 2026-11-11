@@ -1,26 +1,32 @@
 import { Fragment, useEffect, useRef, type CSSProperties } from "react";
 import { useBotLabel } from "../BotLabelContext";
 import { useT } from "../LocaleContext";
-import type { AgentInfo } from "../types";
+import { Hash } from "../icons";
+import type { AgentInfo, Group } from "../types";
 import { Avatar } from "./Avatar";
 
 /**
- * The bots `@` offers. A mouse pick keeps the caret in the box it was typed in.
- * The first `near` share the open chat's group; a labelled line sets the
- * others apart, and each half is named.
+ * The bots `@` offers, or the groups `#` does. A mouse pick keeps the caret
+ * in the box it was typed in. The first `near` bots share the open chat's
+ * group; a labelled line sets the others apart, and each half is named.
  */
 export function MentionMenu({
   bots,
+  groups = [],
   near = 0,
   active,
   onPick,
+  onPickGroup,
   className,
   style,
 }: {
   bots: AgentInfo[];
+  /** Rows after the bots, for `#`. */
+  groups?: Group[];
   near?: number;
   active: number;
   onPick: (agent: AgentInfo) => void;
+  onPickGroup?: (group: Group) => void;
   className?: string;
   style?: CSSProperties;
 }) {
@@ -35,7 +41,7 @@ export function MentionMenu({
     menuRef.current
       ?.querySelector<HTMLElement>(".mention-item.active")
       ?.scrollIntoView?.({ block: "nearest" });
-  }, [active, bots]);
+  }, [active, bots, groups]);
   return (
     <div
       ref={menuRef}
@@ -77,6 +83,27 @@ export function MentionMenu({
           </button>
         </Fragment>
       ))}
+      {groups.map((g, gi) => {
+        const i = bots.length + gi;
+        return (
+          <button
+            key={g.id}
+            type="button"
+            role="option"
+            aria-selected={i === active}
+            className={"mention-item" + (i === active ? " active" : "")}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onPickGroup?.(g);
+            }}
+          >
+            <span className="mention-avatar group-face" aria-hidden>
+              <Hash size={13} strokeWidth={2.25} />
+            </span>
+            <span className="mention-name">{g.name}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

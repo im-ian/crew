@@ -1,14 +1,10 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import type { AgentInfo, EditResult, Kind, Skill } from "../types";
+import type { AgentInfo, EditResult, Group, Kind, Skill } from "../types";
 import { api } from "../api";
 import { useT } from "../LocaleContext";
 import { useBotLabel, useLabelGroups } from "../BotLabelContext";
 import { mediaKind } from "../markdown";
-import {
-  mentionIds,
-  resolveMention,
-  trimMentionPunct,
-} from "../mentions";
+import { groupCandidates, mentionIds } from "../mentions";
 import { sendSteers, type Delivery } from "../deliveryPref";
 import { composerAfterSend } from "../sendGate";
 import { stepQueuePick } from "../queuePick";
@@ -16,15 +12,18 @@ import { oneLine, wrapReply, type ReplyTarget } from "../reply";
 import { caretClientPoint, type CaretPoint } from "../caretPoint";
 import { dropPathsText } from "../dropPaths";
 import type { AskPick } from "./AskHoldDialog";
-import { MentionChip } from "./MentionChip";
+import { GroupChip, MentionChip } from "./MentionChip";
 import { MentionMenu } from "./MentionMenu";
 import {
   caretTextContext,
   insertChip,
   isEditorEmpty,
+  mentionBefore,
   mentionCandidates,
   renderChip,
   serializeEditor,
+  typedHandle,
+  type MentionQuery,
 } from "./mentionEditor";
 import { ArrowUp, CircleDot, Paperclip, Play, Plus, StopSquare, X } from "../icons";
 
@@ -115,7 +114,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   const groups = useLabelGroups();
   const inputRef = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
-  const [mention, setMention] = useState<Mention | null>(null);
+  const [mention, setMention] = useState<MentionQuery | null>(null);
   const [mentionIdx, setMentionIdx] = useState(0);
   const [empty, setEmpty] = useState(true);
   const [slash, setSlash] = useState<Mention | null>(null);
@@ -179,11 +178,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
 
   const { bots: matches, near: mentionNear } = useMemo(
     () =>
-      mention
+      mention?.sigil === "@"
         ? mentionCandidates(agents, groups, mention.query, selectedKind === "agent" ? selected : null)
         : { bots: [], near: 0 },
     [agents, groups, mention, selected, selectedKind],
   );
+  const groupMatches = useMemo(
+    () => (mention?.sigil === "#" ? groupCandidates(groups, mention.query) : []),
+    [groups, mention],
+  );
+  const menuCount = matches.length + groupMatches.length;
 
   const skillMatches = useMemo(() => {
     if (!slash) return [];
@@ -254,24 +258,42 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     } else {
       setSlash(null);
     }
-    const m = before.match(/(^|[\s])@(\S*)$/);
+    const m = mentionBefore(before);
     if (!m) {
       setMention(null);
       return;
     }
-    const query = m[2];
-    const start = before.length - query.length - 1;
     setMention((prev) => {
-      if (prev && prev.start === start && prev.query === query) return prev;
-      return { start, query };
+      if (prev && prev.start === m.start && prev.query === m.query && prev.sigil === m.sigil) {
+        return prev;
+      }
+      return m;
     });
   }
 
-  function pickMention(agent: AgentInfo) {
-    if (!insertChip(inputRef.current, () => renderChip(<MentionChip agent={agent} label={labelOf(agent)} />))) return;
+  function placeChip(make: () => HTMLElement): boolean {
+    if (!insertChip(inputRef.current, make)) return false;
     setMention(null);
     refreshEmpty();
     fit();
+    return true;
+  }
+
+  function pickMention(agent: AgentInfo) {
+    placeChip(() => renderChip(<MentionChip agent={agent} label={labelOf(agent)} />));
+  }
+
+  function pickGroup(group: Group) {
+    placeChip(() => renderChip(<GroupChip id={group.id} name={group.name} />));
+  }
+
+  /** The row the arrow keys are on, as a pick. */
+  function pickActive(i: number) {
+    const agent = matches[i];
+    if (agent) return pickMention(agent);
+    const group = groupMatches[i - matches.length] ?? groupMatches[0];
+    if (group) return pickGroup(group);
+    if (matches[0]) pickMention(matches[0]);
   }
 
   function pickSkill(skill: Skill) {
@@ -524,13 +546,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
 
   useEffect(() => {
     setMentionIdx(0);
-  }, [mention?.start, mention?.query]);
+  }, [mention?.start, mention?.query, mention?.sigil]);
 
   useEffect(() => {
-    if (mentionIdx >= matches.length) setMentionIdx(0);
-  }, [mentionIdx, matches.length]);
+    if (mentionIdx >= menuCount) setMentionIdx(0);
+  }, [mentionIdx, menuCount]);
 
-  const mentionOpen = !!mention && matches.length > 0;
+  const mentionOpen = !!mention && menuCount > 0;
   const slashOpen = !!slash && skillMatches.length > 0;
   const photos = attaches.filter((a) => a.preview && (a.image || a.media === "video"));
   const files = attaches.filter((a) => !a.preview || (!a.image && a.media !== "video"));
@@ -544,7 +566,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         if (!el) return;
         const steer = sendSteers(pendingSteer.current, delivery, canSteer, watching);
         pendingSteer.current = false;
-        const text = mentionIds(serializeEditor(el).trim(), agents);
+        const text = mentionIds(serializeEditor(el).trim(), agents, groups);
         const files = attaches.map(attachMarkdown).filter(Boolean);
         let raw = [text, files.join("\n")].filter(Boolean).join("\n\n");
         if (!raw.trim()) return;
@@ -649,7 +671,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           </div>
         ) : null}
         {mentionOpen ? (
-          <MentionMenu bots={matches} near={mentionNear} active={mentionIdx} onPick={pickMention} />
+          <MentionMenu
+            bots={matches}
+            groups={groupMatches}
+            near={mentionNear}
+            active={mentionIdx}
+            onPick={pickMention}
+            onPickGroup={pickGroup}
+          />
         ) : null}
         {editing ? (
           <div className="reply-bar">
@@ -904,18 +933,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
             if (mentionOpen) {
               if (e.key === "ArrowDown") {
                 e.preventDefault();
-                setMentionIdx((i) => (i + 1) % matches.length);
+                setMentionIdx((i) => (i + 1) % menuCount);
                 return;
               }
               if (e.key === "ArrowUp") {
                 e.preventDefault();
-                setMentionIdx((i) => (i - 1 + matches.length) % matches.length);
+                setMentionIdx((i) => (i - 1 + menuCount) % menuCount);
                 return;
               }
               if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
                 e.preventDefault();
-                const agent = matches[mentionIdx] ?? matches[0];
-                if (agent) pickMention(agent);
+                pickActive(mentionIdx);
                 return;
               }
               if (e.key === "Escape") {
@@ -982,15 +1010,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
             if (e.key === " " && !composing.current) {
               const ctx = caretTextContext(inputRef.current);
               const before = ctx?.node.textContent?.slice(0, ctx.offset) ?? "";
-              const at = before.match(/(^|[\s])@(\S+)$/);
-              const token = at ? trimMentionPunct(at[2]) : "";
-              const agent = token ? resolveMention(token, agents) : undefined;
-              if (agent && insertChip(inputRef.current, () => renderChip(<MentionChip agent={agent} label={labelOf(agent)} />))) {
-                e.preventDefault();
-                setMention(null);
-                refreshEmpty();
-                fit();
-              }
+              const hit = typedHandle(before, agents, groups);
+              const make = !hit
+                ? null
+                : "agent" in hit
+                  ? () => renderChip(<MentionChip agent={hit.agent} label={labelOf(hit.agent)} />)
+                  : () => renderChip(<GroupChip id={hit.group.id} name={hit.group.name} />);
+              if (make && placeChip(make)) e.preventDefault();
             }
           }}
         />

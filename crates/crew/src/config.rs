@@ -1054,7 +1054,7 @@ pub fn team_rules_for(
         "Shared memory is current on every turn. A `[crew system]` note that starts with `Shared memory` holds the live teammate list and your live name, plus the notes every bot shares. That note replaces any teammate list in these instructions, including after a compact. Use the note. To read it, run `crew share show`. To add a note for every bot, run `crew share append <<'EOF'` with one short line, then `EOF`. To replace the shared notes, run `crew share show`, then `crew share set <<'EOF'` with the notes only, then `EOF`. Crew writes the teammate list, so `crew share set` does not change it. Do not copy the teammate list into your own memory. Do not save secrets there. When you sit in a group, the note also holds a `# Group memory` section for that group. To add to it, run `crew group memory append <<'EOF'` with one short line, then `EOF`. To replace it, run `crew group memory show`, then `crew group memory set <<'EOF'` with the whole new notes, then `EOF`.\n",
     );
     s.push_str(
-        "A teammate is written `@<id>`, and Crew shows it as their name. To name a teammate in your reply, write `@<id>` too; that only shows their name and sends nothing. When the user writes one, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, so after `crew tell`, end your turn. Do not wait, sleep, or check for the reply.\n",
+        "A teammate is written `@<id>`, and Crew shows it as their name. To name a teammate in your reply, write `@<id>` too; that only shows their name and sends nothing. When the user writes one, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, so after `crew tell`, end your turn. Do not wait, sleep, or check for the reply. A group is written `#<group-id>`, and Crew shows it as the group's name. When the user writes one, they are naming the group the work belongs to; it messages no one, and a note under their message gives that group's bots, folder, and memory.\n",
     );
     s.push_str(
         "When one message asks for several pieces of work that do not depend on each other, hand them to your CLI's own subagents (Claude's Agent tool, grok's spawn_subagent, agy's invoke_subagent) and run them in parallel where your CLI can, instead of doing them one after another. Work that needs an earlier step's result waits for that step. A CLI without subagents does the work itself. Subagents are not teammates: a teammate gets work only through `crew tell`. Their reports may come back one at a time. Until the last one is in, a reply only says which are still running, and keeps what came back for the end. When the subagents are done, answer once with what they found together.\n",
@@ -1239,18 +1239,85 @@ pub fn mentioned_teammate_ids(text: &str, self_id: &str, roster: &[AgentConfig])
 }
 
 /// Prompt for the CLI: raw user text, plus a short `[crew system]` hint when
-/// the user @mentioned teammates. Transcript keeps the raw message.
+/// the user @mentioned teammates or #named a group. Transcript keeps the raw
+/// message.
 pub fn with_mention_hint(text: &str, self_id: &str, roster: &[AgentConfig]) -> String {
     let scan = crate::rows::reply_body(text);
+    let mut notes = Vec::new();
     let ids = mentioned_teammate_ids(scan, self_id, roster);
-    if ids.is_empty() {
+    if !ids.is_empty() {
+        notes.push(format!(
+            "User already messaged teammates via crew: {}. They have this request. Stay in this session. Do not ask the user to switch chats. Do not pretend.",
+            ids.join(", ")
+        ));
+    }
+    if !group_tokens(scan).is_empty() {
+        let groups = crate::groups::load().unwrap_or_default();
+        if let Some(note) = group_hint(scan, &groups, roster, crate::memory::read_group) {
+            notes.push(note);
+        }
+    }
+    if notes.is_empty() {
         return text.to_string();
     }
-    let note = format!(
-        "User already messaged teammates via crew: {}. They have this request. Stay in this session. Do not ask the user to switch chats. Do not pretend.",
-        ids.join(", ")
-    );
-    format!("{text}\n\n[crew system]\n{note}")
+    format!("{text}\n\n[crew system]\n{}", notes.join("\n\n"))
+}
+
+/// What a `#group` the user wrote tells the bot: the group the work belongs
+/// to, its bots, folder, and notes. Naming a group wakes none of its bots.
+/// `None` when no `#` names a group that exists.
+pub fn group_hint(
+    text: &str,
+    groups: &[crate::groups::SidebarGroup],
+    roster: &[AgentConfig],
+    memory_of: impl Fn(&str) -> String,
+) -> Option<String> {
+    let mut seen = HashSet::new();
+    let mut notes = Vec::new();
+    for token in group_tokens(text) {
+        let Some(group) = groups
+            .iter()
+            .find(|g| g.id == token && g.id != crate::groups::UNGROUPED_ID)
+        else {
+            continue;
+        };
+        if !seen.insert(group.id.clone()) {
+            continue;
+        }
+        let bots: Vec<String> = group
+            .items
+            .iter()
+            .filter_map(|item| item.strip_prefix("agent:"))
+            .filter_map(|id| roster.iter().find(|a| a.id == id))
+            .map(|a| format!("{} ({})", a.id, a.display_name()))
+            .collect();
+        let bots = if bots.is_empty() {
+            "(none)".to_string()
+        } else {
+            bots.join(", ")
+        };
+        let mut note = format!(
+            "The user named the group `{name}` (`#{id}`) as where this work belongs. Naming a group does not message its bots; tell one only if the work needs it.\nIts bots: {bots}.\n",
+            name = group.name,
+            id = group.id,
+        );
+        if let Some(path) = group.path.as_deref().filter(|p| !p.trim().is_empty()) {
+            note.push_str(&format!("Its folder: {path}\n"));
+        }
+        let memory = memory_of(&group.id);
+        let memory = memory.trim();
+        let memory = if memory.is_empty() { "(none)" } else { memory };
+        note.push_str(&format!(
+            "Its group memory:\n{memory}\nTo read it, run `crew group memory show --group {id}`. To add to it, run `crew group memory append --group {id} <<'EOF'` with one short line, then `EOF`.",
+            id = group.id,
+        ));
+        notes.push(note);
+    }
+    if notes.is_empty() {
+        None
+    } else {
+        Some(notes.join("\n\n"))
+    }
 }
 
 /// A handle is `@` and an id. Ids are ASCII (`valid_agent_id`), so one ends at
@@ -1259,11 +1326,24 @@ pub fn with_mention_hint(text: &str, self_id: &str, roster: &[AgentConfig]) -> S
 /// in `@claude.ai` does not. Names are for the screen only; the composer
 /// turns them into ids. `handleAt` in the UI reads a handle the same way.
 pub(crate) fn mention_tokens(text: &str) -> Vec<String> {
+    sigil_tokens(text, '@')
+}
+
+/// `#` and a group id, read the way `mention_tokens` reads `@` and a bot id.
+/// A `#233` that names no group is left to the caller to drop.
+pub(crate) fn group_tokens(text: &str) -> Vec<String> {
+    sigil_tokens(text, '#')
+}
+
+fn sigil_tokens(text: &str, sigil: char) -> Vec<String> {
     let mut out = Vec::new();
     let mut prev_ws = true;
     for (idx, ch) in text.char_indices() {
-        if ch == '@' && prev_ws {
-            let raw = text[idx + 1..].split(char::is_whitespace).next().unwrap_or("");
+        if ch == sigil && prev_ws {
+            let raw = text[idx + ch.len_utf8()..]
+                .split(char::is_whitespace)
+                .next()
+                .unwrap_or("");
             // A bot on another PC is `<alias>/<account>`.
             let end = raw
                 .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '/'))
@@ -2558,6 +2638,51 @@ mod tests {
         assert_eq!(with_mention_hint(quoted, "alpha", &roster), quoted);
         let body_mention = "[crew reply:1-2 from:alice]\nhello\n\nask @beta";
         assert!(with_mention_hint(body_mention, "alpha", &roster).contains("[crew system]"));
+    }
+
+    #[test]
+    fn group_tokens_read_like_mentions() {
+        assert_eq!(group_tokens("#g1 and #g2-2에서, see #g3."), vec!["g1", "g2-2", "g3"]);
+        assert!(group_tokens("issue#g1 #").is_empty());
+        assert!(group_tokens("#claude.ai").is_empty());
+        assert!(mention_tokens("#g1").is_empty());
+    }
+
+    #[test]
+    fn group_hint_names_the_group_without_telling_its_bots() {
+        let roster = vec![
+            AgentConfig::new("alpha".into(), "Alpha".into(), vec!["claude".into()], None),
+            AgentConfig::new("beta".into(), "Beta".into(), vec!["claude".into()], None),
+        ];
+        let groups = vec![
+            crate::groups::SidebarGroup {
+                id: "g1".into(),
+                name: "Crew".into(),
+                collapsed: false,
+                items: vec!["agent:alpha".into(), "agent:gone".into(), "agent:beta".into()],
+                path: Some("/work/crew".into()),
+            },
+            crate::groups::SidebarGroup {
+                id: crate::groups::UNGROUPED_ID.into(),
+                name: "loose".into(),
+                collapsed: false,
+                items: vec![],
+                path: None,
+            },
+        ];
+        let memory = |id: &str| if id == "g1" { "ship on Friday\n".to_string() } else { String::new() };
+        let note = group_hint("#g1 에서 해줘, #g1 again", &groups, &roster, memory).unwrap();
+        assert_eq!(
+            note,
+            "The user named the group `Crew` (`#g1`) as where this work belongs. Naming a group does not message its bots; tell one only if the work needs it.\n\
+             Its bots: alpha (Alpha), beta (Beta).\n\
+             Its folder: /work/crew\n\
+             Its group memory:\nship on Friday\n\
+             To read it, run `crew group memory show --group g1`. To add to it, run `crew group memory append --group g1 <<'EOF'` with one short line, then `EOF`."
+        );
+        assert!(group_hint("#233 and #__ungrouped", &groups, &roster, memory).is_none());
+        // Naming a group is not naming its bots.
+        assert!(mentioned_teammate_ids("#g1", "alpha", &roster).is_empty());
     }
 
     /// Work starts with how the bot will do it, and the progress shows as it goes.
