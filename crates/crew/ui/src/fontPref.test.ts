@@ -32,7 +32,7 @@ describe("fontNames", () => {
 });
 
 describe("missingFonts", () => {
-  // A fake canvas: only Pretendard is installed, and it is wider than either fallback.
+  // A fake measure: only Pretendard is installed, and it is wider than either fallback.
   const measure = (family: string) =>
     family.startsWith('"Pretendard"') ? 120 : family.endsWith("serif") ? 100 : 110;
 
