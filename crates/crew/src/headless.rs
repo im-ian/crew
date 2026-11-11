@@ -250,9 +250,16 @@ fn shared_note_for_turn(
     if let Some(note) = crate::remote::rep_note(agent, roster) {
         return Some(note);
     }
-    let mut note = crate::config::shared_memory_note(agent, roster, &crate::memory::read_shared());
+    // Read once, so the teammate list and the group notes name one group.
+    let folder = crate::groups::folder_of(&agent.id);
+    let mut note = crate::config::shared_memory_note(
+        agent,
+        roster,
+        &crate::memory::read_shared(),
+        folder.as_ref(),
+    );
     note.push_str(&crate::config::group_memory_section(
-        crate::memory::group_for(&agent.id).as_ref(),
+        crate::memory::group_notes(folder.as_ref()).as_ref(),
     ));
     Some(note)
 }

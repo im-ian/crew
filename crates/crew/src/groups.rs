@@ -90,22 +90,19 @@ pub fn add_group(
     Ok(created)
 }
 
-/// The folder `agent_id` sits in. Loose bots have none.
-/// The group `agent_id` sits in, with the bot ids in it.
-pub fn bot_group(agent_id: &str) -> Option<crate::config::BotGroup> {
+/// The folder `agent_id` sits in, read from disk. Loose bots have none.
+pub fn folder_of(agent_id: &str) -> Option<SidebarGroup> {
     let groups = load().ok()?;
-    let group = group_of(&groups, agent_id)?;
-    Some(crate::config::BotGroup {
-        name: group.name.clone(),
-        ids: group
-            .items
-            .iter()
-            .filter_map(|item| item.strip_prefix("agent:"))
-            .map(str::to_string)
-            .collect(),
-    })
+    group_of(&groups, agent_id).cloned()
 }
 
+/// Whether bot `agent_id` sits in `folder`.
+pub fn holds(folder: &SidebarGroup, agent_id: &str) -> bool {
+    let key = format!("agent:{agent_id}");
+    folder.items.iter().any(|item| item == &key)
+}
+
+/// The folder `agent_id` sits in, out of `groups`. Loose bots have none.
 pub fn group_of<'a>(groups: &'a [SidebarGroup], agent_id: &str) -> Option<&'a SidebarGroup> {
     let key = format!("agent:{agent_id}");
     groups
