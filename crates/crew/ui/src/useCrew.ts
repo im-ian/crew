@@ -790,7 +790,8 @@ export function useCrew() {
     }
     const next = await getMessages(id);
     if (!next) return;
-    // A send the daemon has not answered stays held, and stays off the bubble path.
+    // A send the daemon has not answered stays on the end as a sending line
+    // until its own row is in this snapshot.
     const shown = withUnaccepted(next, heldFor(id, heldSends.current));
     setMessages((prev) => keepSame(prev, shown));
     setMessagesFor(id);
@@ -804,6 +805,7 @@ export function useCrew() {
       id: `local-send-${sendSeq.current}`,
       agent: sel,
       text: raw,
+      at: Date.now(),
     };
     heldSends.current = [...heldSends.current, held];
     if (selectedRef.current.id === sel) {
@@ -823,21 +825,29 @@ export function useCrew() {
       } catch {
         showError(err);
       }
-    } finally {
+    }
+    const release = () => {
       heldSends.current = heldSends.current.filter((h) => h.id !== held.id);
-    }
-    if (selectedRef.current.id === sel) {
-      // Failure drops the line this window inserted. Success then takes the daemon rows.
-      setMessages((prev) => rollbackSend(prev, held.id).messages);
-      if (accepted) {
-        try {
-          await refreshMessages();
-        } catch (err) {
-          showError(err);
-        }
+    };
+    if (!accepted) {
+      release();
+      // Failure drops the line this window inserted; the draft goes back.
+      if (selectedRef.current.id === sel) {
+        setMessages((prev) => rollbackSend(prev, held.id).messages);
       }
+      return false;
     }
-    return accepted;
+    // Still held while this fetch runs, so a poll that left before the daemon
+    // row existed cannot drop the bubble. Once the row is in, it stands in for
+    // the sending line in the same render.
+    try {
+      if (selectedRef.current.id === sel) await refreshMessages();
+    } catch (err) {
+      showError(err);
+    } finally {
+      release();
+    }
+    return true;
   }
 
   async function stopAgent(agentId?: string) {

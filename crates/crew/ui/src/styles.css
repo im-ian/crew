@@ -2350,6 +2350,16 @@ button.channel-who:hover {
   background: color-mix(in srgb, var(--user) 72%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 12%, transparent);
 }
+/* A send the daemon has not answered yet. Most answer in milliseconds, so it
+   only fades if it is still waiting a moment later, instead of blinking. */
+.row.me .bubble.sending {
+  animation: send-pending 0s linear 0.4s forwards;
+}
+@keyframes send-pending {
+  to {
+    opacity: 0.6;
+  }
+}
 .row.them.incoming.queued .channel-who,
 .sys.queued {
   opacity: 0.88;

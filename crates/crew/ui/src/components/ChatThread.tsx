@@ -56,7 +56,7 @@ import {
   shortLabels,
 } from "../choiceView";
 import { routineSwitchName } from "../routineNote";
-import { queueActions, shownInThread, userLineAppearance } from "../sendGate";
+import { queueActions, userLineAppearance } from "../sendGate";
 import { isSelfMentionDelivery, mentionRuns, mentionText } from "../mentions";
 import { MentionChip } from "./MentionChip";
 import { focusField, MentionField } from "./MentionField";
@@ -2562,15 +2562,18 @@ function Bubble({
     );
   }
   const appearance = userLineAppearance(m);
-  // Not accepted yet: drawing it here would be a sent bubble ahead of the daemon.
-  if (appearance === "hold") return null;
   const queued = appearance === "waiting";
+  // Drawn at once, before the daemon has it. Its row has no id to reply to yet.
+  const sending = appearance === "sending";
   const { reply, body } = splitReply(text);
   const parts = splitBubbles(body);
   const media = parts.filter((part) => isMediaBlock(part));
   const prose = parts.filter((part) => !isMediaBlock(part)).join("\n\n");
   const cls =
-    "bubble md" + (caret ? " streaming" : "") + (queued ? " queued" : "");
+    "bubble md" +
+    (caret ? " streaming" : "") +
+    (queued ? " queued" : "") +
+    (sending ? " sending" : "");
   return (
     <div
       className={
@@ -2611,7 +2614,7 @@ function Bubble({
               copy={prose.trim()}
               ts={m.ts}
               onReply={
-                onReply
+                onReply && !sending
                   ? () => onReply(makeReply({ ...m, text: prose }, agents, t))
                   : undefined
               }
@@ -2852,7 +2855,6 @@ function visibleMessages(
 ): ChatMessage[] {
   const shown = messages.filter((m, i) => {
     if (isSelfMentionDelivery(m, selfId)) return false;
-    if (!shownInThread(m)) return false;
     if (answerLineHidden(m)) return false;
     if (m.kind === "tool") return showTools;
     if (m.role !== "assistant") return true;
