@@ -91,6 +91,21 @@ pub fn add_group(
 }
 
 /// The folder `agent_id` sits in. Loose bots have none.
+/// The group `agent_id` sits in, with the bot ids in it.
+pub fn bot_group(agent_id: &str) -> Option<crate::config::BotGroup> {
+    let groups = load().ok()?;
+    let group = group_of(&groups, agent_id)?;
+    Some(crate::config::BotGroup {
+        name: group.name.clone(),
+        ids: group
+            .items
+            .iter()
+            .filter_map(|item| item.strip_prefix("agent:"))
+            .map(str::to_string)
+            .collect(),
+    })
+}
+
 pub fn group_of<'a>(groups: &'a [SidebarGroup], agent_id: &str) -> Option<&'a SidebarGroup> {
     let key = format!("agent:{agent_id}");
     groups

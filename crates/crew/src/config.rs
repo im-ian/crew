@@ -1095,25 +1095,54 @@ pub fn team_rules_for(
 
 const MEMORY_HEADING: &str = "# Your memory";
 
+/// The sidebar group a bot sits in: its name and the bot ids in it.
+pub struct BotGroup {
+    pub name: String,
+    pub ids: Vec<String>,
+}
+
 /// `id — name` list, in id order. `(none)` when this bot is alone.
 fn teammates_sentence(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
+    teammates_sentence_in(agent, roster, crate::groups::bot_group(&agent.id).as_ref())
+}
+
+/// A bot in a group sees its group's bots first, and is told to ask them
+/// before the rest: one "ask the other bots" woke every bot on the PC.
+fn teammates_sentence_in(
+    agent: &AgentConfig,
+    roster: &[AgentConfig],
+    group: Option<&BotGroup>,
+) -> String {
     let mut others: Vec<&AgentConfig> = roster.iter().filter(|a| a.id != agent.id).collect();
     others.sort_by(|a, b| a.id.cmp(&b.id));
     if others.is_empty() {
         return "Teammates: (none).".to_string();
     }
     let remote = others.iter().any(|a| a.id.contains('/'));
-    let parts: Vec<String> = others
+    let line = |list: &[&AgentConfig]| {
+        list.iter()
+            .map(|a| format!("{} — {}", a.id, a.display_name()))
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    let (mates, rest): (Vec<&AgentConfig>, Vec<&AgentConfig>) = others
         .into_iter()
-        .map(|a| format!("{} — {}", a.id, a.display_name()))
-        .collect();
+        .partition(|a| group.is_some_and(|g| g.ids.iter().any(|id| id == &a.id)));
+    let mut s = match group.filter(|_| !mates.is_empty()) {
+        Some(g) => {
+            let mut s = format!("Your group ({}): {}.", g.name, line(&mates));
+            if !rest.is_empty() {
+                s.push_str(&format!(" Other teammates: {}.", line(&rest)));
+            }
+            s.push_str(" When you need teammates and the user did not say which, ask only your group. Reach the others only when the user names them or the work is theirs.");
+            s
+        }
+        None => format!("Teammates: {}.", line(&rest)),
+    };
     if remote {
-        return format!(
-            "Teammates: {}. An id with a `/` is a bot on someone else's PC, reached through a crew-router: `crew tell` it the same way, and its reply comes back to you.",
-            parts.join("; ")
-        );
+        s.push_str(" An id with a `/` is a bot on someone else's PC, reached through a crew-router: `crew tell` it the same way, and its reply comes back to you.");
     }
-    format!("Teammates: {}.", parts.join("; "))
+    s
 }
 
 /// Short `[crew system]` note for running PTYs when the roster changes.
@@ -2431,6 +2460,44 @@ mod tests {
         assert!(user.contains("alpha — Alpha"));
         assert!(user.contains("beta — Beta"));
         assert!(!user.contains("You are"));
+    }
+
+    /// "Ask the other bots" once woke every bot on the PC. A bot in a group
+    /// sees its group first and is told to ask only them by default.
+    #[test]
+    fn a_bot_in_a_group_is_told_to_ask_its_group_first() {
+        let bot = |id: &str, name: &str| {
+            AgentConfig::new(id.into(), name.into(), vec!["cat".into()], None)
+        };
+        let me = bot("me", "Me");
+        let roster = [me.clone(), bot("mate", "Mate"), bot("far", "Far")];
+        let group = BotGroup {
+            name: "Crew".into(),
+            ids: vec!["me".into(), "mate".into()],
+        };
+        let s = teammates_sentence_in(&me, &roster, Some(&group));
+        assert!(s.starts_with("Your group (Crew): mate — Mate."), "{s}");
+        assert!(s.contains("Other teammates: far — Far."), "{s}");
+        assert!(s.contains("ask only your group"), "{s}");
+        assert!(!s.contains("me — Me"), "{s}");
+
+        // Everyone is in the group: no empty "Other teammates".
+        let all = BotGroup {
+            name: "Crew".into(),
+            ids: roster.iter().map(|a| a.id.clone()).collect(),
+        };
+        let s = teammates_sentence_in(&me, &roster, Some(&all));
+        assert!(!s.contains("Other teammates"), "{s}");
+
+        // Alone in its group, or in none: the plain list, no rule.
+        let alone = BotGroup {
+            name: "Solo".into(),
+            ids: vec!["me".into()],
+        };
+        for g in [Some(&alone), None] {
+            let s = teammates_sentence_in(&me, &roster, g);
+            assert_eq!(s, "Teammates: far — Far; mate — Mate.");
+        }
     }
 
     #[test]
