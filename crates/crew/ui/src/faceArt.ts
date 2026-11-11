@@ -149,6 +149,12 @@ const ART = {
     ink: 1,
     eyes: { x: 32, y: 26 },
   },
+  palette: {
+    markup: `<g fill="currentColor"><path fill-rule="evenodd" d="M32 4C15 4 3 16 3 31C3 47 15 59 30 59C36.5 59 39 55.5 37.2 51.5C35.4 47.5 38.2 43.5 43 43.5H50C57.5 43.5 61 38 61 31C61 15 48 4 32 4ZM23.6 47A4.6 4.6 0 1 0 14.4 47A4.6 4.6 0 1 0 23.6 47Z"/></g><g fill="#000" fill-opacity="0.22"><circle cx="15.5" cy="22" r="3.3"/><circle cx="26" cy="12" r="3.3"/><circle cx="40" cy="12" r="3.3"/><circle cx="50.5" cy="22" r="3.3"/></g>`,
+    box: { x: 3, y: 4, w: 58, h: 55 },
+    ink: 1,
+    eyes: { x: 31, y: 31 },
+  },
 } satisfies Record<string, ArtFace>;
 
 export type ArtShape = keyof typeof ART;

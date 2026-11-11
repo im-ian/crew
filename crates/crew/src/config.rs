@@ -109,6 +109,7 @@ pub enum AvatarShape {
     Blossom,
     Snowflake,
     Mushroom,
+    Palette,
 }
 
 const AVATAR_SHAPES: &[AvatarShape] = &[
@@ -165,6 +166,7 @@ const AVATAR_SHAPES: &[AvatarShape] = &[
     AvatarShape::Blossom,
     AvatarShape::Snowflake,
     AvatarShape::Mushroom,
+    AvatarShape::Palette,
 ];
 
 impl AvatarShape {
@@ -223,6 +225,7 @@ impl AvatarShape {
             AvatarShape::Blossom => "blossom",
             AvatarShape::Snowflake => "snowflake",
             AvatarShape::Mushroom => "mushroom",
+            AvatarShape::Palette => "palette",
         }
     }
 
