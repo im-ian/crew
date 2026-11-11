@@ -26,9 +26,9 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// A router's connect and its answer each get eight seconds; a join is two.
 const REMOTE_TIMEOUT: Duration = Duration::from_secs(40);
 
-/// How long the whole exchange may take. `None` is for the two that are not
-/// questions: `Ask` waits on a person, and `Subscribe` is a stream the daemon
-/// keeps pushing to. Every other variant is a question the daemon answers, and
+/// How long the whole exchange may take. `Ask` waits on a person for
+/// `ASK_WAIT`, then `crew ask` says the card is still open. `None` is for
+/// `Subscribe`, a stream the daemon keeps pushing to. Every other variant is a question the daemon answers, and
 /// leaving them unbounded parked the caller for good when a socket took the
 /// connection and then went quiet.
 ///
@@ -36,7 +36,10 @@ const REMOTE_TIMEOUT: Duration = Duration::from_secs(40);
 /// inherit a fifteen-second guillotine from a catch-all.
 fn answer_timeout(req: &Request) -> Option<Duration> {
     match req {
-        Request::Ask { .. } | Request::Subscribe => None,
+        // A person may take longer; `crew ask` then says the card is still
+        // open (`ask_within`) instead of being cut off by its CLI.
+        Request::Ask { .. } => Some(ASK_WAIT),
+        Request::Subscribe => None,
         Request::Ping => Some(PING_TIMEOUT),
         Request::List
         | Request::Send { .. }
@@ -143,8 +146,8 @@ fn connection_lost(err: &anyhow::Error) -> bool {
 
 fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
     let mut stream = connect()?;
-    // `connect` arms every socket with `ANSWER_TIMEOUT`. Ask waits on a
-    // person and Subscribe is a stream, so that default would cut them off.
+    // `connect` arms every socket with `ANSWER_TIMEOUT`. Subscribe is a
+    // stream, so that default would cut it off.
     if answer.is_none() {
         stream.set_read_timeout(None).map_err(closed_early)?;
     }
@@ -229,11 +232,120 @@ fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
     }
 }
 
+/// The daemon took the connection and the budget ran out before it answered.
+/// A type, so `crew ask` can tell "no answer yet" from a real failure.
+#[derive(Debug)]
+struct NoAnswer;
+
+impl std::fmt::Display for NoAnswer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "daemon took the connection but did not answer ({})",
+            paths::socket_path().display()
+        )
+    }
+}
+
+impl std::error::Error for NoAnswer {}
+
 fn no_answer() -> anyhow::Error {
-    anyhow::anyhow!(
-        "daemon took the connection but did not answer ({})",
-        paths::socket_path().display()
-    )
+    anyhow::Error::new(NoAnswer)
+}
+
+/// How long `crew ask` waits on the card before it gives the wait back. A
+/// CLI stops a tool at a time limit, ten minutes at most, and tells the bot
+/// only that it stopped, which read as "the card closed". Ending first lets
+/// `crew ask` say what is true: the card is still open.
+pub const ASK_WAIT: Duration = Duration::from_secs(9 * 60);
+
+/// After `ASK_WAIT`, how long `crew ask` still listens once it has said it is
+/// leaving, for an answer the daemon was already writing.
+const ASK_GRACE: Duration = Duration::from_secs(2);
+
+/// What `crew ask` says when `ASK_WAIT` runs out. Leaving closes only this
+/// connection; the daemon keeps the card, and the answer goes to the bot as a
+/// message of its own.
+pub const ASK_STILL_OPEN: &str = "No answer yet. The card is still open in the chat. When the user picks, their answer comes to you as a new message. Do not run crew ask again for this question, and do not say the card closed. End your turn now.";
+
+/// How an `Ask` ended for the caller.
+#[derive(Debug)]
+pub enum AskOutcome {
+    /// The person's answer, or the daemon's error.
+    Answer(Event),
+    /// The card is up and nobody answered within the wait. It stays open.
+    StillOpen,
+}
+
+/// Ask and wait up to `wait`. "Still open" needs the daemon's word that the
+/// card is up; a daemon that never said so, or hung up, is a failure.
+pub fn ask_within(req: Request, wait: Duration) -> anyhow::Result<AskOutcome> {
+    let mut stream = connect()?;
+    writeln!(stream, "{}", req.to_line()?).map_err(stalled)?;
+    stream.flush().map_err(stalled)?;
+    let mut reader = BufReader::new(stream);
+    let mut opened = false;
+    let deadline = Instant::now() + wait;
+    loop {
+        match read_event(&mut reader, deadline)? {
+            Some(Event::Ok) => opened = true,
+            Some(ev @ (Event::Answered { .. } | Event::Error { .. })) => {
+                return Ok(AskOutcome::Answer(ev));
+            }
+            Some(_) => {}
+            None => break,
+        }
+    }
+    if !opened {
+        return Err(no_answer());
+    }
+    // Say we are leaving, then hear out an answer already on its way. The
+    // daemon either writes it here or keeps the card and sends it later.
+    let _ = reader.get_ref().shutdown(std::net::Shutdown::Write);
+    let grace = Instant::now() + ASK_GRACE;
+    loop {
+        match read_event(&mut reader, grace) {
+            Ok(Some(ev @ (Event::Answered { .. } | Event::Error { .. }))) => {
+                return Ok(AskOutcome::Answer(ev));
+            }
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => return Ok(AskOutcome::StillOpen),
+        }
+    }
+}
+
+/// The next event before `deadline`, or `None` once it passes. A daemon that
+/// hangs up is an error.
+fn read_event(
+    reader: &mut BufReader<UnixStream>,
+    deadline: Instant,
+) -> anyhow::Result<Option<Event>> {
+    let mut buf = String::new();
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Ok(None);
+        }
+        reader
+            .get_ref()
+            .set_read_timeout(Some(left))
+            .map_err(closed_early)?;
+        buf.clear();
+        match reader.read_line(&mut buf) {
+            Ok(0) => bail!("daemon closed the connection"),
+            Ok(_) if buf.trim().is_empty() => continue,
+            Ok(_) => return Ok(Some(Event::from_line(buf.trim_end())?)),
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                return Ok(None);
+            }
+            Err(err) => return Err(err.into()),
+        }
+    }
 }
 
 /// A stall and a real IO error read the same from a caller's side unless the
@@ -242,7 +354,7 @@ fn no_answer() -> anyhow::Error {
 fn stalled(err: std::io::Error) -> anyhow::Error {
     match err.kind() {
         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
-            anyhow::Error::from(err).context(no_answer().to_string())
+            anyhow::Error::from(err).context(NoAnswer)
         }
         _ => err.into(),
     }
@@ -617,8 +729,8 @@ mod tests {
                 multi: false,
                 more: Vec::new(),
             }),
-            None,
-            "Ask waits on a person"
+            Some(ASK_WAIT),
+            "Ask waits on a person, then says the card is still open"
         );
         assert_eq!(answer_timeout(&Request::Ping), Some(PING_TIMEOUT));
         assert_eq!(answer_timeout(&Request::List), Some(ANSWER_TIMEOUT));
@@ -657,9 +769,9 @@ mod tests {
         });
     }
 
-    /// `connect` puts a fifteen-second read deadline on the socket. Ask's
-    /// budget is `None`, and leaving the socket deadline in place fails the
-    /// command while the person is still looking at the card.
+    /// `connect` puts a fifteen-second read deadline on the socket. An unbounded
+    /// read must clear it, or the call fails while the person is still looking
+    /// at the card.
     #[test]
     fn an_ask_waits_past_the_socket_deadline() {
         paths::testing::with_home("ask-wait", || {
@@ -697,6 +809,90 @@ mod tests {
                 "{ev:?}"
             );
             slow.join().expect("listener");
+        });
+    }
+
+    /// A CLI stops a tool at a time limit and tells the bot only that it
+    /// stopped, which the bot reported as "the card closed". `crew ask` gives
+    /// the wait back first, as "still open", but only for a card the daemon
+    /// said it opened. An answer the daemon was writing as it left still
+    /// counts, and a daemon that hangs up is a failure.
+    #[test]
+    fn an_ask_gives_the_wait_back_before_a_cli_would_cut_it() {
+        assert!(ASK_WAIT < Duration::from_secs(10 * 60), "{ASK_WAIT:?}");
+        assert!(ASK_STILL_OPEN.contains("still open"));
+        assert!(ASK_STILL_OPEN.contains("as a new message"));
+        let ask = || Request::Ask {
+            agent: "a".into(),
+            question: "어느 쪽?".into(),
+            options: vec!["고름".into()],
+            inputs: Vec::new(),
+            hint: None,
+            multi: false,
+            more: Vec::new(),
+        };
+        let line = |ev: Event| ev.to_line().expect("line");
+        // A daemon that takes the question, then does `then` with the socket.
+        let serve = |listener: &std::os::unix::net::UnixListener,
+                     then: &dyn Fn(&mut std::os::unix::net::UnixStream)| {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+            reader.read_line(&mut String::new()).expect("read");
+            then(&mut stream);
+        };
+        paths::testing::with_home("ask-wait-back", || {
+            paths::ensure_home().expect("home");
+            let listener = std::sync::Arc::new(
+                std::os::unix::net::UnixListener::bind(paths::socket_path()).expect("bind"),
+            );
+            let wait = Duration::from_millis(200);
+
+            // The card opened and nobody answered: still open.
+            let l = listener.clone();
+            let daemon = thread::spawn(move || {
+                serve(&l, &|s| {
+                    writeln!(s, "{}", line(Event::Ok)).unwrap();
+                    // Holds on until `crew ask` says it is leaving.
+                    let _ = BufReader::new(s.try_clone().unwrap()).read_line(&mut String::new());
+                })
+            });
+            let got = ask_within(ask(), wait).expect("not a failure");
+            assert!(matches!(got, AskOutcome::StillOpen), "{got:?}");
+            daemon.join().unwrap();
+
+            // The answer was on its way as the wait ran out: it is the answer.
+            let l = listener.clone();
+            let daemon = thread::spawn(move || {
+                serve(&l, &|s| {
+                    writeln!(s, "{}", line(Event::Ok)).unwrap();
+                    let _ = BufReader::new(s.try_clone().unwrap()).read_line(&mut String::new());
+                    let answered = Event::Answered {
+                        text: "고름".into(),
+                    };
+                    writeln!(s, "{}", line(answered)).unwrap();
+                })
+            });
+            let got = ask_within(ask(), wait).expect("answered");
+            assert!(
+                matches!(got, AskOutcome::Answer(Event::Answered { ref text }) if text == "고름"),
+                "{got:?}"
+            );
+            daemon.join().unwrap();
+
+            // No word that a card opened: not "still open", a failure.
+            let l = listener.clone();
+            let daemon =
+                thread::spawn(move || serve(&l, &|_| thread::sleep(Duration::from_millis(400))));
+            let err = ask_within(ask(), wait).expect_err("no card");
+            assert!(err.downcast_ref::<NoAnswer>().is_some(), "{err:#}");
+            daemon.join().unwrap();
+
+            // A daemon that hangs up is a failure too.
+            let l = listener.clone();
+            let daemon = thread::spawn(move || serve(&l, &|_| {}));
+            let err = ask_within(ask(), Duration::from_secs(5)).expect_err("hung up");
+            assert!(err.to_string().contains("closed"), "{err:#}");
+            daemon.join().unwrap();
         });
     }
 
