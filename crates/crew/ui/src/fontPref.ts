@@ -60,13 +60,22 @@ export function missingFonts(input: string, measure: (family: string) => number)
   });
 }
 
-/** How wide a sample line is in `family`, on a canvas. */
-export function canvasMeasure(): (family: string) => number {
-  const ctx = document.createElement("canvas").getContext("2d");
+/**
+ * How wide a sample line is in `family`, laid out in the page. Not on a
+ * canvas: WebKit's canvas sees only the fonts macOS ships, so a font the
+ * user installed reads as missing there while the page draws it fine.
+ */
+export function pageMeasure(): (family: string) => number {
   return (family) => {
-    if (!ctx) return 0;
-    ctx.font = `48px ${family}`;
-    return ctx.measureText("mmmmmmmmmmlli WWww 가나다라마 0123").width;
+    const span = document.createElement("span");
+    span.textContent = "mmmmmmmmmmlli WWww 가나다라마 0123";
+    span.style.cssText =
+      "position:absolute;left:-9999px;top:0;visibility:hidden;white-space:pre;font-size:48px";
+    span.style.fontFamily = family;
+    document.body.append(span);
+    const width = span.getBoundingClientRect().width;
+    span.remove();
+    return width;
   };
 }
 

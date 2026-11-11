@@ -5,7 +5,7 @@ import { useLocale, useT } from "../LocaleContext";
 import type { Locale } from "../i18n";
 import type { ChatWidth } from "../chatWidth";
 import type { Delivery } from "../deliveryPref";
-import { applyFont, canvasMeasure, loadFont, missingFonts, saveFont } from "../fontPref";
+import { applyFont, pageMeasure, loadFont, missingFonts, saveFont } from "../fontPref";
 import { loadNotify, saveNotify } from "../notifyPref";
 import { loadNoticeKeep, saveNoticeKeep } from "../noticeKeepPref";
 import type { NoticeKeep } from "../island";
@@ -78,7 +78,7 @@ export function SettingsPane({
   }
   const [worktree, setWorktree] = useState(loadWorktree);
   const [font, setFont] = useState(loadFont);
-  const measure = useMemo(canvasMeasure, []);
+  const measure = useMemo(pageMeasure, []);
   const missing = useMemo(() => missingFonts(font, measure), [font, measure]);
   const [botDefault, setBotDefault] = useState(loadBotDefault);
 
