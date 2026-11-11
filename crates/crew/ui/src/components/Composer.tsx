@@ -546,7 +546,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
 
   useEffect(() => {
     setMentionIdx(0);
-  }, [mention?.start, mention?.query]);
+  }, [mention?.start, mention?.query, mention?.sigil]);
 
   useEffect(() => {
     if (mentionIdx >= menuCount) setMentionIdx(0);
