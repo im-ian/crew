@@ -5,8 +5,18 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { botSearchText, groupOfBot } from "../botLabel";
 import { itemKey } from "../groups";
-import { mentionMatches, resolveGroup, resolveMention, trimMentionPunct } from "../mentions";
+import {
+  HANDLE_START,
+  mentionMatches,
+  resolveGroup,
+  resolveMention,
+  trimMentionPunct,
+} from "../mentions";
 import type { AgentInfo, Group } from "../types";
+
+/** A handle being typed, maybe empty, and one typed out, at the end of the text. */
+const TYPING_HANDLE = new RegExp(`${HANDLE_START}([@#])(\\S*)$`);
+const TYPED_HANDLE = new RegExp(`${HANDLE_START}([@#])(\\S+)$`);
 
 /**
  * What was typed after `@` (a bot) or `#` (a group), and where that sign is
@@ -16,7 +26,7 @@ export type MentionQuery = { start: number; query: string; sigil: "@" | "#" };
 
 /** The `@query` or `#query` that `before`, the text up to the caret, ends with. */
 export function mentionBefore(before: string): MentionQuery | null {
-  const m = before.match(/(^|[\s])([@#])(\S*)$/);
+  const m = before.match(TYPING_HANDLE);
   if (!m) return null;
   return {
     start: before.length - m[3].length - 1,
@@ -68,7 +78,7 @@ export function typedHandle(
   agents: readonly AgentInfo[],
   groups: readonly Group[],
 ): { agent: AgentInfo } | { group: Group } | null {
-  const m = before.match(/(^|[\s])([@#])(\S+)$/);
+  const m = before.match(TYPED_HANDLE);
   const token = m ? trimMentionPunct(m[3]) : "";
   if (!token) return null;
   if (m![2] === "#") {

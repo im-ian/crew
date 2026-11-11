@@ -12,6 +12,41 @@ const HANDLE_ID = /^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)?/;
 /** A group's id, after `#`. Group ids are `g` and hex, ASCII like a bot's. */
 const GROUP_ID = /^[A-Za-z0-9_-]+/;
 
+/**
+ * What may stand right before a handle: a space, the start, or an opening
+ * bracket or quote, as in `개발자(@bot-3)`. A letter may not, so `mail@alpha`
+ * is not one. `opens_handle` in the daemon reads it the same way.
+ */
+const HANDLE_OPENERS = "([{\"'“‘「『〈《（［";
+
+export function opensHandle(ch: string): boolean {
+  return /\s/.test(ch) || HANDLE_OPENERS.includes(ch);
+}
+
+/**
+ * A regex piece for what may stand before `@` or `#`: the start, a space, or
+ * an opener. Every scan that looks for a handle builds on it.
+ */
+export const HANDLE_START = `(^|[\\s${HANDLE_OPENERS.replace(/[\]\\^-]/g, "\\$&")}])`;
+
+/** Markdown escapes `"` before the page sees it, and that is the only one. */
+const QUOT = "&quot;";
+
+/** One entity, matched where it starts without copying the rest of the html. */
+const ENTITY = /&#?[A-Za-z0-9]+;/y;
+
+/**
+ * Whether what follows an id ends the handle: nothing, a non-ASCII letter
+ * such as a Korean particle, or closing punctuation followed by nothing or by
+ * one (`@bot-3)끼리`). `@bot-3.ai` and `@bot-3's` go on. In rendered markdown
+ * a closing `"` is `&quot;`; raw text keeps it as is, as the daemon reads it.
+ */
+function handleEnds(rest: string, html = false): boolean {
+  const close = html ? /^(?:[,.!?:;)\]}"']|&quot;)+/ : /^[,.!?:;)\]}"']+/;
+  const after = rest.replace(close, "");
+  return !after || /^[^\x00-\x7f]/.test(after);
+}
+
 const SKIP_TAGS = new Set(["CODE", "PRE", "A"]);
 const BLOCK_TAGS = new Set([
   "P",
@@ -148,10 +183,9 @@ export function mentionsId(text: string, id: string): boolean {
       const raw = (text.slice(i + 1).match(/^[^\s<]+/) || [""])[0];
       const token = (raw.match(HANDLE_ID) || [""])[0];
       const rest = raw.slice(token.length);
-      const ends = !rest || /^[^\x00-\x7f]/.test(rest) || !trimMentionPunct(rest);
-      if (token === id && ends) return true;
+      if (token === id && handleEnds(rest)) return true;
     }
-    prevWs = /\s/.test(text[i]);
+    prevWs = opensHandle(text[i]);
   }
   return false;
 }
@@ -176,6 +210,8 @@ function attr(s: string): string {
     .replace(/</g, "&lt;");
 }
 
+const SENT_HANDLE = new RegExp(`${HANDLE_START}([@#])(\\S+)`, "g");
+
 /**
  * What the composer sends: a handle typed by name and never picked from the
  * menu (pasted, or the menu dismissed) goes out as `@id`, or `#id` for a
@@ -192,11 +228,18 @@ export function mentionIds(
     .map((part, i) =>
       i % 2
         ? part
-        : part.replace(/(^|\s)([@#])(\S+)/g, (all, pre: string, sigil: string, raw: string) => {
-            const token = trimMentionPunct(raw);
-            if (!token) return all;
-            const id =
+        : part.replace(SENT_HANDLE, (all, pre: string, sigil: string, raw: string) => {
+            const find = (token: string) =>
               sigil === "@" ? resolveMention(token, agents)?.id : resolveGroup(token, groups)?.id;
+            const whole = trimMentionPunct(raw);
+            let token = whole;
+            let id = whole ? find(whole) : undefined;
+            // A name closed by a bracket and then a particle: `(@춘식이)끼리`.
+            const cut = raw.search(/[,.!?:;)\]}"']/);
+            if (!id && cut > 0 && handleEnds(raw.slice(cut))) {
+              token = raw.slice(0, cut);
+              id = find(token);
+            }
             return id ? pre + sigil + id + raw.slice(token.length) : all;
           }),
     )
@@ -216,12 +259,10 @@ export type Handle = { label: string; length: number } & (
 );
 
 /** Where a handle's token ends, or nothing when the word goes on past it. */
-function handleToken(text: string, i: number, shape: RegExp): string {
+function handleToken(text: string, i: number, shape: RegExp, html: boolean): string {
   const raw = (text.slice(i + 1).match(/^[^\s<]+/) || [""])[0];
   const token = (raw.match(shape) || [""])[0];
-  const rest = raw.slice(token.length);
-  const ends = !rest || /^[^\x00-\x7f]/.test(rest) || !trimMentionPunct(rest);
-  return ends ? token : "";
+  return handleEnds(raw.slice(token.length), html) ? token : "";
 }
 
 /**
@@ -246,9 +287,10 @@ export function handleAt(
   i: number,
   agents: readonly AgentInfo[],
   groups: readonly Group[] = [],
+  html = false,
 ): Handle | undefined {
   if (text[i] === "#") {
-    const token = handleToken(text, i, GROUP_ID);
+    const token = handleToken(text, i, GROUP_ID, html);
     const lower = token.toLowerCase();
     const group = token
       ? namedGroups(groups).find((g) => g.id.toLowerCase() === lower)
@@ -257,7 +299,7 @@ export function handleAt(
     return { sigil: "#", group, label: group.name, length: 1 + token.length };
   }
   if (text[i] !== "@") return undefined;
-  const token = handleToken(text, i, HANDLE_ID);
+  const token = handleToken(text, i, HANDLE_ID, html);
   if (!token) return undefined;
   const agent = resolveId(token, agents);
   if (!agent) return undefined;
@@ -301,7 +343,7 @@ export function mentionRuns(
       continue;
     }
     plain += text[i];
-    prevWs = /\s/.test(text[i]);
+    prevWs = opensHandle(text[i]);
     i += 1;
   }
   if (plain) runs.push({ text: plain });
@@ -370,7 +412,7 @@ export function injectMentionChips(
       i = end;
       continue;
     }
-    const hit = prevWs ? handleAt(html, i, agents, groups) : undefined;
+    const hit = prevWs ? handleAt(html, i, agents, groups, true) : undefined;
     if (hit) {
       out +=
         hit.sigil === "@"
@@ -380,8 +422,20 @@ export function injectMentionChips(
       prevWs = false;
       continue;
     }
+    // Markdown escapes a quote, so `"@bot-3"` arrives as `&quot;@bot-3&quot;`.
+    // Any other entity glues an `@` after it to a word.
+    if (html[i] === "&") {
+      ENTITY.lastIndex = i;
+      const entity = ENTITY.exec(html)?.[0];
+      if (entity) {
+        out += entity;
+        prevWs = entity === QUOT;
+        i += entity.length;
+        continue;
+      }
+    }
     out += html[i];
-    prevWs = /\s/.test(html[i]);
+    prevWs = opensHandle(html[i]);
     i += 1;
   }
   return out;

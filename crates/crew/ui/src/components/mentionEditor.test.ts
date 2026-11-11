@@ -58,6 +58,12 @@ describe("a # before the caret", () => {
     expect(mentionBefore("issue#cr")).toBeNull();
   });
 
+  it("opens after an opening bracket or quote, not after a letter", () => {
+    expect(mentionBefore("개발자(@Al")).toEqual({ start: 4, query: "Al", sigil: "@" });
+    expect(mentionBefore("「#cr")).toEqual({ start: 1, query: "cr", sigil: "#" });
+    expect(mentionBefore("mail@al")).toBeNull();
+  });
+
   it("turns a typed group name into its chip", () => {
     expect(typedHandle("봐줘 #crew", agents, groups)).toEqual({ group: groups[0] });
     expect(typedHandle("#233", agents, groups)).toBeNull();
