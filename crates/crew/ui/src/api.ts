@@ -63,8 +63,9 @@ export function oneAtATime() {
 
 export const api = {
   listAgents: () => invoke<AgentInfo[]>("list_agents"),
-  sendMessage: (agent: string, text: string, steer = false) =>
-    invoke<void>("send_message", { agent, text, steer }),
+  /** `id` is the row id the window drew the line under; the daemon's row keeps it. */
+  sendMessage: (agent: string, text: string, steer = false, id?: string) =>
+    invoke<void>("send_message", { agent, text, steer, id }),
   stopAgent: (agent: string) => invoke<void>("stop_agent", { agent }),
   cancelQueued: (agent: string, messageId: string) =>
     invoke<void>("cancel_queued", { agent, messageId }),

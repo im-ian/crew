@@ -14,6 +14,10 @@ pub enum Request {
         /// Stop the turn under way and start this one now, instead of queuing.
         #[serde(default)]
         steer: bool,
+        /// The row id the window already drew this line under. The daemon's
+        /// row keeps it, so the bubble stays put when that row comes in.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
     },
     Tell {
         from: String,

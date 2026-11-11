@@ -575,6 +575,30 @@ pub fn push_user(agent: &str, from: &str, text: &str) -> ChatMessage {
     push_role(agent, Role::User, from, text, true, None, None, false)
 }
 
+/// A line the user typed, under the id the window already drew it with. An id
+/// that is not the window's kind, or one this chat already has, gets a fresh
+/// one.
+pub fn push_user_as(agent: &str, from: &str, text: &str, id: Option<&str>) -> ChatMessage {
+    let Some(id) = id.filter(|id| client_row_id(id)) else {
+        return push_user(agent, from, text);
+    };
+    let mut msg = new_row(Role::User, from, text, None, None, false);
+    msg.id = id.to_string();
+    commit_row_as(agent, msg, true, true)
+}
+
+/// The window's ids start `u-`, which `new_id` never does, so one of these
+/// can only meet another one.
+fn client_row_id(id: &str) -> bool {
+    id.len() <= 64
+        && id.strip_prefix("u-").is_some_and(|rest| {
+            !rest.is_empty()
+                && rest
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        })
+}
+
 /// `peer` is the bot that asked for the turn this row starts, if one did.
 pub fn push_system(agent: &str, from: &str, text: &str, peer: Option<String>) -> ChatMessage {
     push_role(
@@ -1313,11 +1337,19 @@ fn new_row(
 }
 
 fn commit_row(agent: &str, msg: ChatMessage, expect: bool) -> ChatMessage {
+    commit_row_as(agent, msg, expect, false)
+}
+
+/// `given_id`: the id came from outside, so it may already be in this chat.
+fn commit_row_as(agent: &str, mut msg: ChatMessage, expect: bool, given_id: bool) -> ChatMessage {
     let sealed = match chats().lock() {
         Ok(mut map) => {
             let chat = map
                 .entry(agent.to_string())
                 .or_insert_with(AgentChat::empty);
+            if given_id && chat.messages.iter().any(|m| m.id == msg.id) {
+                msg.id = new_id();
+            }
             // A headless turn still answering keeps its reply and its stream.
             // Sealing here split the reply around this row, and a row that
             // expects no turn left the rest of the reply nowhere to go.
@@ -2908,6 +2940,34 @@ Severity must be one of: bug.";
         let line = serde_json::to_string(&msg).unwrap();
         assert!(line.contains("\"mention\":true"), "{line}");
         drop_agent(&agent);
+    }
+
+    /// The window draws a sent line before the daemon has it. The row keeps
+    /// that id, unless it is not a plain token or the chat already has it.
+    #[test]
+    fn a_user_line_keeps_the_id_the_window_drew_it_with() {
+        crate::paths::testing::with_home("push-user-as", || {
+            let agent = "push-user-as-bot";
+            drop_agent(agent);
+            let first = push_user_as(agent, "user", "안녕", Some("u-1700000000000-1-ab12"));
+            assert_eq!(first.id, "u-1700000000000-1-ab12");
+            assert_eq!(messages(agent).last().unwrap().id, first.id);
+
+            let again = push_user_as(agent, "user", "안녕", Some("u-1700000000000-1-ab12"));
+            assert_ne!(again.id, first.id, "a chat never holds one id twice");
+
+            let long = format!("u-{}", "x".repeat(63));
+            for bad in ["", "u-", "u-has space", "u-../x", "1700000000000-7", &long] {
+                let row = push_user_as(agent, "user", "다른 글", Some(bad));
+                assert_ne!(row.id, bad);
+            }
+            let plain = push_user_as(agent, "user", "그냥", None);
+            assert!(!plain.id.is_empty());
+            let ids: std::collections::HashSet<_> =
+                messages(agent).into_iter().map(|m| m.id).collect();
+            assert_eq!(ids.len(), messages(agent).len());
+            drop_agent(agent);
+        });
     }
 
     #[test]

@@ -12,7 +12,8 @@ import {
   applyStop,
   heldFor,
   rollbackSend,
-  sendKeptQueued,
+  sendKept,
+  sendRowId,
   withUnaccepted,
   type HeldSend,
 } from "./sendGate";
@@ -790,7 +791,8 @@ export function useCrew() {
     }
     const next = await getMessages(id);
     if (!next) return;
-    // A send the daemon has not answered stays held, and stays off the bubble path.
+    // A send the daemon has not answered stays on the end as a sending line
+    // until its own row is in this snapshot.
     const shown = withUnaccepted(next, heldFor(id, heldSends.current));
     setMessages((prev) => keepSame(prev, shown));
     setMessagesFor(id);
@@ -800,10 +802,12 @@ export function useCrew() {
     const { id: sel } = selectedRef.current;
     if (!sel) return false;
     sendSeq.current += 1;
+    const now = Date.now();
     const held: HeldSend = {
-      id: `local-send-${sendSeq.current}`,
+      id: sendRowId(sendSeq.current, now),
       agent: sel,
       text: raw,
+      at: now,
     };
     heldSends.current = [...heldSends.current, held];
     if (selectedRef.current.id === sel) {
@@ -811,33 +815,43 @@ export function useCrew() {
     }
     let accepted = false;
     try {
-      await api.sendMessage(sel, raw, steer);
+      await api.sendMessage(sel, raw, steer, held.id);
       accepted = true;
     } catch (err) {
       // A failed start can still leave the line queued. That is the waiting
-      // row, so the composer must not also put the draft back.
+      // row, so the composer must not also put the draft back. Asked straight,
+      // not through the poll's newest-only gate, which can answer null.
       try {
-        const next = await getMessages(sel);
-        if (next && sendKeptQueued(next, raw)) accepted = true;
+        const next = await api.getMessages(sel);
+        if (sendKept(next, held.id)) accepted = true;
         else showError(err);
       } catch {
         showError(err);
       }
-    } finally {
+    }
+    // Drops the sending line too. Once the daemon row with its id is in, the
+    // row is that one and this finds nothing; if it never came (a failed
+    // send, a fetch that failed, another chat open), no line is left behind.
+    // On failure the draft goes back.
+    const release = () => {
       heldSends.current = heldSends.current.filter((h) => h.id !== held.id);
-    }
-    if (selectedRef.current.id === sel) {
-      // Failure drops the line this window inserted. Success then takes the daemon rows.
       setMessages((prev) => rollbackSend(prev, held.id).messages);
-      if (accepted) {
-        try {
-          await refreshMessages();
-        } catch (err) {
-          showError(err);
-        }
-      }
+    };
+    if (!accepted) {
+      release();
+      return false;
     }
-    return accepted;
+    // Still held while this fetch runs, so a poll that left before the daemon
+    // row existed cannot drop the bubble. The daemon row has the same id, so
+    // it takes the line's place without a remount.
+    try {
+      if (selectedRef.current.id === sel) await refreshMessages();
+    } catch (err) {
+      showError(err);
+    } finally {
+      release();
+    }
+    return true;
   }
 
   async function stopAgent(agentId?: string) {

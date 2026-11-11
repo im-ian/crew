@@ -77,15 +77,16 @@ export function threadRows(
 
 /**
  * The row the wait dots follow. A reply still being written stays above what
- * lands in its chat meanwhile (a queued message, a teammate's reply, a "sent
- * to" notice), so those are passed over.
+ * lands in its chat meanwhile (a queued message, a send the daemon has not
+ * answered yet, a teammate's reply, a "sent to" notice), so those are passed
+ * over.
  */
 export function dotsAfter(
   list: readonly ChatMessage[],
 ): ChatMessage | undefined {
   for (let i = list.length - 1; i >= 0; i--) {
     const m = list[i];
-    if (m.queued || m.kind === "handoff" || m.kind === "sent") continue;
+    if (m.queued || m.optimistic || m.kind === "handoff" || m.kind === "sent") continue;
     return m;
   }
   return undefined;

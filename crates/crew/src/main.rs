@@ -396,6 +396,7 @@ fn run() -> anyhow::Result<()> {
                 agent,
                 text,
                 steer: false,
+                id: None,
             })?)
         }
         Some(Cmd::Tell { to, from, message }) => run_tell(to, from, message),

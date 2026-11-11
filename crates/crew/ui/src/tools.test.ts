@@ -74,6 +74,7 @@ describe("dotsAfter", () => {
       note("h", "chunsik", "handoff"),
       note("n", "to:chunsik", "sent"),
       { id: "q", role: "user", from: "user", text: "how is it going?", ts: 3, queued: true },
+      { id: "s", role: "user", from: "user", text: "still sending", ts: 4, optimistic: true },
     ];
     expect(dotsAfter(list)?.id).toBe("r");
   });
