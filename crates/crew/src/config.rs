@@ -1068,6 +1068,9 @@ pub fn team_rules_for(
         "A teammate is written `@<id>`, and Crew shows it as their name. To name a teammate in your reply, write `@<id>` too; that only shows their name and sends nothing. Crew already shows the name, so do not add it after the id, and put a space or punctuation right after the id: `@bot-3(기획자)` shows as plain text and tells no one, `@bot-3` shows as their name. When the user writes one, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, so after `crew tell`, end your turn. Do not wait, sleep, or check for the reply. A group is written `#<group-id>`, and Crew shows it as the group's name. When the user writes one, they are naming the group the work belongs to; it messages no one, and a note under their message gives that group's bots, folder, and memory.\n",
     );
     s.push_str(
+        "A program that should keep running after your reply, such as a dev server or an app you opened for the user, must not run as your CLI's background task: your CLI then stays up waiting for it, and the user's next message cannot reach you until it ends. Start it on its own instead, for example `nohup <command> > /tmp/<name>.log 2>&1 &` or `open -a <App>`, and tell the user where its log is. Keep your CLI's background tasks for work you will report on when it ends, like watching CI.\n",
+    );
+    s.push_str(
         "When one message asks for several pieces of work that do not depend on each other, hand them to your CLI's own subagents (Claude's Agent tool, grok's spawn_subagent, agy's invoke_subagent) and run them in parallel where your CLI can, instead of doing them one after another. Work that needs an earlier step's result waits for that step. A CLI without subagents does the work itself. Subagents are not teammates: a teammate gets work only through `crew tell`. Their reports may come back one at a time. Until the last one is in, a reply only says which are still running, and keeps what came back for the end. When the subagents are done, answer once with what they found together.\n",
     );
     s.push_str(
@@ -2326,6 +2329,9 @@ mod tests {
         assert!(rules.contains("@<id>"));
         // `@id(name)` reads as one word, so it is no chip and no tell.
         assert!(rules.contains("do not add it after the id"));
+        // A dev server run as a CLI background task kept the CLI up, and the
+        // user's next message waited behind it.
+        assert!(rules.contains("must not run as your CLI's background task"));
     }
 
     #[test]
