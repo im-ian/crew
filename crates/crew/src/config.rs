@@ -1323,8 +1323,10 @@ pub fn group_hint(
 /// A handle is `@` and an id. Ids are ASCII (`valid_agent_id`), so one ends at
 /// the first other character, as long as that ends the word too: a Korean
 /// particle (`@bot-x에게`) or closing punctuation (`@bot-x,`) does, the `.ai`
-/// in `@claude.ai` does not. Names are for the screen only; the composer
-/// turns them into ids. `handleAt` in the UI reads a handle the same way.
+/// in `@claude.ai` does not. A handle starts after a space, the start, or an
+/// opening bracket or quote (`opens_handle`), and code names no one. Names
+/// are for the screen only; the composer turns them into ids. `handleAt` in
+/// the UI reads a handle the same way.
 pub(crate) fn mention_tokens(text: &str) -> Vec<String> {
     sigil_tokens(text, '@')
 }
@@ -1336,6 +1338,8 @@ pub(crate) fn group_tokens(text: &str) -> Vec<String> {
 }
 
 fn sigil_tokens(text: &str, sigil: char) -> Vec<String> {
+    // Code is left as written, as the UI leaves it: `@x` there names no one.
+    let text = &without_code(text);
     let mut out = Vec::new();
     let mut prev_ws = true;
     for (idx, ch) in text.char_indices() {
@@ -1349,16 +1353,61 @@ fn sigil_tokens(text: &str, sigil: char) -> Vec<String> {
                 .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '/'))
                 .unwrap_or(raw.len());
             let (token, rest) = raw.split_at(end);
-            let ends = rest.is_empty()
-                || !rest.starts_with(|c: char| c.is_ascii())
-                || rest.chars().all(is_mention_punct);
+            // Closing punctuation ends it when nothing or a non-ASCII letter
+            // follows (`@bot-x)끼리`); `@bot-x.ai` and `@bot-x's` go on.
+            let after = rest.trim_start_matches(is_mention_punct);
+            let ends = !after.starts_with(|c: char| c.is_ascii());
             if !token.is_empty() && ends {
                 out.push(token.to_string());
             }
         }
-        prev_ws = ch.is_whitespace();
+        prev_ws = opens_handle(ch);
     }
     out
+}
+
+/// `text` with each code fence and inline code span blanked to spaces, read
+/// as `mentionIds` in the UI splits it: a ``` or ~~~ fence runs to its close
+/// or the end, and `code` closes on the same line.
+fn without_code(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        let fence = ["```", "~~~"].into_iter().find(|f| rest.starts_with(f));
+        let span = if let Some(f) = fence {
+            let body = &rest[f.len()..];
+            Some(body.find(f).map_or(rest.len(), |at| f.len() + at + f.len()))
+        } else if let Some(body) = rest.strip_prefix('`') {
+            body.find(['`', '\n'])
+                .filter(|&at| body[at..].starts_with('`'))
+                .map(|at| 1 + at + 1)
+        } else {
+            None
+        };
+        match span {
+            Some(len) => {
+                out.extend(rest[..len].chars().map(|c| if c == '\n' { c } else { ' ' }));
+                rest = &rest[len..];
+            }
+            None => {
+                let c = rest.chars().next().expect("not empty");
+                out.push(c);
+                rest = &rest[c.len_utf8()..];
+            }
+        }
+    }
+    out
+}
+
+/// What may stand right before a handle: a space, the start, or an opening
+/// bracket or quote, as in `개발자(@bot-3)`. A letter may not, so `mail@alpha`
+/// is not one. `opensHandle` in the UI reads it the same way.
+fn opens_handle(c: char) -> bool {
+    c.is_whitespace()
+        || matches!(
+            c,
+            '(' | '[' | '{' | '"' | '\'' | '“' | '‘' | '「' | '『' | '〈' | '《' | '（' | '［'
+        )
 }
 
 fn is_mention_punct(c: char) -> bool {
@@ -2626,6 +2675,38 @@ mod tests {
         assert_eq!(
             mentioned_teammate_ids("email me@beta.com", "alpha", &roster),
             Vec::<String>::new()
+        );
+        // An opening bracket or quote may stand before a handle, and a
+        // particle may follow a closing one, as the UI draws it; a letter
+        // before it still may not.
+        assert_eq!(
+            mentioned_teammate_ids(
+                "UI/UX @beta)끼리만, \"@choonsik\", 「@beta」",
+                "alpha",
+                &roster
+            ),
+            vec!["beta", "choonsik"]
+        );
+        assert_eq!(
+            mentioned_teammate_ids("x(y@beta) (@beta.ai) (@beta's)", "alpha", &roster),
+            Vec::<String>::new()
+        );
+        // Code names no one, as the UI draws no chip there.
+        assert_eq!(
+            mentioned_teammate_ids(
+                "run `curl -d '{\"to\":\"@beta\"}'` and\n```\nping @choonsik\n```\nthen @beta",
+                "alpha",
+                &roster
+            ),
+            vec!["beta"]
+        );
+        assert_eq!(
+            mentioned_teammate_ids("an open ``` fence @beta", "alpha", &roster),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            mentioned_teammate_ids("a lone ` tick @beta", "alpha", &roster),
+            vec!["beta"]
         );
 
         let hinted = with_mention_hint("ping @Beta please", "alpha", &roster);

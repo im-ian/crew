@@ -15,6 +15,7 @@ import {
   trimMentionPunct,
 } from "./mentions";
 import type { AgentInfo, Group } from "./types";
+import { renderMarkdown } from "./markdown";
 
 function agent(id: string, name: string): AgentInfo {
   return { id, name, status: "idle", cmd: ["cat"], cwd: "/tmp", routines: [] };
@@ -109,6 +110,51 @@ describe("injectMentionChips", () => {
 
   it("ignores an @ glued to the end of a word", () => {
     expect(injectMentionChips("<p>mail@alpha</p>", agents)).toBe("<p>mail@alpha</p>");
+  });
+
+  it("reads a handle right after an opening bracket or quote", () => {
+    const chip = '<span class="mention-chip" data-mention="alpha"></span>';
+    // The case that showed up: an id, a closing bracket, then a particle.
+    expect(injectMentionChips("<p>UI/UX @alpha)끼리만</p>", agents)).toBe(
+      `<p>UI/UX ${chip})끼리만</p>`,
+    );
+    expect(injectMentionChips("<p>개발자(@alpha)끼리</p>", agents)).toBe(`<p>개발자(${chip})끼리</p>`);
+    expect(injectMentionChips("<p>[@alpha]</p>", agents)).toBe(`<p>[${chip}]</p>`);
+    expect(injectMentionChips("<p>「@alpha」</p>", agents)).toBe(`<p>「${chip}」</p>`);
+    expect(injectMentionChips("<p>'@alpha'</p>", agents)).toBe(`<p>'${chip}'</p>`);
+    // Markdown escapes a quote before the page sees it.
+    expect(injectMentionChips("<p>&quot;@alpha&quot;</p>", agents)).toBe(
+      `<p>&quot;${chip}&quot;</p>`,
+    );
+    // Through the real renderer: quotes, brackets, a particle after ")".
+    const rendered = injectMentionChips(
+      renderMarkdown('"@alpha" 그리고 (@gamma)끼리, 「@alpha」'),
+      agents,
+    );
+    expect(rendered.match(/mention-chip/g)?.length).toBe(3);
+    expect(injectMentionChips(renderMarkdown("`(@alpha)`"), agents)).not.toContain("mention-chip");
+    // Any other entity, or a letter, still glues the @ to a word, and a
+    // domain or a possessive still goes on past the id.
+    for (const html of ["<p>&amp;@alpha</p>", "<p>x(y@alpha)</p>", "<p>(@alpha.ai)</p>", "<p>(@alpha's)</p>"]) {
+      expect(injectMentionChips(html, agents), html).toBe(html);
+    }
+  });
+
+  it("reads a bracketed handle the same in previews, sends and self-copies", () => {
+    expect(mentionRuns("개발자(@alpha)", agents).map((r) => r.agent?.id ?? r.text)).toEqual([
+      "개발자(",
+      "alpha",
+      ")",
+    ]);
+    expect(mentionIds("기획자(@Alpha) 봐줘", agents)).toBe("기획자(@alpha) 봐줘");
+    // A name closed by a bracket and a particle is still the bot.
+    expect(mentionIds("개발자(@춘식이)끼리 봐줘", agents)).toBe("개발자(@gamma)끼리 봐줘");
+    expect(mentionIds("(@Alpha.ai) 봐", agents)).toBe("(@Alpha.ai) 봐");
+    expect(mentionIds("`(@Alpha)`", agents)).toBe("`(@Alpha)`");
+    expect(mentionsId("디자이너(@gamma)", "gamma")).toBe(true);
+    expect(mentionsId("mail@gamma", "gamma")).toBe(false);
+    // Raw text keeps a quote as itself, as the daemon reads it.
+    expect(mentionsId("ping @gamma&quot;", "gamma")).toBe(false);
   });
 
   it("does not touch code, pre, or link text", () => {
