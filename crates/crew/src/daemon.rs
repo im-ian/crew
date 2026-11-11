@@ -2310,7 +2310,8 @@ fn restore_epoch(agent: &str, epoch: u64) {
 /// Queued user lines go to the front of that bot's inbox, in transcript order.
 /// A line whose turn already spoke is not put back. Tells that were not
 /// accepted go to a separate list, with the hops they already had. A tell
-/// whose target has moved past the epoch it was created in is dropped.
+/// whose target has moved past the epoch it was created in is dropped, and so
+/// is a waiting tell the waits file no longer has.
 fn restore_waiting(cfg: &Config) {
     let roster = &cfg.agents;
     for agent_cfg in &cfg.agents {
@@ -2390,6 +2391,9 @@ fn restore_waiting(cfg: &Config) {
                 continue;
             }
             let Some(meta) = saved.tells.iter().find(|tell| tell.msg_id == message.id) else {
+                // Nothing can send it again, so it would show as waiting
+                // forever with no way to take it back.
+                crate::transcript::set_queued(id, &message.id, false);
                 continue;
             };
             if current > meta.epoch {
@@ -4545,6 +4549,40 @@ mod daemon_tests {
 
             assert!(bot_path.exists(), "boot must not unlink a bot's transcript");
             assert_eq!(crate::transcript::messages(&bot).len(), 1);
+            crate::transcript::drop_agent(&bot);
+        });
+    }
+
+    /// A teammate's tell still marked waiting, with no record in the waits
+    /// file (its sender was deleted, or the record never got written), cannot
+    /// be sent again. Boot stops showing it as waiting.
+    #[test]
+    fn boot_unmarks_a_waiting_tell_it_cannot_send() {
+        paths::testing::with_home("daemon-orphan-tell", || {
+            let bot = test_id("bot");
+            let gone = test_id("gone");
+            let tell = crate::transcript::push_system(&bot, &gone, "끝냈어요", None);
+            crate::transcript::set_queued(&bot, &tell.id, true);
+            assert!(load_waits(&bot).tells.is_empty());
+
+            let cfg = Config {
+                agents: vec![AgentConfig::new(
+                    bot.clone(),
+                    bot.clone(),
+                    vec!["cat".into()],
+                    None,
+                )],
+            };
+            restore_transcripts(&cfg);
+
+            let row = crate::transcript::messages(&bot)
+                .into_iter()
+                .find(|m| m.id == tell.id)
+                .expect("the tell's row stays in the chat");
+            assert!(!row.queued, "a tell nothing can send must not stay waiting");
+            assert!(recovered_tells().lock().unwrap().get(&bot).is_none());
+            let stored = fs::read_to_string(paths::transcript_path(&bot)).unwrap();
+            assert!(!stored.contains("\"queued\":true"), "{stored}");
             crate::transcript::drop_agent(&bot);
         });
     }
