@@ -877,6 +877,8 @@ impl AgentConfig {
             .prompt_mode()
             .then(|| prompt_with_preamble(self, roster, memory, prompt, isolated));
         let prompt = spoken.as_deref().unwrap_or(prompt);
+        let guarded = not_a_flag(prompt);
+        let prompt = guarded.as_deref().unwrap_or(prompt);
         match self.binary_name().as_str() {
             "grok" => apply_grok_turn(&mut args, prompt, session),
             "claude" => apply_claude_turn(&mut args, prompt, session),
@@ -890,6 +892,15 @@ impl AgentConfig {
         }
         args
     }
+}
+
+/// The prompt goes on the command line, and a CLI reads an argument that
+/// starts with `-` as one of its options: a pasted crash report opening with
+/// `-----` came back as "error: unknown option '-----…'", and a message
+/// opening with a `- item` list would too. A newline in front keeps it a
+/// prompt in every CLI's parser and changes nothing the model reads.
+fn not_a_flag(prompt: &str) -> Option<String> {
+    prompt.starts_with('-').then(|| format!("\n{prompt}"))
 }
 
 pub fn uses_pty_program(program: &str) -> bool {
@@ -1929,6 +1940,38 @@ mod tests {
         assert!(!cfg(&["/opt/homebrew/bin/claude"], None, None).uses_pty());
         assert!(!cfg(&["codex", "--yolo"], None, None).uses_pty());
         assert!(cfg(&["cat"], None, None).uses_pty());
+    }
+
+    /// A pasted crash report opened with `-----`, and the CLI answered
+    /// "error: unknown option", quoting it back as if the bot had said it.
+    #[test]
+    fn a_prompt_starting_with_a_dash_is_not_read_as_a_flag() {
+        let clis = [
+            vec!["grok", "--always-approve"],
+            vec!["claude", "--dangerously-skip-permissions"],
+            vec!["codex", "--yolo"],
+            vec!["gemini"],
+            vec!["agy"],
+            vec!["copilot"],
+            vec!["opencode"],
+        ];
+        for prompt in ["-----\nTranslated Report", "- 첫째\n- 둘째", "--help"] {
+            for cmd in &clis {
+                let argv = cfg(cmd, None, None).turn_cmd(prompt, None, &[], "");
+                let last = argv.last().expect("prompt");
+                assert!(!last.starts_with('-'), "{cmd:?} {last:?}");
+                // The text itself is all there; a CLI that is sent the
+                // instructions in the prompt has them in front already.
+                assert!(last.ends_with(prompt), "{cmd:?}");
+            }
+            let mut custom = cfg(&["my-bot"], None, None);
+            custom.headless = true;
+            let argv = custom.turn_cmd(prompt, None, &[], "");
+            assert!(!argv.last().unwrap().starts_with('-'), "{argv:?}");
+        }
+        // Anything else goes as it was written.
+        let argv = cfg(&["claude"], None, None).turn_cmd("안녕", None, &[], "");
+        assert_eq!(argv.last().unwrap(), "안녕");
     }
 
     #[test]
