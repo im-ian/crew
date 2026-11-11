@@ -32,7 +32,7 @@ Antigravity / Gemini / Copilot / OpenCode도 턴 단위로 실행하지만 세�
 
 세션마다 `CREW_AGENT_ID`와 확장된 `PATH`가 들어가요. 시스템 프롬프트는 대략 이렇게 알려 줘요.
 
-> 사용자가 `@id`를 쓰면 그건 **너에게** 다른 봇을 가리키는 것이다. 이 세션에 남아라. 필요하면 직접 `crew tell <id> <text>`를 실행해라.
+> 사용자가 `@id`를 쓰면 그건 **너에게** 다른 봇을 가리키는 것이다. 이 세션에 남아라. 필요하면 직접 `crew tell <id> <text>`를 실행해라. 답에 동료를 적을 때는 `@id`만 쓰고 바로 뒤에 띄어쓰기나 문장부호를 둬라. 이름은 Crew가 보여 주니 덧붙이지 마라.
 > 이름을 바꿔 달라면 `crew agent set --name "새 이름"`을 실행해라. 봇을 만들라면 `crew agent add`를, 사이드바 그룹을 만들라면 `crew group add`를 실행해라. 반복 일을 맡기면 그 말을 cron으로 바꿔 `crew routine add`로 루틴을 만들고, 고치거나 지우라면 `crew routine edit` / `remove`를 실행해라.
 > 사람에게 고르라고 물으려면 `crew ask --question "..." --option A --option B`를 실행해라. 여럿 고를 수 있으면 `--multi`, 값을 적으라고 하려면 `--input 아이디`를 보태라. 정할 게 여러 개면 답장에 늘어놓지 말고 `--question`을 반복해 한 번에 물어라. `crew ask`가 답 없이 끝나거나 CLI가 끊어도 카드는 열려 있고 답은 나중에 메시지로 온다. 다시 묻지 말고, 카드가 닫혔다고 말하지 마라. 다른 봇에게 묻지 마라.
 > 서로 의존하지 않는 일 여러 개는 CLI 자체 서브에이전트(Claude Agent, grok spawn_subagent, agy invoke_subagent)에게 나눠 병렬로 돌리고, 답은 다 모인 뒤 한 번에 해라. 서브에이전트는 팀원이 아니다.
