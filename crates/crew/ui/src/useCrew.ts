@@ -123,6 +123,9 @@ export function useCrew() {
   const [pendingRenameId, setPendingRenameId] = useState<string | null>(null);
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [highlightId, setHighlightId] = useState<string | null>(null);
+  // Bumps when a person opens a chat, so the composer takes the caret.
+  // The chat already on screen counts: the click had moved focus away.
+  const [composerFocus, setComposerFocus] = useState(0);
   const [readMap, setReadMap] = useState(loadRead);
 
   const selectedRef = useRef({ id: selected, kind: selectedKind });
@@ -414,6 +417,10 @@ export function useCrew() {
     void api.setCwd(id, cwd).then(() => refreshList()).catch((err) => showError(err));
   }
 
+  function focusComposer() {
+    setComposerFocus((n) => n + 1);
+  }
+
   function selectAgent(id: string, highlight: string | null = null) {
     selectedRef.current = { id, kind: "agent" };
     setSelected(id);
@@ -421,6 +428,7 @@ export function useCrew() {
     setStick(!highlight);
     setHighlightId(highlight);
     closePane();
+    focusComposer();
     void refreshMessages();
   }
 
@@ -1117,6 +1125,7 @@ export function useCrew() {
       setStick(true);
       setMessages([]);
       closePane();
+      focusComposer();
       await refreshList();
       if (fromGroup && groupsRef.current.groups.some((g) => g.id === fromGroup.id)) {
         moveToGroup("agent", newId, fromGroup.id, after);
@@ -1198,6 +1207,7 @@ export function useCrew() {
       setStick(true);
       setMessages([]);
       closePane();
+      focusComposer();
       await refreshList();
       if (placeId && groupsRef.current.groups.some((g) => g.id === placeId)) {
         moveToGroup("agent", id, placeId);
@@ -1293,6 +1303,7 @@ export function useCrew() {
     setStick(true);
     setMessages([]);
     closePane();
+    focusComposer();
     await refreshList().catch(showError);
     void refreshRemotes();
     await refreshMessages().catch(showError);
@@ -1607,6 +1618,7 @@ export function useCrew() {
     clearPendingRename: () => setPendingRenameId(null),
     currentAgent,
     placeholder,
+    composerFocus,
     selectAgent,
     openInfo,
     openRoutines,

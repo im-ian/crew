@@ -1603,7 +1603,14 @@ function SearchHitRow({
   const label = agent ? botLabel(agent, groups) : hit.title;
   const tag = routine ? t("search.routine") : hit.kind === "tool" ? t("search.tool") : "";
   return (
-    <button type="button" className="search-hit" onClick={onOpen}>
+    <button
+      type="button"
+      className="search-hit"
+      onMouseDown={(e) => {
+        if (e.button === 0) e.preventDefault();
+      }}
+      onClick={onOpen}
+    >
       <Avatar
         id={agent?.id ?? hit.bot ?? hit.id}
         name={label}
@@ -1813,7 +1820,14 @@ function ItemRow({
       data-rail-row={item.key}
       title={rowTitle}
       aria-label={compact ? label : undefined}
-      onClick={onSelect}
+      onMouseDown={(e) => {
+        if (e.button === 0) e.preventDefault();
+      }}
+      onClick={(e) => {
+        // The second click of a double-click renames, so it must not pull the caret back.
+        if (e.detail > 1) return;
+        onSelect?.();
+      }}
       onContextMenu={onRowContext}
       onPointerDown={onPointerDown}
       onDragStart={(e) => e.preventDefault()}
