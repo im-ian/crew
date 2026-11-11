@@ -1898,13 +1898,30 @@ fn notify_from_frame(ev: &Event) {
         .ok()
         .and_then(|m| m.get(agent).map(|c| c.display_name().to_string()))
         .unwrap_or_else(|| agent.clone());
-    // A bot waiting on this turn is woken with the reply and finishes in its
-    // own chat. Without that wake, this finish is the user's only notice.
-    let waited = get_origin(agent)
-        .and_then(|o| owed_wake(&o, agent))
-        .is_some_and(|(asker, wake)| known_agent(&asker) && !targeting::relay_exhausted(&wake));
+    let waited = answers_a_bot(agent);
     let interrupted = agent_interrupted(agent);
     crate::notify::maybe_status_notify(agent, &name, prev, *status, interrupted || waited);
+}
+
+/// Whether `id`'s turn, the running one or the last one, answers a bot that
+/// ran `crew tell` and waits on it. That bot is woken with the reply and
+/// finishes in its own chat, so this turn's end is not news for the user.
+/// Without that wake, a relay gone too far, this finish is the user's only
+/// notice. A turn that hands its reply over before it goes idle, such as one
+/// with a background task still running, has already spent the wake by then;
+/// it answered the same bot.
+fn answers_a_bot(id: &str) -> bool {
+    let Some(origin) = get_origin(id) else {
+        return false;
+    };
+    let Some(asker) = asked_by(&origin, id) else {
+        return false;
+    };
+    let wake = TurnOrigin {
+        hops: origin.hops + 1,
+        ..TurnOrigin::default()
+    };
+    known_agent(&asker) && !targeting::relay_exhausted(&wake)
 }
 
 /// The bot that asked for this turn. A user's @mention copies the reply back
@@ -3251,18 +3268,23 @@ fn list_agents() -> Vec<AgentInfo> {
                 headless: cfg.is_some_and(|c| c.headless),
                 failed: false,
                 asking: false,
+                for_bot: false,
                 remote: None,
                 remote_online: false,
                 watch: s.watch(),
             }
         })
         .collect();
+    // `answers_a_bot` takes the config lock itself.
+    drop(cfgs);
+    drop(map);
     list.sort_by(|a, b| a.id.cmp(&b.id));
     for a in &mut list {
         a.preview = crate::transcript::preview(&a.id);
         a.last_ts = crate::transcript::last_ts(&a.id);
         a.failed = turn_failed(&a.id);
         a.asking = crate::transcript::has_pending_choice(&a.id);
+        a.for_bot = answers_a_bot(&a.id);
     }
     list.extend(crate::remote::agent_infos());
     list
@@ -4781,6 +4803,44 @@ mod daemon_tests {
         .unwrap_err();
         assert!(err.to_string().contains("inbox full"), "{err}");
         clear_inbox(id);
+    }
+
+    /// A turn a bot asked for with `crew tell` stays that bot's news until
+    /// the next turn starts, even after its reply has woken the bot. A finish
+    /// that comes later, once a background task ends, is still not the user's.
+    #[test]
+    fn a_turn_for_a_waiting_bot_ends_quietly() {
+        let asker = test_id("asker");
+        let speaker = format!("speaker-{asker}");
+        configs().lock().unwrap().insert(
+            asker.clone(),
+            crate::config::AgentConfig::new(asker.clone(), asker.clone(), vec!["cat".into()], None),
+        );
+        let told = |hops: u32| TurnOrigin {
+            from: asker.clone(),
+            reply_agent: Some(asker.clone()),
+            hops,
+            ..TurnOrigin::default()
+        };
+
+        assert!(!answers_a_bot(&speaker), "no turn yet");
+        set_origin(&speaker, TurnOrigin::user());
+        assert!(!answers_a_bot(&speaker), "the user's own turn");
+        set_origin(&speaker, TurnOrigin::mention_tell(&asker));
+        assert!(!answers_a_bot(&speaker), "a user's @mention: that bot did not ask");
+
+        set_origin(&speaker, told(0));
+        assert!(answers_a_bot(&speaker));
+        assert!(take_wake(&speaker).is_some());
+        assert!(answers_a_bot(&speaker), "the wake is spent, the turn still answered a bot");
+
+        set_origin(&speaker, told(targeting::MAX_RELAY_HOPS));
+        assert!(!answers_a_bot(&speaker), "relayed too far: nobody is woken");
+
+        configs().lock().unwrap().remove(&asker);
+        set_origin(&speaker, told(0));
+        assert!(!answers_a_bot(&speaker), "the asker is gone");
+        take_origin(&speaker);
     }
 
     #[test]

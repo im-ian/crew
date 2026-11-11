@@ -2502,6 +2502,7 @@ pub fn agent_infos() -> Vec<AgentInfo> {
                 headless: true,
                 failed: false,
                 asking: online && m.status == "asking",
+                for_bot: false,
                 remote: Some(link.cfg.alias.clone()),
                 remote_online: online,
                 watch: Vec::new(),

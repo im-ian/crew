@@ -39,7 +39,9 @@ const RANK: Record<BotNoticeKind, number> = {
  * Compare two agent lists and say what each bot just did. A bot seen for the
  * first time says nothing: the app opening is not news. Only a long run that
  * ends earns a success, the same bar the face's dance uses, so a quick reply
- * does not light the island every few seconds.
+ * does not light the island every few seconds. A run another bot asked for
+ * and waits on earns none: that bot carries on in its own chat, and the
+ * user hears when it is done.
  */
 export function botNotices(
   prev: Map<string, BotSnap>,
@@ -68,7 +70,9 @@ export function botNotices(
     if (a.status === "blocked" && was.status !== "blocked") pick("blocked");
     if (was.status === "working" && a.status === "idle") {
       if (failed) pick("failure");
-      else if (was.startedAt !== null && now - was.startedAt >= LONG_RUN_MS) pick("success");
+      else if (!a.for_bot && was.startedAt !== null && now - was.startedAt >= LONG_RUN_MS) {
+        pick("success");
+      }
     }
     if (kind) notices.push({ botId: a.id, kind });
   }

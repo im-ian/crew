@@ -105,6 +105,11 @@ export type AgentInfo = {
   failed?: boolean;
   /** A question card is open and waiting for the user. */
   asking?: boolean;
+  /**
+   * Its turn, the running one or the last, answers a bot waiting on it. That
+   * bot finishes in its own chat, so this one's end is no news for the user.
+   */
+  for_bot?: boolean;
   /** Alias of the router a teammate's bot is on. Set only for remote bots. */
   remote?: string;
   /** The teammate's PC is connected to the router. */
