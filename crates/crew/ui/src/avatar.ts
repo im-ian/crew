@@ -49,6 +49,7 @@ export const AVATAR_SHAPES = [
   "blossom",
   "snowflake",
   "mushroom",
+  "palette",
 ] as const;
 
 // Faces a bot may already carry, but the picker no longer offers. They still
@@ -106,6 +107,7 @@ export const AVATAR_SHAPE_GROUPS: {
       "bulb",
       "umbrella",
       "bell",
+      "palette",
     ],
   },
   {
