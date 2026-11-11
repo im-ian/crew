@@ -37,7 +37,7 @@ export function queueActions(m: {
 }
 
 /** A row id for a send, made here so the daemon's row can keep it. */
-export function sendRowId(seq: number, now = Date.now(), rand = Math.random()): string {
+export function sendRowId(seq: number, now: number, rand = Math.random()): string {
   return `u-${now}-${seq}-${Math.floor(rand * 0xffffff).toString(36)}`;
 }
 
@@ -84,12 +84,12 @@ export function rollbackSend(
   };
 }
 
-/** The invoke failed, but the daemon still kept this send as a waiting line. */
-export function sendKeptQueued(
-  messages: readonly { role: string; queued?: boolean; text: string }[],
-  text: string,
+/** The invoke failed, but the daemon still kept this send: its row is there. */
+export function sendKept(
+  messages: readonly { id: string; optimistic?: boolean }[],
+  id: string,
 ): boolean {
-  return messages.some((m) => m.role === "user" && m.queued === true && m.text === text);
+  return messages.some((m) => m.id === id && !m.optimistic);
 }
 
 /**

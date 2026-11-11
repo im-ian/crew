@@ -1156,8 +1156,12 @@ pub fn send_from_user(to: &str, text: &str, row_id: Option<&str>) -> anyhow::Res
     };
     let rid = remote_id(&alias, &account);
     ensure_transcript(&rid);
-    crate::transcript::push_user_as(&rid, "user", text, row_id);
-    tell(None, None, &rid, text, 0)?;
+    let row = crate::transcript::push_user_as(&rid, "user", text, row_id);
+    // Not sent, so not a line in the chat: the window puts the draft back.
+    if let Err(err) = tell(None, None, &rid, text, 0) {
+        crate::transcript::remove_row(&rid, &row.id);
+        return Err(err);
+    }
     Ok(())
 }
 

@@ -576,7 +576,8 @@ pub fn push_user(agent: &str, from: &str, text: &str) -> ChatMessage {
 }
 
 /// A line the user typed, under the id the window already drew it with. An id
-/// that is not a plain token, or one this chat already has, gets a fresh one.
+/// that is not the window's kind, or one this chat already has, gets a fresh
+/// one.
 pub fn push_user_as(agent: &str, from: &str, text: &str, id: Option<&str>) -> ChatMessage {
     let Some(id) = id.filter(|id| client_row_id(id)) else {
         return push_user(agent, from, text);
@@ -586,11 +587,16 @@ pub fn push_user_as(agent: &str, from: &str, text: &str, id: Option<&str>) -> Ch
     commit_row_as(agent, msg, true, true)
 }
 
+/// The window's ids start `u-`, which `new_id` never does, so one of these
+/// can only meet another one.
 fn client_row_id(id: &str) -> bool {
-    (1..=64).contains(&id.len())
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    id.len() <= 64
+        && id.strip_prefix("u-").is_some_and(|rest| {
+            !rest.is_empty()
+                && rest
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        })
 }
 
 /// `peer` is the bot that asked for the turn this row starts, if one did.
@@ -2950,7 +2956,8 @@ Severity must be one of: bug.";
             let again = push_user_as(agent, "user", "안녕", Some("u-1700000000000-1-ab12"));
             assert_ne!(again.id, first.id, "a chat never holds one id twice");
 
-            for bad in ["", "has space", "slash/../x", &"x".repeat(65)] {
+            let long = format!("u-{}", "x".repeat(63));
+            for bad in ["", "u-", "u-has space", "u-../x", "1700000000000-7", &long] {
                 let row = push_user_as(agent, "user", "다른 글", Some(bad));
                 assert_ne!(row.id, bad);
             }

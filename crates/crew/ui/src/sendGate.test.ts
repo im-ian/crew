@@ -7,7 +7,7 @@ import {
   queueActions,
   rollbackSend,
   sendRowId,
-  sendKeptQueued,
+  sendKept,
   stopTurn,
   userLineAppearance,
   withUnaccepted,
@@ -55,7 +55,7 @@ describe("before the daemon accepts", () => {
     const id = sendRowId(3, 1700000000000, 0.5);
     expect(id).toMatch(/^u-1700000000000-3-[0-9a-z]+$/);
     expect(id.length).toBeLessThanOrEqual(64);
-    expect(sendRowId(4)).not.toBe(sendRowId(4));
+    expect(sendRowId(4, 1)).not.toBe(sendRowId(4, 1));
   });
 
   it("shows a user line as waiting only while the daemon row is queued", () => {
@@ -66,11 +66,14 @@ describe("before the daemon accepts", () => {
     expect(userLineAppearance({ ...accepted, queued: false })).toBe("sent");
   });
 
-  it("keeps the draft cleared when a failed invoke still left the line waiting", () => {
-    const waiting = line({ id: "q", role: "user", text: "안녕", queued: true });
-    expect(sendKeptQueued([waiting], "안녕")).toBe(true);
-    expect(sendKeptQueued([line({ id: "s", role: "user", text: "안녕" })], "안녕")).toBe(false);
-    expect(sendKeptQueued([waiting], "다른 글")).toBe(false);
+  it("keeps the draft cleared only when a failed invoke still left this send's row", () => {
+    const kept = line({ id: held.id, role: "user", text: "안녕", queued: true });
+    expect(sendKept([kept], held.id)).toBe(true);
+    // An earlier line with the same text waiting is not this send.
+    const earlier = line({ id: "q", role: "user", text: "안녕", queued: true });
+    expect(sendKept([earlier], held.id)).toBe(false);
+    // The window's own sending line is not the daemon's row.
+    expect(sendKept(withUnaccepted([], [held]), held.id)).toBe(false);
   });
 
   it("puts the text back and drops the unaccepted line when send fails", () => {

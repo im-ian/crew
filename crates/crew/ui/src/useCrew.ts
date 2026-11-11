@@ -12,7 +12,7 @@ import {
   applyStop,
   heldFor,
   rollbackSend,
-  sendKeptQueued,
+  sendKept,
   sendRowId,
   withUnaccepted,
   type HeldSend,
@@ -802,11 +802,12 @@ export function useCrew() {
     const { id: sel } = selectedRef.current;
     if (!sel) return false;
     sendSeq.current += 1;
+    const now = Date.now();
     const held: HeldSend = {
-      id: sendRowId(sendSeq.current),
+      id: sendRowId(sendSeq.current, now),
       agent: sel,
       text: raw,
-      at: Date.now(),
+      at: now,
     };
     heldSends.current = [...heldSends.current, held];
     if (selectedRef.current.id === sel) {
@@ -818,10 +819,11 @@ export function useCrew() {
       accepted = true;
     } catch (err) {
       // A failed start can still leave the line queued. That is the waiting
-      // row, so the composer must not also put the draft back.
+      // row, so the composer must not also put the draft back. Asked straight,
+      // not through the poll's newest-only gate, which can answer null.
       try {
-        const next = await getMessages(sel);
-        if (next && sendKeptQueued(next, raw)) accepted = true;
+        const next = await api.getMessages(sel);
+        if (sendKept(next, held.id)) accepted = true;
         else showError(err);
       } catch {
         showError(err);
