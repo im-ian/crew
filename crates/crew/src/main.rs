@@ -906,9 +906,11 @@ fn run_ask(asks: Vec<AskQuestion>) -> anyhow::Result<()> {
         more: asks.collect(),
     };
     match client::ask_within(req, client::ASK_WAIT)? {
-        Some(ev) => client::print_event(ev),
-        None => {
-            println!("{}", client::ASK_STILL_OPEN);
+        client::AskOutcome::Answer(ev) => client::print_event(ev),
+        // Not an answer, so not on stdout: a script reading the pick gets
+        // nothing, and a bot still reads the note.
+        client::AskOutcome::StillOpen => {
+            eprintln!("{}", client::ASK_STILL_OPEN);
             Ok(())
         }
     }

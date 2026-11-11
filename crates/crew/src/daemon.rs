@@ -870,6 +870,34 @@ fn take_ask(choice_id: &str) -> Option<oneshot::Sender<Event>> {
     ask_waiters().lock().ok()?.remove(choice_id)
 }
 
+/// `crew ask` left before an answer: the card stays open, and its answer will
+/// go to the bot as a message. One that took the waiter just as it left is
+/// already in `rx`; closing first makes any later one find no waiter.
+fn ask_left(agent: &str, choice_id: &str, mut rx: oneshot::Receiver<Event>) {
+    drop_ask(choice_id);
+    rx.close();
+    if let Ok(ev) = rx.try_recv() {
+        late_answer(agent, choice_id, ev);
+    }
+}
+
+/// An answer whose `crew ask` had already gone: it goes on to the bot as a
+/// message, masked and marked as the card's answer, as one with no waiter does.
+fn late_answer(agent: &str, choice_id: &str, ev: Event) {
+    let Event::Answered { text } = ev else {
+        return;
+    };
+    let masked = crate::transcript::messages(agent)
+        .iter()
+        .rev()
+        .find_map(|m| m.choice.as_ref().filter(|c| c.id == choice_id))
+        .map(crate::choice::format_answer_masked)
+        .unwrap_or_else(|| text.clone());
+    if let Err(err) = send_answer(agent, &masked, &text) {
+        eprintln!("[crew] late answer {agent}: {err:#}");
+    }
+}
+
 fn drop_ask(choice_id: &str) {
     let _ = ask_waiters().lock().ok().map(|mut m| m.remove(choice_id));
 }
@@ -2862,20 +2890,22 @@ async fn handle_client(
                             )
                             .await?;
                         }
-                        Ok((choice_id, rx)) => {
+                        Ok((choice_id, mut rx)) => {
+                            // The card is up. `crew ask` gives its wait back
+                            // only once it has heard this, so "still open" is
+                            // never said of a card that never opened.
+                            let opened = write_event(&mut write, &Event::Ok).await.is_ok();
                             tokio::select! {
-                                ev = rx => {
+                                ev = &mut rx, if opened => {
                                     let ev = ev.unwrap_or_else(|_| Event::Error {
                                         message: "ask cancelled".into(),
                                     });
                                     if write_event(&mut write, &ev).await.is_err() {
-                                        if let Event::Answered { text } = ev {
-                                            let _ = send_agent(&agent, &text);
-                                        }
+                                        late_answer(&agent, &choice_id, ev);
                                     }
                                 }
                                 _ = lines.next_line() => {
-                                    drop_ask(&choice_id);
+                                    ask_left(&agent, &choice_id, rx);
                                 }
                             }
                         }
@@ -6063,6 +6093,59 @@ mod daemon_tests {
                 .unwrap();
             answer_choice(&bot, &msg.id, vec![vec!["A".into()]], vec![], vec![], false).unwrap();
             assert!(!asking(&bot), "an answered card still counted");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A CLI stopped `crew ask` and the bot told the user the card had closed.
+    /// The card stays open when `crew ask` leaves, and the answer goes to the
+    /// bot as the card's answer, masked, even one that came just as it left.
+    #[test]
+    fn a_card_outlives_the_crew_ask_that_opened_it() {
+        paths::testing::with_home("ask-left", || {
+            let bot = test_id("ask-left");
+            fake_bot(&bot, "");
+            let ask = AskQuestion {
+                question: "어느 쪽으로 갈까요?".into(),
+                options: vec!["A".into(), "B".into()],
+                ..AskQuestion::default()
+            };
+            let card_row = |choice_id: &str| {
+                crate::transcript::messages(&bot)
+                    .into_iter()
+                    .find(|m| m.choice.as_ref().is_some_and(|c| c.id == choice_id))
+                    .unwrap()
+            };
+            let answers = |bot: &str| {
+                crate::transcript::messages(bot)
+                    .into_iter()
+                    .filter(|m| m.role == Role::User && m.answer)
+                    .count()
+            };
+
+            // Left with nobody answering: still open, answered later.
+            let (choice_id, rx) = start_ask(&bot, &[ask.clone()]).unwrap();
+            ask_left(&bot, &choice_id, rx);
+            let row = card_row(&choice_id);
+            assert_eq!(
+                row.choice.as_ref().unwrap().state,
+                crate::protocol::ChoiceState::Pending
+            );
+            answer_choice(&bot, &row.id, vec![vec!["A".into()]], vec![], vec![], false).unwrap();
+            assert_eq!(answers(&bot), 1, "the late answer went nowhere");
+
+            // The answer took the waiter just as `crew ask` left.
+            let again = AskQuestion {
+                question: "그럼 이쪽은요?".into(),
+                ..ask
+            };
+            let (choice_id, rx) = start_ask(&bot, &[again]).unwrap();
+            let waiter = take_ask(&choice_id).expect("waiter");
+            waiter
+                .send(Event::Answered { text: "B".into() })
+                .expect("rx still open");
+            ask_left(&bot, &choice_id, rx);
+            assert_eq!(answers(&bot), 2, "an answer in flight was lost");
             remove_agent(&bot).unwrap();
         });
     }
