@@ -896,7 +896,7 @@ fn run_ask(asks: Vec<AskQuestion>) -> anyhow::Result<()> {
     let agent = require_agent_id(None, "ask")?;
     let mut asks = asks.into_iter();
     let first = asks.next().expect("ask_questions returns at least one");
-    client::print_event(client::rpc(Request::Ask {
+    let req = Request::Ask {
         agent,
         question: first.question,
         options: first.options,
@@ -904,7 +904,14 @@ fn run_ask(asks: Vec<AskQuestion>) -> anyhow::Result<()> {
         hint: first.hint,
         multi: first.multi,
         more: asks.collect(),
-    })?)
+    };
+    match client::ask_within(req, client::ASK_WAIT)? {
+        Some(ev) => client::print_event(ev),
+        None => {
+            println!("{}", client::ASK_STILL_OPEN);
+            Ok(())
+        }
+    }
 }
 
 /// The questions of one `crew ask`, in the order they were typed. Each

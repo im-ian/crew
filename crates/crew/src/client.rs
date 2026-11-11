@@ -229,11 +229,45 @@ fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
     }
 }
 
+/// The daemon took the connection and the budget ran out before it answered.
+/// A type, so `crew ask` can tell "no answer yet" from a real failure.
+#[derive(Debug)]
+struct NoAnswer;
+
+impl std::fmt::Display for NoAnswer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "daemon took the connection but did not answer ({})",
+            paths::socket_path().display()
+        )
+    }
+}
+
+impl std::error::Error for NoAnswer {}
+
 fn no_answer() -> anyhow::Error {
-    anyhow::anyhow!(
-        "daemon took the connection but did not answer ({})",
-        paths::socket_path().display()
-    )
+    anyhow::Error::new(NoAnswer)
+}
+
+/// How long `crew ask` waits on the card before it gives the wait back. A
+/// CLI stops a tool at ten minutes and tells the bot only that it stopped,
+/// which reads as "the card closed". Ending first lets `crew ask` say what is
+/// true: the card is still open.
+pub const ASK_WAIT: Duration = Duration::from_secs(9 * 60);
+
+/// What `crew ask` prints when `ASK_WAIT` runs out. Leaving closes only this
+/// connection; the daemon keeps the card, and the answer goes to the bot as a
+/// message of its own.
+pub const ASK_STILL_OPEN: &str = "No answer yet. The card is still open in the chat. When the user picks, their answer comes to you as a new message. Do not run crew ask again for this question, and do not say the card closed. End your turn now.";
+
+/// The person's answer to an `Ask`, or `None` when `wait` ran out first.
+pub fn ask_within(req: Request, wait: Duration) -> anyhow::Result<Option<Event>> {
+    match rpc_within(req, Some(wait)) {
+        Ok(ev) => Ok(Some(ev)),
+        Err(err) if err.downcast_ref::<NoAnswer>().is_some() => Ok(None),
+        Err(err) => Err(err),
+    }
 }
 
 /// A stall and a real IO error read the same from a caller's side unless the
@@ -242,7 +276,7 @@ fn no_answer() -> anyhow::Error {
 fn stalled(err: std::io::Error) -> anyhow::Error {
     match err.kind() {
         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
-            anyhow::Error::from(err).context(no_answer().to_string())
+            anyhow::Error::from(err).context(NoAnswer)
         }
         _ => err.into(),
     }
@@ -697,6 +731,50 @@ mod tests {
                 "{ev:?}"
             );
             slow.join().expect("listener");
+        });
+    }
+
+    /// A CLI stops a tool at ten minutes and tells the bot only that it
+    /// stopped, which the bot reported as "the card closed". `crew ask` gives
+    /// the wait back first, as "no answer yet", while a daemon that hangs up
+    /// is still a failure.
+    #[test]
+    fn an_ask_gives_the_wait_back_before_a_cli_would_cut_it() {
+        assert!(ASK_WAIT < Duration::from_secs(10 * 60), "{ASK_WAIT:?}");
+        assert!(ASK_STILL_OPEN.contains("still open"));
+        assert!(ASK_STILL_OPEN.contains("as a new message"));
+        let ask = || Request::Ask {
+            agent: "a".into(),
+            question: "어느 쪽?".into(),
+            options: vec!["고름".into()],
+            inputs: Vec::new(),
+            hint: None,
+            multi: false,
+            more: Vec::new(),
+        };
+        paths::testing::with_home("ask-wait-back", || {
+            paths::ensure_home().expect("home");
+            let listener =
+                std::os::unix::net::UnixListener::bind(paths::socket_path()).expect("bind");
+            // Takes the question and says nothing, as a card nobody answers.
+            let quiet = thread::spawn(move || {
+                let (stream, _) = listener.accept().expect("accept");
+                thread::sleep(Duration::from_millis(600));
+                drop(stream);
+                listener
+            });
+            let got = ask_within(ask(), Duration::from_millis(200)).expect("not a failure");
+            assert!(got.is_none(), "{got:?}");
+
+            // A daemon that hangs up is not "no answer yet".
+            let listener = quiet.join().expect("quiet");
+            let hangs_up = thread::spawn(move || {
+                let (stream, _) = listener.accept().expect("accept");
+                drop(stream);
+            });
+            let err = ask_within(ask(), Duration::from_secs(5)).expect_err("hung up");
+            assert!(err.downcast_ref::<NoAnswer>().is_none(), "{err:#}");
+            hangs_up.join().expect("hangs up");
         });
     }
 
