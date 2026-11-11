@@ -495,6 +495,7 @@ export function App() {
           agents={crew.agents}
           selected={crew.selected}
           selectedKind={crew.selectedKind}
+          focusNonce={crew.composerFocus}
           placeholder={crew.placeholder}
           onSend={crew.onSend}
           onEdit={crew.editQueued}

@@ -40,6 +40,8 @@ type Props = {
   agents: AgentInfo[];
   selected: string | null;
   selectedKind: Kind;
+  /** Bumps each time a chat is opened, including the one already on screen. */
+  focusNonce?: number;
   placeholder: string;
   /** False when the daemon did not take the message. The draft comes back. */
   onSend: (raw: string, steer: boolean) => Promise<boolean>;
@@ -89,6 +91,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   agents,
   selected,
   selectedKind,
+  focusNonce = 0,
   placeholder,
   onSend,
   onEdit,
@@ -449,6 +452,19 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     refreshEmpty();
     fit();
   }, [chatKey]);
+
+  // The draft swap above runs first. The value from mount is the restored
+  // chat, which must not take the caret until someone opens one.
+  const focusSeen = useRef<number | null>(null);
+  useEffect(() => {
+    if (focusSeen.current === null) {
+      focusSeen.current = focusNonce;
+      return;
+    }
+    if (focusSeen.current === focusNonce) return;
+    focusSeen.current = focusNonce;
+    focusEditor();
+  }, [focusNonce]);
 
   useEffect(() => {
     const ids = new Set<string>();

@@ -364,7 +364,13 @@ function IslandPill({
           ) : null}
           {bot ? (
             // Its click goes up to the pill, which opens the chat.
-            <button type="button" className="island-go">
+            <button
+              type="button"
+              className="island-go"
+              onMouseDown={(e) => {
+                if (e.button === 0) e.preventDefault();
+              }}
+            >
               {t("island.go")}
             </button>
           ) : null}
