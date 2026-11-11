@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  groupCandidates,
   injectMentionChips,
   isSelfMentionDelivery,
   mentionIds,
@@ -8,11 +9,12 @@ import {
   mentionsId,
   mentionRuns,
   mentionText,
+  resolveGroup,
   resolveMention,
   sameMentionAgents,
   trimMentionPunct,
 } from "./mentions";
-import type { AgentInfo } from "./types";
+import type { AgentInfo, Group } from "./types";
 
 function agent(id: string, name: string): AgentInfo {
   return { id, name, status: "idle", cmd: ["cat"], cwd: "/tmp", routines: [] };
@@ -270,5 +272,46 @@ describe("a remote bot's handle", () => {
   it("finds a delivered copy that names the remote id", () => {
     expect(mentionsId("@team/acc_k3j9 hi", "team/acc_k3j9")).toBe(true);
     expect(mentionsId("@team/acc_k3j9 hi", "team")).toBe(false);
+  });
+});
+
+describe("a #group handle", () => {
+  const groups: Group[] = [
+    { id: "g19a3", name: "Crew", collapsed: false, items: ["agent:alpha"] },
+    { id: "__ungrouped", name: "", collapsed: false, items: [] },
+  ];
+
+  it("reads a group id back as the group's name", () => {
+    expect(mentionRuns("#g19a3에서 해줘", agents, groups)).toEqual([
+      { text: "#Crew", group: groups[0] },
+      { text: "에서 해줘" },
+    ]);
+    expect(mentionText("@alpha #g19a3, 봐줘", agents, groups)).toBe("@Alpha #Crew, 봐줘");
+  });
+
+  it("leaves a number, a heading, or a name as written", () => {
+    expect(mentionRuns("#233 머지됨", agents, groups)).toEqual([{ text: "#233 머지됨" }]);
+    expect(mentionRuns("#Crew 봐줘", agents, groups)).toEqual([{ text: "#Crew 봐줘" }]);
+    expect(mentionRuns("#__ungrouped", agents, groups)).toEqual([{ text: "#__ungrouped" }]);
+    expect(mentionRuns("issue#g19a3", agents, groups)).toEqual([{ text: "issue#g19a3" }]);
+  });
+
+  it("turns into a chip that carries the group's name", () => {
+    expect(injectMentionChips("<p>#g19a3 봐줘</p>", [], groups)).toBe(
+      '<p><span class="mention-chip" data-group="g19a3" data-label="Crew"></span> 봐줘</p>',
+    );
+  });
+
+  it("is sent as its id when typed by name", () => {
+    expect(mentionIds("#crew 에서 @Alpha 불러줘 #233", agents, groups)).toBe(
+      "#g19a3 에서 @alpha 불러줘 #233",
+    );
+    expect(mentionIds("`#Crew`", agents, groups)).toBe("`#Crew`");
+  });
+
+  it("offers the named groups only", () => {
+    expect(groupCandidates(groups, "").map((g) => g.id)).toEqual(["g19a3"]);
+    expect(groupCandidates(groups, "cr").map((g) => g.id)).toEqual(["g19a3"]);
+    expect(resolveGroup("CREW", groups)?.id).toBe("g19a3");
   });
 });

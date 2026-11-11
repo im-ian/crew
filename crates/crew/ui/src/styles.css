@@ -4777,6 +4777,15 @@ button.mention-chip:active {
   display: inline-grid;
   overflow: visible;
 }
+/* A group named with `#`: a hash where a bot's face goes. */
+.group-face {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 30%;
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  color: var(--muted);
+}
 .mention-chip-name {
   min-width: 0;
   font-size: 13.5px;

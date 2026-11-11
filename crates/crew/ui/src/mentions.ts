@@ -1,5 +1,6 @@
+import { UNGROUPED_ID } from "./groups";
 import { remoteLabel } from "./remote";
-import type { AgentInfo } from "./types";
+import type { AgentInfo, Group } from "./types";
 
 /**
  * The id part of a handle. A local id is ASCII; a remote bot's is
@@ -7,6 +8,9 @@ import type { AgentInfo } from "./types";
  * the whole `alpha/cli`, so it is not `@alpha` with a path after it.
  */
 const HANDLE_ID = /^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)?/;
+
+/** A group's id, after `#`. Group ids are `g` and hex, ASCII like a bot's. */
+const GROUP_ID = /^[A-Za-z0-9_-]+/;
 
 const SKIP_TAGS = new Set(["CODE", "PRE", "A"]);
 const BLOCK_TAGS = new Set([
@@ -104,6 +108,37 @@ export function trimMentionPunct(token: string): string {
   return token.replace(/[,.!?:;)\]}"']+$/, "");
 }
 
+/** The groups `#` can name: the folders on the rail, not the loose bots. */
+function namedGroups(groups: readonly Group[]): readonly Group[] {
+  return groups.some((g) => g.id === UNGROUPED_ID)
+    ? groups.filter((g) => g.id !== UNGROUPED_ID)
+    : groups;
+}
+
+/** Whether the `#` menu offers `group` for what was typed after `#`. */
+export function groupMatches(group: Group, query: string): boolean {
+  const q = query.toLowerCase();
+  if (!q) return true;
+  return group.name.toLowerCase().includes(q) || group.id.toLowerCase().includes(q);
+}
+
+/** The groups the `#` menu offers for `query`. */
+export function groupCandidates(groups: readonly Group[], query: string): Group[] {
+  return namedGroups(groups)
+    .filter((g) => groupMatches(g, query))
+    .slice(0, 8);
+}
+
+/** A `#` token as a group: its id first, then the name it goes by. */
+export function resolveGroup(token: string, groups: readonly Group[]): Group | undefined {
+  const lower = token.toLowerCase();
+  const named = namedGroups(groups);
+  return (
+    named.find((g) => g.id.toLowerCase() === lower) ??
+    named.find((g) => g.name === token || g.name.toLowerCase() === lower)
+  );
+}
+
 /** `@id` where `handleAt` would end the handle. A longer token is not it. */
 export function mentionsId(text: string, id: string): boolean {
   if (!text || !id) return false;
@@ -143,27 +178,51 @@ function attr(s: string): string {
 
 /**
  * What the composer sends: a handle typed by name and never picked from the
- * menu (pasted, or the menu dismissed) goes out as `@id`, the only form the
- * rest of Crew reads.
+ * menu (pasted, or the menu dismissed) goes out as `@id`, or `#id` for a
+ * group, the only form the rest of Crew reads.
  */
-export function mentionIds(text: string, agents: readonly AgentInfo[]): string {
+export function mentionIds(
+  text: string,
+  agents: readonly AgentInfo[],
+  groups: readonly Group[] = [],
+): string {
   // Code is left as written, as the chips leave it. Odd parts are the code.
   return text
     .split(/(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`)/)
     .map((part, i) =>
       i % 2
         ? part
-        : part.replace(/(^|\s)@(\S+)/g, (all, pre: string, raw: string) => {
+        : part.replace(/(^|\s)([@#])(\S+)/g, (all, pre: string, sigil: string, raw: string) => {
             const token = trimMentionPunct(raw);
-            const agent = token ? resolveMention(token, agents) : undefined;
-            return agent ? pre + "@" + agent.id + raw.slice(token.length) : all;
+            if (!token) return all;
+            const id =
+              sigil === "@" ? resolveMention(token, agents)?.id : resolveGroup(token, groups)?.id;
+            return id ? pre + sigil + id + raw.slice(token.length) : all;
           }),
     )
     .join("");
 }
 
-/** A run of preview text, or a handle when `agent` is the bot it names. */
-export type MentionRun = { text: string; agent?: AgentInfo };
+/**
+ * A run of preview text, or a handle when `agent` is the bot it names or
+ * `group` the group.
+ */
+export type MentionRun = { text: string; agent?: AgentInfo; group?: Group };
+
+/** A handle `handleAt` found: a bot after `@`, or a group after `#`. */
+export type Handle = { label: string; length: number } & (
+  | { sigil: "@"; agent: AgentInfo; group?: undefined }
+  | { sigil: "#"; group: Group; agent?: undefined }
+);
+
+/** Where a handle's token ends, or nothing when the word goes on past it. */
+function handleToken(text: string, i: number, shape: RegExp): string {
+  const raw = (text.slice(i + 1).match(/^[^\s<]+/) || [""])[0];
+  const token = (raw.match(shape) || [""])[0];
+  const rest = raw.slice(token.length);
+  const ends = !rest || /^[^\x00-\x7f]/.test(rest) || !trimMentionPunct(rest);
+  return ends ? token : "";
+}
 
 /**
  * The one place that decides where a handle starts and ends. `injectMentionChips`
@@ -177,21 +236,29 @@ export type MentionRun = { text: string; agent?: AgentInfo };
  * (`@bot-x,`) does, the `.ai` in `@claude.ai` does not. `mention_tokens` in
  * the daemon reads it the same way.
  *
- * Returns the resolved bot and how many characters of `text` it consumed.
+ * A group is `#` and its id, read the same way. Only an id that is a group
+ * counts, so `#233` or a heading stays text.
+ *
+ * Returns the resolved bot or group and how many characters of `text` it consumed.
  */
 export function handleAt(
   text: string,
   i: number,
   agents: readonly AgentInfo[],
-):
-  | { sigil: string; agent: AgentInfo; label: string; length: number }
-  | undefined {
+  groups: readonly Group[] = [],
+): Handle | undefined {
+  if (text[i] === "#") {
+    const token = handleToken(text, i, GROUP_ID);
+    const lower = token.toLowerCase();
+    const group = token
+      ? namedGroups(groups).find((g) => g.id.toLowerCase() === lower)
+      : undefined;
+    if (!group) return undefined;
+    return { sigil: "#", group, label: group.name, length: 1 + token.length };
+  }
   if (text[i] !== "@") return undefined;
-  const raw = (text.slice(i + 1).match(/^[^\s<]+/) || [""])[0];
-  const token = (raw.match(HANDLE_ID) || [""])[0];
-  const rest = raw.slice(token.length);
-  const ends = !rest || /^[^\x00-\x7f]/.test(rest) || !trimMentionPunct(rest);
-  if (!token || !ends) return undefined;
+  const token = handleToken(text, i, HANDLE_ID);
+  if (!token) return undefined;
   const agent = resolveId(token, agents);
   if (!agent) return undefined;
   return {
@@ -209,9 +276,10 @@ export function handleAt(
 export function mentionRuns(
   text: string,
   agents: readonly AgentInfo[],
+  groups: readonly Group[] = [],
 ): MentionRun[] {
   if (!text) return [];
-  if (!agents.length) {
+  if (!agents.length && !groups.length) {
     return [{ text }];
   }
   const runs: MentionRun[] = [];
@@ -219,11 +287,15 @@ export function mentionRuns(
   let i = 0;
   let prevWs = true;
   while (i < text.length) {
-    const hit = prevWs ? handleAt(text, i, agents) : undefined;
+    const hit = prevWs ? handleAt(text, i, agents, groups) : undefined;
     if (hit) {
       if (plain) runs.push({ text: plain });
       plain = "";
-      runs.push({ text: hit.sigil + hit.label, agent: hit.agent });
+      runs.push(
+        hit.sigil === "@"
+          ? { text: hit.sigil + hit.label, agent: hit.agent }
+          : { text: hit.sigil + hit.label, group: hit.group },
+      );
       i += hit.length;
       prevWs = false;
       continue;
@@ -236,15 +308,27 @@ export function mentionRuns(
   return runs;
 }
 
-/** The preview with each handle as `@name`, for matching a search query. */
-export function mentionText(text: string, agents: readonly AgentInfo[]): string {
-  return mentionRuns(text, agents)
+/** The preview with each handle as `@name` or `#group`, for matching a search query. */
+export function mentionText(
+  text: string,
+  agents: readonly AgentInfo[],
+  groups: readonly Group[] = [],
+): string {
+  return mentionRuns(text, agents, groups)
     .map((r) => r.text)
     .join("");
 }
 
-export function injectMentionChips(html: string, agents: readonly AgentInfo[]): string {
-  if (!agents.length) return html;
+/**
+ * Each handle in rendered markdown as an empty chip the page fills in. A
+ * group chip carries its name, so drawing it needs no group list.
+ */
+export function injectMentionChips(
+  html: string,
+  agents: readonly AgentInfo[],
+  groups: readonly Group[] = [],
+): string {
+  if (!agents.length && !groups.length) return html;
   let out = "";
   let i = 0;
   let prevWs = true;
@@ -286,9 +370,12 @@ export function injectMentionChips(html: string, agents: readonly AgentInfo[]): 
       i = end;
       continue;
     }
-    const hit = prevWs ? handleAt(html, i, agents) : undefined;
+    const hit = prevWs ? handleAt(html, i, agents, groups) : undefined;
     if (hit) {
-      out += `<span class="mention-chip" data-mention="${attr(hit.agent.id)}"></span>`;
+      out +=
+        hit.sigil === "@"
+          ? `<span class="mention-chip" data-mention="${attr(hit.agent.id)}"></span>`
+          : `<span class="mention-chip" data-group="${attr(hit.group.id)}" data-label="${attr(hit.group.name)}"></span>`;
       i += hit.length;
       prevWs = false;
       continue;

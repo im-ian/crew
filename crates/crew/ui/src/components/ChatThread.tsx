@@ -12,7 +12,7 @@ import {
 } from "react";
 import { ARRIVE_MS, OPEN_SLACK_MS, playArrive, useArriving } from "../arrive";
 import { useLocale, useT } from "../LocaleContext";
-import { useBotLabel } from "../BotLabelContext";
+import { useBotLabel, useLabelGroups } from "../BotLabelContext";
 import type { TFn } from "../i18n";
 import type { ReplyTarget } from "../reply";
 import { splitReply } from "../reply";
@@ -58,7 +58,7 @@ import {
 import { routineSwitchName } from "../routineNote";
 import { queueActions, userLineAppearance } from "../sendGate";
 import { isSelfMentionDelivery, mentionRuns, mentionText } from "../mentions";
-import { MentionChip } from "./MentionChip";
+import { MentionRunsView } from "./MentionChip";
 import { focusField, MentionField } from "./MentionField";
 import { clockLabels, messageClockParts } from "../clock";
 import { threadFaceId } from "../threadFace";
@@ -2003,6 +2003,7 @@ function ChoiceCard({
   ) => void | Promise<void>;
 }) {
   const t = useT();
+  const labelGroups = useLabelGroups();
   const questions = card.questions || [];
   const pending = card.state === "pending";
   const hasFields = questions.some((q) => (q.fields || []).length > 0);
@@ -2343,13 +2344,7 @@ function ChoiceCard({
                 <span className="choice-badge">{badge}</span>
                 <span className="choice-copy">
                   <span className="choice-label">
-                    {mentionRuns(other.trim(), agents).map((run, i) =>
-                      run.agent ? (
-                        <MentionChip key={i} agent={run.agent} />
-                      ) : (
-                        <span key={i}>{run.text}</span>
-                      ),
-                    )}
+                    <MentionRunsView runs={mentionRuns(other.trim(), agents, labelGroups)} />
                   </span>
                 </span>
                 <span className="choice-check">
@@ -2384,7 +2379,7 @@ function ChoiceCard({
                 <span className="choice-sum-q">{(q.header || q.question || "").trim()}</span>
                 <span className="choice-sum-a">
                   {ok
-                    ? mentionText(answerSummary(q, picks[qi], values[qi], others[qi]), agents)
+                    ? mentionText(answerSummary(q, picks[qi], values[qi], others[qi]), agents, labelGroups)
                     : t("thread.choiceUnanswered")}
                 </span>
               </button>

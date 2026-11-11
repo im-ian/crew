@@ -1,24 +1,35 @@
-// The editing a box with @mention chips needs. The composer and the typed
+// The editing a box with @mention and #group chips needs. The composer and the typed
 // answers on a question card share it, so a chip reads the same in both.
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { botSearchText, groupOfBot } from "../botLabel";
 import { itemKey } from "../groups";
-import { mentionMatches } from "../mentions";
+import { mentionMatches, resolveGroup, resolveMention, trimMentionPunct } from "../mentions";
 import type { AgentInfo, Group } from "../types";
 
-/** What was typed after `@`, and where the `@` is in the caret's text. */
-export type MentionQuery = { start: number; query: string };
+/**
+ * What was typed after `@` (a bot) or `#` (a group), and where that sign is
+ * in the caret's text.
+ */
+export type MentionQuery = { start: number; query: string; sigil: "@" | "#" };
 
-/** The `@query` the caret sits at the end of, if any. */
+/** The `@query` or `#query` that `before`, the text up to the caret, ends with. */
+export function mentionBefore(before: string): MentionQuery | null {
+  const m = before.match(/(^|[\s])([@#])(\S*)$/);
+  if (!m) return null;
+  return {
+    start: before.length - m[3].length - 1,
+    query: m[3],
+    sigil: m[2] as "@" | "#",
+  };
+}
+
+/** The `@query` or `#query` the caret sits at the end of, if any. */
 export function mentionAtCaret(editor: HTMLElement | null): MentionQuery | null {
   const ctx = caretTextContext(editor);
   if (!ctx) return null;
-  const before = ctx.node.textContent?.slice(0, ctx.offset) ?? "";
-  const m = before.match(/(^|[\s])@(\S*)$/);
-  if (!m) return null;
-  return { start: before.length - m[2].length - 1, query: m[2] };
+  return mentionBefore(ctx.node.textContent?.slice(0, ctx.offset) ?? "");
 }
 
 /**
@@ -48,6 +59,26 @@ export function mentionCandidates(
   const bots = [...near, ...far].slice(0, 8);
   return { bots, near: Math.min(near.length, bots.length) };
 }
+/**
+ * The bot or group a `@name` or `#name` typed out right before the caret
+ * names, so a space after it can turn it into the chip.
+ */
+export function typedHandle(
+  before: string,
+  agents: readonly AgentInfo[],
+  groups: readonly Group[],
+): { agent: AgentInfo } | { group: Group } | null {
+  const m = before.match(/(^|[\s])([@#])(\S+)$/);
+  const token = m ? trimMentionPunct(m[3]) : "";
+  if (!token) return null;
+  if (m![2] === "#") {
+    const group = resolveGroup(token, groups);
+    return group ? { group } : null;
+  }
+  const agent = resolveMention(token, agents);
+  return agent ? { agent } : null;
+}
+
 export function insertChip(
   editor: HTMLElement | null,
   make: () => HTMLElement,
@@ -55,9 +86,9 @@ export function insertChip(
   const ctx = caretTextContext(editor);
   if (!ctx) return false;
   const prefix = ctx.node.textContent?.slice(0, ctx.offset) ?? "";
-  const m = prefix.match(/(^|[\s])@(\S*)$/);
+  const m = mentionBefore(prefix);
   if (!m) return false;
-  const start = prefix.length - m[2].length - 1;
+  const start = m.start;
   const range = document.createRange();
   range.setStart(ctx.node, start);
   range.setEnd(ctx.node, ctx.offset);
@@ -90,7 +121,7 @@ export function renderChip(node: ReactNode): HTMLElement {
 }
 
 export function isEditorEmpty(el: HTMLElement): boolean {
-  if (el.querySelector("[data-mention]")) return false;
+  if (el.querySelector("[data-mention], [data-group]")) return false;
   return !el.innerText.replace(/\u00a0/g, " ").trim();
 }
 
@@ -105,6 +136,10 @@ export function serializeEditor(root: HTMLElement): string {
     const el = node as HTMLElement;
     if (el.dataset.mention) {
       s += "@" + el.dataset.mention;
+      return;
+    }
+    if (el.dataset.group) {
+      s += "#" + el.dataset.group;
       return;
     }
     if (el.tagName === "BR") {

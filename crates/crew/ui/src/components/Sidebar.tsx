@@ -40,8 +40,8 @@ import {
 } from "../remote";
 import { Avatar } from "./Avatar";
 import { RenameField } from "./RenameField";
-import { MentionChip } from "./MentionChip";
-import { BotLabelProvider } from "../BotLabelContext";
+import { MentionRunsView } from "./MentionChip";
+import { BotLabelProvider, useLabelGroups } from "../BotLabelContext";
 import { botLabel, botSearchText } from "../botLabel";
 import { listedHits, matchRuns } from "../searchView";
 import { PlanUsageButton } from "./PlanUsageBar";
@@ -502,7 +502,7 @@ export function Sidebar({
         item.agent?.role,
         item.agent?.remote,
         // The row shows resolved names, so the query has to see them too.
-        mentionText(item.preview || "", agents),
+        mentionText(item.preview || "", agents, groups),
       ],
       query,
     );
@@ -1679,13 +1679,14 @@ function ItemRow({
   const a = item.agent;
   const t = useT();
   const { locale } = useLocale();
+  const labelGroups = useLabelGroups();
   const ts = a?.last_ts || 0;
   const stamp = listStamp(ts, locale);
   // ItemRow re-renders on every pointermove while a drag is armed, so the scan
   // does not want to run per frame per visible row.
   const previewRuns = useMemo(
-    () => mentionRuns(item.preview || "", agents),
-    [item.preview, agents],
+    () => mentionRuns(item.preview || "", agents, labelGroups),
+    [item.preview, agents, labelGroups],
   );
   const remote = !!a?.remote;
   const online = isOnline(a);
@@ -1760,13 +1761,7 @@ function ItemRow({
           <div className="agent-preview">
             {/* The preview is this bot's chat, so its group is the one left off. */}
             <BotLabelProvider viewer={item.id}>
-              {previewRuns.map((run, i) =>
-                run.agent ? (
-                  <MentionChip key={i} agent={run.agent} />
-                ) : (
-                  <span key={i}>{run.text}</span>
-                ),
-              )}
+              <MentionRunsView runs={previewRuns} />
             </BotLabelProvider>
           </div>
         ) : null}
