@@ -1054,7 +1054,7 @@ pub fn team_rules_for(
         "Shared memory is current on every turn. A `[crew system]` note that starts with `Shared memory` holds the live teammate list and your live name, plus the notes every bot shares. That note replaces any teammate list in these instructions, including after a compact. Use the note. To read it, run `crew share show`. To add a note for every bot, run `crew share append <<'EOF'` with one short line, then `EOF`. To replace the shared notes, run `crew share show`, then `crew share set <<'EOF'` with the notes only, then `EOF`. Crew writes the teammate list, so `crew share set` does not change it. Do not copy the teammate list into your own memory. Do not save secrets there. When you sit in a group, the note also holds a `# Group memory` section for that group. To add to it, run `crew group memory append <<'EOF'` with one short line, then `EOF`. To replace it, run `crew group memory show`, then `crew group memory set <<'EOF'` with the whole new notes, then `EOF`.\n",
     );
     s.push_str(
-        "A teammate is written `@<id>`, and Crew shows it as their name. To name a teammate in your reply, write `@<id>` too; that only shows their name and sends nothing. When the user writes one, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, so after `crew tell`, end your turn. Do not wait, sleep, or check for the reply. A group is written `#<group-id>`, and Crew shows it as the group's name. When the user writes one, they are naming the group the work belongs to; it messages no one, and a note under their message gives that group's bots, folder, and memory.\n",
+        "A teammate is written `@<id>`, and Crew shows it as their name. To name a teammate in your reply, write `@<id>` too; that only shows their name and sends nothing. Crew already shows the name, so do not add it after the id, and put a space or punctuation right after the id: `@bot-3(기획자)` shows as plain text and tells no one, `@bot-3` shows as their name. When the user writes one, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, so after `crew tell`, end your turn. Do not wait, sleep, or check for the reply. A group is written `#<group-id>`, and Crew shows it as the group's name. When the user writes one, they are naming the group the work belongs to; it messages no one, and a note under their message gives that group's bots, folder, and memory.\n",
     );
     s.push_str(
         "When one message asks for several pieces of work that do not depend on each other, hand them to your CLI's own subagents (Claude's Agent tool, grok's spawn_subagent, agy's invoke_subagent) and run them in parallel where your CLI can, instead of doing them one after another. Work that needs an earlier step's result waits for that step. A CLI without subagents does the work itself. Subagents are not teammates: a teammate gets work only through `crew tell`. Their reports may come back one at a time. Until the last one is in, a reply only says which are still running, and keeps what came back for the end. When the subagents are done, answer once with what they found together.\n",
@@ -1144,7 +1144,7 @@ pub fn roster_update_text(
     folder: Option<&crate::groups::SidebarGroup>,
 ) -> String {
     format!(
-        "You are `{}` ({}). {} A teammate is written `@<id>`, and Crew shows it as their name; write them that way in your reply too. When the user writes one they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>`. Do not ask the user to switch chats. Do not pretend.",
+        "You are `{}` ({}). {} A teammate is written `@<id>`, and Crew shows it as their name; write them that way in your reply too, with a space or punctuation right after the id and no name added after it. When the user writes one they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>`. Do not ask the user to switch chats. Do not pretend.",
         agent.id,
         agent.display_name(),
         teammates_sentence(agent, roster, folder)
@@ -2281,6 +2281,8 @@ mod tests {
         assert!(!rules.contains("alpha — Alpha"));
         assert!(rules.contains("crew tell"));
         assert!(rules.contains("@<id>"));
+        // `@id(name)` reads as one word, so it is no chip and no tell.
+        assert!(rules.contains("do not add it after the id"));
     }
 
     #[test]
