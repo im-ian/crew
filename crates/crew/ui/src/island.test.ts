@@ -65,6 +65,21 @@ describe("botNotices", () => {
     expect(long.notices).toEqual([{ botId: "c", kind: "success" }]);
   });
 
+  it("keeps quiet when a long run answered a bot waiting on it", () => {
+    const start = step(new Map(), [bot("a"), bot("b")], 0);
+    const working = step(
+      start.snaps,
+      [bot("a", { status: "working", for_bot: true }), bot("b", { status: "working", for_bot: true })],
+      1000,
+    );
+    const done = step(
+      working.snaps,
+      [bot("a", { for_bot: true }), bot("b", { failed: true, for_bot: true })],
+      1000 + LONG_RUN_MS,
+    );
+    expect(done.notices).toEqual([{ botId: "b", kind: "failure" }]);
+  });
+
   it("keeps the start of a run across lists", () => {
     const a = step(new Map(), [bot("a")], 0);
     const b = step(a.snaps, [bot("a", { status: "working" })], 10);

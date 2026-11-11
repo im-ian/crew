@@ -377,6 +377,11 @@ pub struct AgentInfo {
     /// A question card is open and waiting for the user.
     #[serde(default, skip_serializing_if = "is_false")]
     pub asking: bool,
+    /// Its turn, the running one or the last, answers a bot waiting on it.
+    /// That bot finishes in its own chat, so this one's end is no news for
+    /// the user. It stays until the next turn starts, like `failed`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub for_bot: bool,
     /// The router alias of a bot on another PC. Its id is `<alias>/<account>`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote: Option<String>,
