@@ -2352,7 +2352,7 @@ button.channel-who:hover {
 }
 /* A send the daemon has not answered yet. Most answer in milliseconds, so it
    only fades if it is still waiting a moment later, instead of blinking. */
-.row.me .bubble.sending {
+.row.me.sending .me-msg {
   animation: send-pending 0s linear 0.4s forwards;
 }
 @keyframes send-pending {

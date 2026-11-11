@@ -13,6 +13,7 @@ import {
   heldFor,
   rollbackSend,
   sendKeptQueued,
+  sendRowId,
   withUnaccepted,
   type HeldSend,
 } from "./sendGate";
@@ -802,7 +803,7 @@ export function useCrew() {
     if (!sel) return false;
     sendSeq.current += 1;
     const held: HeldSend = {
-      id: `local-send-${sendSeq.current}`,
+      id: sendRowId(sendSeq.current),
       agent: sel,
       text: raw,
       at: Date.now(),
@@ -813,7 +814,7 @@ export function useCrew() {
     }
     let accepted = false;
     try {
-      await api.sendMessage(sel, raw, steer);
+      await api.sendMessage(sel, raw, steer, held.id);
       accepted = true;
     } catch (err) {
       // A failed start can still leave the line queued. That is the waiting
@@ -826,20 +827,21 @@ export function useCrew() {
         showError(err);
       }
     }
+    // Drops the sending line too. Once the daemon row with its id is in, the
+    // row is that one and this finds nothing; if it never came (a failed
+    // send, a fetch that failed, another chat open), no line is left behind.
+    // On failure the draft goes back.
     const release = () => {
       heldSends.current = heldSends.current.filter((h) => h.id !== held.id);
+      setMessages((prev) => rollbackSend(prev, held.id).messages);
     };
     if (!accepted) {
       release();
-      // Failure drops the line this window inserted; the draft goes back.
-      if (selectedRef.current.id === sel) {
-        setMessages((prev) => rollbackSend(prev, held.id).messages);
-      }
       return false;
     }
     // Still held while this fetch runs, so a poll that left before the daemon
-    // row existed cannot drop the bubble. Once the row is in, it stands in for
-    // the sending line in the same render.
+    // row existed cannot drop the bubble. The daemon row has the same id, so
+    // it takes the line's place without a remount.
     try {
       if (selectedRef.current.id === sel) await refreshMessages();
     } catch (err) {

@@ -6,6 +6,7 @@ import {
   heldFor,
   queueActions,
   rollbackSend,
+  sendRowId,
   sendKeptQueued,
   stopTurn,
   userLineAppearance,
@@ -22,7 +23,7 @@ function line(partial: Partial<ChatMessage> & Pick<ChatMessage, "id" | "role">):
   };
 }
 
-const held: HeldSend = { id: "local-send-1", agent: "bot-a", text: "안녕", at: 100 };
+const held: HeldSend = { id: "u-100-1-ab", agent: "bot-a", text: "안녕", at: 100 };
 
 describe("before the daemon accepts", () => {
   it("draws an unaccepted send at once, as sending, with nothing to edit", () => {
@@ -33,43 +34,28 @@ describe("before the daemon accepts", () => {
     expect(queueActions(row)).toEqual({ edit: false, cancel: false });
   });
 
-  it("lets the daemon row take the sending line's place, never both", () => {
-    const row = line({ id: "d1", role: "user", text: "안녕", ts: 150 });
-    expect(withUnaccepted([row], [held]).map((m) => m.id)).toEqual(["d1"]);
+  it("lets the daemon row with the send's id take its place, never both", () => {
+    const row = line({ id: held.id, role: "user", text: "안녕", ts: 150 });
+    expect(withUnaccepted([row], [held])).toEqual([row]);
     const queued = { ...row, queued: true };
-    expect(withUnaccepted([queued], [held]).map((m) => m.id)).toEqual(["d1"]);
+    expect(withUnaccepted([queued], [held])).toEqual([queued]);
   });
 
-  it("does not take an older line with the same text for the send", () => {
-    const earlier = line({ id: "d0", role: "user", text: "안녕", ts: 50 });
-    expect(withUnaccepted([earlier], [held]).map((m) => m.id)).toEqual([
-      "d0",
-      "local-send-1",
-    ]);
+  it("does not take another line with the same text for the send", () => {
+    const other = line({ id: "d1", role: "user", text: "안녕", ts: 150 });
+    expect(withUnaccepted([other], [held]).map((m) => m.id)).toEqual(["d1", held.id]);
   });
 
-  it("matches each daemon row to one send when the same text goes twice", () => {
-    const again: HeldSend = { ...held, id: "local-send-2", at: 120 };
-    const first = line({ id: "d1", role: "user", text: "안녕", ts: 110 });
-    expect(withUnaccepted([first], [held, again]).map((m) => m.id)).toEqual([
-      "d1",
-      "local-send-2",
-    ]);
-    const second = line({ id: "d2", role: "user", text: "안녕", ts: 130 });
-    expect(withUnaccepted([first, second], [held, again]).map((m) => m.id)).toEqual([
-      "d1",
-      "d2",
-    ]);
+  it("does not add the sending line twice", () => {
+    const once = withUnaccepted([], [held]);
+    expect(withUnaccepted(once, [held])).toBe(once);
   });
 
-  it("does not take a card answer or a teammate's line for the send", () => {
-    const answer = line({ id: "ans", role: "user", text: "안녕", ts: 150, answer: true });
-    const peer = line({ id: "p", role: "user", from: "bot-b", text: "안녕", ts: 150 });
-    expect(withUnaccepted([answer, peer], [held]).map((m) => m.id)).toEqual([
-      "ans",
-      "p",
-      "local-send-1",
-    ]);
+  it("makes a plain token the daemon will keep as the row id", () => {
+    const id = sendRowId(3, 1700000000000, 0.5);
+    expect(id).toMatch(/^u-1700000000000-3-[0-9a-z]+$/);
+    expect(id.length).toBeLessThanOrEqual(64);
+    expect(sendRowId(4)).not.toBe(sendRowId(4));
   });
 
   it("shows a user line as waiting only while the daemon row is queued", () => {
@@ -101,7 +87,7 @@ describe("before the daemon accepts", () => {
     const snapshot = [line({ id: "old", role: "assistant", text: "응" })];
     expect(withUnaccepted(snapshot, heldFor("bot-b", [held]))).toBe(snapshot);
     const same = withUnaccepted(snapshot, heldFor("bot-a", [held]));
-    expect(same.map((m) => m.id)).toEqual(["old", "local-send-1"]);
+    expect(same.map((m) => m.id)).toEqual(["old", held.id]);
     expect(userLineAppearance(same[1])).toBe("sending");
   });
 });

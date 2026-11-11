@@ -1149,13 +1149,14 @@ pub fn tell(
 }
 
 /// The user wrote in a remote bot's chat.
-pub fn send_from_user(to: &str, text: &str) -> anyhow::Result<()> {
+/// `row_id`: the id the window already drew the line under.
+pub fn send_from_user(to: &str, text: &str, row_id: Option<&str>) -> anyhow::Result<()> {
     let Some((alias, account)) = resolve(to) else {
         bail!("unknown agent {to}");
     };
     let rid = remote_id(&alias, &account);
     ensure_transcript(&rid);
-    crate::transcript::push_user(&rid, "user", text);
+    crate::transcript::push_user_as(&rid, "user", text, row_id);
     tell(None, None, &rid, text, 0)?;
     Ok(())
 }

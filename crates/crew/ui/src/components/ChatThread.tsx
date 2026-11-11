@@ -2570,15 +2570,13 @@ function Bubble({
   const media = parts.filter((part) => isMediaBlock(part));
   const prose = parts.filter((part) => !isMediaBlock(part)).join("\n\n");
   const cls =
-    "bubble md" +
-    (caret ? " streaming" : "") +
-    (queued ? " queued" : "") +
-    (sending ? " sending" : "");
+    "bubble md" + (caret ? " streaming" : "") + (queued ? " queued" : "");
   return (
     <div
       className={
         "row me" +
         (queued ? " queued" : "") +
+        (sending ? " sending" : "") +
         (flash ? " flash" : "") +
         (picked ? " queue-picked" : "")
       }

@@ -67,8 +67,18 @@ fn list_agents() -> Result<Vec<AgentInfo>, String> {
 }
 
 #[tauri::command(async)]
-fn send_message(agent: String, text: String, steer: bool) -> Result<(), String> {
-    match client::rpc(Request::Send { agent, text, steer }) {
+fn send_message(
+    agent: String,
+    text: String,
+    steer: bool,
+    id: Option<String>,
+) -> Result<(), String> {
+    match client::rpc(Request::Send {
+        agent,
+        text,
+        steer,
+        id,
+    }) {
         Ok(Event::Ok) => Ok(()),
         Ok(Event::Error { message }) => Err(message),
         Ok(_) => Err("unexpected daemon response".into()),

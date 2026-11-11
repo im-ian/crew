@@ -2934,15 +2934,22 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             }
             out
         }
-        Request::Send { agent, text, .. } if crate::remote::is_remote(&agent) => {
-            match crate::remote::send_from_user(&agent, &text) {
+        Request::Send {
+            agent, text, id, ..
+        } if crate::remote::is_remote(&agent) => {
+            match crate::remote::send_from_user(&agent, &text, id.as_deref()) {
                 Ok(()) => vec![Event::Ok],
                 Err(err) => vec![Event::Error {
                     message: err.to_string(),
                 }],
             }
         }
-        Request::Send { agent, text, steer } => match send_from_user(&agent, &text, &text, steer) {
+        Request::Send {
+            agent,
+            text,
+            steer,
+            id,
+        } => match send_user_line(&agent, &text, &text, steer, false, id.as_deref()) {
             Ok(()) => vec![Event::Ok],
             Err(err) => vec![Event::Error {
                 message: err.to_string(),
@@ -3317,30 +3324,32 @@ fn send_agent_shown(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
 /// it is the one the answer means, not someone to message, so no tell goes
 /// out, the same as when `crew ask` takes the answer itself.
 fn send_answer(id: &str, shown: &str, text: &str) -> anyhow::Result<()> {
-    send_user_line(id, shown, text, false, true)
+    send_user_line(id, shown, text, false, true, None)
 }
 
 /// `steer` stops a turn under way and starts this message in its place, ahead
 /// of what was waiting. Without it, the message waits its turn.
 fn send_from_user(id: &str, shown: &str, text: &str, steer: bool) -> anyhow::Result<()> {
-    send_user_line(id, shown, text, steer, false)
+    send_user_line(id, shown, text, steer, false, None)
 }
 
 /// `answer`: the line is a question card's answer. The teammates it @names are
 /// not told, and its row is marked, since the card already shows it.
+/// `row_id`: the id the window already drew the line under.
 fn send_user_line(
     id: &str,
     shown: &str,
     text: &str,
     steer: bool,
     answer: bool,
+    row_id: Option<&str>,
 ) -> anyhow::Result<()> {
     let tells = !answer;
     let push = || {
         if answer {
             crate::transcript::push_answer(id, shown)
         } else {
-            crate::transcript::push_user(id, "user", shown)
+            crate::transcript::push_user_as(id, "user", shown, row_id)
         }
     };
     let action = apply_user_interrupt(id, text, steer)?;

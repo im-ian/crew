@@ -229,7 +229,7 @@ export type ChatMessage = {
   text: string;
   ts: number;
   queued?: boolean;
-  /** Window-only. The daemon has not accepted this send, so it is not a bubble. */
+  /** Window-only. The daemon has not accepted this send yet; it is drawn as sending. */
   optimistic?: boolean;
   /** The bot that asked for the turn this row came from: it belongs beside the thread, with that bot. */
   peer?: string | null;
