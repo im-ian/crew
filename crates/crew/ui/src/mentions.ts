@@ -37,11 +37,13 @@ const ENTITY = /&#?[A-Za-z0-9]+;/y;
 
 /**
  * Whether what follows an id ends the handle: nothing, a non-ASCII letter
- * such as a Korean particle, or closing punctuation followed by nothing or by
- * one (`@bot-3)끼리`). `@bot-3.ai` and `@bot-3's` go on. In rendered markdown
- * a closing `"` is `&quot;`; raw text keeps it as is, as the daemon reads it.
+ * such as a Korean particle, an opening `(` as in `@bot-3(기획자)`, or closing
+ * punctuation followed by nothing or by one (`@bot-3)끼리`). `@bot-3.ai` and
+ * `@bot-3's` go on. In rendered markdown a closing `"` is `&quot;`; raw text
+ * keeps it as is, as the daemon reads it.
  */
 function handleEnds(rest: string, html = false): boolean {
+  if (rest.startsWith("(")) return true;
   const close = html ? /^(?:[,.!?:;)\]}"']|&quot;)+/ : /^[,.!?:;)\]}"']+/;
   const after = rest.replace(close, "");
   return !after || /^[^\x00-\x7f]/.test(after);
@@ -307,8 +309,21 @@ export function handleAt(
     sigil: "@",
     agent,
     label: mentionLabel(agent),
-    length: 1 + token.length,
+    length: 1 + token.length + nameAfter(text.slice(i + 1 + token.length), agent),
   };
+}
+
+/**
+ * How much of `rest` is the bot's own name in parentheses, `(Moon)` after
+ * `@bot-x`, which the chip already shows. Zero for anything else, such as
+ * `(이거 봐줘)`, which stays as text after the chip.
+ */
+function nameAfter(rest: string, agent: AgentInfo): number {
+  const m = rest.match(/^\(([^()\n<]{1,40})\)/);
+  const said = m?.[1].trim().toLowerCase();
+  if (!m || !said) return 0;
+  const name = (agent.name || agent.id).toLowerCase();
+  return name.includes(said) || mentionLabel(agent).toLowerCase().includes(said) ? m[0].length : 0;
 }
 
 /**

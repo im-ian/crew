@@ -1191,7 +1191,7 @@ pub fn team_rules_for(
         "Shared memory is current on every turn. A `[crew system]` note that starts with `Shared memory` holds the live teammate list and your live name, plus the notes every bot shares. That note replaces any teammate list in these instructions, including after a compact. Use the note. To read it, run `crew share show`. To add a note for every bot, run `crew share append <<'EOF'` with one short line, then `EOF`. To replace the shared notes, run `crew share show`, then `crew share set <<'EOF'` with the notes only, then `EOF`. Crew writes the teammate list, so `crew share set` does not change it. Do not copy the teammate list into your own memory. Do not save secrets there. When you sit in a group, the note also holds a `# Group memory` section for that group. To add to it, run `crew group memory append <<'EOF'` with one short line, then `EOF`. To replace it, run `crew group memory show`, then `crew group memory set <<'EOF'` with the whole new notes, then `EOF`.\n",
     );
     s.push_str(
-        "A teammate is written `@<id>`, and Crew shows it as their name. To name a teammate in your reply, write `@<id>` too; that only shows their name and sends nothing. Crew already shows the name, so do not add it after the id, and put a space or punctuation right after the id: `@bot-3(기획자)` shows as plain text and tells no one, `@bot-3` shows as their name. When the user writes one, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, so after `crew tell`, end your turn. Do not wait, sleep, or check for the reply. A group is written `#<group-id>`, and Crew shows it as the group's name. When the user writes one, they are naming the group the work belongs to; it messages no one, and a note under their message gives that group's bots, folder, and memory.\n",
+        "A teammate is written `@<id>`, and Crew shows it as their name. To name a teammate in your reply, write `@<id>` too; that only shows their name and sends nothing. Crew already shows the name, so do not add it after the id: write `@bot-3`, with a space or punctuation right after it. When the user writes one, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, so after `crew tell`, end your turn. Do not wait, sleep, or check for the reply. A group is written `#<group-id>`, and Crew shows it as the group's name. When the user writes one, they are naming the group the work belongs to; it messages no one, and a note under their message gives that group's bots, folder, and memory.\n",
     );
     if let Some(note) = background_note(agent) {
         s.push_str(note);
@@ -1499,9 +1499,10 @@ fn sigil_tokens(text: &str, sigil: char) -> Vec<String> {
                 .unwrap_or(raw.len());
             let (token, rest) = raw.split_at(end);
             // Closing punctuation ends it when nothing or a non-ASCII letter
-            // follows (`@bot-x)끼리`); `@bot-x.ai` and `@bot-x's` go on.
+            // follows (`@bot-x)끼리`); `@bot-x.ai` and `@bot-x's` go on. An
+            // opening `(` ends it too: people write `@bot-x(Moon)`.
             let after = rest.trim_start_matches(is_mention_punct);
-            let ends = !after.starts_with(|c: char| c.is_ascii());
+            let ends = rest.starts_with('(') || !after.starts_with(|c: char| c.is_ascii());
             if !token.is_empty() && ends {
                 out.push(token.to_string());
             }
@@ -3402,6 +3403,14 @@ mod tests {
         assert_eq!(with_mention_hint(quoted, "alpha", &roster), quoted);
         let body_mention = "[crew reply:1-2 from:alice]\nhello\n\nask @beta";
         assert!(with_mention_hint(body_mention, "alpha", &roster).contains("[crew system]"));
+    }
+
+    /// People write a teammate as `@id(name)`; the `(` ends the id.
+    #[test]
+    fn a_name_in_parentheses_after_an_id_still_names_the_bot() {
+        assert_eq!(mention_tokens("@bot-mwcxdjke(Moon) 봐줘"), vec!["bot-mwcxdjke"]);
+        assert_eq!(mention_tokens("@bot-3(이거 봐줘)"), vec!["bot-3"]);
+        assert!(mention_tokens("@bot-3.ai").is_empty());
     }
 
     #[test]

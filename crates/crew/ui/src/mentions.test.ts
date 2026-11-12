@@ -361,3 +361,23 @@ describe("a #group handle", () => {
     expect(resolveGroup("CREW", groups)?.id).toBe("g19a3");
   });
 });
+
+describe("a name in parentheses after an id", () => {
+  it("still names the bot, and the chip stands for the name", () => {
+    expect(mentionRuns("@gamma(춘식이) 봐줘", agents)).toEqual([
+      { text: "@춘식이", agent: agents[1] },
+      { text: " 봐줘" },
+    ]);
+    expect(injectMentionChips("<p>@alpha(Alpha) 확인</p>", agents)).toBe(
+      '<p><span class="mention-chip" data-mention="alpha"></span> 확인</p>',
+    );
+    expect(mentionsId("@alpha(alpha) 봐줘", "alpha")).toBe(true);
+  });
+
+  it("keeps other words in the parentheses as text", () => {
+    expect(mentionRuns("@alpha(이거 봐줘)", agents)).toEqual([
+      { text: "@Alpha", agent: agents[0] },
+      { text: "(이거 봐줘)" },
+    ]);
+  });
+});
