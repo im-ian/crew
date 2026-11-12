@@ -192,7 +192,9 @@ export type MessageKind =
   | "routine"
   | "handoff"
   | "tool"
-  | "compact";
+  | "compact"
+  /** `crew show`: the text is the file's path, `:line` when one was given. */
+  | "file";
 export type ApprovalState = "pending" | "allowed" | "denied";
 export type ChoiceState = "pending" | "answered" | "closed";
 
@@ -250,4 +252,13 @@ export type ChatMessage = {
 export type PendingAvatar = {
   data: string;
   name: string;
+};
+
+/** A text file read for the panel beside the chat. */
+export type TextFile = {
+  path: string;
+  text: string;
+  size: number;
+  /** Only the first part was read; the file is longer. */
+  truncated: boolean;
 };

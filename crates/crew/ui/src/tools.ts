@@ -56,6 +56,12 @@ export function threadRows(
   const rows: ThreadRow[] = [];
   for (const msg of list) {
     const last = rows[rows.length - 1];
+    // A file a bot showed stays in the thread the user reads, even in a turn
+    // another bot asked for.
+    if (msg.kind === "file") {
+      rows.push({ kind: "msg", msg });
+      continue;
+    }
     const peer = runPeer(msg, agents);
     if (peer) {
       if (last?.kind === "notes" && last.peerId === peer) {

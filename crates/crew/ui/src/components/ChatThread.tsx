@@ -86,7 +86,9 @@ import {
   type JumpFrame,
   type JumpMode,
 } from "../questionJump";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, Reply, X } from "../icons";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, FileText, Reply, X } from "../icons";
+import { parseFileRef, useFileOpen } from "../fileRef";
+import { splitFilePath } from "./FileView";
 import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
 import { MdBody } from "./MdBody";
@@ -1315,6 +1317,7 @@ function SystemOrIncoming({
       />
     );
   }
+  if (m.kind === "file") return <FileCard message={m} flash={flash} />;
   const from = String(m.from || "");
   if (from === "crew") {
     // A note the daemon wrote about the conversation itself, not a bot speaking.
@@ -2857,4 +2860,36 @@ function visibleMessages(
     return stripCrewMarkers(raw).length > 0 || !!m.choice;
   });
   return oneCompactNote(shown);
+}
+
+/** A file a bot showed with `crew show`. It opened beside the chat; a click opens it again. */
+function FileCard({ message: m, flash }: { message: ChatMessage; flash: boolean }) {
+  const t = useT();
+  const openFile = useFileOpen();
+  const target = parseFileRef(m.text || "");
+  const { name, dir } = splitFilePath(target.path);
+  return (
+    <button
+      type="button"
+      className={"file-card" + (flash ? " flash" : "")}
+      data-msg-id={m.id}
+      title={target.path}
+      disabled={!openFile}
+      onClick={() => openFile?.(target)}
+    >
+      <FileText className="file-card-icon" size={16} />
+      <span className="file-card-text">
+        <span className="file-card-name">
+          {name}
+          {target.line ? <span className="file-line">:{target.line}</span> : null}
+        </span>
+        {dir ? (
+          <span className="file-card-dir">
+            <bdi>{dir}</bdi>
+          </span>
+        ) : null}
+      </span>
+      <span className="file-card-action">{t("file.show")}</span>
+    </button>
+  );
 }
