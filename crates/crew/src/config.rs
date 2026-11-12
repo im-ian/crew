@@ -841,10 +841,12 @@ impl AgentConfig {
     }
 
     /// No per-bot session flag. Each turn sends the chat so far in the prompt.
+    /// agy kept up between turns holds its session, so it is not one.
     pub fn prompt_mode(&self) -> bool {
         match self.binary_name().as_str() {
             "grok" | "claude" | "codex" => false,
-            "gemini" | "agy" | "copilot" | "opencode" => true,
+            "agy" => !self.live_cli(),
+            "gemini" | "copilot" | "opencode" => true,
             _ => self.headless,
         }
     }
@@ -893,10 +895,17 @@ impl AgentConfig {
         args
     }
 
-    /// Claude stays up between turns and reads each prompt from its stdin, so
-    /// a send reaches it while a task it put in the background still runs.
+    /// Claude, grok and agy stay up between turns and read each prompt from
+    /// their stdin, so a send reaches them while a task they put in the
+    /// background still runs. grok and agy do that over ACP, a mode that takes
+    /// fewer flags than a one-shot turn: a command with one it does not take
+    /// runs a process per turn, as before.
     pub fn live_cli(&self) -> bool {
-        self.binary_name() == "claude"
+        match self.binary_name().as_str() {
+            "claude" => true,
+            "grok" | "agy" => self.acp_launch(&[], "", None).is_some(),
+            _ => false,
+        }
     }
 
     /// How to start a grok or agy bot that stays up over ACP: the argv, and
@@ -2311,7 +2320,7 @@ mod tests {
         let cmd = ["claude", "--input-format", "text", "--yolo"];
         let c = cfg(&cmd, Some("haiku"), None);
         assert!(c.live_cli());
-        assert!(!cfg(&["grok"], None, None).live_cli());
+        assert!(!cfg(&["gemini"], None, None).live_cli());
         let resume = TurnSession {
             id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee".into(),
             resume: true,
@@ -2344,6 +2353,8 @@ mod tests {
             Some("grok-4.7-build-fast"),
             Some(Effort::Low),
         );
+        assert!(c.live_cli());
+        assert!(!c.prompt_mode());
         let launch = c.acp_launch(&[], "likes tea", None).unwrap();
         assert_eq!(launch.cli, AcpCli::Grok);
         assert_eq!(
@@ -2371,10 +2382,14 @@ mod tests {
         assert!(launch.rules.ends_with("# Your memory\nlikes tea"));
         assert_eq!(launch.model, None);
         // A flag `grok agent` does not take keeps the bot on a process a turn.
-        let web = ["grok", "--always-approve", "--disable-web-search"];
-        assert!(cfg(&web, None, None).acp_launch(&[], "", None).is_none());
-        let stray = cfg(&["grok", "stray"], None, None);
-        assert!(stray.acp_launch(&[], "", None).is_none());
+        let web = cfg(
+            &["grok", "--always-approve", "--disable-web-search"],
+            None,
+            None,
+        );
+        assert!(web.acp_launch(&[], "", None).is_none());
+        assert!(!web.live_cli());
+        assert!(!cfg(&["grok", "stray"], None, None).live_cli());
     }
 
     #[test]
@@ -2384,6 +2399,9 @@ mod tests {
             Some("gemini-3.8-flash-low"),
             Some(Effort::Low),
         );
+        assert!(c.live_cli());
+        // It holds its session, so a turn no longer sends the chat so far.
+        assert!(!c.prompt_mode());
         let launch = c.acp_launch(&[], "likes tea", None).unwrap();
         assert_eq!(launch.cli, AcpCli::Agy);
         assert_eq!(
@@ -2402,6 +2420,8 @@ mod tests {
         assert!(launch.rules.ends_with("# Your memory\nlikes tea"));
         let mode = cfg(&["agy", "--mode", "plan"], None, None);
         assert!(mode.acp_launch(&[], "", None).is_none());
+        assert!(!mode.live_cli());
+        assert!(mode.prompt_mode());
     }
 
     #[test]

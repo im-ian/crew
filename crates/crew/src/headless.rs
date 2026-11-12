@@ -678,6 +678,17 @@ fn run_turn(
         None => prompt,
     };
     let resume = turn_session.as_ref().is_some_and(|s| s.resume);
+    // agy kept up between turns holds a session, and a new one has none of
+    // the chat yet: it used to read the chat so far on every turn.
+    let live_cli = cfg.live_cli();
+    let prompt = if live_cli && program == "agy" && !resume && recap.is_none() {
+        match crate::transcript::prior_recap_excluding(&session.id, &skip_rows) {
+            Some(prior) => with_prior(&prior, &prompt),
+            None => prompt,
+        }
+    } else {
+        prompt
+    };
     mark_resumed(&session, resume);
     let memory_now = crate::memory::read(&session.id);
     let (memory_seen, memory_note) = memory_for_turn(
@@ -720,18 +731,23 @@ fn run_turn(
     if let Err(err) = crate::paths::create_cwd(&cwd) {
         eprintln!("[crew] cwd {}: {err:#}", cwd.display());
     }
-    let live_cli = cfg.live_cli();
-    let result = if live_cli {
-        let isolated = place.isolated.as_ref();
-        let argv = cfg.live_cmd_in(turn_session.as_ref(), &roster, &memory_seen.start, isolated);
-        let started = live::Started {
-            argv: cfg.live_cmd_in(None, &roster, &memory_seen.start, isolated),
-            cwd: cwd.clone(),
-            session_id: turn_session.as_ref().map(|s| s.id.clone()),
-        };
-        live::run_turn(&session, &argv, started, &prompt, generation, &mut turn)
+    let launch = live_cli
+        .then(|| {
+            live_launch(
+                &cfg,
+                &roster,
+                &memory_seen.start,
+                place.isolated.as_ref(),
+                turn_session.as_ref(),
+                &cwd,
+            )
+        })
+        .flatten();
+    let live_cli = launch.is_some();
+    let result = if let Some(launch) = launch.as_ref() {
+        live::run_turn(&session, launch, &prompt, generation, &mut turn)
     } else {
-        // A bot that moved off Claude leaves no process behind.
+        // A bot that moved off a CLI kept up between turns leaves no process.
         live::close(&session);
         let argv = cfg.turn_cmd_in(
             &prompt,
@@ -866,6 +882,57 @@ fn run_turn(
     // Before the inbox: the next turn replaces this origin.
     crate::daemon::turn_ended(&session.id);
     crate::daemon::pump_inbox(&session.id);
+}
+
+/// How a turn of a bot whose CLI stays up between turns reaches it. None
+/// when its command cannot start that way.
+fn live_launch(
+    cfg: &AgentConfig,
+    roster: &[AgentConfig],
+    memory: &str,
+    isolated: Option<&crate::worktree::Isolated>,
+    turn_session: Option<&TurnSession>,
+    cwd: &Path,
+) -> Option<live::Launch> {
+    let session_id = turn_session.map(|s| s.id.clone());
+    if cfg.binary_name() == "claude" {
+        return Some(live::Launch {
+            proto: live::Proto::Claude,
+            argv: cfg.live_cmd_in(turn_session, roster, memory, isolated),
+            started: live::Started {
+                argv: cfg.live_cmd_in(None, roster, memory, isolated),
+                cwd: cwd.to_path_buf(),
+                session_id,
+                setup: String::new(),
+            },
+            acp: None,
+        });
+    }
+    let acp = cfg.acp_launch(roster, memory, isolated)?;
+    // grok keeps the rules a session was opened with, so new ones need no
+    // new process. agy takes them, and its model and effort, per session.
+    let setup = match acp.cli {
+        crate::config::AcpCli::Grok => String::new(),
+        crate::config::AcpCli::Agy => {
+            format!("{:?}\0{:?}\0{}", acp.model, acp.effort, acp.rules)
+        }
+    };
+    Some(live::Launch {
+        proto: live::Proto::Acp(acp.cli),
+        argv: acp.argv.clone(),
+        started: live::Started {
+            argv: acp.argv,
+            cwd: cwd.to_path_buf(),
+            session_id,
+            setup,
+        },
+        acp: Some(live::AcpSetup {
+            rules: acp.rules,
+            model: acp.model,
+            effort: acp.effort,
+            load: turn_session.filter(|s| s.resume).map(|s| s.id.clone()),
+        }),
+    })
 }
 
 /// True when this turn was stopped. The first line that still belongs to it
@@ -1653,6 +1720,25 @@ impl ParseState {
     fn start_reply(&mut self) {
         self.tool_after_text = false;
         self.reply_break = false;
+    }
+
+    /// The next turn on a grok process kept up between turns: what this one
+    /// knew of the subagents, which may still be running, and nothing of its
+    /// reply. A foreground spawn ended with the turn.
+    fn next_turn(self) -> ParseState {
+        ParseState {
+            session_id: self.session_id,
+            background_calls: self.background_calls,
+            child_tool_ids: self.child_tool_ids,
+            parent_tool_ids: self.parent_tool_ids,
+            grok_children: self.grok_children,
+            grok_sessions: self.grok_sessions,
+            grok_pending: self.grok_pending,
+            grok_child_lines: self.grok_child_lines,
+            grok_sessions_root: self.grok_sessions_root,
+            grok_cwd: self.grok_cwd,
+            ..ParseState::default()
+        }
     }
 }
 

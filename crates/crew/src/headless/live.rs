@@ -1,24 +1,25 @@
-//! Claude kept up between turns.
+//! Claude, grok and agy kept up between turns.
 //!
-//! A Claude turn used to be its own process, and Claude keeps that process up
-//! past its `result` while a task it put in the background runs. A send in
-//! that time waited for the task, forever for a dev server, and stopping the
-//! CLI to let it through stopped the task too. Now one process stays up and
-//! reads each prompt from stdin as a stream-json line. A turn ends at its
-//! `result`; the next prompt goes to the same process, and its background
-//! tasks go on.
+//! A turn used to be its own process, and the CLI keeps that process up past
+//! its answer while a task it put in the background runs. A send in that time
+//! waited for the task, forever for a dev server, and stopping the CLI to let
+//! it through stopped the task too. Now one process stays up and reads each
+//! prompt from stdin: Claude as a stream-json line, grok and agy as an ACP
+//! `session/prompt` request (JSON-RPC, a line each way). A turn ends at
+//! Claude's `result` or at the answer to its request; the next prompt goes to
+//! the same process, and its background tasks go on.
 //!
 //! One reader thread owns the process's stdout. Each turn gets the lines up
-//! to its `result` over a channel. Lines that come while no turn is open are
-//! Claude's own: the task list, and the reply it starts by itself once a task
-//! ends, which becomes a turn of its own.
+//! to its end over a channel. Lines that come while no turn is open are the
+//! CLI's own: the task list, a subagent's notes, and the reply Claude or grok
+//! starts by itself once a task ends, which becomes a turn of its own.
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -27,23 +28,70 @@ use anyhow::Context;
 use serde_json::Value;
 
 use super::{
-    arm_first_output_watch, claude_background, cli_command, end_turn_early, is_claude_turn_start,
-    is_stale, is_turn_end, keep_background, kill_all, note_stdout, show_compacts, stream_line,
+    apply_grok_stdout, arm_first_output_watch, claude_background, cli_command, end_turn_early,
+    event_session_id, grok_event, is_claude_turn_start, is_stale, is_turn_end, keep_background,
+    kill_all, note_sealed_grok_child, note_stdout, settle_grok_reply, show_compacts, stream_line,
     strip_tui_noise, CliKind, HeadlessInner, HeadlessSession, ParseState, TurnOutcome,
 };
+use crate::config::AcpCli;
 use crate::protocol::{AgentStatus, Watch};
 
 pub(super) struct LiveCli {
     /// Which process this is, so a reader can tell its own from the next.
     serial: u64,
+    proto: Proto,
     child: Child,
     stdin: Arc<Mutex<ChildStdin>>,
     started: Started,
-    /// Turns given this process's lines, oldest first. Each ends at its
-    /// `result`, including one that was stopped.
+    /// Turns given this process's lines, oldest first. Each ends at its end
+    /// (see `TurnEnd`), including one that was stopped.
     turns: VecDeque<Sink>,
-    /// Claude's latest list of tasks running in the background.
+    /// The CLI's latest list of tasks running in the background.
     background: Vec<(String, Watch)>,
+    /// ACP: the session the process opened or loaded, once it has.
+    acp_session: Option<String>,
+    /// ACP: the id of the next request.
+    next_id: u64,
+    /// ACP: what the last turn knew of grok's subagents. Their notes go on
+    /// between turns, and the next turn goes on from here.
+    grok_state: Option<ParseState>,
+}
+
+/// How a process takes prompts and ends turns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Proto {
+    /// stream-json on stdin, a turn ends at `result`.
+    Claude,
+    /// ACP: a `session/prompt` request, a turn ends at its answer.
+    Acp(AcpCli),
+}
+
+impl Proto {
+    /// The CLI whose limit the first-output watch keeps. agy prints nothing
+    /// before its answer, as on a turn of its own.
+    fn cli(self) -> CliKind {
+        match self {
+            Proto::Claude => CliKind::Claude,
+            Proto::Acp(AcpCli::Grok) => CliKind::Grok,
+            Proto::Acp(AcpCli::Agy) => CliKind::Other,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Proto::Claude => "Claude",
+            Proto::Acp(AcpCli::Grok) => "grok",
+            Proto::Acp(AcpCli::Agy) => "agy",
+        }
+    }
+
+    /// How a reply the CLI starts by itself ends.
+    fn own_end(self) -> TurnEnd {
+        match self {
+            Proto::Claude => TurnEnd::Result,
+            Proto::Acp(_) => TurnEnd::Completed,
+        }
+    }
 }
 
 /// What a process was started with. A turn that would start it differently
@@ -55,11 +103,47 @@ pub(super) struct Started {
     pub cwd: PathBuf,
     /// The CLI session the process holds.
     pub session_id: Option<String>,
+    /// What the session is set up with beside the argv: agy's rules, model
+    /// and effort. Empty for a CLI that has them all on its argv, and for
+    /// grok, which keeps the rules a session was opened with.
+    pub setup: String,
+}
+
+/// How a turn reaches its process.
+pub(super) struct Launch {
+    pub proto: Proto,
+    /// The argv a new process starts with, session flags and all.
+    pub argv: Vec<String>,
+    pub started: Started,
+    /// ACP: how the session is set up.
+    pub acp: Option<AcpSetup>,
+}
+
+/// ACP has the session set up over the protocol, not on the command line.
+pub(super) struct AcpSetup {
+    pub rules: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// The saved session to load. None opens a new one.
+    pub load: Option<String>,
 }
 
 struct Sink {
     generation: u64,
     tx: Sender<LiveLine>,
+    end: TurnEnd,
+}
+
+/// The line a turn ends at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TurnEnd {
+    /// Claude's `result`.
+    Result,
+    /// The answer to the `session/prompt` request with this id.
+    Response(u64),
+    /// grok's `turn_completed` for its own session, which ends a reply it
+    /// started by itself. Nothing answers that one.
+    Completed,
 }
 
 enum LiveLine {
@@ -71,41 +155,79 @@ enum LiveLine {
 static SERIAL: AtomicU64 = AtomicU64::new(1);
 static STOP_ID: AtomicU64 = AtomicU64::new(1);
 
-/// How long Claude has to end a stopped turn with its `result` before the
-/// process is killed, as a stop did before. It answers at once.
+/// How long the CLI has to end a stopped turn before the process is killed,
+/// as a stop did before. It answers at once.
 const STOP_WAIT: Duration = if cfg!(test) {
     Duration::from_secs(1)
 } else {
     Duration::from_secs(10)
 };
 
-/// How long a reply Claude starts by itself waits for a prompt that is on
+/// How long a reply the CLI starts by itself waits for a prompt that is on
 /// its way. That prompt's turn reads it.
 const HANDOFF_WAIT: Duration = Duration::from_secs(30);
 
 /// The stderr kept for a turn that fails.
 const STDERR_KEEP: usize = 16 * 1024;
 
+/// How long an ACP process has to start and open its session. grok answers
+/// in under a second, and loads a long session in a few.
+const SETUP_WAIT: Duration = if cfg!(test) {
+    Duration::from_secs(3)
+} else {
+    Duration::from_secs(60)
+};
+
 /// One prompted turn on the live process. A process kept from an earlier
 /// turn that died before it read the prompt is started again, once.
 pub(super) fn run_turn(
     session: &Arc<HeadlessSession>,
-    argv: &[String],
-    started: Started,
+    launch: &Launch,
     prompt: &str,
     generation: u64,
     turn: &mut u64,
 ) -> anyhow::Result<TurnOutcome> {
-    if argv.is_empty() {
+    if launch.argv.is_empty() {
         anyhow::bail!("empty command");
     }
-    let line = prompt_line(prompt);
     let mut armed = false;
     let mut fresh = false;
     loop {
         let (tx, rx) = channel();
-        let (stdin, reused) = claim(session, argv, &started, generation, tx, fresh)?;
-        match write_prompt(session, &stdin, &line, generation) {
+        let claimed = claim(session, launch, generation, tx, fresh)?;
+        let reused = claimed.reused;
+        if let (Proto::Acp(cli), Some(setup), false) = (launch.proto, launch.acp.as_ref(), reused) {
+            let cwd = &launch.started.cwd;
+            match open_session(session, &claimed, cli, setup, cwd, &rx, generation) {
+                Ok(()) => {}
+                Err(Setup::Stale) => {
+                    close_serial(session, claimed.serial);
+                    anyhow::bail!("turn cancelled");
+                }
+                // Its session did not open, so the process has nothing to
+                // keep. A session it could not load is dropped, as a one-shot
+                // turn's failed resume was: the error quotes its id.
+                Err(Setup::Failed(why)) => {
+                    close_serial(session, claimed.serial);
+                    return Ok(TurnOutcome {
+                        session_id: None,
+                        got_text: false,
+                        error: Some(why),
+                        compacted: false,
+                        watched: Vec::new(),
+                    });
+                }
+            }
+        }
+        let line = match launch.proto {
+            Proto::Claude => prompt_line(prompt),
+            Proto::Acp(_) => match acp_session(session, claimed.serial) {
+                Some(id) => acp_prompt_line(claimed.prompt_id, &id, prompt),
+                None => anyhow::bail!("turn cancelled"),
+            },
+        };
+        let stdin = &claimed.stdin;
+        match write_prompt(session, stdin, &line, generation) {
             Written::Yes => {}
             Written::Stale => anyhow::bail!("turn cancelled"),
             Written::Failed if reused => {
@@ -118,10 +240,15 @@ pub(super) fn run_turn(
             Written::Failed => {}
         }
         if !armed {
-            arm_first_output_watch(Arc::clone(session), generation, CliKind::Claude);
+            arm_first_output_watch(Arc::clone(session), generation, launch.proto.cli());
             armed = true;
         }
-        let read = read_turn(session, &rx, generation, turn);
+        let ctx = TurnCtx {
+            proto: launch.proto,
+            serial: claimed.serial,
+            end: claimed.end,
+        };
+        let read = read_turn(session, &rx, generation, turn, &ctx);
         if read.unheard && reused && !fresh && !is_stale(session, generation) {
             fresh = true;
             continue;
@@ -130,17 +257,28 @@ pub(super) fn run_turn(
     }
 }
 
+/// The process a turn writes to.
+struct Claimed {
+    stdin: Arc<Mutex<ChildStdin>>,
+    /// Kept from an earlier turn, not started for this one.
+    reused: bool,
+    serial: u64,
+    /// ACP: the id the prompt goes out with.
+    prompt_id: u64,
+    end: TurnEnd,
+}
+
 /// The process this turn writes to, with the turn's sink in its line. One
 /// kept from an earlier turn is reused while it runs and nothing it was
 /// started with changed; otherwise it goes and a new one starts.
 fn claim(
     session: &Arc<HeadlessSession>,
-    argv: &[String],
-    started: &Started,
+    launch: &Launch,
     generation: u64,
     tx: Sender<LiveLine>,
     fresh: bool,
-) -> anyhow::Result<(Arc<Mutex<ChildStdin>>, bool)> {
+) -> anyhow::Result<Claimed> {
+    let (argv, started) = (&launch.argv, &launch.started);
     let old = {
         let mut inner = session.inner.lock().expect("headless inner");
         if inner.generation != generation {
@@ -149,14 +287,28 @@ fn claim(
         let inner = &mut *inner;
         let keep = !fresh
             && inner.live.as_mut().is_some_and(|live| {
-                live.started == *started && matches!(live.child.try_wait(), Ok(None))
+                live.proto == launch.proto
+                    && live.started == *started
+                    && (live.proto == Proto::Claude || live.acp_session.is_some())
+                    && matches!(live.child.try_wait(), Ok(None))
             });
         if keep {
             let live = inner.live.as_mut().expect("kept");
-            live.turns.push_back(Sink { generation, tx });
-            let stdin = Arc::clone(&live.stdin);
+            let (prompt_id, end) = live.prompt_end();
+            live.turns.push_back(Sink {
+                generation,
+                tx,
+                end,
+            });
+            let claimed = Claimed {
+                stdin: Arc::clone(&live.stdin),
+                reused: true,
+                serial: live.serial,
+                prompt_id,
+                end,
+            };
             open_turn(inner);
-            return Ok((stdin, true));
+            return Ok(claimed);
         }
         inner.live.take()
     };
@@ -175,37 +327,292 @@ fn claim(
     let stderr = child.stderr.take();
     let stdin = Arc::new(Mutex::new(stdin));
     let serial = SERIAL.fetch_add(1, Ordering::Relaxed);
-    let cancelled = {
+    let proto = launch.proto;
+    let claimed = {
         let mut inner = session.inner.lock().expect("headless inner");
         if inner.generation != generation {
-            Some(child)
+            Err(child)
         } else {
-            inner.live = Some(LiveCli {
+            let mut live = LiveCli {
                 serial,
+                proto,
                 child,
                 stdin: Arc::clone(&stdin),
                 started: started.clone(),
-                turns: VecDeque::from([Sink { generation, tx }]),
+                turns: VecDeque::new(),
                 background: Vec::new(),
+                acp_session: None,
+                next_id: 1,
+                grok_state: None,
+            };
+            let (prompt_id, end) = live.prompt_end();
+            live.turns.push_back(Sink {
+                generation,
+                tx,
+                end,
             });
+            inner.live = Some(live);
             open_turn(&mut inner);
-            None
+            Ok(Claimed {
+                stdin,
+                reused: false,
+                serial,
+                prompt_id,
+                end,
+            })
         }
     };
-    if let Some(mut child) = cancelled {
-        kill_all(&mut child);
-        anyhow::bail!("turn cancelled");
-    }
+    let claimed = match claimed {
+        Ok(claimed) => claimed,
+        Err(mut child) => {
+            kill_all(&mut child);
+            anyhow::bail!("turn cancelled");
+        }
+    };
     let stderr = stderr.map(keep_stderr);
     let reader = Arc::clone(session);
     if let Err(err) = std::thread::Builder::new()
         .name(format!("crew-live-{}", session.id))
-        .spawn(move || read_stdout(reader, serial, stdout, stderr))
+        .spawn(move || read_stdout(reader, serial, proto, stdout, stderr))
     {
         close(session);
         return Err(err).context("spawn the live CLI reader");
     }
-    Ok((stdin, false))
+    Ok(claimed)
+}
+
+impl LiveCli {
+    fn take_id(&mut self) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
+    }
+
+    /// The id a prompt goes out with, and the line its turn ends at.
+    fn prompt_end(&mut self) -> (u64, TurnEnd) {
+        match self.proto {
+            Proto::Claude => (0, TurnEnd::Result),
+            Proto::Acp(_) => {
+                let id = self.take_id();
+                (id, TurnEnd::Response(id))
+            }
+        }
+    }
+}
+
+enum Setup {
+    /// The turn was stopped while the process started.
+    Stale,
+    Failed(String),
+}
+
+/// Start the ACP conversation and open the turn's session on it: load the
+/// saved one, or open a new one with the rules. agy also gets its model and
+/// effort here. Lines up to each answer are the setup's: a loaded session
+/// tells its history over again first, and none of it is this turn's reply.
+fn open_session(
+    session: &HeadlessSession,
+    claimed: &Claimed,
+    cli: AcpCli,
+    setup: &AcpSetup,
+    cwd: &Path,
+    rx: &Receiver<LiveLine>,
+    generation: u64,
+) -> Result<(), Setup> {
+    let name = Proto::Acp(cli).name();
+    let deadline = Instant::now() + SETUP_WAIT;
+    let ask = |method: &str, params: Value| -> Result<Value, Setup> {
+        acp_request(session, claimed, rx, generation, deadline, method, params)
+    };
+    let init = ask(
+        "initialize",
+        serde_json::json!({
+            "protocolVersion": 1,
+            "clientCapabilities": {
+                "fs": { "readTextFile": false, "writeTextFile": false },
+                "terminal": false,
+            },
+        }),
+    )?;
+    if let Some(why) = rpc_error(&init) {
+        return Err(Setup::Failed(format!("{name} did not start: {why}")));
+    }
+    let meta = match (cli, setup.rules.trim().is_empty()) {
+        (_, true) => serde_json::json!({}),
+        (AcpCli::Grok, false) => serde_json::json!({ "rules": setup.rules }),
+        (AcpCli::Agy, false) => serde_json::json!({
+            "antigravity": { "systemPrompt": { "append": setup.rules } },
+        }),
+    };
+    // Where grok keeps the session, by the folder's real path, as a one-shot
+    // turn's `current_dir()` named it.
+    let cwd = std::fs::canonicalize(cwd)
+        .unwrap_or_else(|_| cwd.to_path_buf())
+        .display()
+        .to_string();
+    let id = match setup.load.as_deref() {
+        // grok keeps the rules a session was opened with, as a one-shot
+        // resume did; agy adds the ones given here.
+        Some(id) => {
+            let loaded = ask(
+                "session/load",
+                serde_json::json!({ "sessionId": id, "cwd": cwd, "mcpServers": [], "_meta": meta }),
+            )?;
+            if let Some(why) = rpc_error(&loaded) {
+                return Err(Setup::Failed(format!(
+                    "{name} could not open session {id}: {why}"
+                )));
+            }
+            id.to_string()
+        }
+        None => {
+            let opened = ask(
+                "session/new",
+                serde_json::json!({ "cwd": cwd, "mcpServers": [], "_meta": meta }),
+            )?;
+            if let Some(why) = rpc_error(&opened) {
+                return Err(Setup::Failed(format!(
+                    "{name} could not open a session: {why}"
+                )));
+            }
+            opened
+                .pointer("/result/sessionId")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| Setup::Failed(format!("{name} opened a session with no id")))?
+                .to_string()
+        }
+    };
+    if cli == AcpCli::Agy {
+        if let Some(model) = setup.model.as_deref() {
+            let set = ask(
+                "session/set_model",
+                serde_json::json!({ "sessionId": id, "modelId": model }),
+            )?;
+            if let Some(why) = rpc_error(&set) {
+                return Err(Setup::Failed(format!("agy has no model {model}: {why}")));
+            }
+        }
+        if let Some(effort) = setup.effort.as_deref() {
+            let set = ask(
+                "session/set_config_option",
+                serde_json::json!({ "sessionId": id, "configId": "thought_level", "value": effort }),
+            )?;
+            // The model's own thinking level stays: no reason to fail the turn.
+            if let Some(why) = rpc_error(&set) {
+                eprintln!("[crew] {}: agy effort {effort}: {why}", session.id);
+            }
+        }
+    }
+    // The session the process holds is this one, not the id the turn made up
+    // for a new one: the CLI names its own. A turn stopped before it saves
+    // the session still leaves it for the next.
+    if let Ok(mut inner) = session.inner.lock() {
+        if inner.generation == generation {
+            inner.session_id = Some(id.clone());
+        }
+        if let Some(live) = inner.live.as_mut().filter(|l| l.serial == claimed.serial) {
+            live.started.session_id = Some(id.clone());
+            live.acp_session = Some(id);
+        }
+    }
+    Ok(())
+}
+
+/// One setup request and its answer. Other lines that come first are not
+/// this turn's.
+fn acp_request(
+    session: &HeadlessSession,
+    claimed: &Claimed,
+    rx: &Receiver<LiveLine>,
+    generation: u64,
+    deadline: Instant,
+    method: &str,
+    params: Value,
+) -> Result<Value, Setup> {
+    let id = {
+        let mut inner = session.inner.lock().map_err(|_| Setup::Stale)?;
+        match inner.live.as_mut().filter(|l| l.serial == claimed.serial) {
+            Some(live) => live.take_id(),
+            None => return Err(Setup::Stale),
+        }
+    };
+    let request =
+        serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+    // One that cannot be written exited, and the exit says why below.
+    let _ = write_line(&claimed.stdin, &request.to_string());
+    loop {
+        if is_stale(session, generation) {
+            return Err(Setup::Stale);
+        }
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(Setup::Failed(format!(
+                "{} did not answer {method} in {} s",
+                program_of(claimed, session),
+                SETUP_WAIT.as_secs()
+            )));
+        }
+        match rx.recv_timeout(left.min(Duration::from_millis(100))) {
+            Ok(LiveLine::Line(line)) => {
+                let Ok(v) = serde_json::from_str::<Value>(line.trim()) else {
+                    continue;
+                };
+                if v.get("method").is_none() && v.get("id").and_then(Value::as_u64) == Some(id) {
+                    return Ok(v);
+                }
+            }
+            Ok(LiveLine::Exit(status, stderr)) => {
+                return Err(Setup::Failed(exit_error(status, &stderr)));
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            // Whoever took the process stopped it.
+            Err(RecvTimeoutError::Disconnected) => return Err(Setup::Stale),
+        }
+    }
+}
+
+/// The CLI's name, for a setup that never answered.
+fn program_of(claimed: &Claimed, session: &HeadlessSession) -> &'static str {
+    session
+        .inner
+        .lock()
+        .ok()
+        .and_then(|inner| {
+            let live = inner.live.as_ref()?;
+            (live.serial == claimed.serial).then_some(live.proto.name())
+        })
+        .unwrap_or("The CLI")
+}
+
+/// What a JSON-RPC error answer says.
+fn rpc_error(v: &Value) -> Option<String> {
+    let err = v.get("error")?;
+    let message = err
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("an error");
+    let detail = err.pointer("/data/detail").and_then(Value::as_str);
+    Some(match detail {
+        Some(detail) if !detail.is_empty() => format!("{message} ({detail})"),
+        _ => message.to_string(),
+    })
+}
+
+/// How a process that exited says it failed: its stderr, or its status.
+fn exit_error(status: Option<ExitStatus>, stderr: &str) -> String {
+    let tail = strip_tui_noise(stderr);
+    if !tail.is_empty() {
+        return tail;
+    }
+    let code = status.and_then(|s| s.code()).unwrap_or(1);
+    format!("CLI exited with status {code}")
+}
+
+fn acp_session(session: &HeadlessSession, serial: u64) -> Option<String> {
+    let inner = session.inner.lock().ok()?;
+    let live = inner.live.as_ref().filter(|l| l.serial == serial)?;
+    live.acp_session.clone()
 }
 
 fn open_turn(inner: &mut HeadlessInner) {
@@ -220,6 +627,20 @@ fn open_turn(inner: &mut HeadlessInner) {
 fn prompt_line(prompt: &str) -> String {
     let content = Value::String(prompt.to_string());
     format!(r#"{{"type":"user","message":{{"role":"user","content":{content}}}}}"#)
+}
+
+/// The ACP `session/prompt` request for one prompt, on one line.
+fn acp_prompt_line(id: u64, session_id: &str, prompt: &str) -> String {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "session/prompt",
+        "params": {
+            "sessionId": session_id,
+            "prompt": [{ "type": "text", "text": prompt }],
+        },
+    })
+    .to_string()
 }
 
 fn write_line(stdin: &Mutex<ChildStdin>, line: &str) -> std::io::Result<()> {
@@ -277,17 +698,47 @@ struct ReadTurn {
     unheard: bool,
 }
 
-/// This turn's lines, up to its `result` or the process's exit.
+/// Which turn of which process a reader reads.
+struct TurnCtx {
+    proto: Proto,
+    serial: u64,
+    end: TurnEnd,
+}
+
+/// What a turn starts from. Claude's is new each turn. An ACP turn goes on
+/// from what the last one knew of grok's subagents, in the session the
+/// process holds.
+fn start_state(session: &HeadlessSession, ctx: &TurnCtx) -> ParseState {
+    let Ok(mut inner) = session.inner.lock() else {
+        return ParseState::default();
+    };
+    if ctx.proto == Proto::Claude {
+        let mut state = ParseState::default();
+        state.session_id = inner.session_id.clone();
+        return state;
+    }
+    let Some(live) = inner.live.as_mut().filter(|l| l.serial == ctx.serial) else {
+        return ParseState::default();
+    };
+    let mut state = live.grok_state.take().unwrap_or_default();
+    state.session_id = live.acp_session.clone();
+    // A spawn that names no folder keeps its session in grok's.
+    state.grok_cwd = std::fs::canonicalize(&live.started.cwd)
+        .unwrap_or_else(|_| live.started.cwd.clone())
+        .display()
+        .to_string();
+    state
+}
+
+/// This turn's lines, up to its end or the process's exit.
 fn read_turn(
     session: &Arc<HeadlessSession>,
     rx: &Receiver<LiveLine>,
     generation: u64,
     turn: &mut u64,
+    ctx: &TurnCtx,
 ) -> ReadTurn {
-    let mut state = ParseState::default();
-    if let Ok(inner) = session.inner.lock() {
-        state.session_id = inner.session_id.clone();
-    }
+    let mut state = start_state(session, ctx);
     let mut plain = String::new();
     let mut heard = false;
     let mut exit = None;
@@ -309,7 +760,17 @@ fn read_turn(
             continue;
         }
         show_compacts(session, &mut state);
-        let turn_end = stream_line(session, CliKind::Claude, &line, &mut state, &mut plain);
+        let (turn_end, failure) = match ctx.proto {
+            Proto::Claude => {
+                let end = stream_line(session, CliKind::Claude, &line, &mut state, &mut plain);
+                let failure = end
+                    .then(|| serde_json::from_str::<Value>(line.trim()).ok())
+                    .flatten()
+                    .and_then(|v| result_failure(&v));
+                (end, failure)
+            }
+            Proto::Acp(_) => acp_line(session, ctx, &line, &mut state),
+        };
         show_compacts(session, &mut state);
         if let Some(id) = state.session_id.as_ref() {
             if let Ok(mut inner) = session.inner.lock() {
@@ -317,11 +778,11 @@ fn read_turn(
             }
         }
         if turn_end {
-            ended = Some(
-                serde_json::from_str::<Value>(line.trim())
-                    .ok()
-                    .and_then(|v| result_failure(&v)),
-            );
+            ended = Some(failure);
+            // What grok held back while a subagent spoke goes before the end.
+            if ctx.proto != Proto::Claude {
+                settle_grok_reply(session, &mut state);
+            }
             // The process stays up, with what it runs in the background. The
             // agent is idle, and the next send goes to it.
             if state.got_text {
@@ -329,6 +790,9 @@ fn read_turn(
             }
             break;
         }
+    }
+    if ctx.proto != Proto::Claude {
+        settle_grok_reply(session, &mut state);
     }
     let mut error = state.error.take();
     match ended {
@@ -360,15 +824,82 @@ fn read_turn(
             }
         }
     }
+    let outcome = TurnOutcome {
+        session_id: state.session_id.clone(),
+        got_text: state.got_text,
+        error,
+        compacted: state.compacted,
+        watched: Vec::new(),
+    };
+    if ctx.proto != Proto::Claude {
+        keep_grok_state(session, ctx.serial, state.next_turn());
+    }
     ReadTurn {
         unheard: !heard,
-        outcome: TurnOutcome {
-            session_id: state.session_id,
-            got_text: state.got_text,
-            error,
-            compacted: state.compacted,
-            watched: Vec::new(),
-        },
+        outcome,
+    }
+}
+
+/// What the next turn and the lines between turns go on from.
+fn keep_grok_state(session: &HeadlessSession, serial: u64, state: ParseState) {
+    if let Ok(mut inner) = session.inner.lock() {
+        if let Some(live) = inner.live.as_mut().filter(|l| l.serial == serial) {
+            live.grok_state = Some(state);
+        }
+    }
+}
+
+/// One ACP line of a turn: reply text, tool cards and side-chat notes, read
+/// as grok's streaming-json was. True on the line the turn ends at, with what
+/// went wrong when it says so.
+fn acp_line(
+    session: &HeadlessSession,
+    ctx: &TurnCtx,
+    line: &str,
+    state: &mut ParseState,
+) -> (bool, Option<String>) {
+    let Ok(v) = serde_json::from_str::<Value>(line.trim()) else {
+        return (false, None);
+    };
+    // The answer to this turn's prompt.
+    if v.get("method").is_none() && v.get("id").is_some() {
+        let mine = matches!(ctx.end, TurnEnd::Response(id) if v.get("id").and_then(Value::as_u64) == Some(id));
+        if !mine {
+            return (false, None);
+        }
+        let failure = rpc_error(&v).or_else(|| {
+            let reason = v.pointer("/result/stopReason").and_then(Value::as_str);
+            stop_failure(ctx.proto, reason)
+        });
+        return (true, failure);
+    }
+    let (event, kind) = grok_event(&v);
+    // grok ends each turn, a subagent's too, with this. Only its own ends a
+    // reply it started by itself; the answer ends a prompted one.
+    if kind == "turn_completed" {
+        let own =
+            event_session_id(&v).is_some() && event_session_id(&v) == state.session_id.as_deref();
+        if own && ctx.end == TurnEnd::Completed {
+            let reason = event.get("stop_reason").and_then(Value::as_str);
+            return (true, stop_failure(ctx.proto, reason));
+        }
+        return (false, None);
+    }
+    if apply_grok_stdout(session, state, line).is_some() {
+        if let Ok(mut inner) = session.inner.lock() {
+            inner.last_output = Instant::now();
+            inner.seq += 1;
+        }
+    }
+    (false, None)
+}
+
+/// Why a turn that ended for `reason` failed: an end that is not the model
+/// finishing, or a stop.
+fn stop_failure(proto: Proto, reason: Option<&str>) -> Option<String> {
+    match reason {
+        None | Some("end_turn" | "cancelled") => None,
+        Some(reason) => Some(format!("{} ended the turn with {reason}", proto.name())),
     }
 }
 
@@ -431,6 +962,7 @@ fn keep_stderr(stderr: ChildStderr) -> JoinHandle<String> {
 fn read_stdout(
     session: Arc<HeadlessSession>,
     serial: u64,
+    proto: Proto,
     stdout: ChildStdout,
     stderr: Option<JoinHandle<String>>,
 ) {
@@ -445,33 +977,116 @@ fn read_stdout(
         let line = String::from_utf8_lossy(&buf);
         let line = line.trim_end_matches(['\n', '\r']);
         if !line.trim().is_empty() {
-            route(&session, serial, line.to_string());
+            route(&session, serial, proto, line.to_string());
         }
     }
     exited(&session, serial, stderr);
 }
 
-/// Hand `line` to the turn reading this process, or read it here when none is.
-fn route(session: &Arc<HeadlessSession>, serial: u64, line: String) {
-    let v = serde_json::from_str::<Value>(line.trim()).ok();
-    // Claude's answer to a stop's interrupt, ahead of the stopped turn's
-    // `result`. It is no turn's line.
-    if v.as_ref()
-        .and_then(|v| v.get("type"))
-        .and_then(Value::as_str)
-        == Some("control_response")
-    {
-        return;
+/// What one line means for the turns of a process.
+#[derive(Default)]
+struct Routing {
+    /// The answer to the ACP request with this id.
+    answer: Option<u64>,
+    /// It ends the open turn when that turn ends this way.
+    ends: Option<TurnEnd>,
+    /// The CLI starts a reply with it.
+    starts: bool,
+    /// The CLI's list of tasks running in the background, as (id, what).
+    tasks: Option<Vec<(String, String)>>,
+    /// ACP: the session it is about. Only the process's own counts above.
+    session: Option<String>,
+}
+
+fn routing(proto: Proto, v: &Value) -> Routing {
+    match proto {
+        Proto::Claude => Routing {
+            ends: is_turn_end(CliKind::Claude, v).then_some(TurnEnd::Result),
+            starts: is_claude_turn_start(v),
+            tasks: claude_background(v),
+            ..Routing::default()
+        },
+        Proto::Acp(_) => {
+            if v.get("method").is_none() {
+                return Routing {
+                    answer: v.get("id").and_then(Value::as_u64),
+                    ..Routing::default()
+                };
+            }
+            let (event, kind) = grok_event(v);
+            let update = v.get("method").and_then(Value::as_str) == Some("session/update");
+            Routing {
+                ends: (kind == "turn_completed").then_some(TurnEnd::Completed),
+                starts: update
+                    && matches!(
+                        kind,
+                        "agent_message_chunk" | "agent_thought_chunk" | "tool_call"
+                    ),
+                tasks: (kind == "background_tasks").then(|| acp_background(event)),
+                session: event_session_id(v).map(str::to_string),
+                ..Routing::default()
+            }
+        }
     }
-    let result = v.as_ref().is_some_and(|v| is_turn_end(CliKind::Claude, v));
-    let starts = v.as_ref().is_some_and(is_claude_turn_start);
-    let tasks = v.as_ref().and_then(claude_background);
+}
+
+/// grok's `background_tasks`: every task it started in the background, with
+/// the ones still going marked running.
+fn acp_background(event: &Value) -> Vec<(String, String)> {
+    let tasks = event.get("tasks").and_then(Value::as_array);
+    tasks
+        .into_iter()
+        .flatten()
+        .filter(|task| {
+            matches!(
+                task.get("status").and_then(Value::as_str),
+                Some("running" | "pending" | "starting" | "queued")
+            )
+        })
+        .map(|task| {
+            let key = task
+                .get("task_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let what = ["description", "display_command", "command"]
+                .iter()
+                .find_map(|k| {
+                    task.get(*k)
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty())
+                })
+                .unwrap_or_default();
+            (key.to_string(), what.to_string())
+        })
+        .collect()
+}
+
+/// Hand `line` to the turn reading this process, or read it here when none is.
+fn route(session: &Arc<HeadlessSession>, serial: u64, proto: Proto, line: String) {
+    let v = serde_json::from_str::<Value>(line.trim()).ok();
+    match (proto, v.as_ref()) {
+        // Claude's answer to a stop's interrupt, ahead of the stopped turn's
+        // `result`. It is no turn's line.
+        (Proto::Claude, Some(v))
+            if v.get("type").and_then(Value::as_str) == Some("control_response") =>
+        {
+            return;
+        }
+        // The CLI asks Crew something, such as leave to run a tool.
+        (Proto::Acp(_), Some(v)) if v.get("method").is_some() && v.get("id").is_some() => {
+            answer_request(session, serial, v);
+            return;
+        }
+        _ => {}
+    }
+    let routing = v.as_ref().map(|v| routing(proto, v)).unwrap_or_default();
     let waited_since = Instant::now();
     let mut line = Some(line);
-    let mut tasks = tasks;
+    let mut tasks = routing.tasks;
     loop {
         let mut emit = false;
         let mut start = None;
+        let mut between = None;
         {
             let Ok(mut guard) = session.inner.lock() else {
                 return;
@@ -480,7 +1095,11 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, line: String) {
             let Some(live) = inner.live.as_mut().filter(|l| l.serial == serial) else {
                 return;
             };
-            if let Some(next) = tasks.take() {
+            // Claude speaks for itself only. An ACP line about a subagent's
+            // session is the subagent's.
+            let own = proto == Proto::Claude
+                || routing.session.is_some() && routing.session == live.acp_session;
+            if let Some(next) = tasks.take().filter(|_| own) {
                 keep_background(&mut live.background, next);
                 if !inner.live_turn {
                     let watch = watch_of(&live.background);
@@ -491,14 +1110,34 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, line: String) {
                     }
                 }
             }
-            if let Some(front) = live.turns.front() {
+            if let Some(id) = routing.answer {
+                // A prompt's answer ends its turn. Turns ahead of it that never
+                // closed, such as a reply grok started by itself and was
+                // stopped in, go with it. Any other answer is to the setup of
+                // the turn starting the process.
+                let at = live
+                    .turns
+                    .iter()
+                    .position(|t| t.end == TurnEnd::Response(id));
+                if let Some(at) = at {
+                    live.turns.drain(..at);
+                }
+                if let Some(front) = live.turns.front() {
+                    let _ = front
+                        .tx
+                        .send(LiveLine::Line(line.take().unwrap_or_default()));
+                    if at.is_some() {
+                        live.turns.pop_front();
+                    }
+                }
+            } else if let Some(front) = live.turns.front() {
                 let _ = front
                     .tx
                     .send(LiveLine::Line(line.take().unwrap_or_default()));
-                if result {
+                if own && routing.ends.is_some_and(|end| end == front.end) {
                     live.turns.pop_front();
                 }
-            } else if starts {
+            } else if own && routing.starts {
                 // A prompt is on its way, and its turn reads this reply, or
                 // the last turn is still closing.
                 let busy = inner.live_turn || inner.status == AgentStatus::Working;
@@ -512,18 +1151,21 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, line: String) {
                 }
                 if inner.live_turn {
                     eprintln!(
-                        "[crew] {}: a reply Claude started had no turn to go to",
-                        session.id
+                        "[crew] {}: a reply {} started had no turn to go to",
+                        session.id,
+                        proto.name()
                     );
                 } else {
-                    // Claude answers again on its own, as when a task it put
+                    // The CLI answers again on its own, as when a task it put
                     // in the background ends: a turn nobody prompted. So is
                     // one a prompt said it was coming for and never did.
                     let (tx, rx) = channel();
                     let _ = tx.send(LiveLine::Line(line.take().unwrap_or_default()));
+                    let end = proto.own_end();
                     live.turns.push_back(Sink {
                         generation: inner.generation,
                         tx,
+                        end,
                     });
                     inner.interrupted = false;
                     if inner.status == AgentStatus::Idle {
@@ -531,22 +1173,32 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, line: String) {
                     }
                     inner.last_output = Instant::now();
                     open_turn(inner);
-                    start = Some((rx, inner.generation));
+                    let ctx = TurnCtx { proto, serial, end };
+                    start = Some((rx, inner.generation, ctx));
                 }
-            } else if let Some(v) = v.as_ref() {
-                crate::usage::note_claude_event(v);
+            } else if proto == Proto::Claude {
+                if let Some(v) = v.as_ref() {
+                    crate::usage::note_claude_event(v);
+                }
+            } else {
+                // A subagent grok left running reports between turns.
+                between = live.grok_state.take();
             }
         }
         if emit {
             crate::daemon::emit_agent_frame(&session.id);
         }
-        if let Some((rx, generation)) = start {
+        if let (Some(mut state), Some(line)) = (between, line.as_deref()) {
+            note_sealed_grok_child(session, &mut state, line);
+            keep_grok_state(session, serial, state);
+        }
+        if let Some((rx, generation, ctx)) = start {
             let turn_session = Arc::clone(session);
             if let Err(err) = std::thread::Builder::new()
                 .name(format!("crew-turn-{}", session.id))
-                .spawn(move || run_unprompted(turn_session, rx, generation))
+                .spawn(move || run_unprompted(turn_session, rx, generation, ctx))
             {
-                eprintln!("[crew] {}: Claude's own reply: {err}", session.id);
+                eprintln!("[crew] {}: {}'s own reply: {err}", session.id, proto.name());
                 if let Ok(mut inner) = session.inner.lock() {
                     settle(&mut inner, generation);
                     if inner.status == AgentStatus::Working {
@@ -557,6 +1209,40 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, line: String) {
         }
         return;
     }
+}
+
+/// The CLI asked Crew for something. Crew asks nobody: a bot that may not
+/// run a tool without leave does not run it, and anything else is refused.
+fn answer_request(session: &HeadlessSession, serial: u64, v: &Value) {
+    let stdin = session.inner.lock().ok().and_then(|inner| {
+        let live = inner.live.as_ref().filter(|l| l.serial == serial)?;
+        Some(Arc::clone(&live.stdin))
+    });
+    let Some(stdin) = stdin else {
+        return;
+    };
+    let method = v.get("method").and_then(Value::as_str).unwrap_or_default();
+    let id = v.get("id").cloned().unwrap_or(Value::Null);
+    let reply = if method == "session/request_permission" {
+        let options = v.pointer("/params/options").and_then(Value::as_array);
+        let reject = options.into_iter().flatten().find(|o| {
+            o.get("kind")
+                .and_then(Value::as_str)
+                .is_some_and(|k| k.starts_with("reject"))
+        });
+        let outcome = match reject.and_then(|o| o.get("optionId")) {
+            Some(option) => serde_json::json!({ "outcome": "selected", "optionId": option }),
+            None => serde_json::json!({ "outcome": "cancelled" }),
+        };
+        serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": { "outcome": outcome } })
+    } else {
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": -32601, "message": format!("Crew does not answer {method}") },
+        })
+    };
+    let _ = write_line(&stdin, &reply.to_string());
 }
 
 /// The process closed its stdout. The turn reading it hears how it exited;
@@ -587,14 +1273,19 @@ fn exited(session: &HeadlessSession, serial: u64, stderr: Option<JoinHandle<Stri
     crate::daemon::emit_agent_frame(&session.id);
 }
 
-/// A reply Claude started by itself. It reads like a prompted turn's and ends
-/// the same way, with nothing to save for a prompt.
-fn run_unprompted(session: Arc<HeadlessSession>, rx: Receiver<LiveLine>, generation: u64) {
+/// A reply the CLI started by itself. It reads like a prompted turn's and
+/// ends the same way, with nothing to save for a prompt.
+fn run_unprompted(
+    session: Arc<HeadlessSession>,
+    rx: Receiver<LiveLine>,
+    generation: u64,
+    ctx: TurnCtx,
+) {
     let mut turn = crate::transcript::begin_turn(&session.id);
     crate::daemon::turn_reopened(&session.id);
     crate::daemon::note_turn_failed(&session.id, false);
     crate::daemon::emit_agent_frame(&session.id);
-    let outcome = read_turn(&session, &rx, generation, &mut turn).outcome;
+    let outcome = read_turn(&session, &rx, generation, &mut turn, &ctx).outcome;
     let failed = outcome.error.is_some() && !outcome.got_text;
     if !is_stale(&session, generation) {
         let error = outcome
@@ -654,11 +1345,11 @@ pub(super) fn note_session(session: &HeadlessSession, generation: u64, id: &str)
 }
 
 /// After `pull_turn`. `pulled` is the generation of the turn it took from the
-/// process, if any. With `keep_cli` Claude is asked to stop that turn, and
+/// process, if any. With `keep_cli` the CLI is asked to stop that turn, and
 /// the process stays up with what it runs in the background. That holds for
 /// a turn it has not answered yet too: Claude ends a prompt it was told to
-/// stop before it began with a `result` of its own, and does none of it.
-/// Without `keep_cli` the process goes.
+/// stop before it began with a `result` of its own, and does none of it, and
+/// an ACP CLI answers a cancelled prompt. Without `keep_cli` the process goes.
 pub(super) fn stop(session: &Arc<HeadlessSession>, pulled: Option<u64>, keep_cli: bool) {
     if !keep_cli {
         close(session);
@@ -672,24 +1363,38 @@ pub(super) fn stop(session: &Arc<HeadlessSession>, pulled: Option<u64>, keep_cli
         let live = inner.live.as_ref()?;
         inner.watch = watch_of(&live.background);
         inner.seq += 1;
-        Some((Arc::clone(&live.stdin), live.serial))
+        let acp = live.acp_session.clone();
+        Some((Arc::clone(&live.stdin), live.serial, live.proto, acp))
     });
-    let Some((stdin, serial)) = target else {
+    let Some((stdin, serial, proto, acp)) = target else {
         return;
     };
-    let id = STOP_ID.fetch_add(1, Ordering::Relaxed);
-    let request = serde_json::json!({
-        "type": "control_request",
-        "request_id": format!("crew-stop-{id}"),
-        "request": { "subtype": "interrupt" },
-    })
+    let request = match proto {
+        Proto::Claude => {
+            let id = STOP_ID.fetch_add(1, Ordering::Relaxed);
+            serde_json::json!({
+                "type": "control_request",
+                "request_id": format!("crew-stop-{id}"),
+                "request": { "subtype": "interrupt" },
+            })
+        }
+        Proto::Acp(_) => match acp {
+            Some(id) => serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "session/cancel",
+                "params": { "sessionId": id },
+            }),
+            // Still opening its session: that sees the stop and closes it.
+            None => return,
+        },
+    }
     .to_string();
     if write_line(&stdin, &request).is_err() {
         close_serial(session, serial);
         return;
     }
-    // Claude ends the stopped turn with a `result` at once. One that does not
-    // is stuck, and goes as a stop took it before.
+    // The CLI ends the stopped turn at once. One that does not is stuck, and
+    // goes as a stop took it before.
     let session = Arc::clone(session);
     let _ = std::thread::Builder::new()
         .name(format!("crew-stop-{}", session.id))
@@ -702,8 +1407,9 @@ pub(super) fn stop(session: &Arc<HeadlessSession>, pulled: Option<u64>, keep_cli
             });
             if stuck {
                 eprintln!(
-                    "[crew] {}: Claude did not stop its turn; killing it",
-                    session.id
+                    "[crew] {}: {} did not stop its turn; killing it",
+                    session.id,
+                    proto.name()
                 );
                 close_serial(&session, serial);
             }
