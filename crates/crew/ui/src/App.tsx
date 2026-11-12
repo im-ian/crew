@@ -177,7 +177,10 @@ export function App() {
     autoFor.current = sel;
     hitFor.current = hit;
     const peer = sideOnlyPeer(crew.messages, crew.agents, hit, crew.selected);
-    if (peer) setPeek({ peer, focus: hit ? [hit] : [], openAtFocus: !!hit });
+    if (peer) {
+      setFile(null);
+      setPeek({ peer, focus: hit ? [hit] : [], openAtFocus: !!hit });
+    }
   }, [
     crew.selected,
     crew.messagesFor,
