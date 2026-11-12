@@ -310,18 +310,20 @@ export function ChatThread({
     });
   const lastVisible = dotsAfter(visible);
   function workingPlaceholders(): AgentInfo[] {
-    const live = streaming && currentAgent ? [currentAgent] : [];
-    return live.filter((a) => {
-      // A reply folded beside the thread has no bubble here to carry the dots.
-      if (
-        lastVisible?.role === "assistant" &&
-        lastVisible.from === a.id &&
-        !runPeer(lastVisible, agents)
-      ) {
-        return false;
-      }
-      return true;
-    });
+    if (!streaming || !currentAgent) return [];
+    // Working keeps its own row under the lines so far. Dots on the last
+    // balloon sit on text that already reads as finished, and the face
+    // leaves with them. A bot that is only blocked still puts the dots on
+    // the line it is waiting on.
+    if (currentAgent.status === "working") return [currentAgent];
+    if (
+      lastVisible?.role === "assistant" &&
+      lastVisible.from === currentAgent.id &&
+      !runPeer(lastVisible, agents)
+    ) {
+      return [];
+    }
+    return [currentAgent];
   }
 
   // A new bot asks before any row exists, so the dots have to stand alone.
@@ -332,6 +334,7 @@ export function ChatThread({
       : [];
   const empty = !direct && placeholders.length === 0;
   const typingId = placeholders[0] ? "working-" + placeholders[0].id : null;
+  const typingFrom = new Set(placeholders.map((agent) => agent.id));
   const faceId =
     selectedKind === "agent" && selected
       ? threadFaceId(visible, selected, typingId)
@@ -726,9 +729,13 @@ export function ChatThread({
     } else {
       const m = row.msg;
       // Dots sit under the reply that is arriving, from the first
-      // tokens until the turn ends.
+      // tokens until the turn ends. A working row of its own carries
+      // them instead, so the finished lines do not grow a second tail.
       const caret =
-        streaming && m.role === "assistant" && m.id === lastVisible?.id;
+        streaming &&
+        m.role === "assistant" &&
+        m.id === lastVisible?.id &&
+        !typingFrom.has(m.from);
       const flash = highlightId === m.id;
       const revise = queueActions(m);
       node =

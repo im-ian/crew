@@ -9,7 +9,7 @@ export type FaceLine = {
 
 /**
  * A 1:1 room shows the bot once, on its latest line.
- * The typing row takes that spot while a turn has no bubble of its own.
+ * While it is working, that spot is the typing row under the lines so far.
  */
 export function threadFaceId(
   messages: readonly FaceLine[],
