@@ -34,6 +34,7 @@ import {
   rowTs,
   runPeer,
   threadRows,
+  askedWork,
   toolArgs,
   toolNames,
   toolSummary,
@@ -291,6 +292,12 @@ export function ChatThread({
   // thread stays empty, and its side chat opens beside it (`sideOnlyPeer`).
   const direct = all.some((row) => row.kind === "msg" || row.kind === "files");
   const rows = direct ? all : [];
+  // Work another bot asked for runs in the exchange with it; its run in the
+  // thread says so, with the newest line, on the last run with that bot.
+  const asked = askedWork(messages, currentAgent?.status === "working");
+  const askedRun = asked
+    ? [...rows].reverse().find((row) => row.kind === "notes" && row.peerId === asked.peer)
+    : undefined;
   // Keyed by row id, not by index: a filter or an inserted row would slide a
   // parallel array and stamp the wrong stretch.
   const clocks = useMemo(() => {
@@ -716,6 +723,7 @@ export function ChatThread({
         <NoteGroup
           peerId={row.peerId}
           items={row.msgs}
+          live={row === askedRun ? asked?.line : undefined}
           agents={agents}
           selectedKind={selectedKind}
           onSelectAgent={openAgent}
@@ -1775,9 +1783,12 @@ function NoteGroup({
   peekFocus = null,
   onPeek,
   highlightId = null,
+  live,
 }: {
   peerId: string;
   items: ChatMessage[];
+  /** Set while this bot works on what `peerId` asked: the newest line it said, or "". */
+  live?: string;
   agents: AgentInfo[];
   selectedKind: Kind;
   onSelectAgent?: (id: string) => void;
@@ -1824,6 +1835,21 @@ function NoteGroup({
           }
         />
       </div>
+      {live !== undefined ? (
+        <button
+          type="button"
+          className="note-live"
+          onClick={side ?? undefined}
+          disabled={!side}
+          title={live || undefined}
+        >
+          <span className="note-live-head">
+            <span className="note-live-dot" aria-hidden="true" />
+            {t("thread.askedWork", { who })}
+          </span>
+          {live ? <span className="note-live-line">{live}</span> : null}
+        </button>
+      ) : null}
       {!show && queued ? <QueueWait /> : null}
       {show
         ? items.map((m) =>

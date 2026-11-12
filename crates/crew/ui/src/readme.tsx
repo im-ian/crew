@@ -193,6 +193,20 @@ if (shot === "files") {
   );
   setTimeout(() => thread.impl.push(...fileRows), 900);
 }
+// `?shot=asked`: 구현 works on what 리뷰어 asked for. The work runs in their
+// exchange, so the thread says who asked and the newest line.
+if (shot === "asked") {
+  agents[0].status = "working";
+  thread.impl = [
+    { id: "a1", role: "user", from: "user", ts: at(50), text: "사이드바 접기 끝나면 리뷰어랑 마무리해 줘." },
+    { id: "a2", role: "assistant", from: "impl", ts: at(48), text: "접기 기능을 올렸어요. 리뷰는 리뷰어에게 맡겼어요." },
+    { id: "a3", role: "system", from: "review", kind: "received", ts: at(41), text: "[crew from:review]\n리뷰 항목 다섯 개예요. 각각 실패하는 테스트부터 넣고 고쳐 주세요." },
+    {
+      id: "a4", role: "assistant", from: "impl", peer: "review", ts: at(1),
+      text: "리뷰 항목을 코드에서 하나씩 확인한 뒤 고칠게요.\n\n항목 1·5는 실제 문제로 확인됐어요. 실패하는 테스트부터 넣었어요.\n\n전체 테스트를 돌리는 중이에요. 남은 건 3번과 7번이에요.",
+    },
+  ];
+}
 if (shot === "file") {
   thread.impl = [
     { id: "f1", role: "user", from: "user", ts: at(3), text: "설치 폰트 판별하는 코드 보여줘." },
