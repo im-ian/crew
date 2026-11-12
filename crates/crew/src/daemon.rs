@@ -4721,7 +4721,7 @@ mod daemon_tests {
                 panic!("claude runs headless");
             };
             session.inner.lock().unwrap().session_id = Some("claude-session".into());
-            headless::save_session(&bot, "claude-session").unwrap();
+            headless::save_session(&bot, "claude-session", &session.cwd).unwrap();
 
             session.inner.lock().unwrap().status = AgentStatus::Working;
             assert!(set_cli(&bot, "codex", Vec::new())
@@ -5824,10 +5824,39 @@ fi
     }
 
     fn resume_from(id: &str, session_id: &str) {
-        headless::save_session(id, session_id).unwrap();
-        if let Some(LiveAgent::Headless(session)) = agents().lock().unwrap().get(id) {
-            session.inner.lock().unwrap().session_id = Some(session_id.to_string());
-        }
+        let Some(LiveAgent::Headless(session)) = agents().lock().unwrap().get(id).cloned() else {
+            panic!("{id} runs headless");
+        };
+        headless::save_session(id, session_id, &session.cwd).unwrap();
+        session.inner.lock().unwrap().session_id = Some(session_id.to_string());
+    }
+
+    /// claude and grok keep a session under the folder it was opened in. A bot
+    /// whose folder changed since starts a new session that reads the chat so
+    /// far, instead of resuming one the CLI cannot find.
+    #[test]
+    fn a_session_from_another_folder_is_not_resumed() {
+        paths::testing::with_home("moved-folder", || {
+            let bot = test_id("moved");
+            let log = paths::home_dir().join("prompts");
+            fake_bot_running(&bot, &hang_on_resume(&log, "하나", false));
+            wait_idle(&bot);
+            crate::transcript::push_user(&bot, "user", "어제 시킨 일");
+            let elsewhere = std::path::Path::new("/tmp/crew-demo/elsewhere");
+            headless::save_session(&bot, "old-folder", elsewhere).unwrap();
+            if let Some(LiveAgent::Headless(session)) = agents().lock().unwrap().get(&bot) {
+                session.inner.lock().unwrap().session_id = Some("old-folder".into());
+            }
+            send_agent(&bot, "하나").unwrap();
+            wait_idle(&bot);
+            let sent = fs::read_to_string(&log).unwrap();
+            let tries: Vec<&str> = sent.split('|').filter(|t| t.contains("하나")).collect();
+            assert_eq!(tries.len(), 1, "{sent}");
+            assert!(tries[0].starts_with("fresh:"), "{sent}");
+            assert!(tries[0].contains("어제 시킨 일"), "no recap: {sent}");
+            assert_ne!(headless::load_session(&bot).as_deref(), Some("old-folder"));
+            remove_agent(&bot).unwrap();
+        });
     }
 
     fn system_said(id: &str, line: &str) -> bool {
