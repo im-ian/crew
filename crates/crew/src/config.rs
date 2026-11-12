@@ -895,17 +895,34 @@ impl AgentConfig {
         args
     }
 
-    /// Claude, grok and agy stay up between turns and read each prompt from
-    /// their stdin, so a send reaches them while a task they put in the
-    /// background still runs. grok and agy do that over ACP, a mode that takes
-    /// fewer flags than a one-shot turn: a command with one it does not take
-    /// runs a process per turn, as before.
+    /// Claude, grok, agy and codex stay up between turns and read each prompt
+    /// from their stdin, so a send reaches them while a task they put in the
+    /// background still runs. grok and agy do that over ACP, codex over
+    /// `codex app-server`. Those modes take fewer flags than a one-shot turn:
+    /// a command with one they do not take runs a process per turn, as before.
     pub fn live_cli(&self) -> bool {
         match self.binary_name().as_str() {
             "claude" => true,
             "grok" | "agy" => self.acp_launch(&[], "", None).is_some(),
+            "codex" => self.codex_launch(&[], "", None).is_some(),
             _ => false,
         }
+    }
+
+    /// How to start a codex bot that stays up: `codex app-server`, and what
+    /// the thread is opened with instead of `exec`'s flags. None for any
+    /// other CLI, and for a command with a flag app-server does not take.
+    pub fn codex_launch(
+        &self,
+        roster: &[AgentConfig],
+        memory: &str,
+        isolated: Option<&Isolated>,
+    ) -> Option<CodexLaunch> {
+        let args = self.argv_with_memory(true, roster, memory, isolated);
+        if args.is_empty() || self.binary_name() != "codex" {
+            return None;
+        }
+        codex_app_launch(&args)
     }
 
     /// How to start a grok or agy bot that stays up over ACP: the argv, and
@@ -1790,6 +1807,113 @@ fn grok_agent_launch(args: &[String]) -> Option<AcpLaunch> {
     })
 }
 
+/// A codex process that stays up and speaks app-server JSON-RPC on stdio.
+/// Model, effort and the developer instructions go to the thread, where
+/// `exec` used to take them as flags. `--yolo` is an approval policy of
+/// `never` and a `danger-full-access` sandbox: app-server rejects the flag.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CodexLaunch {
+    pub argv: Vec<String>,
+    pub rules: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub approval: Option<String>,
+    pub sandbox: Option<String>,
+}
+
+/// `codex app-server`. Flags a one-shot `exec` turn adds, and ones app-server
+/// does not take, come off the command line. A flag this does not know keeps
+/// the bot on a process per turn.
+fn codex_app_launch(args: &[String]) -> Option<CodexLaunch> {
+    const VALUES: &[&str] = &[
+        "--model",
+        "-m",
+        "-c",
+        "--config",
+        "--sandbox",
+        "-s",
+        "--ask-for-approval",
+        "-a",
+        "--cd",
+        "-C",
+        "--profile",
+        "-p",
+        "--enable",
+        "--disable",
+        "--add-dir",
+        "--local-provider",
+        "--image",
+        "-i",
+    ];
+    let mut argv = vec![args[0].clone(), "app-server".to_string()];
+    let mut rules = String::new();
+    let (mut model, mut effort) = (None, None);
+    let (mut approval, mut sandbox) = (None, None);
+    let mut yolo = false;
+    for flag in cmd_flags(args, VALUES)? {
+        match flag.name {
+            "--yolo" | "--dangerously-bypass-approvals-and-sandbox" if flag.value.is_none() => {
+                yolo = true;
+            }
+            "--model" | "-m" => model = Some(flag.value?),
+            "--sandbox" | "-s" => sandbox = Some(flag.value?),
+            "--ask-for-approval" | "-a" => approval = Some(flag.value?),
+            // The process's own cwd is the bot's folder.
+            "--cd" | "-C" => {
+                flag.value?;
+            }
+            "-c" | "--config" => {
+                let raw = flag.value?;
+                let Some((key, value)) = raw.split_once('=') else {
+                    return None;
+                };
+                match key {
+                    "model_reasoning_effort" => effort = Some(value.to_string()),
+                    "developer_instructions" => {
+                        let value = value.trim();
+                        if !value.is_empty() {
+                            if !rules.is_empty() {
+                                rules.push_str("\n\n");
+                            }
+                            rules.push_str(value);
+                        }
+                    }
+                    "approval_policy" => approval = Some(value.to_string()),
+                    "sandbox_mode" => sandbox = Some(value.to_string()),
+                    _ => {
+                        argv.push(flag.name.to_string());
+                        argv.push(raw);
+                    }
+                }
+            }
+            "--profile" | "-p" | "--enable" | "--disable" | "--add-dir" | "--local-provider"
+            | "--oss" | "--strict-config" => {
+                argv.push(flag.name.to_string());
+                if let Some(value) = flag.value {
+                    argv.push(value);
+                }
+            }
+            _ => return None,
+        }
+    }
+    if yolo {
+        if approval.is_none() {
+            approval = Some("never".into());
+        }
+        if sandbox.is_none() {
+            sandbox = Some("danger-full-access".into());
+        }
+    }
+    Some(CodexLaunch {
+        argv,
+        rules,
+        model,
+        effort,
+        approval,
+        sandbox,
+    })
+}
+
 /// `agy acp [options] --dangerously-skip-permissions`. `agy acp` takes no
 /// model or effort: those are set on the session.
 fn agy_acp_launch(args: &[String], rules: String) -> Option<AcpLaunch> {
@@ -2422,6 +2546,37 @@ mod tests {
         assert!(mode.acp_launch(&[], "", None).is_none());
         assert!(!mode.live_cli());
         assert!(mode.prompt_mode());
+    }
+
+    #[test]
+    fn codex_stays_up_as_app_server_and_keeps_yolo_off_the_command() {
+        let c = cfg(
+            &["codex", "--yolo"],
+            Some("gpt-5.6-terra"),
+            Some(Effort::Medium),
+        );
+        assert!(c.live_cli());
+        let launch = c.codex_launch(&[], "likes tea", None).unwrap();
+        assert_eq!(launch.argv, ["codex", "app-server"]);
+        assert_eq!(launch.model.as_deref(), Some("gpt-5.6-terra"));
+        assert_eq!(launch.effort.as_deref(), Some("medium"));
+        assert_eq!(launch.approval.as_deref(), Some("never"));
+        assert_eq!(launch.sandbox.as_deref(), Some("danger-full-access"));
+        assert!(launch.rules.contains("crew tell"), "{}", launch.rules);
+        assert!(
+            launch.rules.ends_with("# Your memory\nlikes tea"),
+            "{}",
+            launch.rules
+        );
+        // app-server rejects `--yolo`, so it is the thread's approval policy.
+        assert!(!launch.argv.iter().any(|a| a == "--yolo"));
+        // A flag app-server does not take keeps a process per turn.
+        let search = cfg(&["codex", "--yolo", "--search"], None, None);
+        assert!(search.codex_launch(&[], "", None).is_none());
+        assert!(!search.live_cli());
+        let argv = search.turn_cmd("hello", None, &[], "");
+        assert_eq!(argv[1], "exec");
+        assert!(argv.contains(&"--search".to_string()));
     }
 
     #[test]
