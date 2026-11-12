@@ -12,6 +12,10 @@ use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+pub const FIVE_HOURS: u32 = 5 * 60;
+pub const DAY: u32 = 24 * 60;
+pub const WEEK: u32 = 7 * DAY;
+
 /// One limit window: how much of it is used, and when it starts over.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,21 +23,80 @@ pub struct Window {
     pub used_percent: f64,
     /// Unix seconds.
     pub resets_at: Option<i64>,
+    /// How long the window runs before it starts over, in minutes: 300 for
+    /// five hours, 10080 for a week, 43200 for Codex's 30 days. The window
+    /// is named for it. Unknown for a reading kept before Crew tracked it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minutes: Option<u32>,
+}
+
+impl Window {
+    fn new(used_percent: f64, resets_at: Option<i64>, minutes: u32) -> Self {
+        Self {
+            used_percent,
+            resets_at,
+            minutes: Some(minutes),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlanUsage {
     pub cli: String,
-    /// Absent while the plan has no five-hour window, as during some promotions.
-    pub five_hour: Option<Window>,
-    pub weekly: Option<Window>,
+    /// Each limit the plan has now, shortest first. A plan can drop one for a
+    /// while, as some promotions drop the five-hour window.
+    #[serde(default)]
+    pub windows: Vec<Window>,
     /// Unix seconds when the numbers were read from the CLI.
     pub captured_at: Option<i64>,
     /// Separate pools within one plan, as Antigravity has per model family.
-    /// `weekly` is then the fullest of them.
+    /// `windows` then holds the fullest pool of each length.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub groups: Vec<NamedWindow>,
+    /// How a reading Crew kept before `windows` was written. Read once and
+    /// folded into `windows` (`PlanUsage::upgrade`).
+    #[serde(default, skip_serializing)]
+    five_hour: Option<Window>,
+    #[serde(default, skip_serializing)]
+    weekly: Option<Window>,
+}
+
+impl PlanUsage {
+    /// A reading with these windows, shortest first, or nothing without one.
+    fn of(cli: &str, mut windows: Vec<Window>, captured_at: Option<i64>, groups: Vec<NamedWindow>) -> Option<Self> {
+        if windows.is_empty() {
+            return None;
+        }
+        windows.sort_by_key(|w| w.minutes.unwrap_or(u32::MAX));
+        Some(Self {
+            cli: cli.into(),
+            windows,
+            captured_at,
+            groups,
+            five_hour: None,
+            weekly: None,
+        })
+    }
+
+    /// The window that runs `minutes` long, if the plan has one.
+    #[cfg(test)]
+    fn window(&self, minutes: u32) -> Option<&Window> {
+        self.windows.iter().find(|w| w.minutes == Some(minutes))
+    }
+
+    /// A reading saved in the old shape, with its five-hour and weekly fields,
+    /// as one with `windows`.
+    fn upgrade(mut self) -> Self {
+        for (old, minutes) in [(self.five_hour.take(), FIVE_HOURS), (self.weekly.take(), WEEK)] {
+            if let Some(mut w) = old {
+                w.minutes.get_or_insert(minutes);
+                self.windows.push(w);
+            }
+        }
+        self.windows.sort_by_key(|w| w.minutes.unwrap_or(u32::MAX));
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -90,22 +153,13 @@ pub fn note_claude_event(v: &Value) {
 
 fn parse_claude_event(v: &Value, now: i64) -> Option<PlanUsage> {
     let windows = v.pointer("/rate_limit_info/unifiedWindows")?;
-    let window = |key: &str| {
+    let window = |key: &str, minutes: u32| {
         let w = windows.get(key)?;
         let used = w.get("utilization").and_then(Value::as_f64)?;
-        Some(Window {
-            used_percent: used * 100.0,
-            resets_at: w.get("resetsAt").and_then(Value::as_i64),
-        })
+        Some(Window::new(used * 100.0, w.get("resetsAt").and_then(Value::as_i64), minutes))
     };
-    let usage = PlanUsage {
-        cli: "claude".into(),
-        five_hour: window("five_hour"),
-        weekly: window("seven_day"),
-        captured_at: Some(now),
-        groups: Vec::new(),
-    };
-    (usage.five_hour.is_some() || usage.weekly.is_some()).then_some(usage)
+    let found = [window("five_hour", FIVE_HOURS), window("seven_day", WEEK)];
+    PlanUsage::of("claude", found.into_iter().flatten().collect(), Some(now), Vec::new())
 }
 
 /// What Crew kept, or the status-line capture some setups write, whichever
@@ -113,7 +167,8 @@ fn parse_claude_event(v: &Value, now: i64) -> Option<PlanUsage> {
 fn claude_usage() -> Option<PlanUsage> {
     let kept = fs::read_to_string(claude_store())
         .ok()
-        .and_then(|text| serde_json::from_str::<PlanUsage>(&text).ok());
+        .and_then(|text| serde_json::from_str::<PlanUsage>(&text).ok())
+        .map(PlanUsage::upgrade);
     let widget = claude_config_dir()
         .map(|dir| dir.join("token-widget").join("claude-rate-limits.json"))
         .and_then(|path| fs::read_to_string(path).ok())
@@ -127,24 +182,17 @@ fn claude_usage() -> Option<PlanUsage> {
 
 fn parse_claude_widget(v: &Value) -> Option<PlanUsage> {
     let limits = v.get("rate_limits")?;
-    let window = |key: &str| {
+    let window = |key: &str, minutes: u32| {
         let w = limits.get(key)?;
-        Some(Window {
-            used_percent: w.get("used_percentage").and_then(Value::as_f64)?,
-            resets_at: w.get("resets_at").and_then(Value::as_f64).map(|s| s as i64),
-        })
+        Some(Window::new(
+            w.get("used_percentage").and_then(Value::as_f64)?,
+            w.get("resets_at").and_then(Value::as_f64).map(|s| s as i64),
+            minutes,
+        ))
     };
-    let usage = PlanUsage {
-        cli: "claude".into(),
-        five_hour: window("five_hour"),
-        weekly: window("seven_day"),
-        captured_at: v
-            .get("captured_at")
-            .and_then(Value::as_f64)
-            .map(|s| s as i64),
-        groups: Vec::new(),
-    };
-    (usage.five_hour.is_some() || usage.weekly.is_some()).then_some(usage)
+    let found = [window("five_hour", FIVE_HOURS), window("seven_day", WEEK)];
+    let captured_at = v.get("captured_at").and_then(Value::as_f64).map(|s| s as i64);
+    PlanUsage::of("claude", found.into_iter().flatten().collect(), captured_at, Vec::new())
 }
 
 fn claude_config_dir() -> Option<PathBuf> {
@@ -260,27 +308,25 @@ fn parse_grok_line(v: &Value) -> Option<PlanUsage> {
     let config = v.pointer("/ctx/config")?;
     let used = config.get("creditUsagePercent").and_then(Value::as_f64)?;
     let period = config.get("currentPeriod");
-    if period
-        .and_then(|p| p.get("type"))
-        .and_then(Value::as_str)
-        .is_some_and(|ty| ty != "USAGE_PERIOD_TYPE_WEEKLY")
-    {
-        return None;
-    }
-    let end = period
-        .and_then(|p| p.get("end"))
-        .or_else(|| config.get("billingPeriodEnd"))
-        .and_then(Value::as_str);
-    Some(PlanUsage {
-        cli: "grok".into(),
-        five_hour: None,
-        weekly: Some(Window {
-            used_percent: used,
-            resets_at: end.and_then(parse_utc),
-        }),
-        captured_at: v.get("ts").and_then(Value::as_str).and_then(parse_utc),
-        groups: Vec::new(),
-    })
+    let at = |key: &str| period.and_then(|p| p.get(key)).and_then(Value::as_str).and_then(parse_utc);
+    let end = at("end").or_else(|| {
+        config
+            .get("billingPeriodEnd")
+            .and_then(Value::as_str)
+            .and_then(parse_utc)
+    });
+    // The period's own start and end give its length; the type names it
+    // when they do not. A weekly period is what Grok has used so far.
+    let minutes = match (at("start"), end) {
+        (Some(start), Some(end)) if end > start => round_minutes(((end - start) / 60) as u32),
+        _ => match period.and_then(|p| p.get("type")).and_then(Value::as_str) {
+            Some("USAGE_PERIOD_TYPE_DAILY") => DAY,
+            Some("USAGE_PERIOD_TYPE_MONTHLY") => 30 * DAY,
+            _ => WEEK,
+        },
+    };
+    let captured_at = v.get("ts").and_then(Value::as_str).and_then(parse_utc);
+    PlanUsage::of("grok", vec![Window::new(used, end, minutes)], captured_at, Vec::new())
 }
 
 /// Codex writes its windows into each session's `token_count` events. The
@@ -325,45 +371,36 @@ fn collect_jsonl(dir: &Path, depth: u32, out: &mut Vec<(std::time::SystemTime, P
 
 fn parse_codex_line(v: &Value) -> Option<PlanUsage> {
     let limits = v.pointer("/payload/rate_limits")?;
-    let mut usage = PlanUsage {
-        cli: "codex".into(),
-        five_hour: None,
-        weekly: None,
-        captured_at: v
-            .get("timestamp")
-            .and_then(Value::as_str)
-            .and_then(parse_utc),
-        groups: Vec::new(),
-    };
-    // `primary` is usually the five-hour window and `secondary` the weekly
-    // one, but a plan with only a weekly window reports it as `primary`.
-    for (key, five_hour_by_default) in [("primary", true), ("secondary", false)] {
+    let captured_at = v.get("timestamp").and_then(Value::as_str).and_then(parse_utc);
+    // Each window says how long it is. Without that, `primary` has been the
+    // five-hour one and `secondary` the weekly one.
+    let mut windows = Vec::new();
+    for (key, minutes_by_default) in [("primary", FIVE_HOURS), ("secondary", WEEK)] {
         let Some(w) = limits.get(key).filter(|w| w.is_object()) else {
             continue;
         };
         let Some(used) = w.get("used_percent").and_then(Value::as_f64) else {
             continue;
         };
-        let window = Window {
-            used_percent: used,
-            resets_at: w
-                .get("resets_at")
-                .or_else(|| w.get("reset_at"))
-                .and_then(Value::as_f64)
-                .map(|s| s as i64),
-        };
-        let five_hour = match w.get("window_minutes").and_then(Value::as_f64) {
-            Some(m) if m == 300.0 => true,
-            Some(m) if m == 10_080.0 => false,
-            _ => five_hour_by_default,
-        };
-        if five_hour {
-            usage.five_hour = Some(window);
-        } else {
-            usage.weekly = Some(window);
-        }
+        let resets_at = w
+            .get("resets_at")
+            .or_else(|| w.get("reset_at"))
+            .and_then(Value::as_f64)
+            .map(|s| s as i64);
+        let minutes = w
+            .get("window_minutes")
+            .and_then(Value::as_f64)
+            .filter(|m| *m > 0.0)
+            .map_or(minutes_by_default, |m| m as u32);
+        windows.push(Window::new(used, resets_at, minutes));
     }
-    (usage.five_hour.is_some() || usage.weekly.is_some()).then_some(usage)
+    PlanUsage::of("codex", windows, captured_at, Vec::new())
+}
+
+/// A period read off two clock times, to the nearest whole hour, so a week
+/// that ran a few seconds long is still a week.
+fn round_minutes(minutes: u32) -> u32 {
+    ((minutes + 30) / 60 * 60).max(60)
 }
 
 fn agy_store() -> PathBuf {
@@ -377,7 +414,8 @@ const AGY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 fn agy_usage() -> Option<PlanUsage> {
     let kept = fs::read_to_string(agy_store())
         .ok()
-        .and_then(|text| serde_json::from_str::<PlanUsage>(&text).ok());
+        .and_then(|text| serde_json::from_str::<PlanUsage>(&text).ok())
+        .map(PlanUsage::upgrade);
     if let Some(k) = &kept {
         if k.captured_at.is_some_and(|at| now() - at < AGY_FRESH_SECS) {
             return kept;
@@ -455,36 +493,43 @@ fn parse_agy_report(v: &Value, now: i64) -> Option<PlanUsage> {
             .into_iter()
             .flatten()
         {
-            if bucket.get("window").and_then(Value::as_str) != Some("weekly") {
+            let Some(minutes) = bucket.get("window").and_then(Value::as_str).and_then(agy_window) else {
                 continue;
-            }
+            };
             let Some(left) = bucket.get("remaining_fraction").and_then(Value::as_f64) else {
                 continue;
             };
             groups.push(NamedWindow {
                 name: name.to_string(),
-                window: Window {
-                    used_percent: ((1.0 - left) * 100.0).clamp(0.0, 100.0),
-                    resets_at: bucket
-                        .get("reset_time")
-                        .and_then(Value::as_str)
-                        .and_then(parse_utc),
-                },
+                window: Window::new(
+                    ((1.0 - left) * 100.0).clamp(0.0, 100.0),
+                    bucket.get("reset_time").and_then(Value::as_str).and_then(parse_utc),
+                    minutes,
+                ),
             });
         }
     }
-    let fullest = groups
-        .iter()
-        .max_by(|a, b| a.window.used_percent.total_cmp(&b.window.used_percent))?
-        .window
-        .clone();
-    Some(PlanUsage {
-        cli: "agy".into(),
-        five_hour: None,
-        weekly: Some(fullest),
-        captured_at: Some(now),
-        groups,
-    })
+    // Each length shows its fullest pool; the details list every pool.
+    let mut windows: Vec<Window> = Vec::new();
+    for g in &groups {
+        match windows.iter_mut().find(|w| w.minutes == g.window.minutes) {
+            Some(w) if w.used_percent >= g.window.used_percent => {}
+            Some(w) => *w = g.window.clone(),
+            None => windows.push(g.window.clone()),
+        }
+    }
+    PlanUsage::of("agy", windows, Some(now), groups)
+}
+
+/// How long an Antigravity bucket's window is, from its name.
+fn agy_window(name: &str) -> Option<u32> {
+    match name {
+        "five_hour" | "5h" | "hourly_5" => Some(FIVE_HOURS),
+        "daily" | "day" => Some(DAY),
+        "weekly" | "week" => Some(WEEK),
+        "monthly" | "month" => Some(30 * DAY),
+        _ => None,
+    }
 }
 
 fn read_tail(path: &Path, max: u64) -> Option<String> {
@@ -590,14 +635,36 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// A reading kept before windows carried their length still shows.
+    #[test]
+    fn a_reading_in_the_old_shape_reads_as_windows() {
+        let old = r#"{"cli":"claude","fiveHour":{"usedPercent":12.0,"resetsAt":5},"weekly":{"usedPercent":40.0,"resetsAt":9},"capturedAt":3}"#;
+        let u = serde_json::from_str::<PlanUsage>(old).unwrap().upgrade();
+        assert_eq!(u.window(FIVE_HOURS).unwrap().used_percent, 12.0);
+        assert_eq!(u.window(WEEK).unwrap().used_percent, 40.0);
+        let saved = serde_json::to_string(&u).unwrap();
+        assert!(!saved.contains("fiveHour") && saved.contains("\"minutes\":300"), "{saved}");
+    }
+
+    /// Codex says how long each window is; a day or two weeks keep their own length.
+    #[test]
+    fn a_codex_window_of_any_length_keeps_it() {
+        let v = json!({"payload": {"rate_limits": {
+            "primary": {"used_percent": 3.0, "window_minutes": 1440},
+            "secondary": {"used_percent": 20.0, "window_minutes": 20160}}}});
+        let u = parse_codex_line(&v).unwrap();
+        assert_eq!(u.window(DAY).unwrap().used_percent, 3.0);
+        assert_eq!(u.window(14 * DAY).unwrap().used_percent, 20.0);
+    }
+
     #[test]
     fn a_claude_event_keeps_both_windows() {
         let v = json!({"type": "rate_limit_event", "rate_limit_info": {"unifiedWindows": {
             "five_hour": {"utilization": 0.37, "resetsAt": 1793598600},
             "seven_day": {"utilization": 0.3, "resetsAt": 1793840400}}}});
         let u = parse_claude_event(&v, 100).unwrap();
-        assert_eq!(u.five_hour.unwrap().resets_at, Some(1793598600));
-        assert!((u.weekly.as_ref().unwrap().used_percent - 30.0).abs() < 1e-9);
+        assert_eq!(u.window(FIVE_HOURS).unwrap().resets_at, Some(1793598600));
+        assert!((u.window(WEEK).unwrap().used_percent - 30.0).abs() < 1e-9);
         assert_eq!(u.captured_at, Some(100));
     }
 
@@ -607,8 +674,8 @@ mod tests {
         let v = json!({"type": "rate_limit_event", "rate_limit_info": {"unifiedWindows": {
             "seven_day": {"utilization": 0.92, "resetsAt": 1793235600}}}});
         let u = parse_claude_event(&v, 1).unwrap();
-        assert!(u.five_hour.is_none());
-        assert!(u.weekly.is_some());
+        assert!(u.window(FIVE_HOURS).is_none());
+        assert!(u.window(WEEK).is_some());
     }
 
     #[test]
@@ -616,8 +683,8 @@ mod tests {
         let v = json!({"captured_at": 1793182801.3, "rate_limits": {
             "seven_day": {"used_percentage": 92.0, "resets_at": 1793235600.0}}});
         let u = parse_claude_widget(&v).unwrap();
-        assert!(u.five_hour.is_none());
-        assert_eq!(u.weekly.unwrap().resets_at, Some(1793235600));
+        assert!(u.window(FIVE_HOURS).is_none());
+        assert_eq!(u.window(WEEK).unwrap().resets_at, Some(1793235600));
         assert_eq!(u.captured_at, Some(1793182801));
     }
 
@@ -627,18 +694,26 @@ mod tests {
             "ctx": {"config": {"creditUsagePercent": 99.0, "currentPeriod": {
                 "type": "USAGE_PERIOD_TYPE_WEEKLY", "end": "2026-11-02T00:33:32.018044+00:00"}}}});
         let u = parse_grok_line(&v).unwrap();
-        assert!(u.five_hour.is_none());
-        let w = u.weekly.unwrap();
+        assert!(u.window(FIVE_HOURS).is_none());
+        let w = u.window(WEEK).unwrap();
         assert_eq!(w.used_percent, 99.0);
         assert_eq!(w.resets_at, Some(1793579612));
         assert_eq!(u.captured_at, Some(1793243902));
     }
 
+    /// A period other than a week is named for its length, not dropped.
     #[test]
-    fn a_grok_period_that_is_not_weekly_is_skipped() {
+    fn a_grok_period_is_as_long_as_it_runs() {
         let v = json!({"ctx": {"config": {"creditUsagePercent": 5.0,
             "currentPeriod": {"type": "USAGE_PERIOD_TYPE_MONTHLY"}}}});
-        assert!(parse_grok_line(&v).is_none());
+        assert_eq!(parse_grok_line(&v).unwrap().windows[0].minutes, Some(30 * DAY));
+        let v = json!({"ctx": {"config": {"creditUsagePercent": 5.0, "currentPeriod": {
+            "type": "USAGE_PERIOD_TYPE_WEEKLY",
+            "start": "2026-11-09T00:33:32.018044+00:00", "end": "2026-11-16T00:33:32.018044+00:00"}}}});
+        assert_eq!(parse_grok_line(&v).unwrap().windows[0].minutes, Some(WEEK));
+        let v = json!({"ctx": {"config": {"creditUsagePercent": 5.0, "currentPeriod": {
+            "start": "2026-11-01T00:00:00Z", "end": "2026-11-15T00:00:00Z"}}}});
+        assert_eq!(parse_grok_line(&v).unwrap().windows[0].minutes, Some(14 * DAY));
     }
 
     fn grok_credits_line(percent: f64) -> String {
@@ -664,7 +739,7 @@ mod tests {
             body.extend(std::iter::repeat(b'x').take((GROK_TAIL_BYTES + 64) as usize));
             write_log(&root, &body);
             std::env::set_var("GROK_HOME", &root);
-            let used = grok_usage().unwrap().weekly.unwrap().used_percent;
+            let used = grok_usage().unwrap().window(WEEK).unwrap().used_percent;
             std::env::remove_var("GROK_HOME");
             assert_eq!(used, 42.0);
         });
@@ -681,14 +756,14 @@ mod tests {
             body.extend(std::iter::repeat(b'x').take((GROK_TAIL_BYTES + 64) as usize));
             write_log(&root, &body);
             std::env::set_var("GROK_HOME", &root);
-            assert_eq!(grok_usage().unwrap().weekly.unwrap().used_percent, 42.0);
+            assert_eq!(grok_usage().unwrap().window(WEEK).unwrap().used_percent, 42.0);
 
             // The fetch line is gone, and the new bytes are still inside one tail.
             write_log(
                 &root,
                 &vec![b'y'; (body.len() + 100).max((GROK_TAIL_BYTES + 32) as usize)],
             );
-            assert_eq!(grok_usage().unwrap().weekly.unwrap().used_percent, 42.0);
+            assert_eq!(grok_usage().unwrap().window(WEEK).unwrap().used_percent, 42.0);
 
             let gap = vec![b'\n'; (GROK_TAIL_BYTES + 128) as usize];
             let mut next = gap.clone();
@@ -707,7 +782,7 @@ mod tests {
                 );
             }
             write_log(&root, &next);
-            let used = grok_usage().unwrap().weekly.unwrap().used_percent;
+            let used = grok_usage().unwrap().window(WEEK).unwrap().used_percent;
             std::env::remove_var("GROK_HOME");
             assert_eq!(used, 7.0);
         });
@@ -719,14 +794,21 @@ mod tests {
             "rate_limits": {"primary": {"used_percent": 43.0, "window_minutes": 10080, "resets_at": 1787612904},
                 "secondary": null}}});
         let u = parse_codex_line(&v).unwrap();
-        assert!(u.five_hour.is_none());
-        assert_eq!(u.weekly.unwrap().resets_at, Some(1787612904));
+        assert!(u.window(FIVE_HOURS).is_none());
+        assert_eq!(u.window(WEEK).unwrap().resets_at, Some(1787612904));
         let both = json!({"payload": {"rate_limits": {
             "primary": {"used_percent": 12.0, "window_minutes": 300},
             "secondary": {"used_percent": 64.0, "window_minutes": 10080}}}});
         let u = parse_codex_line(&both).unwrap();
-        assert_eq!(u.five_hour.unwrap().used_percent, 12.0);
-        assert_eq!(u.weekly.unwrap().used_percent, 64.0);
+        assert_eq!(u.window(FIVE_HOURS).unwrap().used_percent, 12.0);
+        assert_eq!(u.window(WEEK).unwrap().used_percent, 64.0);
+        // The `go` plan, as codex-cli 0.167 writes it: one 30-day window as `primary`.
+        let go = json!({"payload": {"rate_limits": {"limit_id": "codex", "plan_type": "go",
+            "primary": {"used_percent": 41.0, "window_minutes": 43200, "resets_at": 1797038573},
+            "secondary": null}}});
+        let u = parse_codex_line(&go).unwrap();
+        assert!(u.windows.len() == 1);
+        assert_eq!(u.window(30 * DAY).unwrap().used_percent, 41.0);
     }
 
     #[test]
@@ -738,8 +820,8 @@ mod tests {
         let u = parse_agy_report(&v, 7).unwrap();
         assert_eq!(u.groups.len(), 2);
         assert_eq!(u.groups[0].name, "Gemini Models");
-        assert_eq!(u.weekly.unwrap().used_percent, 25.0);
-        assert!(u.five_hour.is_none());
+        assert_eq!(u.window(WEEK).unwrap().used_percent, 25.0);
+        assert!(u.window(FIVE_HOURS).is_none());
         assert!(parse_agy_report(&json!({"status": "ERROR"}), 7).is_none());
     }
 
