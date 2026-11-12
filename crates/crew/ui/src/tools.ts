@@ -211,3 +211,46 @@ export function toolSummary(detail: string): string {
   const line = pick.split("\n")[0]?.trim() ?? "";
   return line.length > 72 ? line.slice(0, 71) + "…" : line;
 }
+
+/**
+ * While a bot works on a turn another bot asked for, who asked and the newest
+ * thing it said. That turn's rows sit in the exchange with the asker, beside
+ * the thread, so without this the thread shows nothing for as long as the
+ * work runs. `line` is empty until the bot has said anything.
+ *
+ * The turn is the one the newest delivered line started: a user's line is
+ * the user's turn, a teammate's tell is that teammate's. A waiting line has
+ * not started anything yet.
+ */
+export function askedWork(
+  messages: readonly ChatMessage[],
+  working: boolean,
+): { peer: string; line: string } | null {
+  if (!working) return null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.queued || m.kind === "tool" || m.kind === "file") continue;
+    if (m.role === "assistant") {
+      if (!m.peer) return null;
+      return { peer: m.peer, line: lastSaid(m.text || "") };
+    }
+    if (m.role === "user") return null;
+    // A delivered line starts a turn: a teammate's tell is theirs, while a
+    // user's @mention from another chat, a handoff, or a routine is not
+    // another bot's request.
+    if (m.role === "system" && (m.kind === "received" || m.kind === "handoff" || m.kind === "routine")) {
+      return m.kind === "received" && m.from !== "user" ? { peer: m.from, line: "" } : null;
+    }
+  }
+  return null;
+}
+
+/** The last paragraph of a reply, on one line, without Crew's marker lines. */
+function lastSaid(text: string): string {
+  const kept = text
+    .split("\n")
+    .filter((line) => !/^\s*\[crew [^\]]*\]\s*$/.test(line))
+    .join("\n");
+  const paras = kept.split(/\n\s*\n/).map((p) => p.replace(/\s+/g, " ").trim());
+  return paras.filter(Boolean).pop() ?? "";
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sideOnlyPeer } from "./components/ChatThread";
 import {
+  askedWork,
   dotsAfter,
   momentStamp,
   oneCompactNote,
@@ -388,5 +389,45 @@ describe("sideOnlyPeer", () => {
     };
     expect(sideOnlyPeer([note("1", "alpha"), hello], agents)).toBe(null);
     expect(sideOnlyPeer([], agents)).toBe(null);
+  });
+});
+
+describe("askedWork", () => {
+  const row = (id: string, extra: Partial<ChatMessage>): ChatMessage =>
+    ({ id, role: "system", from: "dev", text: "", ts: 0, ...extra }) as ChatMessage;
+
+  it("names who asked and the newest paragraph while the work runs", () => {
+    const list = [
+      row("1", { kind: "received", from: "lead", text: "리뷰 항목 고쳐 줘" }),
+      row("2", { role: "assistant", peer: "lead", text: "확인할게요.\n\n테스트부터 넣고\n고치겠습니다.\n[crew system]" }),
+      row("t", { kind: "tool", peer: "lead" }),
+      row("3", { kind: "received", from: "lead", queued: true, text: "다음 건" }),
+    ];
+    expect(askedWork(list, true)).toEqual({ peer: "lead", line: "테스트부터 넣고 고치겠습니다." });
+    expect(askedWork(list, false)).toBeNull();
+  });
+
+  it("knows the asker before the bot has said anything", () => {
+    expect(askedWork([row("1", { kind: "received", from: "lead" })], true)).toEqual({ peer: "lead", line: "" });
+  });
+
+  it("stays out of the user's own turn", () => {
+    const list = [
+      row("1", { role: "assistant", peer: "lead", text: "끝났어요." }),
+      row("2", { role: "user", from: "user", text: "이거 해줘" }),
+    ];
+    expect(askedWork(list, true)).toBeNull();
+    expect(askedWork([row("1", { role: "assistant", text: "하는 중" })], true)).toBeNull();
+  });
+
+  it("does not reach back past a turn a mention, handoff, or routine started", () => {
+    const earlier = row("1", { role: "assistant", peer: "lead", text: "끝났어요." });
+    for (const start of [
+      row("2", { kind: "received", from: "user", text: "@dev 봐줘" }),
+      row("2", { kind: "handoff", from: "lead", text: "리뷰 끝" }),
+      row("2", { kind: "routine", from: "아침 브리핑", text: "정리해 줘" }),
+    ]) {
+      expect(askedWork([earlier, start], true)).toBeNull();
+    }
   });
 });

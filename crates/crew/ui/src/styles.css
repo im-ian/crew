@@ -3375,6 +3375,56 @@ button.choice-option:active:not(:disabled) .choice-badge {
   flex: 0 0 auto;
   padding: var(--space-8) 0;
 }
+/* Work another bot asked for, still running: who asked, and the newest line,
+   which a click opens the exchange at. */
+.note-live {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: min(100%, 520px);
+  padding: var(--space-4) var(--space-10);
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+.note-live:hover:not(:disabled) {
+  background: var(--hover);
+}
+.note-live-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  font-size: var(--text-sm);
+  font-weight: 550;
+}
+.note-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--working);
+  animation: note-live-pulse 1.4s ease-in-out infinite;
+}
+@keyframes note-live-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .note-live-dot { animation: none; }
+}
+.note-live-line {
+  max-width: 100%;
+  color: var(--ink);
+  font-size: var(--text-md);
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .note-run-chip {
   display: inline-flex;
   align-items: center;
