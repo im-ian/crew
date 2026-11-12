@@ -2502,6 +2502,9 @@ pub async fn run() -> anyhow::Result<()> {
         );
     }
     paths::remove_stale_socket();
+    // A crash skips `halt`, which is what stops a resident CLI. The pid file
+    // is the record of ones the last process did not get to stop.
+    crate::headless::reap_orphaned_clis();
 
     crate::transcript::set_seal_hook(on_assistant_sealed);
 

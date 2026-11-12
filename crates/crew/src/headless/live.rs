@@ -66,6 +66,14 @@ pub(super) struct LiveCli {
     turn_id: Option<String>,
     /// Codex: the thread's approval policy. `never` is `--yolo`.
     approval: Option<String>,
+    /// Process group leader. Recorded so a daemon that dies can reap it.
+    pid: u32,
+}
+
+impl Drop for LiveCli {
+    fn drop(&mut self) {
+        super::forget_live_cli(self.pid);
+    }
 }
 
 /// How a process takes prompts and ends turns.
@@ -165,6 +173,14 @@ struct Sink {
     /// The request this turn is waiting on. `0` is not one. A JSON-RPC error
     /// ends the turn only when its id is this, so an interrupt's error does not.
     prompt_id: u64,
+    /// Set once this turn's prompt has been written. A start line before that
+    /// is a turn the CLI opened itself.
+    prompted: bool,
+    /// The CLI opened this turn. It is read ahead of a prompt that is not
+    /// written yet.
+    own: bool,
+    /// Codex turn id, once a start or the `turn/start` result names it.
+    turn_id: Option<String>,
 }
 
 /// The line a turn ends at.
@@ -195,10 +211,6 @@ const STOP_WAIT: Duration = if cfg!(test) {
 } else {
     Duration::from_secs(10)
 };
-
-/// How long a reply the CLI starts by itself waits for a prompt that is on
-/// its way. That prompt's turn reads it.
-const HANDOFF_WAIT: Duration = Duration::from_secs(30);
 
 /// The stderr kept for a turn that fails.
 const STDERR_KEEP: usize = 16 * 1024;
@@ -300,6 +312,7 @@ pub(super) fn run_turn(
             proto: launch.proto,
             serial: claimed.serial,
             end: claimed.end,
+            own: false,
         };
         let read = read_turn(session, &rx, generation, turn, &ctx);
         if read.unheard && reused && !fresh && !is_stale(session, generation) {
@@ -353,6 +366,9 @@ fn claim(
                 tx,
                 end,
                 prompt_id,
+                prompted: false,
+                own: false,
+                turn_id: None,
             });
             let claimed = Claimed {
                 stdin: Arc::clone(&live.stdin),
@@ -387,6 +403,7 @@ fn claim(
         if inner.generation != generation {
             Err(child)
         } else {
+            let pid = child.id();
             let mut live = LiveCli {
                 serial,
                 proto,
@@ -401,6 +418,7 @@ fn claim(
                 claude_state: None,
                 turn_id: None,
                 approval: launch.codex.as_ref().and_then(|c| c.approval.clone()),
+                pid,
             };
             let (prompt_id, end) = live.prompt_end();
             live.turns.push_back(Sink {
@@ -408,7 +426,11 @@ fn claim(
                 tx,
                 end,
                 prompt_id,
+                prompted: false,
+                own: false,
+                turn_id: None,
             });
+            super::remember_live_cli(&session.id, live.pid);
             inner.live = Some(live);
             open_turn(&mut inner);
             Ok(Claimed {
@@ -846,31 +868,87 @@ enum Written {
     Failed,
 }
 
+fn drop_generation(session: &HeadlessSession, generation: u64) {
+    if let Ok(mut inner) = session.inner.lock() {
+        if let Some(live) = inner.live.as_mut() {
+            live.turns.retain(|t| t.generation != generation);
+        }
+    }
+}
+
+fn own_turn_open(session: &HeadlessSession) -> bool {
+    session.inner.lock().ok().is_some_and(|inner| {
+        inner
+            .live
+            .as_ref()
+            .is_some_and(|live| live.turns.iter().any(|turn| turn.own))
+    })
+}
+
+fn mark_prompted(session: &HeadlessSession, generation: u64) {
+    if let Ok(mut inner) = session.inner.lock() {
+        if let Some(live) = inner.live.as_mut() {
+            if let Some(sink) = live
+                .turns
+                .iter_mut()
+                .find(|turn| !turn.own && turn.generation == generation)
+            {
+                sink.prompted = true;
+            }
+        }
+    }
+}
+
 /// The prompt, unless a stop got there first. A stop writes its interrupt
 /// under the same stdin lock, so it lands after a prompt that went, and one
 /// that lands before the prompt finds no turn to end: Claude would then run
 /// the prompt in full, with nobody reading it.
+///
+/// A turn the CLI already opened is finished first. The prompt is not written
+/// while a stdout line is being classified, so that line cannot become this
+/// prompt's start.
 fn write_prompt(
     session: &HeadlessSession,
     stdin: &Mutex<ChildStdin>,
     line: &str,
     generation: u64,
 ) -> Written {
-    let Ok(mut stdin) = stdin.lock() else {
-        return Written::Failed;
-    };
-    if is_stale(session, generation) {
-        drop(stdin);
-        if let Ok(mut inner) = session.inner.lock() {
-            if let Some(live) = inner.live.as_mut() {
-                live.turns.retain(|t| t.generation != generation);
-            }
+    loop {
+        if is_stale(session, generation) {
+            drop_generation(session, generation);
+            return Written::Stale;
         }
-        return Written::Stale;
-    }
-    match write_locked(&mut stdin, line) {
-        Ok(()) => Written::Yes,
-        Err(_) => Written::Failed,
+        if own_turn_open(session) {
+            std::thread::sleep(Duration::from_millis(20));
+            continue;
+        }
+        let _gate = session
+            .route_gate
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        if is_stale(session, generation) {
+            drop_generation(session, generation);
+            return Written::Stale;
+        }
+        if own_turn_open(session) {
+            continue;
+        }
+        let Ok(mut stdin) = stdin.lock() else {
+            return Written::Failed;
+        };
+        if is_stale(session, generation) {
+            drop(stdin);
+            drop_generation(session, generation);
+            return Written::Stale;
+        }
+        return match write_locked(&mut stdin, line) {
+            Ok(()) => {
+                drop(stdin);
+                mark_prompted(session, generation);
+                Written::Yes
+            }
+            Err(_) => Written::Failed,
+        };
     }
 }
 
@@ -886,6 +964,8 @@ struct TurnCtx {
     proto: Proto,
     serial: u64,
     end: TurnEnd,
+    /// The CLI opened this turn. Its end must not answer a prompt still open.
+    own: bool,
 }
 
 /// What a turn starts from. Claude's and codex's are new each turn. An ACP
@@ -980,8 +1060,10 @@ fn read_turn(
             // The process stays up, with what it runs in the background. The
             // agent is idle, and the next send goes to it. A subagent that has
             // not reported yet is still this turn's work, so the bot stays
-            // working until that line arrives.
-            if state.got_text {
+            // working until that line arrives. A turn the CLI opened while a
+            // prompt is still open only seals its own bubble.
+            let pending_own = ctx.own && user_turn_pending(session, generation);
+            if state.got_text && !pending_own {
                 let waiting =
                     ctx.proto == Proto::Claude && claude_still_waiting(session, ctx.serial);
                 end_turn_early(session, generation, *turn, waiting);
@@ -1549,7 +1631,320 @@ fn acp_background(event: &Value) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Hand `line` to the turn reading this process, or read it here when none is.
+/// The id a codex line belongs to. `turn/completed` keeps its id here too,
+/// and that id is the turn that ended, not the one a later stop interrupts.
+fn codex_event_turn(v: &Value) -> Option<String> {
+    if let Some(id) = codex_turn_id(v) {
+        return Some(id);
+    }
+    for pointer in ["/params/turnId", "/params/turn/id"] {
+        if let Some(id) = v
+            .pointer(pointer)
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+        {
+            return Some(id.to_string());
+        }
+    }
+    None
+}
+
+/// Where a method-less response lands. Setup uses other ids, so an error
+/// there is delivered and does not end the prompt.
+fn prompt_sink_at(turns: &VecDeque<Sink>, v: &Value) -> Option<usize> {
+    if v.get("method").is_some() {
+        return None;
+    }
+    let id = v.get("id").and_then(Value::as_u64).filter(|id| *id != 0)?;
+    turns.iter().position(|turn| turn.prompt_id == id)
+}
+
+fn prompt_failed(routing: &Routing, v: &Value, prompt_id: u64) -> bool {
+    routing.failed && prompt_id != 0 && v.get("id").and_then(Value::as_u64) == Some(prompt_id)
+}
+
+fn session_owns(inner: &HeadlessInner, proto: Proto, routing: &Routing) -> bool {
+    let Some(live) = inner.live.as_ref() else {
+        return false;
+    };
+    proto == Proto::Claude || routing.session.is_some() && routing.session == live.acp_session
+}
+
+/// The front sink is a prompt that was written and has no turn id yet.
+fn unbound_prompted_user(inner: &HeadlessInner) -> bool {
+    inner.live.as_ref().is_some_and(|live| {
+        live.turns
+            .front()
+            .is_some_and(|turn| turn.prompted && !turn.own && turn.turn_id.is_none())
+    })
+}
+
+/// A prompt Crew started and has not finished, or a sink waiting on one.
+fn user_turn_pending(session: &HeadlessSession, generation: u64) -> bool {
+    session.inner.lock().ok().is_some_and(|inner| {
+        inner.generation == generation
+            && (inner.user_turns > 0
+                || inner
+                    .live
+                    .as_ref()
+                    .is_some_and(|live| live.turns.iter().any(|turn| !turn.own)))
+    })
+}
+
+/// Drop the interrupt target when the turn it names just ended. Another
+/// turn's end leaves it, so a stop still cuts the prompt that is open.
+fn clear_tracked(live: &mut LiveCli, ended: Option<String>) {
+    let Some(current) = live.turn_id.clone() else {
+        return;
+    };
+    let matches = ended.as_ref() == Some(&current);
+    let no_holder = ended.is_none()
+        && !live
+            .turns
+            .iter()
+            .any(|turn| turn.turn_id.as_ref() == Some(&current));
+    if matches || no_holder {
+        live.turn_id = None;
+    }
+}
+
+/// Read `line` as a turn the CLI opened. The sink sits in front of a prompt
+/// that has not been written, so that prompt waits.
+fn open_own_turn(
+    inner: &mut HeadlessInner,
+    proto: Proto,
+    serial: u64,
+    line: String,
+    turn_id: Option<String>,
+) -> Option<(Receiver<LiveLine>, u64, TurnCtx)> {
+    let end = proto.own_end();
+    let generation = inner.generation;
+    let (tx, rx) = channel();
+    let _ = tx.send(LiveLine::Line(line));
+    {
+        let live = inner.live.as_mut()?;
+        let user_bound = live
+            .turns
+            .iter()
+            .any(|turn| !turn.own && turn.turn_id.is_some());
+        if !user_bound {
+            if let Some(id) = turn_id.clone() {
+                live.turn_id = Some(id);
+            }
+        }
+        live.turns.push_front(Sink {
+            generation,
+            tx,
+            end,
+            prompt_id: 0,
+            prompted: false,
+            own: true,
+            turn_id,
+        });
+    }
+    inner.interrupted = false;
+    if inner.status == AgentStatus::Idle {
+        inner.status = AgentStatus::Working;
+    }
+    inner.last_output = Instant::now();
+    open_turn(inner);
+    Some((
+        rx,
+        generation,
+        TurnCtx {
+            proto,
+            serial,
+            end,
+            own: true,
+        },
+    ))
+}
+
+/// A start line. The front sink takes it when the prompt was already written
+/// and has no turn yet, or when that sink is itself an unbound turn of the
+/// CLI's. Otherwise the CLI opened a new one.
+fn open_or_give(
+    inner: &mut HeadlessInner,
+    proto: Proto,
+    serial: u64,
+    line: String,
+    turn_id: Option<String>,
+) -> Option<(Receiver<LiveLine>, u64, TurnCtx)> {
+    let give_front = inner.live.as_ref().is_some_and(|live| {
+        live.turns.front().is_some_and(|turn| {
+            (turn.own && turn.turn_id.is_none())
+                || (turn.prompted && !turn.own && turn.turn_id.is_none())
+        })
+    });
+    if !give_front {
+        return open_own_turn(inner, proto, serial, line, turn_id);
+    }
+    let live = inner.live.as_mut()?;
+    let user = live.turns.front().is_some_and(|turn| !turn.own);
+    if let Some(id) = turn_id.clone() {
+        if let Some(front) = live.turns.front_mut() {
+            if front.turn_id.is_none() {
+                front.turn_id = Some(id.clone());
+            }
+        }
+        let user_bound = live
+            .turns
+            .iter()
+            .any(|turn| !turn.own && turn.turn_id.is_some());
+        if user || !user_bound {
+            live.turn_id = Some(id);
+        }
+    }
+    if let Some(front) = live.turns.front() {
+        let _ = front.tx.send(LiveLine::Line(line));
+    }
+    None
+}
+
+/// Give `line` to the sink it belongs to. A new own turn comes back for
+/// `run_unprompted` to read.
+fn deliver_line(
+    inner: &mut HeadlessInner,
+    proto: Proto,
+    serial: u64,
+    routing: &Routing,
+    v: Option<&Value>,
+    line: &mut Option<String>,
+) -> Option<(Receiver<LiveLine>, u64, TurnCtx)> {
+    let own = session_owns(inner, proto, routing);
+    if let Some(id) = routing.answer {
+        let live = inner.live.as_mut()?;
+        let at = live
+            .turns
+            .iter()
+            .position(|turn| turn.end == TurnEnd::Response(id));
+        if let Some(at) = at {
+            live.turns.drain(..at);
+        }
+        if let Some(front) = live.turns.front() {
+            let _ = front
+                .tx
+                .send(LiveLine::Line(line.take().unwrap_or_default()));
+            if at.is_some() {
+                live.turns.pop_front();
+            }
+        }
+        return None;
+    }
+    if let Some(v) = v {
+        if let Some(at) = inner
+            .live
+            .as_ref()
+            .and_then(|live| prompt_sink_at(&live.turns, v))
+        {
+            let live = inner.live.as_mut()?;
+            if let Some(id) = codex_turn_id(v) {
+                live.turns[at].turn_id = Some(id.clone());
+                if !live.turns[at].own {
+                    live.turn_id = Some(id);
+                }
+            }
+            let failed = v.get("error").is_some();
+            let _ = live.turns[at]
+                .tx
+                .send(LiveLine::Line(line.take().unwrap_or_default()));
+            if failed {
+                let ended = live.turns[at].turn_id.clone();
+                live.turns.remove(at);
+                clear_tracked(live, ended);
+            }
+            return None;
+        }
+    }
+    if let Some(v) = v {
+        if let Some(id) = codex_event_turn(v) {
+            let matched = inner.live.as_ref().and_then(|live| {
+                live.turns
+                    .iter()
+                    .position(|turn| turn.turn_id.as_deref() == Some(id.as_str()))
+            });
+            if let Some(at) = matched {
+                let live = inner.live.as_mut()?;
+                let ends = own && routing.ends.is_some_and(|end| end == live.turns[at].end);
+                let _ = live.turns[at]
+                    .tx
+                    .send(LiveLine::Line(line.take().unwrap_or_default()));
+                if ends {
+                    let ended = live.turns[at].turn_id.clone();
+                    live.turns.remove(at);
+                    clear_tracked(live, ended);
+                }
+                return None;
+            }
+            if own && routing.starts {
+                return open_or_give(
+                    inner,
+                    proto,
+                    serial,
+                    line.take().unwrap_or_default(),
+                    Some(id),
+                );
+            }
+            let close_unbound = routing.ends.is_some()
+                && inner.live.as_ref().is_some_and(|live| {
+                    live.turns
+                        .front()
+                        .is_some_and(|turn| turn.turn_id.is_none())
+                        && live.turns.iter().all(|turn| turn.turn_id.is_none())
+                });
+            if !close_unbound {
+                if own && routing.ends.is_none() && !unbound_prompted_user(inner) {
+                    return open_or_give(
+                        inner,
+                        proto,
+                        serial,
+                        line.take().unwrap_or_default(),
+                        Some(id),
+                    );
+                }
+                if unbound_prompted_user(inner) && routing.ends.is_none() {
+                    let live = inner.live.as_mut()?;
+                    if let Some(front) = live.turns.front_mut() {
+                        front.turn_id = Some(id.clone());
+                    }
+                    live.turn_id = Some(id);
+                    if let Some(front) = live.turns.front() {
+                        let _ = front
+                            .tx
+                            .send(LiveLine::Line(line.take().unwrap_or_default()));
+                    }
+                    return None;
+                }
+                // An end for a turn this process is not reading.
+                line.take();
+                return None;
+            }
+        }
+    }
+    if own && routing.starts {
+        return open_or_give(inner, proto, serial, line.take().unwrap_or_default(), None);
+    }
+    let pop = inner.live.as_mut().and_then(|live| {
+        let front = live.turns.front_mut()?;
+        let ends = own && routing.ends.is_some_and(|end| end == front.end);
+        let failed = v.is_some_and(|v| prompt_failed(routing, v, front.prompt_id));
+        let _ = front
+            .tx
+            .send(LiveLine::Line(line.take().unwrap_or_default()));
+        Some(ends || failed)
+    });
+    if pop == Some(true) {
+        if let Some(live) = inner.live.as_mut() {
+            let ended = live.turns.front().and_then(|turn| turn.turn_id.clone());
+            live.turns.pop_front();
+            clear_tracked(live, ended);
+        }
+    }
+    None
+}
+
+/// Hand `line` to the turn it belongs to. A turn the CLI opened itself is
+/// not the prompt's, even when a send is already marked working.
 fn route(session: &Arc<HeadlessSession>, serial: u64, proto: Proto, line: String) {
     let v = serde_json::from_str::<Value>(line.trim()).ok();
     match (proto, v.as_ref()) {
@@ -1570,188 +1965,133 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, proto: Proto, line: String
         _ => {}
     }
     let routing = v.as_ref().map(|v| routing(proto, v)).unwrap_or_default();
-    let waited_since = Instant::now();
+    // Held across the classification, and across `write_prompt`'s write, so
+    // a line already here cannot be counted as the prompt's start. Not held
+    // across the stdout read: a line still sitting in the pipe can arrive
+    // after the prompt is marked written.
+    let _gate = session
+        .route_gate
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
     let mut line = Some(line);
-    let mut tasks = routing.tasks;
-    // Notes for a Claude line no turn is reading. The turn's own reader pushes
-    // the ones it sees, so these are only the lines that arrive after it.
+    let mut tasks = routing.tasks.clone();
+    let mut emit = false;
+    let mut between = None;
     let mut claude_notes: Vec<SubagentNote> = Vec::new();
-    let mut tracked = false;
     let mut release_at: Option<u64> = None;
-    loop {
-        let mut emit = false;
-        let mut start = None;
-        let mut between = None;
-        {
-            let Ok(mut guard) = session.inner.lock() else {
-                return;
-            };
-            let inner = &mut *guard;
-            let Some(live) = inner.live.as_mut().filter(|l| l.serial == serial) else {
-                return;
-            };
-            // Claude speaks for itself only. An ACP line about a subagent's
-            // session is the subagent's.
-            if proto == Proto::Codex {
-                if let Some(v) = v.as_ref() {
-                    let method = v.get("method").and_then(Value::as_str).unwrap_or("");
-                    if method == "turn/completed" {
-                        live.turn_id = None;
-                    } else if let Some(id) = codex_turn_id(v) {
-                        live.turn_id = Some(id);
-                    }
-                    if tasks.is_none() {
+    let start;
+    {
+        let Ok(mut guard) = session.inner.lock() else {
+            return;
+        };
+        let inner = &mut *guard;
+        let serial_ok = inner
+            .live
+            .as_ref()
+            .is_some_and(|live| live.serial == serial);
+        if !serial_ok {
+            return;
+        }
+        if proto == Proto::Codex {
+            if let Some(v) = v.as_ref() {
+                if tasks.is_none() {
+                    if let Some(live) = inner.live.as_ref() {
                         if let Some(next) = codex_commands(&live.background, v) {
                             tasks = Some(next);
                         }
                     }
                 }
             }
-            if proto == Proto::Claude && !tracked {
-                if let Some(v) = v.as_ref() {
+        }
+        if proto == Proto::Claude {
+            if let Some(v) = v.as_ref() {
+                if let Some(live) = inner.live.as_mut() {
                     let mut state = live.claude_state.take().unwrap_or_default();
                     claude_notes = claude_subagent_notes(v, &mut state);
                     note_claude_background(v, &mut state);
                     live.claude_state = Some(state);
                 }
-                tracked = true;
             }
-            let own = proto == Proto::Claude
-                || routing.session.is_some() && routing.session == live.acp_session;
-            if let Some(next) = tasks.take().filter(|_| own) {
-                keep_background(&mut live.background, next);
-                if !inner.live_turn {
-                    let watch = watch_of(&live.background);
-                    if inner.watch != watch {
-                        inner.watch = watch;
-                        inner.seq += 1;
-                        emit = true;
-                    }
-                }
+        }
+        // Claude speaks for itself only. An ACP line about a subagent's
+        // session is the subagent's.
+        let own = session_owns(inner, proto, &routing);
+        let watch = tasks.take().filter(|_| own).map(|next| {
+            let live = inner.live.as_mut().expect("serial checked");
+            keep_background(&mut live.background, next);
+            watch_of(&live.background)
+        });
+        if let Some(watch) = watch {
+            if !inner.live_turn && inner.watch != watch {
+                inner.watch = watch;
+                inner.seq += 1;
+                emit = true;
             }
-            if let Some(id) = routing.answer {
-                // A prompt's answer ends its turn. Turns ahead of it that never
-                // closed, such as a reply grok started by itself and was
-                // stopped in, go with it. Any other answer is to the setup of
-                // the turn starting the process.
-                let at = live
-                    .turns
-                    .iter()
-                    .position(|t| t.end == TurnEnd::Response(id));
-                if let Some(at) = at {
-                    live.turns.drain(..at);
-                }
-                if let Some(front) = live.turns.front() {
-                    let _ = front
-                        .tx
-                        .send(LiveLine::Line(line.take().unwrap_or_default()));
-                    if at.is_some() {
-                        live.turns.pop_front();
-                    }
-                }
-            } else if let Some(front) = live.turns.front() {
-                let _ = front
-                    .tx
-                    .send(LiveLine::Line(line.take().unwrap_or_default()));
-                let ends = own && routing.ends.is_some_and(|end| end == front.end);
-                // An error for this turn's own request ends it. One for a stop,
-                // or for setup, does not: those ids are not the prompt's.
-                let prompt_failed = routing.failed
-                    && front.prompt_id != 0
-                    && v.as_ref()
-                        .and_then(|val| val.get("id"))
-                        .and_then(Value::as_u64)
-                        == Some(front.prompt_id);
-                if ends || prompt_failed {
-                    live.turns.pop_front();
-                }
-            } else if own && routing.starts {
-                // A prompt is on its way, and its turn reads this reply, or
-                // the last turn is still closing.
-                let busy = inner.live_turn || inner.status == AgentStatus::Working;
-                if busy && waited_since.elapsed() < HANDOFF_WAIT {
-                    drop(guard);
-                    if emit {
-                        crate::daemon::emit_agent_frame(&session.id);
-                    }
-                    std::thread::sleep(Duration::from_millis(20));
-                    continue;
-                }
-                if inner.live_turn {
-                    eprintln!(
-                        "[crew] {}: a reply {} started had no turn to go to",
-                        session.id,
-                        proto.name()
-                    );
-                } else {
-                    // The CLI answers again on its own, as when a task it put
-                    // in the background ends: a turn nobody prompted. So is
-                    // one a prompt said it was coming for and never did.
-                    let (tx, rx) = channel();
-                    let _ = tx.send(LiveLine::Line(line.take().unwrap_or_default()));
-                    let end = proto.own_end();
-                    live.turns.push_back(Sink {
-                        generation: inner.generation,
-                        tx,
-                        end,
-                        prompt_id: 0,
-                    });
-                    inner.interrupted = false;
-                    if inner.status == AgentStatus::Idle {
-                        inner.status = AgentStatus::Working;
-                    }
-                    inner.last_output = Instant::now();
-                    open_turn(inner);
-                    let ctx = TurnCtx { proto, serial, end };
-                    start = Some((rx, inner.generation, ctx));
-                }
-            } else if proto == Proto::Claude {
+        }
+        start = deliver_line(inner, proto, serial, &routing, v.as_ref(), &mut line);
+        if line.is_some() {
+            if proto == Proto::Claude {
                 if let Some(v) = v.as_ref() {
                     crate::usage::note_claude_event(v);
                 }
                 // The reply is already sealed. A subagent's report is a side
                 // note, and the bot is idle once nothing it started is left.
                 release_at = Some(inner.generation);
-            } else {
-                // A subagent grok left running reports between turns.
-                between = live.grok_state.take();
-            }
-        }
-        if emit {
-            crate::daemon::emit_agent_frame(&session.id);
-        }
-        if let Some(generation) = release_at {
-            for note in claude_notes.drain(..) {
-                crate::transcript::push_subagent(&session.id, &note.key, &note.from, &note.text);
-            }
-            let state = session.inner.lock().ok().and_then(|mut inner| {
-                inner
-                    .live
-                    .as_mut()
-                    .filter(|l| l.serial == serial)
-                    .and_then(|l| l.claude_state.take())
-            });
-            if let Some(state) = state {
-                release_sealed_if_idle(session, generation, &state);
-                if let Ok(mut inner) = session.inner.lock() {
-                    if let Some(live) = inner.live.as_mut().filter(|l| l.serial == serial) {
-                        live.claude_state = Some(state);
-                    }
+            } else if matches!(proto, Proto::Acp(_)) {
+                if let Some(live) = inner.live.as_mut() {
+                    // A subagent grok left running reports between turns.
+                    between = live.grok_state.take();
                 }
             }
         }
-        if let (Some(mut state), Some(line)) = (between, line.as_deref()) {
-            note_sealed_grok_child(session, &mut state, line);
-            keep_grok_state(session, serial, state);
+    }
+    if emit {
+        crate::daemon::emit_agent_frame(&session.id);
+    }
+    if let Some(generation) = release_at {
+        for note in claude_notes.drain(..) {
+            crate::transcript::push_subagent(&session.id, &note.key, &note.from, &note.text);
         }
-        if let Some((rx, generation, ctx)) = start {
-            let turn_session = Arc::clone(session);
-            if let Err(err) = std::thread::Builder::new()
-                .name(format!("crew-turn-{}", session.id))
-                .spawn(move || run_unprompted(turn_session, rx, generation, ctx))
-            {
-                eprintln!("[crew] {}: {}'s own reply: {err}", session.id, proto.name());
-                if let Ok(mut inner) = session.inner.lock() {
+        let state = session.inner.lock().ok().and_then(|mut inner| {
+            inner
+                .live
+                .as_mut()
+                .filter(|l| l.serial == serial)
+                .and_then(|l| l.claude_state.take())
+        });
+        if let Some(state) = state {
+            release_sealed_if_idle(session, generation, &state);
+            if let Ok(mut inner) = session.inner.lock() {
+                if let Some(live) = inner.live.as_mut().filter(|l| l.serial == serial) {
+                    live.claude_state = Some(state);
+                }
+            }
+        }
+    }
+    if let (Some(mut state), Some(line)) = (between, line.as_deref()) {
+        note_sealed_grok_child(session, &mut state, line);
+        keep_grok_state(session, serial, state);
+    }
+    if let Some((rx, generation, ctx)) = start {
+        let turn_session = Arc::clone(session);
+        if let Err(err) = std::thread::Builder::new()
+            .name(format!("crew-turn-{}", session.id))
+            .spawn(move || run_unprompted(turn_session, rx, generation, ctx))
+        {
+            eprintln!("[crew] {}: {}'s own reply: {err}", session.id, proto.name());
+            if let Ok(mut inner) = session.inner.lock() {
+                if let Some(live) = inner.live.as_mut() {
+                    if live.turns.front().is_some_and(|turn| turn.own) {
+                        live.turns.pop_front();
+                    }
+                }
+                let holding = inner.generation == generation
+                    && (inner.user_turns > 0
+                        || inner
+                            .live
+                            .as_ref()
+                            .is_some_and(|live| live.turns.iter().any(|turn| !turn.own)));
+                if !holding {
                     settle(&mut inner, generation);
                     if inner.status == AgentStatus::Working {
                         inner.status = AgentStatus::Idle;
@@ -1759,8 +2099,63 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, proto: Proto, line: String
                 }
             }
         }
+    }
+}
+
+/// A reply the CLI started by itself. It reads like a prompted turn's and
+/// ends the same way, with nothing to save for a prompt. While a prompt is
+/// still open it does not settle that prompt or hand its text over as the
+/// answer.
+fn run_unprompted(
+    session: Arc<HeadlessSession>,
+    rx: Receiver<LiveLine>,
+    generation: u64,
+    ctx: TurnCtx,
+) {
+    let pending = user_turn_pending(&session, generation);
+    let mut turn = crate::transcript::begin_turn(&session.id);
+    if !pending {
+        crate::daemon::turn_reopened(&session.id);
+        crate::daemon::note_turn_failed(&session.id, false);
+    }
+    crate::daemon::emit_agent_frame(&session.id);
+    let outcome = read_turn(&session, &rx, generation, &mut turn, &ctx).outcome;
+    let failed = outcome.error.is_some() && !outcome.got_text;
+    if !is_stale(&session, generation) {
+        let error = outcome
+            .error
+            .as_deref()
+            .map(strip_tui_noise)
+            .filter(|err| !err.is_empty());
+        if let Some(err) = error {
+            if outcome.got_text {
+                crate::transcript::push_system(&session.id, "crew", &err, None);
+            } else {
+                crate::transcript::on_assistant_delta(&session.id, &err);
+            }
+        }
+    }
+    crate::transcript::end_turn_gen(&session.id, Some(turn));
+    if is_stale(&session, generation) {
         return;
     }
+    if user_turn_pending(&session, generation) || own_turn_open(&session) {
+        crate::daemon::emit_agent_frame(&session.id);
+        return;
+    }
+    crate::daemon::note_turn_failed(&session.id, failed);
+    crate::daemon::remote_turn_over(&session.id);
+    if let Ok(mut inner) = session.inner.lock() {
+        settle(&mut inner, generation);
+        if inner.status != AgentStatus::Exited && inner.status != AgentStatus::Blocked {
+            inner.status = AgentStatus::Idle;
+        }
+        inner.last_output = Instant::now();
+        inner.seq += 1;
+    }
+    crate::daemon::emit_agent_frame(&session.id);
+    crate::daemon::turn_ended(&session.id);
+    crate::daemon::pump_inbox(&session.id);
 }
 
 /// The CLI asked Crew for something. Crew asks nobody: a bot that may not
@@ -1825,53 +2220,6 @@ fn exited(session: &HeadlessSession, serial: u64, stderr: Option<JoinHandle<Stri
         let _ = front.tx.send(LiveLine::Exit(status, stderr));
     }
     crate::daemon::emit_agent_frame(&session.id);
-}
-
-/// A reply the CLI started by itself. It reads like a prompted turn's and
-/// ends the same way, with nothing to save for a prompt.
-fn run_unprompted(
-    session: Arc<HeadlessSession>,
-    rx: Receiver<LiveLine>,
-    generation: u64,
-    ctx: TurnCtx,
-) {
-    let mut turn = crate::transcript::begin_turn(&session.id);
-    crate::daemon::turn_reopened(&session.id);
-    crate::daemon::note_turn_failed(&session.id, false);
-    crate::daemon::emit_agent_frame(&session.id);
-    let outcome = read_turn(&session, &rx, generation, &mut turn, &ctx).outcome;
-    let failed = outcome.error.is_some() && !outcome.got_text;
-    if !is_stale(&session, generation) {
-        let error = outcome
-            .error
-            .as_deref()
-            .map(strip_tui_noise)
-            .filter(|err| !err.is_empty());
-        if let Some(err) = error {
-            if outcome.got_text {
-                crate::transcript::push_system(&session.id, "crew", &err, None);
-            } else {
-                crate::transcript::on_assistant_delta(&session.id, &err);
-            }
-        }
-    }
-    crate::transcript::end_turn_gen(&session.id, Some(turn));
-    if is_stale(&session, generation) {
-        return;
-    }
-    crate::daemon::note_turn_failed(&session.id, failed);
-    crate::daemon::remote_turn_over(&session.id);
-    if let Ok(mut inner) = session.inner.lock() {
-        settle(&mut inner, generation);
-        if inner.status != AgentStatus::Exited && inner.status != AgentStatus::Blocked {
-            inner.status = AgentStatus::Idle;
-        }
-        inner.last_output = Instant::now();
-        inner.seq += 1;
-    }
-    crate::daemon::emit_agent_frame(&session.id);
-    crate::daemon::turn_ended(&session.id);
-    crate::daemon::pump_inbox(&session.id);
 }
 
 /// The turn of `generation` is over. The process's background work shows
@@ -2131,5 +2479,198 @@ mod tests {
         );
         let fine = serde_json::json!({"type": "result", "subtype": "success", "is_error": false});
         assert_eq!(result_failure(&fine), None);
+    }
+
+    /// A start that arrived before the prompt was written is not that
+    /// prompt's, and finishing it does not idle the prompt.
+    #[test]
+    fn a_self_started_turn_is_not_the_prompt_waiting_behind_it() {
+        crate::paths::testing::with_home("self-turn", || {
+            let (bare, serial, _) = codex_session("th", false);
+            {
+                let mut inner = bare.inner.lock().unwrap();
+                inner.live.as_mut().unwrap().turns.clear();
+                inner.live_turn = false;
+            }
+            let _bare = KillChild(Arc::clone(&bare));
+            let started = Instant::now();
+            route(&bare, serial, Proto::Codex, started_line("th", "alone"));
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "a start with no sink waited"
+            );
+            route(&bare, serial, Proto::Codex, completed_line("th", "alone"));
+            wait_own(&bare);
+            {
+                let inner = bare.inner.lock().unwrap();
+                assert!(inner.live_turn);
+                assert_eq!(inner.status, AgentStatus::Working);
+            }
+            let (session, serial, rx) = codex_session("th", false);
+            let _guard = KillChild(Arc::clone(&session));
+            let started = Instant::now();
+            route(&session, serial, Proto::Codex, started_line("th", "self"));
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "a start with no sink waited"
+            );
+            assert!(rx.try_recv().is_err(), "the prompt's sink took the start");
+            {
+                let inner = session.inner.lock().unwrap();
+                let live = inner.live.as_ref().unwrap();
+                assert!(live.turns.front().unwrap().own);
+                assert!(!live.turns.back().unwrap().own);
+                assert!(inner.live_turn);
+            }
+            route(&session, serial, Proto::Codex, completed_line("th", "self"));
+            wait_own(&session);
+            let inner = session.inner.lock().unwrap();
+            assert!(inner.live_turn);
+            assert_eq!(inner.status, AgentStatus::Working);
+            assert!(inner.user_turns > 0);
+            assert!(inner
+                .live
+                .as_ref()
+                .unwrap()
+                .turns
+                .iter()
+                .all(|turn| !turn.own));
+        });
+    }
+
+    #[test]
+    fn a_start_after_the_prompt_belongs_to_that_prompt() {
+        crate::paths::testing::with_home("prompted-start", || {
+            let (session, serial, rx) = codex_session("th", true);
+            let _guard = KillChild(Arc::clone(&session));
+            route(&session, serial, Proto::Codex, started_line("th", "user"));
+            let got = match rx.try_recv() {
+                Ok(LiveLine::Line(line)) => line,
+                Ok(LiveLine::Exit(_, _)) => panic!("prompt sink got the process exit"),
+                Err(_) => panic!("prompt sink missed the start"),
+            };
+            assert!(got.contains("user"), "{got}");
+            let inner = session.inner.lock().unwrap();
+            let front = inner.live.as_ref().unwrap().turns.front().unwrap();
+            assert!(!front.own);
+            assert_eq!(front.turn_id.as_deref(), Some("user"));
+            assert_eq!(Arc::strong_count(&session), 2);
+        });
+    }
+
+    fn wait_own(session: &Arc<HeadlessSession>) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Arc::strong_count(session) > 2 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            Arc::strong_count(session),
+            2,
+            "the own turn is still reading"
+        );
+    }
+
+    fn started_line(thread: &str, turn: &str) -> String {
+        format!(
+            r#"{{"jsonrpc":"2.0","method":"turn/started","params":{{"threadId":"{thread}","turn":{{"id":"{turn}","status":"inProgress"}}}}}}"#
+        )
+    }
+
+    fn completed_line(thread: &str, turn: &str) -> String {
+        format!(
+            r#"{{"jsonrpc":"2.0","method":"turn/completed","params":{{"threadId":"{thread}","turn":{{"id":"{turn}","status":"completed"}}}}}}"#
+        )
+    }
+
+    /// A codex process with one user sink. `prompted` is whether the prompt
+    /// has been written. The sink's prompt id is 4.
+    fn codex_session(
+        thread: &str,
+        prompted: bool,
+    ) -> (Arc<HeadlessSession>, u64, Receiver<LiveLine>) {
+        use std::os::unix::process::CommandExt;
+        let mut child = std::process::Command::new("sleep")
+            .arg("60")
+            .process_group(0)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let stdin = child.stdin.take().unwrap();
+        let (tx, rx) = channel();
+        let serial = 7;
+        let live = LiveCli {
+            serial,
+            proto: Proto::Codex,
+            child,
+            stdin: Arc::new(Mutex::new(stdin)),
+            started: Started {
+                argv: vec!["codex".into(), "app-server".into()],
+                cwd: PathBuf::from("/tmp"),
+                session_id: Some(thread.into()),
+                setup: String::new(),
+            },
+            turns: VecDeque::from([Sink {
+                generation: 3,
+                tx,
+                end: TurnEnd::Completed,
+                prompt_id: 4,
+                prompted,
+                own: false,
+                turn_id: None,
+            }]),
+            background: Vec::new(),
+            acp_session: Some(thread.into()),
+            next_id: 5,
+            grok_state: None,
+            claude_state: None,
+            turn_id: None,
+            approval: Some("never".into()),
+            pid,
+        };
+        let session = Arc::new(HeadlessSession {
+            id: "bot".into(),
+            name: "bot".into(),
+            cmd: vec!["codex".into()],
+            cwd: PathBuf::from("/tmp"),
+            inner: Mutex::new(HeadlessInner {
+                status: AgentStatus::Working,
+                last_output: Instant::now(),
+                seq: 0,
+                cols: 80,
+                rows: 24,
+                session_id: Some(thread.into()),
+                child: None,
+                generation: 3,
+                interrupted: false,
+                in_flight: None,
+                first_output_timeout: None,
+                watch: Vec::new(),
+                live: Some(live),
+                live_turn: true,
+                user_turns: 1,
+            }),
+            route_gate: Mutex::new(()),
+        });
+        (session, serial, rx)
+    }
+
+    /// Kills the sleep the test parked as the resident CLI.
+    struct KillChild(Arc<HeadlessSession>);
+
+    impl Drop for KillChild {
+        fn drop(&mut self) {
+            let live = self
+                .0
+                .inner
+                .lock()
+                .ok()
+                .and_then(|mut inner| inner.live.take());
+            if let Some(mut live) = live {
+                super::super::kill_all(&mut live.child);
+            }
+        }
     }
 }

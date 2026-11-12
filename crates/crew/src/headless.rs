@@ -23,6 +23,9 @@ pub struct HeadlessSession {
     pub cmd: Vec<String>,
     pub cwd: PathBuf,
     pub inner: Mutex<HeadlessInner>,
+    /// Held across classifying one stdout line and across writing a prompt,
+    /// so a line already in hand is not given to a prompt that has not gone.
+    route_gate: Mutex<()>,
 }
 
 pub struct HeadlessInner {
@@ -48,6 +51,9 @@ pub struct HeadlessInner {
     live: Option<live::LiveCli>,
     /// A turn is running on `live`. Like `child`, it keeps the next turn out.
     live_turn: bool,
+    /// Prompts `kick` has handed off and `run_turn` has not returned.
+    /// A reply the CLI opens itself must not idle the agent while one remains.
+    user_turns: u32,
 }
 
 impl HeadlessInner {
@@ -122,7 +128,9 @@ pub fn open(
             watch: Vec::new(),
             live: None,
             live_turn: false,
+            user_turns: 0,
         }),
+        route_gate: Mutex::new(()),
     }))
 }
 
@@ -148,6 +156,40 @@ pub fn save_session(agent_id: &str, session_id: &str) -> anyhow::Result<()> {
     }
     fs::write(path, format!("{}\n", session_id.trim()))?;
     Ok(())
+}
+
+/// Write the turn's session id unless a reset or delete already took this
+/// turn. The check and the write share the session lock, so `kill` cannot
+/// bump the generation and delete the file in between.
+fn save_session_if_current(session: &HeadlessSession, generation: u64, id: &str) -> bool {
+    let Ok(mut inner) = session.inner.lock() else {
+        return false;
+    };
+    if inner.generation != generation {
+        return false;
+    }
+    inner.session_id = Some(id.to_string());
+    save_session(&session.id, id).is_ok()
+}
+
+/// `kick` counts a prompt until `run_turn` returns, including every early
+/// return. A reply the CLI opens itself reads that count.
+struct UserTurn<'a> {
+    session: &'a HeadlessSession,
+}
+
+impl<'a> UserTurn<'a> {
+    fn new(session: &'a HeadlessSession) -> Self {
+        Self { session }
+    }
+}
+
+impl Drop for UserTurn<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut inner) = self.session.inner.lock() {
+            inner.user_turns = inner.user_turns.saturating_sub(1);
+        }
+    }
 }
 
 /// Chat a bot had before it moved to this CLI, for the new session to read once.
@@ -522,6 +564,108 @@ fn drop_stuck_session(session: &HeadlessSession, msg_ids: &[String]) {
 /// no later resume could open.
 const STOP_GRACE: Duration = Duration::from_secs(3);
 
+#[derive(Serialize, Deserialize)]
+struct LiveCliPid {
+    pid: u32,
+    pgid: u32,
+    agent: String,
+}
+
+fn live_cli_gate() -> &'static Mutex<()> {
+    static GATE: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
+    GATE.get_or_init(|| Mutex::new(()))
+}
+
+fn live_cli_lock() -> std::sync::MutexGuard<'static, ()> {
+    live_cli_gate()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+}
+
+fn live_cli_path() -> PathBuf {
+    paths::home_dir().join("live-cli.json")
+}
+
+fn read_live_clis() -> Vec<LiveCliPid> {
+    let raw = fs::read_to_string(live_cli_path()).unwrap_or_default();
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
+fn write_live_clis(list: &[LiveCliPid]) {
+    let Ok(raw) = serde_json::to_string(list) else {
+        return;
+    };
+    if let Some(parent) = live_cli_path().parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(live_cli_path(), raw);
+}
+
+/// The resident CLI's pid and process group, so a daemon that died without
+/// `halt` can reap it on the next start. `process_group(0)` makes the pid
+/// the group leader. Closing stdin is not enough: a crash already does that,
+/// and Claude can stay up after EOF while a background task is still running.
+fn remember_live_cli(agent: &str, pid: u32) {
+    if pid == 0 {
+        return;
+    }
+    let _gate = live_cli_lock();
+    let mut list = read_live_clis();
+    list.retain(|row| row.pid != pid);
+    list.push(LiveCliPid {
+        pid,
+        pgid: pid,
+        agent: agent.to_string(),
+    });
+    write_live_clis(&list);
+}
+
+fn forget_live_cli(pid: u32) {
+    if pid == 0 {
+        return;
+    }
+    let _gate = live_cli_lock();
+    let mut list = read_live_clis();
+    let before = list.len();
+    list.retain(|row| row.pid != pid);
+    if list.len() != before {
+        write_live_clis(&list);
+    }
+}
+
+fn process_group_of(pid: u32) -> Option<u32> {
+    let pgid = unsafe { libc::getpgid(pid as libc::pid_t) };
+    (pgid > 0).then_some(pgid as u32)
+}
+
+/// Kill resident CLIs the last daemon recorded and did not get to stop.
+/// A pid whose group is no longer the one we started is left alone.
+pub fn reap_orphaned_clis() {
+    let _gate = live_cli_lock();
+    let list = read_live_clis();
+    for row in &list {
+        if row.pid == 0 || row.pid == std::process::id() || row.pgid == 0 {
+            continue;
+        }
+        if process_group_of(row.pid) != Some(row.pgid) {
+            continue;
+        }
+        unsafe {
+            libc::killpg(row.pgid as libc::pid_t, libc::SIGTERM);
+        }
+        let deadline = Instant::now() + STOP_GRACE;
+        while process_group_of(row.pid) == Some(row.pgid) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        if process_group_of(row.pid) == Some(row.pgid) {
+            unsafe {
+                libc::killpg(row.pgid as libc::pid_t, libc::SIGKILL);
+            }
+        }
+    }
+    write_live_clis(&[]);
+}
+
 /// The CLI and what it started. npm's codex is a node launcher, and killing
 /// the launcher alone left the CLI under it running on the bot's session.
 fn kill_all(child: &mut Child) {
@@ -586,6 +730,7 @@ pub fn kick(
         inner.interrupted = false;
         inner.status = AgentStatus::Working;
         inner.last_output = Instant::now();
+        inner.user_turns = inner.user_turns.saturating_add(1);
         inner.seq += 1;
         inner.generation
     };
@@ -599,6 +744,7 @@ pub fn kick(
         .spawn(move || run_turn(thread_session, cfg, roster, prompt, generation, skip_rows))
     {
         if let Ok(mut inner) = session.inner.lock() {
+            inner.user_turns = inner.user_turns.saturating_sub(1);
             if inner.generation == generation {
                 inner.status = AgentStatus::Idle;
                 inner.seq += 1;
@@ -619,6 +765,7 @@ fn run_turn(
     generation: u64,
     skip_rows: Vec<String>,
 ) {
+    let _user_turn = UserTurn::new(&session);
     {
         let inner = match session.inner.lock() {
             Ok(g) => g,
@@ -811,14 +958,11 @@ fn run_turn(
                     .or(created_id.as_deref())
                     .or(turn_session.as_ref().map(|s| s.id.as_str()))
                 {
-                    if !id.is_empty() {
-                        if let Ok(mut inner) = session.inner.lock() {
-                            inner.session_id = Some(id.to_string());
-                        }
-                        let _ = save_session(&session.id, id);
-                        if live_cli {
-                            live::note_session(&session, generation, id);
-                        }
+                    if !id.is_empty()
+                        && save_session_if_current(&session, generation, id)
+                        && live_cli
+                    {
+                        live::note_session(&session, generation, id);
                     }
                 }
             }
@@ -4000,8 +4144,65 @@ mod tests {
                 watch: Vec::new(),
                 live: None,
                 live_turn: false,
+                user_turns: 0,
             }),
+            route_gate: Mutex::new(()),
         }
+    }
+
+    /// A turn that lost the race with reset must not write the session back.
+    #[test]
+    fn save_session_skips_a_turn_reset_already_took() {
+        paths::testing::with_home("save-stale", || {
+            let session = grok_session("bot");
+            assert!(save_session_if_current(&session, 0, "sess-1"));
+            assert_eq!(load_session("bot").as_deref(), Some("sess-1"));
+            session.inner.lock().unwrap().generation = 1;
+            clear_session("bot");
+            assert!(load_session("bot").is_none());
+            assert!(!save_session_if_current(&session, 0, "sess-1"));
+            assert!(load_session("bot").is_none());
+            assert_eq!(
+                session.inner.lock().unwrap().session_id.as_deref(),
+                Some("sess-1")
+            );
+        });
+    }
+
+    /// The pid file is what a new daemon reaps. A reused pid, whose group is
+    /// no longer the one we started, is left alone.
+    #[test]
+    fn reap_kills_a_recorded_group_and_spares_a_mismatched_one() {
+        paths::testing::with_home("reap-cli", || {
+            let mut child = Command::new("sleep")
+                .arg("30")
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            let pid = child.id();
+            remember_live_cli("bot", pid);
+            reap_orphaned_clis();
+            let status = child.wait().unwrap();
+            assert!(!status.success(), "{status}");
+            let left = fs::read_to_string(live_cli_path()).unwrap_or_default();
+            assert!(left.is_empty() || left == "[]", "{left}");
+
+            let mut other = Command::new("sleep")
+                .arg("30")
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            let opid = other.id();
+            remember_live_cli("bot", opid);
+            let raw = fs::read_to_string(live_cli_path()).unwrap();
+            let mut list: Vec<LiveCliPid> = serde_json::from_str(&raw).unwrap();
+            list[0].pgid = 1;
+            fs::write(live_cli_path(), serde_json::to_string(&list).unwrap()).unwrap();
+            reap_orphaned_clis();
+            assert!(other.try_wait().unwrap().is_none());
+            let _ = other.kill();
+            let _ = other.wait();
+        });
     }
 
     /// A later update can repeat `subagent_id` and the word "background" in the
