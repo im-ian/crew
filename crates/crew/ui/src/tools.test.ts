@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { sideOnlyPeer } from "./components/ChatThread";
+import { firstUnreadId } from "./readCursors";
 import {
   askedWork,
   dotsAfter,
   momentStamp,
+  dividerCandidates,
+  notePeers,
   oneCompactNote,
   threadRows,
   toolNames,
@@ -157,20 +160,52 @@ describe("threadRows note runs", () => {
     expect(rows.map((r) => r.kind)).toEqual(["tools", "msg", "tools"]);
   });
 
-  it("starts a new run when the other bot changes", () => {
+  it("keeps alternating bots on one line, in the order they first appear", () => {
     const rows = threadRows(
       [
         note("a", "jordy", "received"),
-        note("b", "jordy", "handoff"),
-        note("c", "chunsik", "received"),
+        note("b", "chunsik", "received"),
+        note("c", "jordy", "handoff"),
         note("d", "chunsik", "handoff"),
       ],
       roster,
     );
-    expect(rows.map((r) => (r.kind === "notes" ? r.peerId : r.kind))).toEqual([
-      "jordy",
-      "chunsik",
+    expect(rows.map((r) => r.kind)).toEqual(["notes"]);
+    const groups = rows[0].kind === "notes" ? notePeers(rows[0].msgs, roster) : [];
+    expect(groups.map((g) => [g.peerId, g.msgs.map((m) => m.id)])).toEqual([
+      ["jordy", ["a", "c"]],
+      ["chunsik", ["b", "d"]],
     ]);
+    expect(rows[0].kind === "notes" && rows[0].peerId).toBe("jordy");
+  });
+
+  it("starts a new line when a balloon sits between the notes", () => {
+    const rows = threadRows(
+      [
+        note("a", "jordy", "received"),
+        note("b", "chunsik", "received"),
+        { id: "u", role: "user", from: "user", text: "hi", ts: 1 },
+        note("c", "jordy", "handoff"),
+        note("d", "chunsik", "handoff"),
+      ],
+      roster,
+    );
+    expect(rows.map((r) => r.kind)).toEqual(["notes", "msg", "notes"]);
+    const peers = rows.map((r) =>
+      r.kind === "notes" ? notePeers(r.msgs, roster).map((g) => g.peerId) : r.kind,
+    );
+    expect(peers).toEqual([["jordy", "chunsik"], "msg", ["jordy", "chunsik"]]);
+  });
+
+  it("names a later note so the new-message divider can see it", () => {
+    const rows = threadRows(
+      [
+        { ...note("a", "jordy", "received"), ts: 10 },
+        { ...note("b", "chunsik", "received"), ts: 30 },
+      ],
+      roster,
+    );
+    expect(firstUnreadId(dividerCandidates(rows), 15)).toBe("b");
   });
 
   it("keeps a lone note in a run so a reply does not remount it", () => {
@@ -377,6 +412,16 @@ describe("sideOnlyPeer", () => {
     const list = [note("1", "alpha"), note("2", "bot-gone")];
     expect(sideOnlyPeer(list, agents)).toBe("bot-gone");
     expect(sideOnlyPeer(list, agents, "1")).toBe("alpha");
+  });
+
+  it("follows the bot a hit belongs to when the notes share a line", () => {
+    const list = [
+      note("1", "alpha"),
+      note("2", "bot-gone"),
+      note("3", "alpha"),
+    ];
+    expect(sideOnlyPeer(list, agents)).toBe("alpha");
+    expect(sideOnlyPeer(list, agents, "2")).toBe("bot-gone");
   });
 
   it("opens nothing once the chat has a conversation of its own", () => {

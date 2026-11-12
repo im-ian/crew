@@ -28,8 +28,10 @@ import { isMediaBlock, splitBubbles } from "../bubbles";
 import { messageDefinitions } from "../markdown";
 import { displayWho, noteRef, sentTarget, subagentFace } from "../peek";
 import {
+  dividerCandidates,
   dotsAfter,
   momentStamp,
+  notePeers,
   oneCompactNote,
   rowTs,
   runPeer,
@@ -296,7 +298,11 @@ export function ChatThread({
   // thread says so, with the newest line, on the last run with that bot.
   const asked = askedWork(messages, currentAgent?.status === "working");
   const askedRun = asked
-    ? [...rows].reverse().find((row) => row.kind === "notes" && row.peerId === asked.peer)
+    ? [...rows].reverse().find(
+        (row) =>
+          row.kind === "notes" &&
+          row.msgs.some((m) => runPeer(m, agents) === asked.peer),
+      )
     : undefined;
   // Keyed by row id, not by index: a filter or an inserted row would slide a
   // parallel array and stamp the wrong stretch.
@@ -362,16 +368,7 @@ export function ChatThread({
     if (openedRead?.key !== chatKey) return;
     settledRef.current = false;
     movedRef.current = false;
-    const id = firstUnreadId(
-      rows.map((row) => ({
-        id: rowKey(row),
-        ts: rowTs(row),
-        mine:
-          row.kind === "msg" &&
-          (row.msg.role === "user" || row.msg.from === "user"),
-      })),
-      openedRead.ts,
-    );
+    const id = firstUnreadId(dividerCandidates(rows), openedRead.ts);
     setResume({ key: chatKey, id, hold: !!id });
   }, [ready, chatKey, openedRead, rows.length]);
   const writtenAt = new Map(rows.map((row) => [rowKey(row), rowTs(row)]));
@@ -721,9 +718,9 @@ export function ChatThread({
     } else if (row.kind === "notes") {
       node = (
         <NoteGroup
-          peerId={row.peerId}
           items={row.msgs}
           live={row === askedRun ? asked?.line : undefined}
+          livePeer={row === askedRun ? asked?.peer : undefined}
           agents={agents}
           selectedKind={selectedKind}
           onSelectAgent={openAgent}
@@ -814,7 +811,7 @@ export function ChatThread({
         start={start}
       >
         {time ? <ThreadTime ts={time.ts} label={time.label} /> : null}
-        {resumeId === id ? <NewFromHere /> : null}
+        {resumeId && rowHas(row, resumeId) ? <NewFromHere /> : null}
         {node}
       </MsgSlot>
     );
@@ -1773,7 +1770,6 @@ function Incoming({
 }
 
 function NoteGroup({
-  peerId,
   items,
   agents,
   selectedKind,
@@ -1784,11 +1780,12 @@ function NoteGroup({
   onPeek,
   highlightId = null,
   live,
+  livePeer,
 }: {
-  peerId: string;
   items: ChatMessage[];
-  /** Set while this bot works on what `peerId` asked: the newest line it said, or "". */
+  /** Set while this bot works on what `livePeer` asked: the newest line it said, or "". */
   live?: string;
+  livePeer?: string;
   agents: AgentInfo[];
   selectedKind: Kind;
   onSelectAgent?: (id: string) => void;
@@ -1802,29 +1799,33 @@ function NoteGroup({
   const labelOf = useBotLabel();
   const [open, setOpen] = useState(false);
   const hit = items.some((m) => m.id === highlightId);
-  const agent = agents.find((a) => a.id === peerId) ?? null;
-  const side =
-    onPeek && !peerId.startsWith("#")
-      ? () => onPeek(peerId, items.map((m) => m.id))
-      : null;
-  const peeking = peekFocus === items[0].id;
-  // A search hit inside a folded run has to be on screen to be highlighted.
-  const show = (!side && open) || hit;
-  // One note wears the same chip as many. The row stays a run, so opening it
-  // keeps this mounted and the note inside keeps its body when the next arrives.
-  const who = displayWho(peerId, agent, t, labelOf);
+  const groups = notePeers(items, agents);
   const queued = items.some((m) => m.queued);
-  return (
-    <div className={"note-run" + (queued ? " queued" : "")}>
-      <div className="note-run-chip">
+  // A room has no side chat, so its chip still opens the notes in the thread.
+  const foldsHere = groups.some((g) => !onPeek || g.peerId.startsWith("#"));
+  // A search hit inside a folded run has to be on screen to be highlighted.
+  const show = (foldsHere && open) || hit;
+  if (groups.length === 0) return null;
+
+  function chip(peerId: string, msgs: ChatMessage[], label: string) {
+    const agent = agents.find((a) => a.id === peerId) ?? null;
+    const side =
+      onPeek && !peerId.startsWith("#")
+        ? () => onPeek(peerId, msgs.map((m) => m.id))
+        : null;
+    const peeking = peekFocus === msgs[0].id;
+    const who = displayWho(peerId, agent, t, labelOf);
+    return (
+      <div className="note-run-chip" key={peerId}>
         <button
           type="button"
           className={"note-run-head" + (peeking ? " is-peeking" : "")}
           aria-expanded={side ? peeking : show}
-          onClick={side ?? (() => setOpen(!open))}
+          aria-label={who + " " + msgs.length}
+          onClick={side ?? (() => setOpen((v) => !v))}
         >
           <ChevronDown className="note-caret" size={12} />
-          {t("thread.noteRun", { n: items.length })}
+          {label}
         </button>
         <WhoButton
           agent={agent ?? subagentFace(peerId, t)}
@@ -1835,17 +1836,48 @@ function NoteGroup({
           }
         />
       </div>
-      {live !== undefined ? (
+    );
+  }
+
+  const liveGroup = livePeer
+    ? groups.find((g) => g.peerId === livePeer)
+    : undefined;
+  const liveSide =
+    liveGroup && onPeek && !liveGroup.peerId.startsWith("#")
+      ? () => onPeek(liveGroup.peerId, liveGroup.msgs.map((m) => m.id))
+      : null;
+  const liveWho = liveGroup
+    ? displayWho(
+        liveGroup.peerId,
+        agents.find((a) => a.id === liveGroup.peerId) ?? null,
+        t,
+        labelOf,
+      )
+    : "";
+  // One bot keeps the old chip. Several bots share the phrase and sit in a
+  // row, each chip opening only that bot's notes. The row stays one element
+  // as notes arrive, so an open note is not remounted.
+  return (
+    <div className={"note-run" + (queued ? " queued" : "")}>
+      {groups.length === 1 ? (
+        chip(groups[0].peerId, groups[0].msgs, t("thread.noteRun", { n: groups[0].msgs.length }))
+      ) : (
+        <div className="note-run-line">
+          <span className="note-run-label">{t("thread.notePeers")}</span>
+          {groups.map((g) => chip(g.peerId, g.msgs, String(g.msgs.length)))}
+        </div>
+      )}
+      {live !== undefined && liveGroup ? (
         <button
           type="button"
           className="note-live"
-          onClick={side ?? undefined}
-          disabled={!side}
+          onClick={liveSide ?? undefined}
+          disabled={!liveSide}
           title={live || undefined}
         >
           <span className="note-live-head">
             <span className="note-live-dot" aria-hidden="true" />
-            {t("thread.askedWork", { who })}
+            {t("thread.askedWork", { who: liveWho })}
           </span>
           {live ? <span className="note-live-line">{live}</span> : null}
         </button>
@@ -2872,9 +2904,13 @@ export function sideOnlyPeer(
   if (rows.some((row) => row.kind === "msg" || row.kind === "files")) return null;
   let peer: string | null = null;
   for (const row of rows) {
-    if (row.kind !== "notes" || row.peerId.startsWith("#")) continue;
-    if (row.msgs.some((m) => m.id === hit)) return row.peerId;
-    peer = row.peerId;
+    if (row.kind !== "notes") continue;
+    for (const m of row.msgs) {
+      const id = runPeer(m, agents);
+      if (!id || id.startsWith("#")) continue;
+      if (m.id === hit) return id;
+      peer = id;
+    }
   }
   return peer;
 }
