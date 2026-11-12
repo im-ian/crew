@@ -1007,7 +1007,7 @@ fn routing(proto: Proto, v: &Value) -> Routing {
             tasks: claude_background(v),
             ..Routing::default()
         },
-        Proto::Acp(_) => {
+        Proto::Acp(cli) => {
             if v.get("method").is_none() {
                 return Routing {
                     answer: v.get("id").and_then(Value::as_u64),
@@ -1016,9 +1016,12 @@ fn routing(proto: Proto, v: &Value) -> Routing {
             }
             let (event, kind) = grok_event(v);
             let update = v.get("method").and_then(Value::as_str) == Some("session/update");
+            // agy starts no reply by itself, and has no event that would end
+            // one: a stray word of its between turns opens nothing.
             Routing {
                 ends: (kind == "turn_completed").then_some(TurnEnd::Completed),
-                starts: update
+                starts: cli == AcpCli::Grok
+                    && update
                     && matches!(
                         kind,
                         "agent_message_chunk" | "agent_thought_chunk" | "tool_call"

@@ -7868,7 +7868,8 @@ while IFS= read -r line; do handle "$line"; done"#,
     /// waits for a cancel, with `mute` it says nothing, with `deaf` it ignores
     /// the cancel too, and with `die` it answers and exits. With `watch` it
     /// starts a CI watch, answers, and once the watch ends a moment later says
-    /// so in a reply of its own. With `spawn` a subagent answers for it. With
+    /// so in a reply of its own. With `stray` it says a word after the answer.
+    /// With `spawn` a subagent answers for it. With
     /// `load-fails` in the home, the next load finds no session.
     fn fake_acp(id: &str, cli: &str, args: &[&str]) -> (PathBuf, PathBuf) {
         use std::os::unix::fs::PermissionsExt;
@@ -7928,6 +7929,7 @@ while IFS= read -r line; do
       upd '"sessionUpdate":"tool_call_update","toolCallId":"c2","status":"completed","content":[{"type":"content","content":{"type":"text","text":"KIWI is the word the subagent found for you"}}]'
       say "The subagent is done."
       answer "$id" '{"stopReason":"end_turn"}' ;;
+    *stray*) say "answer $n from $$"; answer "$id" '{"stopReason":"end_turn"}'; ( sleep 0.5; say "a stray word" ) & ;;
     *) say "answer $n from $$"; answer "$id" '{"stopReason":"end_turn"}' ;;
     esac
     case "$p" in *die*) exit 0 ;; esac ;;
@@ -8315,6 +8317,39 @@ done
                 &format!("s-{}", pids[0])
             );
             assert!(!pid_alive(&pids[0]), "the old one stayed");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// agy starts no reply by itself and has nothing that would end one, so
+    /// a word it says between turns opens no turn: the bot stays idle, and
+    /// the next send goes through.
+    #[test]
+    fn a_stray_agy_line_between_turns_opens_no_turn() {
+        paths::testing::with_home("acp-agy-stray", || {
+            let bot = test_id("acpagystray");
+            let (starts, _) = fake_acp(&bot, "agy", &[]);
+            wait_idle(&bot);
+            send_agent(&bot, "stray").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            std::thread::sleep(Duration::from_millis(1000));
+            assert!(!agent_busy(&bot).unwrap(), "a stray line held the bot");
+            send_agent(&bot, "next").unwrap();
+            let pid = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "no second answer", || {
+                told(&bot, &format!("answer 2 from {pid}"))
+            });
+            wait_idle(&bot);
+            assert_eq!(
+                assistant_texts(&bot),
+                [
+                    format!("answer 1 from {pid}"),
+                    format!("answer 2 from {pid}")
+                ]
+            );
             remove_agent(&bot).unwrap();
         });
     }
