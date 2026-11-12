@@ -8768,30 +8768,38 @@ done
         });
     }
 
-    /// Without `--yolo` a command approval is declined. The thread is not
-    /// opened with approval `never`.
+    /// Without `--yolo` Codex does not stay on app-server. Each message is
+    /// `codex exec`, and Crew never answers an approval for it.
     #[test]
-    fn codex_without_yolo_declines_a_command() {
+    fn codex_without_yolo_stays_on_exec() {
         paths::testing::with_home("codex-noyolo", || {
             let bot = test_id("codexnoyolo");
-            let (_starts, stdin) = fake_codex(&bot);
+            let (starts, stdin) = fake_codex(&bot);
             configs().lock().unwrap().get_mut(&bot).unwrap().cmd.pop();
             wait_idle(&bot);
             send_agent(&bot, "first-prompt").unwrap();
-            eventually(Duration::from_secs(5), "no answer", || {
-                assistant_texts(&bot).len() == 1
+            eventually(Duration::from_secs(5), "exec never started", || {
+                started_pids(&starts).len() == 1 && !agent_busy(&bot).unwrap()
             });
-            wait_idle(&bot);
-            let opened = &acp_requests(&stdin, "thread/start")[0];
-            assert!(opened.pointer("/params/approvalPolicy").is_none());
-            let lines = fs::read_to_string(&stdin).unwrap();
-            assert!(
-                lines.contains(r#""decision":"decline""#),
-                "a command was accepted without yolo: {lines}"
+            send_agent(&bot, "second-prompt").unwrap();
+            eventually(
+                Duration::from_secs(5),
+                "the second turn reused the process",
+                || started_pids(&starts).len() == 2 && !agent_busy(&bot).unwrap(),
             );
+            let log = fs::read_to_string(&starts).unwrap();
+            let commands: Vec<&str> = log
+                .lines()
+                .map(|line| line.split_whitespace().nth(1).unwrap_or(""))
+                .collect();
+            assert_eq!(commands, ["exec", "exec"]);
+            assert!(log.contains("first-prompt"));
+            assert!(log.contains("second-prompt"));
+            assert!(!log.contains(" app-server"));
+            let lines = fs::read_to_string(&stdin).unwrap_or_default();
             assert!(
-                !lines.contains(r#""permissions":{"network""#),
-                "permissions were granted without yolo: {lines}"
+                !lines.contains("thread/start") && !lines.contains("\"decision\""),
+                "an approval was answered off exec: {lines}"
             );
             remove_agent(&bot).unwrap();
         });
