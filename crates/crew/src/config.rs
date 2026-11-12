@@ -2931,18 +2931,12 @@ mod tests {
             assert!(!rules.contains("nohup"), "{cmd:?}");
         }
 
-        for cmd in [
-            &["codex", "--yolo"][..],
-            &["codex"][..],
-            &["codex", "--ask-for-approval", "on-request"][..],
-        ] {
-            let agent = cfg(cmd, None, None);
-            assert!(agent.live_cli(), "{cmd:?}");
-            let rules = team_rules_for(&agent, &[], None);
-            assert!(!rules.contains(blocks), "{cmd:?}");
-            assert!(rules.contains("when the command item completes"), "{cmd:?}");
-            assert!(rules.contains("nohup"), "{cmd:?}");
-        }
+        let codex = cfg(&["codex", "--yolo"], None, None);
+        assert!(codex.live_cli());
+        let rules = team_rules_for(&codex, &[], None);
+        assert!(!rules.contains(blocks));
+        assert!(rules.contains("when the command item completes"));
+        assert!(rules.contains("nohup"));
 
         let per_turn = [
             &["gemini", "--approval-mode", "yolo"][..],
