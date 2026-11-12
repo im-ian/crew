@@ -77,6 +77,8 @@ export type PlanUsage = {
   cli: string;
   fiveHour?: PlanWindow | null;
   weekly?: PlanWindow | null;
+  /** A window longer than a week, as Codex's 30-day one on some plans. */
+  monthly?: PlanWindow | null;
   capturedAt?: number | null;
   /** Separate pools inside one plan, each with its own weekly window. */
   groups?: { name: string; window: PlanWindow }[];

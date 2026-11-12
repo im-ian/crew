@@ -61,6 +61,21 @@ describe("plan usage", () => {
     expect(usageColumns(some).map((c) => c.label)).toEqual(["5h", "주간"]);
   });
 
+  it("shows Codex's 30-day window in a column of its own", () => {
+    const rows = usageRows(
+      [
+        { cli: "claude", fiveHour: { usedPercent: 5 }, weekly: { usedPercent: 40 } },
+        { cli: "codex", monthly: { usedPercent: 41, resetsAt: NOW / 1000 + 9 * 86400 } },
+      ],
+      NOW,
+      t,
+    );
+    expect(usageColumns(rows).map((c) => c.label)).toEqual(["5h", "주간", "30일"]);
+    const codex = rows.find((r) => r.cli === "codex")!;
+    expect(codex.cells).toMatchObject([{ key: "monthly", percent: 41 }]);
+    expect(codex.cells[0].title).toContain("30일 한도");
+  });
+
   it("lists Codex and Antigravity too, in a fixed order", () => {
     expect(usageClis([bot("agy"), bot("codex"), bot("grok"), bot("claude")])).toEqual(["claude", "codex", "grok", "agy"]);
   });

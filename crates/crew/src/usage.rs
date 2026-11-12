@@ -28,6 +28,9 @@ pub struct PlanUsage {
     /// Absent while the plan has no five-hour window, as during some promotions.
     pub five_hour: Option<Window>,
     pub weekly: Option<Window>,
+    /// A window longer than a week, as Codex's 30-day one on some plans.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monthly: Option<Window>,
     /// Unix seconds when the numbers were read from the CLI.
     pub captured_at: Option<i64>,
     /// Separate pools within one plan, as Antigravity has per model family.
@@ -102,6 +105,7 @@ fn parse_claude_event(v: &Value, now: i64) -> Option<PlanUsage> {
         cli: "claude".into(),
         five_hour: window("five_hour"),
         weekly: window("seven_day"),
+        monthly: None,
         captured_at: Some(now),
         groups: Vec::new(),
     };
@@ -138,6 +142,7 @@ fn parse_claude_widget(v: &Value) -> Option<PlanUsage> {
         cli: "claude".into(),
         five_hour: window("five_hour"),
         weekly: window("seven_day"),
+        monthly: None,
         captured_at: v
             .get("captured_at")
             .and_then(Value::as_f64)
@@ -278,6 +283,7 @@ fn parse_grok_line(v: &Value) -> Option<PlanUsage> {
             used_percent: used,
             resets_at: end.and_then(parse_utc),
         }),
+        monthly: None,
         captured_at: v.get("ts").and_then(Value::as_str).and_then(parse_utc),
         groups: Vec::new(),
     })
@@ -329,6 +335,7 @@ fn parse_codex_line(v: &Value) -> Option<PlanUsage> {
         cli: "codex".into(),
         five_hour: None,
         weekly: None,
+        monthly: None,
         captured_at: v
             .get("timestamp")
             .and_then(Value::as_str)
@@ -336,7 +343,9 @@ fn parse_codex_line(v: &Value) -> Option<PlanUsage> {
         groups: Vec::new(),
     };
     // `primary` is usually the five-hour window and `secondary` the weekly
-    // one, but a plan with only a weekly window reports it as `primary`.
+    // one, but a plan with only a weekly window reports it as `primary`, and
+    // one plan (`go`) has only a 30-day window. The window's length decides
+    // when it is given.
     for (key, five_hour_by_default) in [("primary", true), ("secondary", false)] {
         let Some(w) = limits.get(key).filter(|w| w.is_object()) else {
             continue;
@@ -352,18 +361,17 @@ fn parse_codex_line(v: &Value) -> Option<PlanUsage> {
                 .and_then(Value::as_f64)
                 .map(|s| s as i64),
         };
-        let five_hour = match w.get("window_minutes").and_then(Value::as_f64) {
-            Some(m) if m == 300.0 => true,
-            Some(m) if m == 10_080.0 => false,
-            _ => five_hour_by_default,
+        let slot = match w.get("window_minutes").and_then(Value::as_f64) {
+            Some(m) if m <= 300.0 => &mut usage.five_hour,
+            Some(m) if m <= 10_080.0 => &mut usage.weekly,
+            Some(_) => &mut usage.monthly,
+            None if five_hour_by_default => &mut usage.five_hour,
+            None => &mut usage.weekly,
         };
-        if five_hour {
-            usage.five_hour = Some(window);
-        } else {
-            usage.weekly = Some(window);
-        }
+        *slot = Some(window);
     }
-    (usage.five_hour.is_some() || usage.weekly.is_some()).then_some(usage)
+    (usage.five_hour.is_some() || usage.weekly.is_some() || usage.monthly.is_some())
+        .then_some(usage)
 }
 
 fn agy_store() -> PathBuf {
@@ -482,6 +490,7 @@ fn parse_agy_report(v: &Value, now: i64) -> Option<PlanUsage> {
         cli: "agy".into(),
         five_hour: None,
         weekly: Some(fullest),
+        monthly: None,
         captured_at: Some(now),
         groups,
     })
@@ -727,6 +736,13 @@ mod tests {
         let u = parse_codex_line(&both).unwrap();
         assert_eq!(u.five_hour.unwrap().used_percent, 12.0);
         assert_eq!(u.weekly.unwrap().used_percent, 64.0);
+        // The `go` plan, as codex-cli 0.167 writes it: one 30-day window as `primary`.
+        let go = json!({"payload": {"rate_limits": {"limit_id": "codex", "plan_type": "go",
+            "primary": {"used_percent": 41.0, "window_minutes": 43200, "resets_at": 1797038573},
+            "secondary": null}}});
+        let u = parse_codex_line(&go).unwrap();
+        assert!(u.five_hour.is_none() && u.weekly.is_none());
+        assert_eq!(u.monthly.unwrap().used_percent, 41.0);
     }
 
     #[test]

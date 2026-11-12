@@ -1,4 +1,5 @@
 import type { TFn } from "./i18n";
+import type { MessageKey } from "./locales";
 import type { AgentInfo, PlanUsage, PlanWindow } from "./types";
 import { cliFromCmd } from "./options";
 
@@ -20,8 +21,26 @@ export function usageClis(agents: AgentInfo[]): string[] {
   return READABLE.filter((cli) => have.has(cli));
 }
 
+export type WindowKey = "fiveHour" | "weekly" | "monthly";
+
+const SHORT: Record<WindowKey, MessageKey> = {
+  fiveHour: "usage.fiveHour",
+  weekly: "usage.weekly",
+  monthly: "usage.monthly",
+};
+const LONG: Record<WindowKey, MessageKey> = {
+  fiveHour: "usage.fiveHourLong",
+  weekly: "usage.weeklyLong",
+  monthly: "usage.monthlyLong",
+};
+
+/** A window's name in a column head, or in a sentence. */
+export function windowName(key: WindowKey, t: TFn, long = false): string {
+  return t((long ? LONG : SHORT)[key]);
+}
+
 export type UsageCell = {
-  key: "fiveHour" | "weekly";
+  key: WindowKey;
   label: string;
   percent: number;
   /** Unix seconds. */
@@ -72,7 +91,7 @@ export function anyWarn(rows: UsageRow[]): boolean {
 
 /** The columns to draw: a window only when some plan has it, so with no five-hour cap anywhere only the weekly one is left. */
 export function usageColumns(rows: UsageRow[]): { key: UsageCell["key"]; label: string }[] {
-  return (["fiveHour", "weekly"] as const).flatMap((key) => {
+  return (["fiveHour", "weekly", "monthly"] as const).flatMap((key) => {
     const cell = rows.flatMap((r) => r.cells).find((c) => c.key === key);
     return cell ? [{ key, label: cell.label }] : [];
   });
@@ -97,7 +116,7 @@ export function usageRows(usage: PlanUsage[], nowMs: number, t: TFn): UsageRow[]
           : t("usage.title", { cli: label, name, percent });
       return {
         key,
-        label: t(key === "fiveHour" ? "usage.fiveHour" : "usage.weekly"),
+        label: windowName(key, t),
         percent,
         resetsAt: w.resetsAt ?? null,
         until,
@@ -108,10 +127,11 @@ export function usageRows(usage: PlanUsage[], nowMs: number, t: TFn): UsageRow[]
     };
     const add = (key: UsageCell["key"], w: PlanWindow | null | undefined) => {
       if (!w) return;
-      cells.push(cell(key, w, t(key === "fiveHour" ? "usage.fiveHourLong" : "usage.weeklyLong")));
+      cells.push(cell(key, w, windowName(key, t, true)));
     };
     add("fiveHour", u.fiveHour);
     add("weekly", u.weekly);
+    add("monthly", u.monthly);
     const groups = (u.groups ?? []).map((g) => ({ name: g.name, cell: cell("weekly", g.window, g.name) }));
     if (cells.length) rows.push({ cli, label, cells, capturedAt: u.capturedAt ?? null, groups });
   }
