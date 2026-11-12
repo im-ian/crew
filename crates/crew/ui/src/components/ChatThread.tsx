@@ -95,7 +95,7 @@ import { splitFilePath } from "./FileView";
 import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
 import { MdBody } from "./MdBody";
-import { WhoButton, whoColor } from "./WhoButton";
+import { WhoButton, WhoLabel, whoColor } from "./WhoButton";
 
 const STICK_PX = 24;
 /** How far below the thread's top edge a jumped question sits, clear of the fade. */
@@ -1807,7 +1807,10 @@ function NoteGroup({
   const show = (foldsHere && open) || hit;
   if (groups.length === 0) return null;
 
-  function chip(peerId: string, msgs: ChatMessage[], label: string) {
+  // The whole chip is one button: the count, the face and the name all open
+  // that bot's side chat. Going to the bot itself is the sidebar's job.
+  const stacked = groups.length > 1;
+  function chip(peerId: string, msgs: ChatMessage[]) {
     const agent = agents.find((a) => a.id === peerId) ?? null;
     const side =
       onPeek && !peerId.startsWith("#")
@@ -1815,27 +1818,25 @@ function NoteGroup({
         : null;
     const peeking = peekFocus === msgs[0].id;
     const who = displayWho(peerId, agent, t, labelOf);
+    const count = t("thread.noteRun", { n: msgs.length });
     return (
-      <div className="note-run-chip" key={peerId}>
-        <button
-          type="button"
-          className={"note-run-head" + (peeking ? " is-peeking" : "")}
-          aria-expanded={side ? peeking : show}
-          aria-label={who + " " + msgs.length}
-          onClick={side ?? (() => setOpen((v) => !v))}
-        >
-          <ChevronDown className="note-caret" size={12} />
-          {label}
-        </button>
-        <WhoButton
+      <button
+        type="button"
+        key={peerId}
+        className={"note-run-head" + (peeking ? " is-peeking" : "")}
+        aria-expanded={side ? peeking : show}
+        aria-label={count + ", " + who}
+        title={who}
+        onClick={side ?? (() => setOpen((v) => !v))}
+      >
+        <ChevronDown className="note-caret" size={12} />
+        <span className="note-run-count">{stacked ? msgs.length : count}</span>
+        <WhoLabel
           agent={agent ?? subagentFace(peerId, t)}
           who={who}
           fallbackId={peerId}
-          onClick={
-            onSelectAgent && agent ? () => onSelectAgent(agent.id) : undefined
-          }
         />
-      </div>
+      </button>
     );
   }
 
@@ -1854,19 +1855,18 @@ function NoteGroup({
         labelOf,
       )
     : "";
-  // One bot keeps the old chip. Several bots share the phrase and sit in a
-  // row, each chip opening only that bot's notes. The row stays one element
-  // as notes arrive, so an open note is not remounted.
+  // One bot keeps the old chip. Several bots share the phrase and stack one
+  // under another, each chip opening that bot's side chat. A room has none,
+  // so its chip unfolds the whole run here. The list and the first chip stay
+  // mounted when a second bot joins, so focus and an open note survive it.
   return (
     <div className={"note-run" + (queued ? " queued" : "")}>
-      {groups.length === 1 ? (
-        chip(groups[0].peerId, groups[0].msgs, t("thread.noteRun", { n: groups[0].msgs.length }))
-      ) : (
-        <div className="note-run-line">
+      <div className={"note-run-list" + (stacked ? " is-stacked" : "")}>
+        {stacked ? (
           <span className="note-run-label">{t("thread.notePeers")}</span>
-          {groups.map((g) => chip(g.peerId, g.msgs, String(g.msgs.length)))}
-        </div>
-      )}
+        ) : null}
+        {groups.map((g) => chip(g.peerId, g.msgs))}
+      </div>
       {live !== undefined && liveGroup ? (
         <button
           type="button"

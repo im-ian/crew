@@ -144,6 +144,41 @@ export function WhoButton({
   );
 }
 
+/** A bot's face and name with no click of its own, for inside another button. */
+export function WhoLabel({
+  agent,
+  who,
+  fallbackId,
+}: {
+  agent: AgentInfo | null;
+  who: string;
+  fallbackId?: string;
+}) {
+  const color = agent
+    ? whoColor(resolveFace(agent.id, agent.avatar_shape, agent.avatar_color).color)
+    : undefined;
+  return (
+    <span
+      className="who-label"
+      style={color ? ({ "--who-color": color } as CSSProperties) : undefined}
+    >
+      {agent ? (
+        <Avatar
+          as="span"
+          className="who-avatar"
+          id={agent.id || fallbackId}
+          name={who}
+          src={agent.avatar}
+          shape={agent.avatar_shape}
+          color={agent.avatar_color}
+          status={agent.status}
+        />
+      ) : null}
+      <span className="who-name">{who}</span>
+    </span>
+  );
+}
+
 export function whoColor(hex: string): string {
   const n = hex.replace("#", "");
   if (n.length !== 6) return hex;
