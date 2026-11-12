@@ -2868,15 +2868,17 @@ function FileCard({ message: m, flash }: { message: ChatMessage; flash: boolean 
   const openFile = useFileOpen();
   const target = parseFileRef(m.text || "");
   const { name, dir } = splitFilePath(target.path);
+  // In the bot's column, past the empty spot its face takes, like its bubbles.
   return (
-    <button
-      type="button"
-      className={"file-card" + (flash ? " flash" : "")}
-      data-msg-id={m.id}
-      title={target.path}
-      disabled={!openFile}
-      onClick={() => openFile?.(target)}
-    >
+    <div className="row them file-row-msg" data-msg-id={m.id}>
+      <div className="msg-avatar" aria-hidden="true" />
+      <button
+        type="button"
+        className={"file-card" + (flash ? " flash" : "")}
+        title={target.path}
+        disabled={!openFile}
+        onClick={() => openFile?.(target)}
+      >
       <FileText className="file-card-icon" size={16} />
       <span className="file-card-text">
         <span className="file-card-name">
@@ -2889,7 +2891,8 @@ function FileCard({ message: m, flash }: { message: ChatMessage; flash: boolean 
           </span>
         ) : null}
       </span>
-      <span className="file-card-action">{t("file.show")}</span>
-    </button>
+        <span className="file-card-action">{t("file.show")}</span>
+      </button>
+    </div>
   );
 }

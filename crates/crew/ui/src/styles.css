@@ -4424,8 +4424,8 @@ html[data-theme="light"] .file-src span {
 }
 /* `crew show` in the thread: the file a bot opened beside the chat. */
 .file-card {
-  align-self: flex-start;
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: var(--space-10);
   max-width: min(100%, 420px);
