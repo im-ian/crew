@@ -235,8 +235,11 @@ export function askedWork(
       return { peer: m.peer, line: lastSaid(m.text || "") };
     }
     if (m.role === "user") return null;
-    if (m.role === "system" && m.kind === "received" && m.from !== "user") {
-      return { peer: m.from, line: "" };
+    // A delivered line starts a turn: a teammate's tell is theirs, while a
+    // user's @mention from another chat, a handoff, or a routine is not
+    // another bot's request.
+    if (m.role === "system" && (m.kind === "received" || m.kind === "handoff" || m.kind === "routine")) {
+      return m.kind === "received" && m.from !== "user" ? { peer: m.from, line: "" } : null;
     }
   }
   return null;

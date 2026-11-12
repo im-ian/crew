@@ -419,4 +419,15 @@ describe("askedWork", () => {
     expect(askedWork(list, true)).toBeNull();
     expect(askedWork([row("1", { role: "assistant", text: "하는 중" })], true)).toBeNull();
   });
+
+  it("does not reach back past a turn a mention, handoff, or routine started", () => {
+    const earlier = row("1", { role: "assistant", peer: "lead", text: "끝났어요." });
+    for (const start of [
+      row("2", { kind: "received", from: "user", text: "@dev 봐줘" }),
+      row("2", { kind: "handoff", from: "lead", text: "리뷰 끝" }),
+      row("2", { kind: "routine", from: "아침 브리핑", text: "정리해 줘" }),
+    ]) {
+      expect(askedWork([earlier, start], true)).toBeNull();
+    }
+  });
 });
