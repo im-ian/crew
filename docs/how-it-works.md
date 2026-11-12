@@ -125,7 +125,7 @@ Claude, Grok, Antigravity가 상주일 때는 이 문단을 넣지 않아요. �
 | `memory/<id>.md` | 대화를 지워도 남는 그 봇의 기억 |
 | `skills/<이름>.md` | `/이름` 스킬 |
 | `transcripts/<id>.jsonl` | 1:1 대화 |
-| `cli-sessions/<id>` | Grok/Claude/Codex 세션 id |
+| `cli-sessions/<id>` | Grok/Claude/Codex 세션 id와 그 세션을 연 폴더(둘째 줄). Claude·Grok은 다른 폴더에서 턴을 돌면 새 세션을 열고 대화 요약을 넘김 |
 | `cli-memory/<id>` | 그 세션이 아는 메모리 (바뀌면 알려 주려고) |
 | `cli-shared/<id>` | 그 세션에 마지막으로 보낸 공유 메모리 노트 (바뀌거나 압축되면 다시 보내려고) |
 | `archive/` | 지운 대화 |

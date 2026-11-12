@@ -140,28 +140,61 @@ pub fn clear_session(agent_id: &str) {
 }
 
 pub fn load_session(agent_id: &str) -> Option<String> {
-    let raw = fs::read_to_string(paths::cli_session_path(agent_id)).ok()?;
-    let id = raw.trim();
-    if id.is_empty() {
-        None
-    } else {
-        Some(id.to_string())
-    }
+    load_session_at(agent_id).map(|(id, _)| id)
 }
 
-pub fn save_session(agent_id: &str, session_id: &str) -> anyhow::Result<()> {
+/// The saved session and the folder it was opened in. A file written before
+/// the folder was kept holds only the id.
+fn load_session_at(agent_id: &str) -> Option<(String, Option<PathBuf>)> {
+    let raw = fs::read_to_string(paths::cli_session_path(agent_id)).ok()?;
+    let mut lines = raw.lines();
+    let id = lines.next()?.trim();
+    if id.is_empty() {
+        return None;
+    }
+    let cwd = lines
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    Some((id.to_string(), cwd))
+}
+
+pub fn save_session(agent_id: &str, session_id: &str, cwd: &Path) -> anyhow::Result<()> {
     let path = paths::cli_session_path(agent_id);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, format!("{}\n", session_id.trim()))?;
+    fs::write(
+        path,
+        format!("{}\n{}\n", session_id.trim(), cwd.to_string_lossy()),
+    )?;
     Ok(())
+}
+
+/// The saved session was opened in another folder than `cwd`. A link and the
+/// folder it points at are one folder: grok resolves both before it looks.
+fn session_moved(agent_id: &str, cwd: &Path) -> bool {
+    let real = |p: &Path| {
+        fs::canonicalize(p)
+            .unwrap_or_else(|_| p.to_path_buf())
+            .to_string_lossy()
+            .into_owned()
+    };
+    load_session_at(agent_id)
+        .and_then(|(_, at)| at)
+        .is_some_and(|at| real(&at) != real(cwd))
 }
 
 /// Write the turn's session id unless a reset or delete already took this
 /// turn. The check and the write share the session lock, so `kill` cannot
 /// bump the generation and delete the file in between.
-fn save_session_if_current(session: &HeadlessSession, generation: u64, id: &str) -> bool {
+fn save_session_if_current(
+    session: &HeadlessSession,
+    generation: u64,
+    id: &str,
+    cwd: &Path,
+) -> bool {
     let Ok(mut inner) = session.inner.lock() else {
         return false;
     };
@@ -169,7 +202,7 @@ fn save_session_if_current(session: &HeadlessSession, generation: u64, id: &str)
         return false;
     }
     inner.session_id = Some(id.to_string());
-    save_session(&session.id, id).is_ok()
+    save_session(&session.id, id, cwd).is_ok()
 }
 
 /// `kick` counts a prompt until `run_turn` returns, including every early
@@ -192,7 +225,8 @@ impl Drop for UserTurn<'_> {
     }
 }
 
-/// Chat a bot had before it moved to this CLI, for the new session to read once.
+/// Chat a bot had before its session was dropped (it moved to this CLI or to
+/// another folder, or its session hung), for the new session to read once.
 pub fn save_recap(agent_id: &str, recap: &str) -> anyhow::Result<()> {
     let path = paths::cli_recap_path(agent_id);
     if let Some(parent) = path.parent() {
@@ -214,9 +248,10 @@ pub fn clear_recap(agent_id: &str) {
 
 fn with_recap(recap: &str, prompt: &str) -> String {
     format!(
-        "[crew recap] This bot just moved to you from another AI CLI. Below is the chat \
-         so far, oldest first; `assistant` lines are the bot's earlier replies, errors \
-         its old CLI printed included. Read it for context only; do not answer it. \
+        "[crew recap] This bot's earlier CLI session could not come along: it moved to \
+         you from another AI CLI or another folder, or that session stopped answering. \
+         Below is the chat so far, oldest first; `assistant` lines are the bot's earlier \
+         replies, errors its old CLI printed included. Read it for context only; do not answer it. \
          Answer the message after it.\n<chat>\n{recap}\n</chat>\n\n{prompt}"
     )
 }
@@ -543,6 +578,20 @@ fn give_back_if_unheard(session: Arc<HeadlessSession>, generation: u64) {
     }
 }
 
+/// Forget a session opened in another folder, like a hung one. A recap still
+/// waiting (a CLI switch whose first turn failed) is kept: it was written for
+/// this bot's move and holds more than the chat here would.
+fn drop_moved_session(session: &HeadlessSession, msg_ids: &[String]) {
+    if load_recap(&session.id).is_some() {
+        if let Ok(mut inner) = session.inner.lock() {
+            inner.session_id = None;
+        }
+        clear_session(&session.id);
+    } else {
+        drop_stuck_session(session, msg_ids);
+    }
+}
+
 /// Forget the session a resumed turn hung in. The next turn starts a new one
 /// and reads the chat before the prompt it is about to send again.
 fn drop_stuck_session(session: &HeadlessSession, msg_ids: &[String]) {
@@ -778,6 +827,16 @@ fn run_turn(
     let mut turn = crate::transcript::begin_turn(&session.id);
 
     let program = cfg.binary_name();
+    let place = crate::worktree::place_for(&cfg.id, &crate::config::Config::default_cwd(&cfg));
+    let cwd = place.cwd.clone();
+    // The bot moved to another folder, or worktrees were turned on or off since
+    // its session was opened. claude and grok keep a session under its folder,
+    // so resumed from here they find nothing and the message is lost. A new
+    // session reads the chat so far instead. codex finds a thread from anywhere.
+    let per_folder = matches!(program.as_str(), "claude" | "grok");
+    if per_folder && !cfg.prompt_mode() && session_moved(&session.id, &cwd) {
+        drop_moved_session(&session, &skip_rows);
+    }
     let stored = session
         .inner
         .lock()
@@ -873,8 +932,6 @@ fn run_turn(
     } else {
         prompt
     };
-    let place = crate::worktree::place_for(&cfg.id, &crate::config::Config::default_cwd(&cfg));
-    let cwd = place.cwd.clone();
     if let Err(err) = crate::paths::create_cwd(&cwd) {
         eprintln!("[crew] cwd {}: {err:#}", cwd.display());
     }
@@ -959,7 +1016,7 @@ fn run_turn(
                     .or(turn_session.as_ref().map(|s| s.id.as_str()))
                 {
                     if !id.is_empty()
-                        && save_session_if_current(&session, generation, id)
+                        && save_session_if_current(&session, generation, id, &cwd)
                         && live_cli
                     {
                         live::note_session(&session, generation, id);
@@ -4150,17 +4207,45 @@ mod tests {
         }
     }
 
+    /// A session is trusted only in the folder it was opened in. One saved
+    /// before the folder was kept has no folder, and still resumes.
+    #[test]
+    fn a_session_knows_its_folder() {
+        paths::testing::with_home("session-at", || {
+            save_session("bot", "sess-1", Path::new("/work/a")).unwrap();
+            assert_eq!(load_session("bot").as_deref(), Some("sess-1"));
+            assert!(!session_moved("bot", Path::new("/work/a")));
+            assert!(session_moved("bot", Path::new("/work/b")));
+
+            // A link to the same folder is the same folder.
+            let real = paths::home_dir().join("real");
+            fs::create_dir_all(&real).unwrap();
+            let link = paths::home_dir().join("link");
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            save_session("bot", "sess-1", &real).unwrap();
+            assert!(!session_moved("bot", &link));
+
+            fs::write(paths::cli_session_path("bot"), "sess-old\n").unwrap();
+            assert_eq!(load_session("bot").as_deref(), Some("sess-old"));
+            assert!(!session_moved("bot", Path::new("/work/b")));
+
+            clear_session("bot");
+            assert!(!session_moved("bot", Path::new("/work/a")));
+        });
+    }
+
     /// A turn that lost the race with reset must not write the session back.
     #[test]
     fn save_session_skips_a_turn_reset_already_took() {
         paths::testing::with_home("save-stale", || {
             let session = grok_session("bot");
-            assert!(save_session_if_current(&session, 0, "sess-1"));
+            let cwd = Path::new("/tmp");
+            assert!(save_session_if_current(&session, 0, "sess-1", cwd));
             assert_eq!(load_session("bot").as_deref(), Some("sess-1"));
             session.inner.lock().unwrap().generation = 1;
             clear_session("bot");
             assert!(load_session("bot").is_none());
-            assert!(!save_session_if_current(&session, 0, "sess-1"));
+            assert!(!save_session_if_current(&session, 0, "sess-1", cwd));
             assert!(load_session("bot").is_none());
             assert_eq!(
                 session.inner.lock().unwrap().session_id.as_deref(),
