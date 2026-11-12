@@ -70,17 +70,20 @@ export type FocusTarget = {
 };
 
 /** One limit window. `resetsAt` is Unix seconds. */
-export type PlanWindow = { usedPercent: number; resetsAt?: number | null };
+export type PlanWindow = {
+  usedPercent: number;
+  resetsAt?: number | null;
+  /** How long the window runs before it starts over, in minutes. Unknown on an old reading. */
+  minutes?: number | null;
+};
 
 /** How much of a CLI's plan is used. A window it does not have right now is null. */
 export type PlanUsage = {
   cli: string;
-  fiveHour?: PlanWindow | null;
-  weekly?: PlanWindow | null;
-  /** A window longer than a week, as Codex's 30-day one on some plans. */
-  monthly?: PlanWindow | null;
+  /** Each limit the plan has now, shortest first. */
+  windows?: PlanWindow[];
   capturedAt?: number | null;
-  /** Separate pools inside one plan, each with its own weekly window. */
+  /** Separate pools inside one plan, each with its own window. */
   groups?: { name: string; window: PlanWindow }[];
 };
 

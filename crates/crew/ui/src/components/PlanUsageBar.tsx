@@ -10,7 +10,6 @@ import {
   usageClis,
   usageColumns,
   usageRows,
-  windowName,
   type UsageRow,
 } from "../planUsage";
 import type { AgentInfo, PlanUsage } from "../types";
@@ -216,7 +215,7 @@ export function PlanUsageDetail({
               ? row.groups.map((g) => ({ key: g.name, name: g.name, cell: g.cell }))
               : row.cells.map((cell) => ({
                   key: cell.key,
-                  name: windowName(cell.key, t, true),
+                  name: cell.name,
                   cell,
                 }))
             ).map(({ key, name, cell }) => (

@@ -1,5 +1,4 @@
 import type { TFn } from "./i18n";
-import type { MessageKey } from "./locales";
 import type { AgentInfo, PlanUsage, PlanWindow } from "./types";
 import { cliFromCmd } from "./options";
 
@@ -21,27 +20,36 @@ export function usageClis(agents: AgentInfo[]): string[] {
   return READABLE.filter((cli) => have.has(cli));
 }
 
-export type WindowKey = "fiveHour" | "weekly" | "monthly";
+const DAY = 24 * 60;
 
-const SHORT: Record<WindowKey, MessageKey> = {
-  fiveHour: "usage.fiveHour",
-  weekly: "usage.weekly",
-  monthly: "usage.monthly",
-};
-const LONG: Record<WindowKey, MessageKey> = {
-  fiveHour: "usage.fiveHourLong",
-  weekly: "usage.weeklyLong",
-  monthly: "usage.monthlyLong",
-};
+/**
+ * A window's name, from how long it runs: "5h", "1일", "주간", "30일".
+ * `long` is the name in a sentence, "5시간 한도". An old reading that never
+ * said how long its window is is just "한도".
+ */
+export function windowName(minutes: number | null | undefined, t: TFn, long = false): string {
+  if (!minutes || minutes <= 0) return t(long ? "usage.limitLong" : "usage.limit");
+  if (minutes === 7 * DAY) return t(long ? "usage.weeklyLong" : "usage.weekly");
+  if (minutes % DAY === 0) return t(long ? "usage.daysLong" : "usage.days", { n: minutes / DAY });
+  const hours = Math.max(1, Math.round(minutes / 60));
+  return t(long ? "usage.hoursLong" : "usage.hours", { n: hours });
+}
 
-/** A window's name in a column head, or in a sentence. */
-export function windowName(key: WindowKey, t: TFn, long = false): string {
-  return t((long ? LONG : SHORT)[key]);
+/** A column per window length; one of unknown length goes last. */
+function windowKey(minutes: number | null | undefined): string {
+  return minutes && minutes > 0 ? String(minutes) : "?";
+}
+
+function keyOrder(key: string): number {
+  return key === "?" ? Number.MAX_SAFE_INTEGER : Number(key);
 }
 
 export type UsageCell = {
-  key: WindowKey;
+  /** The window's length in minutes, as text, or "?" when unknown: the column it sits in. */
+  key: string;
   label: string;
+  /** The window's name in a sentence, "5시간 한도". */
+  name: string;
   percent: number;
   /** Unix seconds. */
   resetsAt: number | null;
@@ -91,10 +99,11 @@ export function anyWarn(rows: UsageRow[]): boolean {
 
 /** The columns to draw: a window only when some plan has it, so with no five-hour cap anywhere only the weekly one is left. */
 export function usageColumns(rows: UsageRow[]): { key: UsageCell["key"]; label: string }[] {
-  return (["fiveHour", "weekly", "monthly"] as const).flatMap((key) => {
-    const cell = rows.flatMap((r) => r.cells).find((c) => c.key === key);
-    return cell ? [{ key, label: cell.label }] : [];
-  });
+  const seen = new Map<string, string>();
+  for (const c of rows.flatMap((r) => r.cells)) if (!seen.has(c.key)) seen.set(c.key, c.label);
+  return [...seen]
+    .sort(([a], [b]) => keyOrder(a) - keyOrder(b))
+    .map(([key, label]) => ({ key, label }));
 }
 
 /** Rows for the sidebar. A window the plan does not have right now is not shown. */
@@ -105,7 +114,7 @@ export function usageRows(usage: PlanUsage[], nowMs: number, t: TFn): UsageRow[]
     if (!u) continue;
     const label = LABELS[cli];
     const cells: UsageCell[] = [];
-    const cell = (key: UsageCell["key"], w: PlanWindow, name: string): UsageCell => {
+    const cell = (w: PlanWindow, name: string): UsageCell => {
       const percent = Math.min(100, Math.max(0, Math.round(w.usedPercent)));
       const stale = !!w.resetsAt && w.resetsAt * 1000 <= nowMs;
       const until = untilLabel(w.resetsAt, nowMs, t);
@@ -115,8 +124,9 @@ export function usageRows(usage: PlanUsage[], nowMs: number, t: TFn): UsageRow[]
           ? t("usage.titleResets", { cli: label, name, percent, until })
           : t("usage.title", { cli: label, name, percent });
       return {
-        key,
-        label: windowName(key, t),
+        key: windowKey(w.minutes),
+        label: windowName(w.minutes, t),
+        name,
         percent,
         resetsAt: w.resetsAt ?? null,
         until,
@@ -125,14 +135,8 @@ export function usageRows(usage: PlanUsage[], nowMs: number, t: TFn): UsageRow[]
         title,
       };
     };
-    const add = (key: UsageCell["key"], w: PlanWindow | null | undefined) => {
-      if (!w) return;
-      cells.push(cell(key, w, windowName(key, t, true)));
-    };
-    add("fiveHour", u.fiveHour);
-    add("weekly", u.weekly);
-    add("monthly", u.monthly);
-    const groups = (u.groups ?? []).map((g) => ({ name: g.name, cell: cell("weekly", g.window, g.name) }));
+    for (const w of u.windows ?? []) cells.push(cell(w, windowName(w.minutes, t, true)));
+    const groups = (u.groups ?? []).map((g) => ({ name: g.name, cell: cell(g.window, g.name) }));
     if (cells.length) rows.push({ cli, label, cells, capturedAt: u.capturedAt ?? null, groups });
   }
   return rows;
