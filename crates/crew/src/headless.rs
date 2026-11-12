@@ -15,6 +15,8 @@ use crate::config::{AgentConfig, TurnSession};
 use crate::paths;
 use crate::protocol::{AgentStatus, Watch};
 
+mod live;
+
 pub struct HeadlessSession {
     pub id: String,
     pub name: String,
@@ -39,7 +41,20 @@ pub struct HeadlessInner {
     pub first_output_timeout: Option<Duration>,
     /// The reply is done and the CLI is up only for this background work.
     /// The agent stays working, so a send waits, but the chat is not waiting.
+    /// A Claude process kept up between turns lists its tasks here while the
+    /// agent is idle, and a send goes straight to it.
     pub watch: Vec<Watch>,
+    /// The Claude process kept up between turns (see `live`).
+    live: Option<live::LiveCli>,
+    /// A turn is running on `live`. Like `child`, it keeps the next turn out.
+    live_turn: bool,
+}
+
+impl HeadlessInner {
+    /// A turn holds the CLI, so the next one waits for it.
+    pub fn turn_running(&self) -> bool {
+        self.child.is_some() || self.live_turn
+    }
 }
 
 /// How long a turn may sit before its first stdout line. Later silence is a
@@ -105,6 +120,8 @@ pub fn open(
             in_flight: None,
             first_output_timeout: None,
             watch: Vec::new(),
+            live: None,
+            live_turn: false,
         }),
     }))
 }
@@ -293,17 +310,22 @@ fn shared_note_due(every_turn: bool, resume: bool, seen: Option<&str>, note: &st
 /// Drop the CLI session so the next turn opens a new one. Refused mid-turn:
 /// that turn would save its session back when it ends.
 pub fn forget_session(session: &HeadlessSession) -> anyhow::Result<()> {
-    let mut inner = session.inner.lock().expect("headless inner");
-    if inner.status == AgentStatus::Working || inner.child.is_some() {
-        anyhow::bail!("agent {} is working; switch once it finishes", session.id);
+    {
+        let mut inner = session.inner.lock().expect("headless inner");
+        if inner.status == AgentStatus::Working || inner.turn_running() {
+            anyhow::bail!("agent {} is working; switch once it finishes", session.id);
+        }
+        inner.session_id = None;
+        clear_session(&session.id);
     }
-    inner.session_id = None;
-    clear_session(&session.id);
+    // It holds the session just dropped.
+    live::close(session);
     Ok(())
 }
 
-pub fn kill(session: &HeadlessSession) {
-    interrupt(session);
+/// Stop the turn and the CLI kept up between turns, and drop the session.
+pub fn kill(session: &Arc<HeadlessSession>) {
+    halt(session);
     if let Ok(mut inner) = session.inner.lock() {
         inner.session_id = None;
     }
@@ -313,8 +335,22 @@ pub fn kill(session: &HeadlessSession) {
 /// Stop the in-flight child. Keeps the CLI session so a later turn can resume.
 /// Does not undo already-sealed assistant text. A prompt the CLI never wrote
 /// a line for goes back to the inbox; the caller cleared the chain first.
-pub fn interrupt(session: &HeadlessSession) {
+/// A Claude process kept up between turns is asked to stop the turn and stays
+/// up, with what it runs in the background.
+pub fn interrupt(session: &Arc<HeadlessSession>) {
+    stop(session, true);
+}
+
+/// `interrupt`, and the CLI kept up between turns goes too. The session stays.
+pub fn halt(session: &Arc<HeadlessSession>) {
+    stop(session, false);
+}
+
+fn stop(session: &Arc<HeadlessSession>, keep_cli: bool) {
     let Some(pulled) = pull_turn(session, None, false) else {
+        if !keep_cli {
+            live::close(session);
+        }
         return;
     };
     // Before the kill. A wait that does not return would leave the lines gone.
@@ -324,6 +360,7 @@ pub fn interrupt(session: &HeadlessSession) {
     if let Some(mut child) = pulled.child {
         kill_all(&mut child);
     }
+    live::stop(session, pulled.live, keep_cli);
 }
 
 /// Record `flight` as the prompt the CLI is about to read.
@@ -359,6 +396,9 @@ struct PulledTurn {
     child: Option<Child>,
     /// The prompt, when the CLI had not written a line yet.
     unheard: Option<InFlight>,
+    /// The generation of the turn taken from the Claude process kept up
+    /// between turns. That process is not in `child`.
+    live: Option<u64>,
 }
 
 /// `only_unheard` claims the turn only when it is still running and no stdout
@@ -375,7 +415,7 @@ fn pull_turn(
         }
     }
     if only_unheard {
-        let unheard = inner.child.is_some()
+        let unheard = inner.turn_running()
             && inner
                 .in_flight
                 .as_ref()
@@ -384,6 +424,8 @@ fn pull_turn(
             return None;
         }
     }
+    let live = inner.live_turn.then_some(inner.generation);
+    inner.live_turn = false;
     inner.generation = inner.generation.wrapping_add(1);
     inner.interrupted = true;
     inner.watch.clear();
@@ -394,7 +436,11 @@ fn pull_turn(
     let flight = inner.in_flight.take();
     let unheard = flight.filter(|flight| !flight.got_output);
     let child = inner.child.take();
-    Some(PulledTurn { child, unheard })
+    Some(PulledTurn {
+        child,
+        unheard,
+        live,
+    })
 }
 
 fn arm_first_output_watch(session: Arc<HeadlessSession>, generation: u64, cli: CliKind) {
@@ -443,6 +489,11 @@ fn give_back_if_unheard(session: Arc<HeadlessSession>, generation: u64) {
     }
     if let Some(mut child) = pulled.child {
         kill_all(&mut child);
+    }
+    // A Claude process kept up between turns that did not take the prompt
+    // may still hold it, so it goes as well.
+    if pulled.live.is_some() {
+        live::close(&session);
     }
     // After the kill, so the stuck CLI is gone before the new one starts.
     if retry {
@@ -529,7 +580,7 @@ pub fn kick(
 ) -> anyhow::Result<()> {
     let generation = {
         let mut inner = session.inner.lock().expect("headless inner");
-        if inner.status == AgentStatus::Working || inner.child.is_some() {
+        if inner.status == AgentStatus::Working || inner.turn_running() {
             anyhow::bail!("agent {} is working", session.id);
         }
         inner.interrupted = false;
@@ -665,18 +716,32 @@ fn run_turn(
         prompt
     };
     let place = crate::worktree::place_for(&cfg.id, &crate::config::Config::default_cwd(&cfg));
-    let argv = cfg.turn_cmd_in(
-        &prompt,
-        turn_session.as_ref(),
-        &roster,
-        &memory_seen.start,
-        place.isolated.as_ref(),
-    );
-    let cwd = place.cwd;
+    let cwd = place.cwd.clone();
     if let Err(err) = crate::paths::create_cwd(&cwd) {
         eprintln!("[crew] cwd {}: {err:#}", cwd.display());
     }
-    let result = spawn_and_stream(&session, &argv, generation, &mut turn, &cwd);
+    let live_cli = cfg.live_cli();
+    let result = if live_cli {
+        let isolated = place.isolated.as_ref();
+        let argv = cfg.live_cmd_in(turn_session.as_ref(), &roster, &memory_seen.start, isolated);
+        let started = live::Started {
+            argv: cfg.live_cmd_in(None, &roster, &memory_seen.start, isolated),
+            cwd: cwd.clone(),
+            session_id: turn_session.as_ref().map(|s| s.id.clone()),
+        };
+        live::run_turn(&session, &argv, started, &prompt, generation, &mut turn)
+    } else {
+        // A bot that moved off Claude leaves no process behind.
+        live::close(&session);
+        let argv = cfg.turn_cmd_in(
+            &prompt,
+            turn_session.as_ref(),
+            &roster,
+            &memory_seen.start,
+            place.isolated.as_ref(),
+        );
+        spawn_and_stream(&session, &argv, generation, &mut turn, &cwd)
+    };
 
     if is_stale(&session, generation) {
         crate::transcript::end_turn_gen(&session.id, Some(turn));
@@ -733,6 +798,9 @@ fn run_turn(
                             inner.session_id = Some(id.to_string());
                         }
                         let _ = save_session(&session.id, id);
+                        if live_cli {
+                            live::note_session(&session, generation, id);
+                        }
                     }
                 }
             }
@@ -787,6 +855,7 @@ fn run_turn(
         if inner.generation == generation {
             inner.in_flight = None;
         }
+        live::settle(&mut inner, generation);
         if inner.status != AgentStatus::Exited && inner.status != AgentStatus::Blocked {
             inner.status = AgentStatus::Idle;
         }
@@ -3695,6 +3764,8 @@ mod tests {
                 in_flight: None,
                 first_output_timeout: None,
                 watch: Vec::new(),
+                live: None,
+                live_turn: false,
             }),
         }
     }
