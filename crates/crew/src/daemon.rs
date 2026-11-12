@@ -12,7 +12,8 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{broadcast, oneshot};
 
 use crate::config::{
-    empty_to_none, find_routine_index, new_bot_ask, parse_hex_color, roster_update_text,
+    cloned_bot_ask, empty_to_none, find_routine_index, new_bot_ask, parse_hex_color,
+    roster_update_text,
     write_roster, AgentCli, AgentConfig, AvatarShape, Config, Effort, Routine,
 };
 use crate::cron;
@@ -3979,27 +3980,42 @@ fn add_agent(
 /// A new headless bot speaks first and asks what work it should take.
 /// A shell stub has nothing to ask with. A failed turn still leaves the bot.
 fn ask_new_bot(id: &str) {
+    ask_once(id, &new_bot_ask(crate::paths::locale() == "en"));
+}
+
+/// A cloned headless bot speaks first: a short hello, then what to take on.
+/// A shell stub has nothing to say it with. A failed turn still leaves the copy.
+fn greet_clone(id: &str, source_name: &str) {
+    ask_once(
+        id,
+        &cloned_bot_ask(source_name, crate::paths::locale() == "en"),
+    );
+}
+
+fn ask_once(id: &str, note: &str) {
     if !is_headless(id) {
         return;
     }
-    let text = crate::protocol::system_envelope(&new_bot_ask(crate::paths::locale() == "en"));
+    let text = crate::protocol::system_envelope(note);
     let origin = TurnOrigin {
         skip_judgment: true,
         ..TurnOrigin::user()
     };
     if let Err(err) = submit_delivery(id, &text, true, None, origin) {
-        eprintln!("[crew] new-bot ask {id}: {err:#}");
+        eprintln!("[crew] spawn ask {id}: {err:#}");
     }
 }
 
 fn clone_agent(src_id: &str, name: Option<String>) -> anyhow::Result<String> {
     let src = clone_agent_cfg(src_id)?;
+    let source_name = src.display_name().to_string();
     let existing: Vec<String> = roster_vec().into_iter().map(|a| a.id).collect();
     let mut cfg = src.duplicate(name.as_deref(), existing.iter().map(|s| s.as_str()));
     cfg.avatar = crate::avatar::copy_for(src.avatar.as_deref(), &cfg.id);
     crate::memory::copy(src_id, &cfg.id)?;
     let new_id = cfg.id.clone();
     insert_spawned_agent(cfg)?;
+    greet_clone(&new_id, &source_name);
     Ok(new_id)
 }
 
@@ -4581,6 +4597,18 @@ mod daemon_tests {
     /// A per-test id. The agent and pending-handoff maps are process-wide,
     /// so two tests sharing a key drain each other's state under the
     /// parallel harness — which is how CI failed here.
+    fn headless_child_started(id: &str) -> bool {
+        match agents().lock().expect("agents mutex").get(id) {
+            Some(LiveAgent::Headless(session)) => session
+                .inner
+                .lock()
+                .expect("headless inner")
+                .child
+                .is_some(),
+            _ => false,
+        }
+    }
+
     fn test_id(prefix: &str) -> String {
         format!(
             "{prefix}-{}",
@@ -6902,6 +6930,74 @@ exec sleep 1"#,
             assert_eq!(live_status(&bot).unwrap(), AgentStatus::Idle);
             take_origin(&bot);
             remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A copy speaks on its own. The note names the original and is not judged
+    /// as an approval. A shell has no CLI to ask, so it stays quiet.
+    ///
+    /// The holder is `sh -c`, not `sleep`. A custom headless turn appends the
+    /// prompt as the last argument, and `sleep` treats that as a time and exits.
+    #[test]
+    fn a_cloned_headless_bot_asks_what_to_take() {
+        paths::testing::with_home("clone-greet", || {
+            paths::write_notifications_enabled(false);
+            let src = test_id("src");
+            let mut cfg = AgentConfig::new(
+                src.clone(),
+                "리뷰어".into(),
+                vec!["/bin/sh".into(), "-c".into(), "sleep 30".into()],
+                None,
+            );
+            cfg.headless = true;
+            insert_spawned_agent(cfg).unwrap();
+            let new_id = clone_agent(&src, None).unwrap();
+            let check = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                while !headless_child_started(&new_id) {
+                    if std::time::Instant::now() > deadline {
+                        panic!("the copy's turn never started");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                let prompt = prompts()
+                    .lock()
+                    .unwrap()
+                    .get(&new_id)
+                    .and_then(|q| q.first().cloned())
+                    .expect("the copy is asked");
+                assert!(
+                    prompt.text.contains("duplicated from 리뷰어"),
+                    "{}",
+                    prompt.text
+                );
+                assert!(prompt.text.starts_with("[crew system]"));
+                assert!(prompt.origin.skip_judgment);
+            }));
+            let _ = remove_agent(&new_id);
+            let _ = remove_agent(&src);
+            if let Err(payload) = check {
+                std::panic::resume_unwind(payload);
+            }
+        });
+    }
+
+    #[test]
+    fn a_cloned_shell_stays_quiet() {
+        paths::testing::with_home("clone-shell", || {
+            let src = test_id("sh");
+            insert_spawned_agent(AgentConfig::new(
+                src.clone(),
+                "터미널".into(),
+                vec!["cat".into()],
+                None,
+            ))
+            .unwrap();
+            let new_id = clone_agent(&src, None).unwrap();
+            assert!(prompts().lock().unwrap().get(&new_id).is_none());
+            assert_eq!(live_status(&new_id).unwrap(), AgentStatus::Idle);
+            remove_agent(&new_id).unwrap();
+            remove_agent(&src).unwrap();
         });
     }
 
