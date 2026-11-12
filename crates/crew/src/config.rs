@@ -841,10 +841,12 @@ impl AgentConfig {
     }
 
     /// No per-bot session flag. Each turn sends the chat so far in the prompt.
+    /// agy kept up between turns holds its session, so it is not one.
     pub fn prompt_mode(&self) -> bool {
         match self.binary_name().as_str() {
             "grok" | "claude" | "codex" => false,
-            "gemini" | "agy" | "copilot" | "opencode" => true,
+            "agy" => !self.live_cli(),
+            "gemini" | "copilot" | "opencode" => true,
             _ => self.headless,
         }
     }
@@ -889,6 +891,72 @@ impl AgentConfig {
             "opencode" => apply_opencode_turn(&mut args, prompt),
             _ if self.headless => apply_custom_turn(&mut args, prompt),
             _ => {}
+        }
+        args
+    }
+
+    /// Claude, grok, agy and codex stay up between turns and read each prompt
+    /// from their stdin, so a send reaches them while a task they put in the
+    /// background still runs. grok and agy do that over ACP, codex over
+    /// `codex app-server`. Those modes take fewer flags than a one-shot turn:
+    /// a command with one they do not take runs a process per turn, as before.
+    pub fn live_cli(&self) -> bool {
+        match self.binary_name().as_str() {
+            "claude" => true,
+            "grok" | "agy" => self.acp_launch(&[], "", None).is_some(),
+            "codex" => self.codex_launch(&[], "", None).is_some(),
+            _ => false,
+        }
+    }
+
+    /// How to start a codex bot that stays up: `codex app-server`, and what
+    /// the thread is opened with instead of `exec`'s flags. None for any
+    /// other CLI, and for a command with a flag app-server does not take.
+    pub fn codex_launch(
+        &self,
+        roster: &[AgentConfig],
+        memory: &str,
+        isolated: Option<&Isolated>,
+    ) -> Option<CodexLaunch> {
+        let args = self.argv_with_memory(true, roster, memory, isolated);
+        if args.is_empty() || self.binary_name() != "codex" {
+            return None;
+        }
+        codex_app_launch(&args)
+    }
+
+    /// How to start a grok or agy bot that stays up over ACP: the argv, and
+    /// what goes to the session instead of the command line. None for any
+    /// other CLI, and for a command with a flag the ACP mode does not take.
+    pub fn acp_launch(
+        &self,
+        roster: &[AgentConfig],
+        memory: &str,
+        isolated: Option<&Isolated>,
+    ) -> Option<AcpLaunch> {
+        let args = self.argv_with_memory(true, roster, memory, isolated);
+        if args.is_empty() {
+            return None;
+        }
+        match self.binary_name().as_str() {
+            "grok" => grok_agent_launch(&args),
+            "agy" => agy_acp_launch(&args, system_text(self, roster, memory, isolated)),
+            _ => None,
+        }
+    }
+
+    /// argv for a `live_cli` process: `turn_cmd_in` without the prompt, which
+    /// goes to stdin as a stream-json line, so no argument can be read as a flag.
+    pub fn live_cmd_in(
+        &self,
+        session: Option<&TurnSession>,
+        roster: &[AgentConfig],
+        memory: &str,
+        isolated: Option<&Isolated>,
+    ) -> Vec<String> {
+        let mut args = self.argv_with_memory(true, roster, memory, isolated);
+        if !args.is_empty() {
+            apply_claude_live(&mut args, session);
         }
         args
     }
@@ -1495,12 +1563,12 @@ fn inject_team_rules(
     }
 }
 
-/// Team rules and memory have no flag on these CLIs, so they lead the prompt.
-fn prompt_with_preamble(
+/// Team rules, then memory under its heading: what a CLI with no system
+/// prompt flag reads ahead of the prompt.
+fn system_text(
     agent: &AgentConfig,
     roster: &[AgentConfig],
     memory: &str,
-    prompt: &str,
     isolated: Option<&Isolated>,
 ) -> String {
     let mut body = team_rules_for(agent, roster, isolated);
@@ -1511,6 +1579,18 @@ fn prompt_with_preamble(
         body.push('\n');
         body.push_str(memory);
     }
+    body
+}
+
+/// Team rules and memory have no flag on these CLIs, so they lead the prompt.
+fn prompt_with_preamble(
+    agent: &AgentConfig,
+    roster: &[AgentConfig],
+    memory: &str,
+    prompt: &str,
+    isolated: Option<&Isolated>,
+) -> String {
+    let mut body = system_text(agent, roster, memory, isolated);
     if !body.ends_with('\n') {
         body.push('\n');
     }
@@ -1617,20 +1697,302 @@ fn apply_grok_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSe
 /// How long a grok turn waits on the background work it started.
 const GROK_BACKGROUND_WAIT_SECS: u64 = 60 * 60;
 
+/// Which CLI an ACP process is: they set up a session differently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AcpCli {
+    Grok,
+    Agy,
+}
+
+/// A grok or agy process that stays up and speaks ACP on stdio.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AcpLaunch {
+    pub cli: AcpCli,
+    pub argv: Vec<String>,
+    /// The team rules and memory, for the session's system prompt.
+    pub rules: String,
+    /// agy takes these per session; grok has them on `argv`.
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+/// One flag of a bot's command, with its value when it takes one.
+struct CmdFlag<'a> {
+    name: &'a str,
+    value: Option<String>,
+}
+
+/// Walk `args` after the program the way `remove_flag_with_value` reads them:
+/// a value flag takes `--flag=value`, or the next word unless it starts with
+/// `-`. `takes_value` names the value flags. None for a bare word, which no
+/// command Crew starts over ACP can place.
+fn cmd_flags<'a>(args: &'a [String], takes_value: &[&str]) -> Option<Vec<CmdFlag<'a>>> {
+    let mut out = Vec::new();
+    let mut i = 1;
+    while i < args.len() {
+        let arg = args[i].as_str();
+        if !arg.starts_with('-') {
+            return None;
+        }
+        let (name, inline) = match arg.split_once('=') {
+            Some((name, value)) if arg.starts_with("--") => (name, Some(value.to_string())),
+            _ => (arg, None),
+        };
+        let value = if inline.is_some() {
+            inline
+        } else if takes_value.contains(&name) {
+            match args.get(i + 1).filter(|next| !next.starts_with('-')) {
+                Some(next) => {
+                    i += 1;
+                    Some(next.clone())
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+        out.push(CmdFlag { name, value });
+        i += 1;
+    }
+    Some(out)
+}
+
+/// `grok agent [options] --no-leader stdio`. The rules go to `session/new`:
+/// `grok agent` has no `--rules`. Crew's one-shot flags have no use there.
+fn grok_agent_launch(args: &[String]) -> Option<AcpLaunch> {
+    const AGENT_VALUES: [&str; 6] = [
+        "--model",
+        "-m",
+        "--reasoning-effort",
+        "--effort",
+        "--agent-profile",
+        "--plugin-dir",
+    ];
+    const TURN_VALUES: [&str; 8] = [
+        "--rules",
+        "--output-format",
+        "-p",
+        "--single",
+        "--background-wait-timeout",
+        "--background-shell-timeout",
+        "--prompt-file",
+        "--prompt-json",
+    ];
+    let takes: Vec<&str> = AGENT_VALUES.iter().chain(&TURN_VALUES).copied().collect();
+    let mut argv = vec![args[0].clone(), "agent".to_string()];
+    let mut rules: Vec<String> = Vec::new();
+    for flag in cmd_flags(args, &takes)? {
+        match flag.name {
+            "--always-approve" | "--yolo" if flag.value.is_none() => {
+                argv.push("--always-approve".into())
+            }
+            name if AGENT_VALUES.contains(&name) => {
+                argv.push(name.to_string());
+                argv.push(flag.value?);
+            }
+            "--rules" => rules.extend(flag.value.filter(|v| !v.trim().is_empty())),
+            name if TURN_VALUES.contains(&name) => {}
+            "--no-wait-for-background" | "--no-leader" => {}
+            _ => return None,
+        }
+    }
+    argv.push("--no-leader".into());
+    argv.push("stdio".into());
+    Some(AcpLaunch {
+        cli: AcpCli::Grok,
+        argv,
+        rules: rules.join("\n\n"),
+        model: None,
+        effort: None,
+    })
+}
+
+/// A codex process that stays up and speaks app-server JSON-RPC on stdio.
+/// Model, effort and the developer instructions go to the thread, where
+/// `exec` used to take them as flags. `--yolo` is an approval policy of
+/// `never` and a `danger-full-access` sandbox: app-server rejects the flag.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CodexLaunch {
+    pub argv: Vec<String>,
+    pub rules: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub approval: Option<String>,
+    pub sandbox: Option<String>,
+}
+
+/// `codex app-server`. Flags a one-shot `exec` turn adds, and ones app-server
+/// does not take, come off the command line. A flag this does not know keeps
+/// the bot on a process per turn.
+fn codex_app_launch(args: &[String]) -> Option<CodexLaunch> {
+    const VALUES: &[&str] = &[
+        "--model",
+        "-m",
+        "-c",
+        "--config",
+        "--sandbox",
+        "-s",
+        "--ask-for-approval",
+        "-a",
+        "--cd",
+        "-C",
+        "--profile",
+        "-p",
+        "--enable",
+        "--disable",
+        "--add-dir",
+        "--local-provider",
+        "--image",
+        "-i",
+    ];
+    let mut argv = vec![args[0].clone(), "app-server".to_string()];
+    let mut rules = String::new();
+    let (mut model, mut effort) = (None, None);
+    let (mut approval, mut sandbox) = (None, None);
+    let mut yolo = false;
+    for flag in cmd_flags(args, VALUES)? {
+        match flag.name {
+            "--yolo" | "--dangerously-bypass-approvals-and-sandbox" if flag.value.is_none() => {
+                yolo = true;
+            }
+            "--model" | "-m" => model = Some(flag.value?),
+            "--sandbox" | "-s" => sandbox = Some(flag.value?),
+            "--ask-for-approval" | "-a" => approval = Some(flag.value?),
+            // The process's own cwd is the bot's folder.
+            "--cd" | "-C" => {
+                flag.value?;
+            }
+            "-c" | "--config" => {
+                let raw = flag.value?;
+                let Some((key, value)) = raw.split_once('=') else {
+                    return None;
+                };
+                match key {
+                    "model_reasoning_effort" => effort = Some(value.to_string()),
+                    "developer_instructions" => {
+                        let value = value.trim();
+                        if !value.is_empty() {
+                            if !rules.is_empty() {
+                                rules.push_str("\n\n");
+                            }
+                            rules.push_str(value);
+                        }
+                    }
+                    "approval_policy" => approval = Some(value.to_string()),
+                    "sandbox_mode" => sandbox = Some(value.to_string()),
+                    _ => {
+                        argv.push(flag.name.to_string());
+                        argv.push(raw);
+                    }
+                }
+            }
+            "--profile" | "-p" | "--enable" | "--disable" | "--add-dir" | "--local-provider"
+            | "--oss" | "--strict-config" => {
+                argv.push(flag.name.to_string());
+                if let Some(value) = flag.value {
+                    argv.push(value);
+                }
+            }
+            _ => return None,
+        }
+    }
+    if yolo {
+        if approval.is_none() {
+            approval = Some("never".into());
+        }
+        if sandbox.is_none() {
+            sandbox = Some("danger-full-access".into());
+        }
+    }
+    Some(CodexLaunch {
+        argv,
+        rules,
+        model,
+        effort,
+        approval,
+        sandbox,
+    })
+}
+
+/// `agy acp [options] --dangerously-skip-permissions`. `agy acp` takes no
+/// model or effort: those are set on the session.
+fn agy_acp_launch(args: &[String], rules: String) -> Option<AcpLaunch> {
+    const ACP_VALUES: [&str; 2] = ["--add-dir", "--agent"];
+    const TURN_VALUES: [&str; 3] = ["--output-format", "--input-format", "--conversation"];
+    let takes: Vec<&str> = ACP_VALUES
+        .iter()
+        .chain(&TURN_VALUES)
+        .chain(&["--model", "-m", "--effort"])
+        .copied()
+        .collect();
+    let mut argv = vec![args[0].clone(), "acp".to_string()];
+    let (mut model, mut effort) = (None, None);
+    for flag in cmd_flags(args, &takes)? {
+        match flag.name {
+            "--dangerously-skip-permissions" | "--sandbox" if flag.value.is_none() => {
+                if flag.name == "--sandbox" {
+                    argv.push("--sandbox".into());
+                }
+            }
+            name if ACP_VALUES.contains(&name) => {
+                argv.push(name.to_string());
+                argv.push(flag.value?);
+            }
+            "--model" | "-m" => model = Some(flag.value?),
+            "--effort" => effort = Some(flag.value?),
+            name if TURN_VALUES.contains(&name) => {}
+            "-p" | "--print" | "--prompt" | "-i" | "--prompt-interactive" => {}
+            "--continue" | "-c" => {}
+            _ => return None,
+        }
+    }
+    // A one-shot turn always runs with it (see `apply_agy_turn`).
+    argv.push("--dangerously-skip-permissions".into());
+    Some(AcpLaunch {
+        cli: AcpCli::Agy,
+        argv,
+        rules,
+        model,
+        effort,
+    })
+}
+
 fn apply_claude_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSession>) {
+    apply_claude_stream(args);
+    apply_session_flags(args, session, "--resume", "--session-id");
+    args.push(prompt.to_string());
+}
+
+/// Claude reading stream-json on stdin: one `{"type":"user",…}` line a turn,
+/// and the process stays up until stdin closes.
+fn apply_claude_live(args: &mut Vec<String>, session: Option<&TurnSession>) {
+    apply_claude_stream(args);
+    args.push("--input-format".into());
+    args.push("stream-json".into());
+    apply_session_flags(args, session, "--resume", "--session-id");
+}
+
+fn apply_claude_stream(args: &mut Vec<String>) {
     remove_switch(
         args,
         &["-p", "--print", "--include-partial-messages", "--verbose"],
     );
-    remove_flag_with_value(args, &["--output-format", "--resume", "-r", "--session-id"]);
+    remove_flag_with_value(
+        args,
+        &[
+            "--output-format",
+            "--input-format",
+            "--resume",
+            "-r",
+            "--session-id",
+        ],
+    );
     args.push("-p".into());
     args.push("--output-format".into());
     args.push("stream-json".into());
     args.push("--include-partial-messages".into());
     // Claude CLI 2.x: `-p --output-format=stream-json` exits unless `--verbose`.
     args.push("--verbose".into());
-    apply_session_flags(args, session, "--resume", "--session-id");
-    args.push(prompt.to_string());
 }
 
 fn apply_codex_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSession>) {
@@ -2072,6 +2434,149 @@ mod tests {
         let argv = c.turn_cmd("next", Some(&resume), &[], "");
         assert!(argv.contains(&"--resume".to_string()));
         assert_eq!(argv.last().map(|s| s.as_str()), Some("next"));
+    }
+
+    #[test]
+    fn live_claude_reads_its_prompts_from_stdin() {
+        let pair = |argv: &[String], flag: &str, value: &str| {
+            argv.windows(2).any(|w| w[0] == flag && w[1] == value)
+        };
+        let cmd = ["claude", "--input-format", "text", "--yolo"];
+        let c = cfg(&cmd, Some("haiku"), None);
+        assert!(c.live_cli());
+        assert!(!cfg(&["gemini"], None, None).live_cli());
+        let resume = TurnSession {
+            id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee".into(),
+            resume: true,
+        };
+        let argv = c.live_cmd_in(Some(&resume), &[], "", None);
+        assert!(pair(&argv, "--input-format", "stream-json"), "{argv:?}");
+        assert!(!argv.iter().any(|a| a == "text"), "{argv:?}");
+        assert!(pair(&argv, "--output-format", "stream-json"), "{argv:?}");
+        assert!(pair(&argv, "--model", "haiku"), "{argv:?}");
+        assert!(argv.contains(&"--yolo".to_string()));
+        assert_eq!(&argv[argv.len() - 2..], ["--resume", resume.id.as_str()]);
+        // Without a session it is what the process was started with, so two
+        // turns compare equal while nothing they would spawn with changed.
+        let bare = c.live_cmd_in(None, &[], "", None);
+        assert!(!bare.iter().any(|a| a == "--resume" || a == "--session-id"));
+        assert_eq!(bare, c.live_cmd_in(None, &[], "", None));
+    }
+
+    #[test]
+    fn acp_grok_is_grok_agent_on_stdio_with_rules_for_the_session() {
+        let c = cfg(
+            &[
+                "grok",
+                "--always-approve",
+                "--rules",
+                "Be brief.",
+                "-r",
+                "old",
+            ],
+            Some("grok-4.7-build-fast"),
+            Some(Effort::Low),
+        );
+        assert!(c.live_cli());
+        assert!(!c.prompt_mode());
+        let launch = c.acp_launch(&[], "likes tea", None).unwrap();
+        assert_eq!(launch.cli, AcpCli::Grok);
+        assert_eq!(
+            launch.argv,
+            [
+                "grok",
+                "agent",
+                "--always-approve",
+                "--model",
+                "grok-4.7-build-fast",
+                "--reasoning-effort",
+                "low",
+                "--no-leader",
+                "stdio"
+            ]
+        );
+        // The bot's own rules, then the team rules, then memory, as `--rules`
+        // had them.
+        assert!(
+            launch.rules.starts_with("Be brief.\n\n"),
+            "{}",
+            launch.rules
+        );
+        assert!(launch.rules.contains("crew tell"));
+        assert!(launch.rules.ends_with("# Your memory\nlikes tea"));
+        assert_eq!(launch.model, None);
+        // A flag `grok agent` does not take keeps the bot on a process a turn.
+        let web = cfg(
+            &["grok", "--always-approve", "--disable-web-search"],
+            None,
+            None,
+        );
+        assert!(web.acp_launch(&[], "", None).is_none());
+        assert!(!web.live_cli());
+        assert!(!cfg(&["grok", "stray"], None, None).live_cli());
+    }
+
+    #[test]
+    fn acp_agy_is_agy_acp_with_model_and_effort_for_the_session() {
+        let c = cfg(
+            &["agy", "--add-dir", "/tmp/x", "-c"],
+            Some("gemini-3.8-flash-low"),
+            Some(Effort::Low),
+        );
+        assert!(c.live_cli());
+        // It holds its session, so a turn no longer sends the chat so far.
+        assert!(!c.prompt_mode());
+        let launch = c.acp_launch(&[], "likes tea", None).unwrap();
+        assert_eq!(launch.cli, AcpCli::Agy);
+        assert_eq!(
+            launch.argv,
+            [
+                "agy",
+                "acp",
+                "--add-dir",
+                "/tmp/x",
+                "--dangerously-skip-permissions"
+            ]
+        );
+        assert_eq!(launch.model.as_deref(), Some("gemini-3.8-flash-low"));
+        assert_eq!(launch.effort.as_deref(), Some("low"));
+        assert!(launch.rules.contains("crew tell"));
+        assert!(launch.rules.ends_with("# Your memory\nlikes tea"));
+        let mode = cfg(&["agy", "--mode", "plan"], None, None);
+        assert!(mode.acp_launch(&[], "", None).is_none());
+        assert!(!mode.live_cli());
+        assert!(mode.prompt_mode());
+    }
+
+    #[test]
+    fn codex_stays_up_as_app_server_and_keeps_yolo_off_the_command() {
+        let c = cfg(
+            &["codex", "--yolo"],
+            Some("gpt-5.6-terra"),
+            Some(Effort::Medium),
+        );
+        assert!(c.live_cli());
+        let launch = c.codex_launch(&[], "likes tea", None).unwrap();
+        assert_eq!(launch.argv, ["codex", "app-server"]);
+        assert_eq!(launch.model.as_deref(), Some("gpt-5.6-terra"));
+        assert_eq!(launch.effort.as_deref(), Some("medium"));
+        assert_eq!(launch.approval.as_deref(), Some("never"));
+        assert_eq!(launch.sandbox.as_deref(), Some("danger-full-access"));
+        assert!(launch.rules.contains("crew tell"), "{}", launch.rules);
+        assert!(
+            launch.rules.ends_with("# Your memory\nlikes tea"),
+            "{}",
+            launch.rules
+        );
+        // app-server rejects `--yolo`, so it is the thread's approval policy.
+        assert!(!launch.argv.iter().any(|a| a == "--yolo"));
+        // A flag app-server does not take keeps a process per turn.
+        let search = cfg(&["codex", "--yolo", "--search"], None, None);
+        assert!(search.codex_launch(&[], "", None).is_none());
+        assert!(!search.live_cli());
+        let argv = search.turn_cmd("hello", None, &[], "");
+        assert_eq!(argv[1], "exec");
+        assert!(argv.contains(&"--search".to_string()));
     }
 
     #[test]

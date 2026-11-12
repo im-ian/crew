@@ -15,6 +15,8 @@ use crate::config::{AgentConfig, TurnSession};
 use crate::paths;
 use crate::protocol::{AgentStatus, Watch};
 
+mod live;
+
 pub struct HeadlessSession {
     pub id: String,
     pub name: String,
@@ -39,7 +41,20 @@ pub struct HeadlessInner {
     pub first_output_timeout: Option<Duration>,
     /// The reply is done and the CLI is up only for this background work.
     /// The agent stays working, so a send waits, but the chat is not waiting.
+    /// A Claude process kept up between turns lists its tasks here while the
+    /// agent is idle, and a send goes straight to it.
     pub watch: Vec<Watch>,
+    /// The Claude process kept up between turns (see `live`).
+    live: Option<live::LiveCli>,
+    /// A turn is running on `live`. Like `child`, it keeps the next turn out.
+    live_turn: bool,
+}
+
+impl HeadlessInner {
+    /// A turn holds the CLI, so the next one waits for it.
+    pub fn turn_running(&self) -> bool {
+        self.child.is_some() || self.live_turn
+    }
 }
 
 /// How long a turn may sit before its first stdout line. Later silence is a
@@ -105,6 +120,8 @@ pub fn open(
             in_flight: None,
             first_output_timeout: None,
             watch: Vec::new(),
+            live: None,
+            live_turn: false,
         }),
     }))
 }
@@ -293,17 +310,22 @@ fn shared_note_due(every_turn: bool, resume: bool, seen: Option<&str>, note: &st
 /// Drop the CLI session so the next turn opens a new one. Refused mid-turn:
 /// that turn would save its session back when it ends.
 pub fn forget_session(session: &HeadlessSession) -> anyhow::Result<()> {
-    let mut inner = session.inner.lock().expect("headless inner");
-    if inner.status == AgentStatus::Working || inner.child.is_some() {
-        anyhow::bail!("agent {} is working; switch once it finishes", session.id);
+    {
+        let mut inner = session.inner.lock().expect("headless inner");
+        if inner.status == AgentStatus::Working || inner.turn_running() {
+            anyhow::bail!("agent {} is working; switch once it finishes", session.id);
+        }
+        inner.session_id = None;
+        clear_session(&session.id);
     }
-    inner.session_id = None;
-    clear_session(&session.id);
+    // It holds the session just dropped.
+    live::close(session);
     Ok(())
 }
 
-pub fn kill(session: &HeadlessSession) {
-    interrupt(session);
+/// Stop the turn and the CLI kept up between turns, and drop the session.
+pub fn kill(session: &Arc<HeadlessSession>) {
+    halt(session);
     if let Ok(mut inner) = session.inner.lock() {
         inner.session_id = None;
     }
@@ -313,8 +335,22 @@ pub fn kill(session: &HeadlessSession) {
 /// Stop the in-flight child. Keeps the CLI session so a later turn can resume.
 /// Does not undo already-sealed assistant text. A prompt the CLI never wrote
 /// a line for goes back to the inbox; the caller cleared the chain first.
-pub fn interrupt(session: &HeadlessSession) {
+/// A Claude process kept up between turns is asked to stop the turn and stays
+/// up, with what it runs in the background.
+pub fn interrupt(session: &Arc<HeadlessSession>) {
+    stop(session, true);
+}
+
+/// `interrupt`, and the CLI kept up between turns goes too. The session stays.
+pub fn halt(session: &Arc<HeadlessSession>) {
+    stop(session, false);
+}
+
+fn stop(session: &Arc<HeadlessSession>, keep_cli: bool) {
     let Some(pulled) = pull_turn(session, None, false) else {
+        if !keep_cli {
+            live::close(session);
+        }
         return;
     };
     // Before the kill. A wait that does not return would leave the lines gone.
@@ -324,6 +360,7 @@ pub fn interrupt(session: &HeadlessSession) {
     if let Some(mut child) = pulled.child {
         kill_all(&mut child);
     }
+    live::stop(session, pulled.live, keep_cli);
 }
 
 /// Record `flight` as the prompt the CLI is about to read.
@@ -359,6 +396,9 @@ struct PulledTurn {
     child: Option<Child>,
     /// The prompt, when the CLI had not written a line yet.
     unheard: Option<InFlight>,
+    /// The generation of the turn taken from the Claude process kept up
+    /// between turns. That process is not in `child`.
+    live: Option<u64>,
 }
 
 /// `only_unheard` claims the turn only when it is still running and no stdout
@@ -375,7 +415,7 @@ fn pull_turn(
         }
     }
     if only_unheard {
-        let unheard = inner.child.is_some()
+        let unheard = inner.turn_running()
             && inner
                 .in_flight
                 .as_ref()
@@ -384,6 +424,8 @@ fn pull_turn(
             return None;
         }
     }
+    let live = inner.live_turn.then_some(inner.generation);
+    inner.live_turn = false;
     inner.generation = inner.generation.wrapping_add(1);
     inner.interrupted = true;
     inner.watch.clear();
@@ -394,7 +436,11 @@ fn pull_turn(
     let flight = inner.in_flight.take();
     let unheard = flight.filter(|flight| !flight.got_output);
     let child = inner.child.take();
-    Some(PulledTurn { child, unheard })
+    Some(PulledTurn {
+        child,
+        unheard,
+        live,
+    })
 }
 
 fn arm_first_output_watch(session: Arc<HeadlessSession>, generation: u64, cli: CliKind) {
@@ -443,6 +489,11 @@ fn give_back_if_unheard(session: Arc<HeadlessSession>, generation: u64) {
     }
     if let Some(mut child) = pulled.child {
         kill_all(&mut child);
+    }
+    // A Claude process kept up between turns that did not take the prompt
+    // may still hold it, so it goes as well.
+    if pulled.live.is_some() {
+        live::close(&session);
     }
     // After the kill, so the stuck CLI is gone before the new one starts.
     if retry {
@@ -529,7 +580,7 @@ pub fn kick(
 ) -> anyhow::Result<()> {
     let generation = {
         let mut inner = session.inner.lock().expect("headless inner");
-        if inner.status == AgentStatus::Working || inner.child.is_some() {
+        if inner.status == AgentStatus::Working || inner.turn_running() {
             anyhow::bail!("agent {} is working", session.id);
         }
         inner.interrupted = false;
@@ -627,6 +678,17 @@ fn run_turn(
         None => prompt,
     };
     let resume = turn_session.as_ref().is_some_and(|s| s.resume);
+    // agy kept up between turns holds a session, and a new one has none of
+    // the chat yet: it used to read the chat so far on every turn.
+    let live_cli = cfg.live_cli();
+    let prompt = if live_cli && program == "agy" && !resume && recap.is_none() {
+        match crate::transcript::prior_recap_excluding(&session.id, &skip_rows) {
+            Some(prior) => with_prior(&prior, &prompt),
+            None => prompt,
+        }
+    } else {
+        prompt
+    };
     mark_resumed(&session, resume);
     let memory_now = crate::memory::read(&session.id);
     let (memory_seen, memory_note) = memory_for_turn(
@@ -665,18 +727,37 @@ fn run_turn(
         prompt
     };
     let place = crate::worktree::place_for(&cfg.id, &crate::config::Config::default_cwd(&cfg));
-    let argv = cfg.turn_cmd_in(
-        &prompt,
-        turn_session.as_ref(),
-        &roster,
-        &memory_seen.start,
-        place.isolated.as_ref(),
-    );
-    let cwd = place.cwd;
+    let cwd = place.cwd.clone();
     if let Err(err) = crate::paths::create_cwd(&cwd) {
         eprintln!("[crew] cwd {}: {err:#}", cwd.display());
     }
-    let result = spawn_and_stream(&session, &argv, generation, &mut turn, &cwd);
+    let launch = live_cli
+        .then(|| {
+            live_launch(
+                &cfg,
+                &roster,
+                &memory_seen.start,
+                place.isolated.as_ref(),
+                turn_session.as_ref(),
+                &cwd,
+            )
+        })
+        .flatten();
+    let live_cli = launch.is_some();
+    let result = if let Some(launch) = launch.as_ref() {
+        live::run_turn(&session, launch, &prompt, generation, &mut turn)
+    } else {
+        // A bot that moved off a CLI kept up between turns leaves no process.
+        live::close(&session);
+        let argv = cfg.turn_cmd_in(
+            &prompt,
+            turn_session.as_ref(),
+            &roster,
+            &memory_seen.start,
+            place.isolated.as_ref(),
+        );
+        spawn_and_stream(&session, &argv, generation, &mut turn, &cwd)
+    };
 
     if is_stale(&session, generation) {
         crate::transcript::end_turn_gen(&session.id, Some(turn));
@@ -687,9 +768,11 @@ fn run_turn(
     // A stop never gets here: it went stale above. The first-output watch goes
     // stale too, and marks its own failure.
     let failed;
+    let mut hold_subagent = false;
     match result {
         Ok(outcome) => {
             failed = outcome.error.is_some() && !outcome.got_text;
+            hold_subagent = outcome.subagents;
             let dead = session_is_dead(
                 outcome.got_text,
                 outcome.error.as_deref(),
@@ -733,6 +816,9 @@ fn run_turn(
                             inner.session_id = Some(id.to_string());
                         }
                         let _ = save_session(&session.id, id);
+                        if live_cli {
+                            live::note_session(&session, generation, id);
+                        }
                     }
                 }
             }
@@ -787,7 +873,13 @@ fn run_turn(
         if inner.generation == generation {
             inner.in_flight = None;
         }
-        if inner.status != AgentStatus::Exited && inner.status != AgentStatus::Blocked {
+        live::settle(&mut inner, generation);
+        // A subagent still out keeps the bot working. The report, which
+        // arrives after this turn, is what lets it go idle.
+        if !hold_subagent
+            && inner.status != AgentStatus::Exited
+            && inner.status != AgentStatus::Blocked
+        {
             inner.status = AgentStatus::Idle;
         }
         inner.last_output = Instant::now();
@@ -797,6 +889,87 @@ fn run_turn(
     // Before the inbox: the next turn replaces this origin.
     crate::daemon::turn_ended(&session.id);
     crate::daemon::pump_inbox(&session.id);
+}
+
+/// How a turn of a bot whose CLI stays up between turns reaches it. None
+/// when its command cannot start that way.
+fn live_launch(
+    cfg: &AgentConfig,
+    roster: &[AgentConfig],
+    memory: &str,
+    isolated: Option<&crate::worktree::Isolated>,
+    turn_session: Option<&TurnSession>,
+    cwd: &Path,
+) -> Option<live::Launch> {
+    let session_id = turn_session.map(|s| s.id.clone());
+    if cfg.binary_name() == "claude" {
+        return Some(live::Launch {
+            proto: live::Proto::Claude,
+            argv: cfg.live_cmd_in(turn_session, roster, memory, isolated),
+            started: live::Started {
+                argv: cfg.live_cmd_in(None, roster, memory, isolated),
+                cwd: cwd.to_path_buf(),
+                session_id,
+                setup: String::new(),
+            },
+            acp: None,
+            codex: None,
+        });
+    }
+    if cfg.binary_name() == "codex" {
+        let codex = cfg.codex_launch(roster, memory, isolated)?;
+        // Model, effort, approval, sandbox and the instructions are not on
+        // the argv. A change to any of them starts a new process once idle.
+        let setup = format!(
+            "{:?}\0{:?}\0{:?}\0{:?}\0{}",
+            codex.model, codex.effort, codex.approval, codex.sandbox, codex.rules
+        );
+        return Some(live::Launch {
+            proto: live::Proto::Codex,
+            argv: codex.argv.clone(),
+            started: live::Started {
+                argv: codex.argv,
+                cwd: cwd.to_path_buf(),
+                session_id,
+                setup,
+            },
+            acp: None,
+            codex: Some(live::CodexSetup {
+                rules: codex.rules,
+                model: codex.model,
+                effort: codex.effort,
+                approval: codex.approval,
+                sandbox: codex.sandbox,
+                load: turn_session.filter(|s| s.resume).map(|s| s.id.clone()),
+            }),
+        });
+    }
+    let acp = cfg.acp_launch(roster, memory, isolated)?;
+    // grok keeps the rules a session was opened with, so new ones need no
+    // new process. agy takes them, and its model and effort, per session.
+    let setup = match acp.cli {
+        crate::config::AcpCli::Grok => String::new(),
+        crate::config::AcpCli::Agy => {
+            format!("{:?}\0{:?}\0{}", acp.model, acp.effort, acp.rules)
+        }
+    };
+    Some(live::Launch {
+        proto: live::Proto::Acp(acp.cli),
+        argv: acp.argv.clone(),
+        started: live::Started {
+            argv: acp.argv,
+            cwd: cwd.to_path_buf(),
+            session_id,
+            setup,
+        },
+        acp: Some(live::AcpSetup {
+            rules: acp.rules,
+            model: acp.model,
+            effort: acp.effort,
+            load: turn_session.filter(|s| s.resume).map(|s| s.id.clone()),
+        }),
+        codex: None,
+    })
 }
 
 /// True when this turn was stopped. The first line that still belongs to it
@@ -842,26 +1015,8 @@ fn session_is_dead(
     }
 }
 
-struct TurnOutcome {
-    session_id: Option<String>,
-    got_text: bool,
-    error: Option<String>,
-    /// The CLI compacted the session during this turn.
-    compacted: bool,
-    /// What the CLI still ran after its reply when it exited.
-    watched: Vec<String>,
-}
-
-fn spawn_and_stream(
-    session: &Arc<HeadlessSession>,
-    argv: &[String],
-    generation: u64,
-    turn: &mut u64,
-    cwd: &std::path::Path,
-) -> anyhow::Result<TurnOutcome> {
-    if argv.is_empty() {
-        anyhow::bail!("empty command");
-    }
+/// The CLI process for `argv`, stdout and stderr piped. The caller sets stdin.
+fn cli_command(session: &HeadlessSession, argv: &[String], cwd: &Path) -> Command {
     let program = paths::resolve_program(&argv[0]);
     let mut cmd = Command::new(program.as_os_str());
     for arg in argv.iter().skip(1) {
@@ -876,11 +1031,39 @@ fn spawn_and_stream(
     cmd.env("GROK_CLAUDE_AGENTS_ENABLED", "false");
     cmd.env("TERM", "dumb");
     cmd.env("NO_COLOR", "1");
-    cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
     // Its own group, so a stop reaches all of it (see `kill_all`).
     cmd.process_group(0);
+    cmd
+}
+
+struct TurnOutcome {
+    session_id: Option<String>,
+    got_text: bool,
+    error: Option<String>,
+    /// The CLI compacted the session during this turn.
+    compacted: bool,
+    /// What the CLI still ran after its reply when it exited.
+    watched: Vec<String>,
+    /// A Claude subagent this turn started has not reported yet. The bot stays
+    /// working, and goes idle when that report arrives. A background task does
+    /// not: the process staying up is not work.
+    subagents: bool,
+}
+
+fn spawn_and_stream(
+    session: &Arc<HeadlessSession>,
+    argv: &[String],
+    generation: u64,
+    turn: &mut u64,
+    cwd: &std::path::Path,
+) -> anyhow::Result<TurnOutcome> {
+    if argv.is_empty() {
+        anyhow::bail!("empty command");
+    }
+    let mut cmd = cli_command(session, argv, cwd);
+    cmd.stdin(Stdio::null());
 
     let mut child = cmd
         .spawn()
@@ -1056,47 +1239,8 @@ fn spawn_and_stream(
                     state.error = Some(err);
                 }
             }
-        } else if cli != CliKind::Other {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
-                for card in crate::tool_card::from_events(&v) {
-                    if cli == CliKind::Claude && is_subagent_call(&v, &card.name) {
-                        continue;
-                    }
-                    crate::transcript::push_tool(
-                        &session.id,
-                        card.id.as_deref(),
-                        &card.name,
-                        &card.detail,
-                    );
-                }
-                if cli == CliKind::Claude {
-                    note_claude_background(&v, &mut state);
-                    crate::usage::note_claude_event(&v);
-                    for note in claude_subagent_notes(&v, &mut state) {
-                        crate::transcript::push_subagent(
-                            &session.id,
-                            &note.key,
-                            &note.from,
-                            &note.text,
-                        );
-                    }
-                }
-                turn_end = is_turn_end(cli, &v);
-            }
-        }
-        if cli != CliKind::Grok {
-            if let Some(chunk) = ingest_line(cli, &line, &mut state) {
-                feed_text(cli, session, &chunk, state.codex_new_message);
-                if let Ok(mut inner) = session.inner.lock() {
-                    inner.last_output = Instant::now();
-                    inner.seq += 1;
-                }
-            } else if let Some(line) = other_reply_line(cli, &line) {
-                if !plain.is_empty() {
-                    plain.push('\n');
-                }
-                plain.push_str(line);
-            }
+        } else {
+            turn_end = stream_line(session, cli, &line, &mut state, &mut plain);
         }
         show_compacts(session, &mut state);
         if let Some(id) = state.session_id.as_ref() {
@@ -1180,7 +1324,61 @@ fn spawn_and_stream(
         error,
         compacted: state.compacted,
         watched,
+        subagents: false,
     })
+}
+
+/// Tool cards, side-chat notes, and reply text for one stdout line of a CLI
+/// other than grok. True on the line that ends the CLI's turn.
+fn stream_line(
+    session: &HeadlessSession,
+    cli: CliKind,
+    line: &str,
+    state: &mut ParseState,
+    plain: &mut String,
+) -> bool {
+    let mut turn_end = false;
+    if cli != CliKind::Other {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+            for card in crate::tool_card::from_events(&v) {
+                if cli == CliKind::Claude && is_subagent_call(&v, &card.name) {
+                    continue;
+                }
+                crate::transcript::push_tool(
+                    &session.id,
+                    card.id.as_deref(),
+                    &card.name,
+                    &card.detail,
+                );
+            }
+            if cli == CliKind::Claude {
+                note_claude_background(&v, state);
+                crate::usage::note_claude_event(&v);
+                for note in claude_subagent_notes(&v, state) {
+                    crate::transcript::push_subagent(
+                        &session.id,
+                        &note.key,
+                        &note.from,
+                        &note.text,
+                    );
+                }
+            }
+            turn_end = is_turn_end(cli, &v);
+        }
+    }
+    if let Some(chunk) = ingest_line(cli, line, state) {
+        feed_text(cli, session, &chunk, state.codex_new_message);
+        if let Ok(mut inner) = session.inner.lock() {
+            inner.last_output = Instant::now();
+            inner.seq += 1;
+        }
+    } else if let Some(line) = other_reply_line(cli, line) {
+        if !plain.is_empty() {
+            plain.push('\n');
+        }
+        plain.push_str(line);
+    }
+    turn_end
 }
 
 /// grok's exit after its wait on background work ran out, such as `the wait for
@@ -1341,10 +1539,17 @@ fn is_claude_turn_start(v: &Value) -> bool {
 
 /// Claude lists the tasks still running in the background on every change.
 fn note_claude_background(v: &Value, state: &mut ParseState) {
+    if let Some(next) = claude_background(v) {
+        keep_background(&mut state.background, next);
+    }
+}
+
+/// The task list in Claude's `background_tasks_changed`, as (id, description).
+fn claude_background(v: &Value) -> Option<Vec<(String, String)>> {
     if v.get("type").and_then(Value::as_str) != Some("system")
         || v.get("subtype").and_then(Value::as_str) != Some("background_tasks_changed")
     {
-        return;
+        return None;
     }
     let tasks = v.get("tasks").and_then(Value::as_array);
     let next = tasks
@@ -1363,23 +1568,23 @@ fn note_claude_background(v: &Value, state: &mut ParseState) {
             (key, what.to_string())
         })
         .collect();
-    keep_background(state, next);
+    Some(next)
 }
 
 /// Replace the running list, keeping when each task that stays started.
-fn keep_background(state: &mut ParseState, next: Vec<(String, String)>) {
+fn keep_background(background: &mut Vec<(String, Watch)>, next: Vec<(String, String)>) {
     let now = now_ms();
-    state.background = next
+    let kept = next
         .into_iter()
         .map(|(key, what)| {
-            let since = state
-                .background
+            let since = background
                 .iter()
                 .find(|(k, _)| *k == key)
                 .map_or(now, |(_, w)| w.since);
             (key, Watch { what, since })
         })
         .collect();
+    *background = kept;
 }
 
 /// The background tasks grok starts and finishes, from its tool calls.
@@ -1611,6 +1816,9 @@ struct ParseState {
     /// Canonical directory of this grok process. A spawn with no `cwd` stores
     /// its session here.
     grok_cwd: String,
+    /// A subagent's words come a token at a time, spaces and all, as over
+    /// ACP, not a sentence at a time.
+    child_tokens: bool,
 }
 
 impl ParseState {
@@ -1618,6 +1826,26 @@ impl ParseState {
     fn start_reply(&mut self) {
         self.tool_after_text = false;
         self.reply_break = false;
+    }
+
+    /// The next turn on a grok process kept up between turns: what this one
+    /// knew of the subagents, which may still be running, and nothing of its
+    /// reply. A foreground spawn ended with the turn.
+    fn next_turn(self) -> ParseState {
+        ParseState {
+            session_id: self.session_id,
+            background_calls: self.background_calls,
+            child_tool_ids: self.child_tool_ids,
+            parent_tool_ids: self.parent_tool_ids,
+            grok_children: self.grok_children,
+            grok_sessions: self.grok_sessions,
+            grok_pending: self.grok_pending,
+            grok_child_lines: self.grok_child_lines,
+            grok_sessions_root: self.grok_sessions_root,
+            grok_cwd: self.grok_cwd,
+            child_tokens: self.child_tokens,
+            ..ParseState::default()
+        }
     }
 }
 
@@ -1639,6 +1867,8 @@ struct GrokChild {
     /// The last utterance folded into `report`, so the finish output is not
     /// appended a second time.
     last: String,
+    /// The tokens it said so far, when they come one at a time.
+    streamed: String,
 }
 
 fn other_reply_line(cli: CliKind, line: &str) -> Option<&str> {
@@ -2093,18 +2323,29 @@ fn push_child_text(state: &mut ParseState, call_id: &str, text: &str) -> Option<
 }
 
 fn take_child_text(state: &mut ParseState, sid: &str, text: &str) -> Option<SubagentNote> {
+    let token = text;
     let text = text.trim();
-    if text.is_empty() {
+    if text.is_empty() && !state.child_tokens {
         return None;
     }
+    let push = |state: &mut ParseState, call: &str| {
+        if state.child_tokens {
+            push_child_token(state, call, token)
+        } else {
+            push_child_text(state, call, text)
+        }
+    };
     if let Some(call) = state.grok_sessions.get(sid).cloned() {
-        return push_child_text(state, &call, text);
+        return push(state, &call);
     }
     let unbound = unbound_calls(state);
     if unbound.len() == 1 {
         let call = unbound[0].clone();
         remember_session(state, &call, sid);
-        return push_child_text(state, &call, text);
+        return push(state, &call);
+    }
+    if text.is_empty() {
+        return None;
     }
     state
         .grok_pending
@@ -2112,6 +2353,24 @@ fn take_child_text(state: &mut ParseState, sid: &str, text: &str) -> Option<Suba
         .or_default()
         .push(text.to_string());
     None
+}
+
+/// A subagent's words as they stream, a token at a time. Its session file
+/// has them as sentences once it finishes, and those replace these (see
+/// `backfill_child`).
+fn push_child_token(state: &mut ParseState, call_id: &str, token: &str) -> Option<SubagentNote> {
+    let child = state.grok_children.get_mut(call_id)?;
+    child.streamed.push_str(token);
+    let text = child.streamed.trim();
+    if text.is_empty() || child.report == text {
+        return None;
+    }
+    child.report = text.to_string();
+    Some(SubagentNote {
+        key: format!("{call_id}/report"),
+        from: child.peer.clone(),
+        text: child.report.clone(),
+    })
 }
 
 fn join_utterances(lines: &[String]) -> String {
@@ -2597,6 +2856,7 @@ fn grok_subagent_notes(v: &Value, state: &mut ParseState) -> Vec<SubagentNote> {
                         session_id: None,
                         report: String::new(),
                         last: String::new(),
+                        streamed: String::new(),
                     },
                 );
             }
@@ -3738,6 +3998,8 @@ mod tests {
                 in_flight: None,
                 first_output_timeout: None,
                 watch: Vec::new(),
+                live: None,
+                live_turn: false,
             }),
         }
     }

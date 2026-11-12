@@ -607,7 +607,7 @@ fn live_status(id: &str) -> anyhow::Result<AgentStatus> {
     match live {
         LiveAgent::Headless(session) => {
             let inner = session.inner.lock().expect("headless inner");
-            if inner.child.is_some() {
+            if inner.turn_running() {
                 Ok(AgentStatus::Working)
             } else {
                 Ok(inner.status)
@@ -2595,19 +2595,20 @@ pub async fn run() -> anyhow::Result<()> {
                         paths::socket_path().display(),
                         if now.is_none() { "is gone" } else { "is a different socket now" }
                     );
-                    // Reap what is in flight first. `interrupt` bumps the
+                    // Reap what is in flight first. `halt` bumps the
                     // turn's generation, so `run_turn` returns at its
                     // staleness check — before the arm that calls
                     // `clear_session` on the ids this exit exists to leave
-                    // alone. Without it the turn's CLI child outlives us and
-                    // keeps writing the session the reachable daemon resumes.
+                    // alone. Without it the turn's CLI child, or the Claude
+                    // kept up between turns, outlives us and keeps writing
+                    // the session the reachable daemon resumes.
                     let live: Vec<LiveAgent> = match agents().lock() {
                         Ok(map) => map.values().cloned().collect(),
                         Err(_) => Vec::new(),
                     };
                     for agent in live {
                         if let LiveAgent::Headless(session) = agent {
-                            headless::interrupt(&session);
+                            headless::halt(&session);
                         }
                     }
                     // Then only exit. The socket, pid and version name whoever
@@ -5417,21 +5418,42 @@ mod daemon_tests {
         });
     }
 
+    /// Sets `$last` to the prompt: the stream-json line on stdin, decoded
+    /// well enough for test prompts, or the last argument.
+    const FAKE_CLAUDE_PROMPT: &str = r#"live=; for arg; do last=$arg; [ "$arg" = --input-format ] && live=1; done
+if [ -n "$live" ]; then
+  IFS= read -r line
+  last=$(printf '%s' "$line" | sed -e 's/^.*"content":"//' -e 's/"}}$//' -e 's/\\"/"/g')
+  last=$(printf '%b' "$last")
+fi
+"#;
+
     /// A stand-in `claude` in the test home, so a turn runs without the real
     /// CLI. It keeps the prompt it got in `prompt` beside it, then runs `body`.
     /// Notifications go off first: a turn's finish would post a real one.
+    ///
+    /// Crew keeps Claude up between turns and writes each prompt to its stdin
+    /// as a stream-json line. This one reads that first line into `$last`,
+    /// as the prompt argument it used to get, and exits when `body` ends, so
+    /// the next turn starts it again on the saved session.
     fn fake_claude(body: &str) -> String {
         use std::os::unix::fs::PermissionsExt;
         paths::write_notifications_enabled(false);
         let dir = paths::home_dir();
         let bin = dir.join("claude");
         let script = format!(
-            "#!/bin/sh\nfor arg; do last=$arg; done\nprintf '%s' \"$last\" > '{}'\n{body}\n",
+            "#!/bin/sh\n{FAKE_CLAUDE_PROMPT}printf '%s' \"$last\" > '{}'\n{body}\n",
             dir.join("prompt").display()
         );
         fs::write(&bin, script).unwrap();
         fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
         bin.display().to_string()
+    }
+
+    /// A stand-in grok's command with a flag `grok agent` does not take, so it
+    /// runs a process per turn and reads its prompt from the command line.
+    fn grok_per_turn(bin: &std::path::Path) -> Vec<String> {
+        vec![bin.display().to_string(), "--disable-web-search".into()]
     }
 
     /// grok answers, then its wait on a CI `monitor` runs out and it stops the
@@ -5455,7 +5477,7 @@ mod daemon_tests {
             insert_spawned_agent(AgentConfig::new(
                 bot.clone(),
                 bot.clone(),
-                vec![bin.display().to_string()],
+                grok_per_turn(&bin),
                 Some(paths::home_dir().display().to_string()),
             ))
             .unwrap();
@@ -5496,7 +5518,7 @@ mod daemon_tests {
             insert_spawned_agent(AgentConfig::new(
                 bot.clone(),
                 bot.clone(),
-                vec![bin.display().to_string()],
+                grok_per_turn(&bin),
                 Some(home.display().to_string()),
             ))
             .unwrap();
@@ -5989,10 +6011,17 @@ mod daemon_tests {
         paths::testing::with_home("send-queued-busy", || {
             let bot = test_id("sendb");
             let log = paths::home_dir().join("prompts");
+            // Claude stays up: it ends a stopped turn with its `result`, then
+            // reads the next prompt from stdin.
             let script = format!(
-                "printf '%s|' \"$last\" >> '{}'\n{}",
-                log.display(),
-                r#"case "$last" in *살았*) printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"alive"}]}}'; exec sleep 30 ;; esac"#
+                "printf '%s|' \"$last\" >> '{log}'\n{}",
+                r#"case "$last" in *살았*) printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"alive"}]}}'
+while IFS= read -r line; do case "$line" in
+*control_request*) printf '%s\n' '{"type":"result","subtype":"error_during_execution","is_error":true}' ;;
+*) printf '%s|' "$line" >> "$LOG"; printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"later"}]}}' '{"type":"result","subtype":"success"}' ;;
+esac; done ;; esac"#
+                    .replace("$LOG", &log.display().to_string()),
+                log = log.display(),
             );
             fake_bot_running(&bot, &script);
             wait_idle(&bot);
@@ -6237,15 +6266,36 @@ exec sleep 5"#,
         });
     }
 
+    /// A headless CLI Crew does not know: one process a turn, the prompt as
+    /// its last argument. It runs `body`.
+    fn fake_one_shot_bot(id: &str, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        paths::write_notifications_enabled(false);
+        let home = paths::home_dir();
+        let bin = home.join("oneshot");
+        fs::write(&bin, format!("#!/bin/sh\n{body}\n")).unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut cfg = AgentConfig::new(
+            id.into(),
+            id.into(),
+            vec![bin.display().to_string()],
+            Some(home.display().to_string()),
+        );
+        cfg.headless = true;
+        insert_spawned_agent(cfg).unwrap();
+    }
+
     /// npm's codex is a node launcher, and a stop killed only the launcher: the
-    /// CLI under it kept working, on the session the next turn resumes.
+    /// CLI under it kept working, on the session the next turn resumes. Claude
+    /// stays up through a stop; one that is stuck goes the same way (see
+    /// `claude_that_ignores_a_stop_is_killed`).
     #[test]
     fn a_stop_ends_the_whole_cli() {
         paths::testing::with_home("stop-group", || {
             let bot = test_id("group");
             let home = paths::home_dir();
             let (armed, outlived) = (home.join("armed"), home.join("outlived"));
-            fake_bot_running(
+            fake_one_shot_bot(
                 &bot,
                 &format!(
                     "( sleep 1; touch '{}' ) &\ntouch '{}'\nexec sleep 5",
@@ -7428,38 +7478,1462 @@ exec sleep 1"#,
             .collect()
     }
 
-    /// Claude answered and left a task in the background. The bot shows what
-    /// it watches until the task ends and claude answers again.
+    /// Claude answered and left a task in the background. It stays up for the
+    /// task, and the bot is idle and shows what it watches: a send goes to the
+    /// same process at once, and the task runs on. When the task ends Claude
+    /// answers on its own, and that answer is a reply of its own.
     #[test]
-    fn claude_shows_what_it_watches_after_answering() {
+    fn claude_takes_a_send_while_it_watches() {
         paths::testing::with_home("claude-watch", || {
             let bot = test_id("cwatch");
+            let pids = paths::home_dir().join("pids");
             fake_bot_running(
                 &bot,
-                r#"printf '%s\n' '{"type":"system","subtype":"init","session_id":"s1"}' '{"type":"assistant","message":{"content":[{"type":"text","text":"CI 끝나면 알려줄게요"}]}}' '{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"t1","description":"Watch PR 12 CI"}]}' '{"type":"result","subtype":"success","result":"CI 끝나면 알려줄게요"}'
-sleep 2
-printf '%s\n' '{"type":"system","subtype":"background_tasks_changed","tasks":[]}' '{"type":"system","subtype":"init","session_id":"s1"}' '{"type":"assistant","message":{"content":[{"type":"text","text":"CI 통과했어요"}]}}' '{"type":"result","subtype":"success","result":"CI 통과했어요"}'"#,
+                &format!(
+                    r#"echo $$ >> '{}'
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"CI 끝나면 알려줄게요"}}]}}}}' '{{"type":"system","subtype":"background_tasks_changed","tasks":[{{"task_id":"t1","description":"Watch PR 12 CI"}}]}}' '{{"type":"result","subtype":"success","result":"CI 끝나면 알려줄게요"}}'
+(sleep 2; printf '%s\n' '{{"type":"system","subtype":"background_tasks_changed","tasks":[]}}' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"CI 통과했어요"}}]}}}}' '{{"type":"result","subtype":"success","result":"CI 통과했어요"}}') &
+while IFS= read -r line; do printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"다음 거 할게요"}}]}}}}' '{{"type":"result","subtype":"success"}}'; done"#,
+                    pids.display()
+                ),
             );
             wait_idle(&bot);
             send_agent(&bot, "머지해줘").unwrap();
             eventually(Duration::from_secs(3), "the watch was not shown", || {
                 watch_of(&bot) == ["Watch PR 12 CI"]
             });
-            assert!(agent_busy(&bot).unwrap(), "a watching bot took a new turn");
+            wait_idle(&bot);
             send_agent(&bot, "다음 거").unwrap();
-            assert_eq!(queued_text(&bot), ["다음 거"], "a send stopped the watch");
+            assert!(queued_text(&bot).is_empty(), "a send waited on the watch");
+            eventually(Duration::from_secs(3), "the send was not answered", || {
+                told(&bot, "다음 거 할게요")
+            });
+            assert_eq!(
+                watch_of(&bot),
+                ["Watch PR 12 CI"],
+                "the send stopped the watch"
+            );
             eventually(
                 Duration::from_secs(5),
                 "the later answer was dropped",
                 || told(&bot, "CI 통과했어요"),
             );
+            wait_idle(&bot);
+            assert_eq!(
+                assistant_texts(&bot),
+                ["CI 끝나면 알려줄게요", "다음 거 할게요", "CI 통과했어요"]
+            );
+            assert!(watch_of(&bot).is_empty(), "the watch outlived the task");
+            let started = fs::read_to_string(&pids).unwrap();
+            assert_eq!(started.lines().count(), 1, "{started}");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A stand-in Claude that stays up and answers each stdin line, as the
+    /// real one does with `--input-format stream-json`. Each start goes on a
+    /// line of `starts` (pid, then argv), each stdin line on one of `stdin`.
+    /// A prompt with `hang` opens a turn and says nothing more, with `mute` it
+    /// says nothing at all, and with `die` it answers and exits. A stop request
+    /// ends the open turn, a moment later after a `slow` prompt, and never
+    /// after a `deaf` one, which also leaves a child that touches `outlived`
+    /// in a while. With `resume-fails` in the home, the next start on
+    /// `--resume` finds no session, as the real one says it.
+    fn fake_live_claude(id: &str) -> (PathBuf, PathBuf) {
+        let home = paths::home_dir();
+        let (starts, stdin) = (home.join("starts"), home.join("stdin"));
+        let body = format!(
+            r#"{{ printf '%s ' "$$" "$@" | tr '\n' ' '; echo; }} >> '{starts}'
+prev=; for a; do [ "$prev" = --resume ] && rid=$a; prev=$a; done
+if [ -n "$rid" ] && [ -e '{fails}' ]; then
+  rm '{fails}'
+  echo "No conversation found with session ID: $rid" >&2
+  printf '%s\n' "{{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"errors\":[\"No conversation found with session ID: $rid\"]}}"
+  exit 1
+fi
+n=0; slow=; deaf=
+handle() {{
+  printf '%s\n' "$1" >> '{stdin}'
+  case "$1" in *control_request*)
+    [ -n "$deaf" ] && return
+    [ -n "$slow" ] && sleep 0.3
+    printf '%s\n' '{{"type":"control_response","response":{{"subtype":"success"}}}}' '{{"type":"user","message":{{"content":[{{"type":"text","text":"[Request interrupted by user]"}}]}}}}' '{{"type":"result","subtype":"error_during_execution","is_error":true}}'
+    return ;;
+  esac
+  case "$1" in *slow*) slow=1 ;; *) slow= ;; esac
+  case "$1" in *deaf*) deaf=1; ( sleep 2.5; touch '{outlived}' ) & ;; *) deaf= ;; esac
+  case "$1" in *mute*) return ;; esac
+  n=$((n+1))
+  printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s-live"}}'
+  case "$1" in *hang*) return ;; esac
+  printf '%s\n' "{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"answer $n from $$\"}}]}}}}" '{{"type":"result","subtype":"success","is_error":false}}'
+  case "$1" in *die*) exit 0 ;; esac
+}}
+handle "$line"
+while IFS= read -r line; do handle "$line"; done"#,
+            starts = starts.display(),
+            stdin = stdin.display(),
+            fails = home.join("resume-fails").display(),
+            outlived = home.join("outlived").display(),
+        );
+        fake_bot_running(id, &body);
+        (starts, stdin)
+    }
+
+    fn pid_alive(pid: &str) -> bool {
+        unsafe { libc::kill(pid.parse().unwrap(), 0) == 0 }
+    }
+
+    /// The turn running now has had a stdout line.
+    fn turn_heard(id: &str) -> bool {
+        match agents().lock().unwrap().get(id) {
+            Some(LiveAgent::Headless(s)) => s
+                .inner
+                .lock()
+                .unwrap()
+                .in_flight
+                .as_ref()
+                .is_some_and(|f| f.got_output),
+            _ => false,
+        }
+    }
+
+    /// The second start resumes the session the first one opened.
+    fn resumes_first_session(log: &str) -> bool {
+        let lines: Vec<&str> = log.lines().collect();
+        let id = lines[0]
+            .split_once("--session-id ")
+            .and_then(|(_, rest)| rest.split(' ').next())
+            .unwrap_or("none");
+        lines[1].contains(&format!("--resume {id}"))
+    }
+
+    fn started_pids(starts: &std::path::Path) -> Vec<String> {
+        fs::read_to_string(starts)
+            .unwrap_or_default()
+            .lines()
+            .map(|l| l.split(' ').next().unwrap_or_default().to_string())
+            .collect()
+    }
+
+    /// Claude stays up between turns: the second prompt goes to the stdin of
+    /// the process that answered the first, not to a new one, and a prompt
+    /// that starts with a dash is just text there.
+    #[test]
+    fn claude_answers_every_turn_from_one_process() {
+        paths::testing::with_home("live-one", || {
+            let bot = test_id("liveone");
+            let (starts, stdin) = fake_live_claude(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "first-prompt").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                started_pids(&starts).len() == 1
+                    && told(&bot, &format!("answer 1 from {}", started_pids(&starts)[0]))
+            });
+            wait_idle(&bot);
+            send_agent(&bot, "- two").unwrap();
+            let pid = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "no second answer", || {
+                told(&bot, &format!("answer 2 from {pid}"))
+            });
+            wait_idle(&bot);
+            assert_eq!(started_pids(&starts), [pid]);
+            let argv = fs::read_to_string(&starts).unwrap();
+            assert!(argv.contains("--input-format stream-json"), "{argv}");
+            assert!(!argv.contains("first-prompt"), "the prompt went on argv");
+            let lines = fs::read_to_string(&stdin).unwrap();
+            let lines: Vec<&str> = lines.lines().collect();
+            assert_eq!(lines.len(), 2, "{lines:?}");
+            assert!(lines[0].ends_with(r#"first-prompt"}}"#), "{}", lines[0]);
+            assert!(lines[1].ends_with(r#""content":"- two"}}"#), "{}", lines[1]);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A Claude process that went away between turns is started again for the
+    /// next one, on the session it had.
+    #[test]
+    fn claude_that_exited_starts_again_on_its_session() {
+        paths::testing::with_home("live-respawn", || {
+            let bot = test_id("liverespawn");
+            let (starts, _) = fake_live_claude(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "die after this").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            let first = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "the first process stayed", || {
+                !pid_alive(&first)
+            });
+            send_agent(&bot, "again").unwrap();
+            eventually(Duration::from_secs(5), "no answer after the exit", || {
+                assistant_texts(&bot).len() == 2
+            });
+            wait_idle(&bot);
+            let log = fs::read_to_string(&starts).unwrap();
+            let lines: Vec<&str> = log.lines().collect();
+            assert_eq!(lines.len(), 2, "{log}");
+            assert!(resumes_first_session(&log), "{log}");
+            let second = started_pids(&starts)[1].clone();
+            assert!(told(&bot, &format!("answer 1 from {second}")));
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A stop asks Claude to end the turn and leaves the process up, with what
+    /// it runs in the background. The next prompt goes to that same process,
+    /// even while the stopped turn has not closed yet, and its answer is not
+    /// read as the stopped turn's.
+    #[test]
+    fn a_stop_ends_the_claude_turn_and_keeps_the_process() {
+        paths::testing::with_home("live-stop", || {
+            let bot = test_id("livestop");
+            let (starts, stdin) = fake_live_claude(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "hang on, slowly").unwrap();
+            eventually(Duration::from_secs(5), "the turn never spoke", || {
+                turn_heard(&bot)
+            });
+            interrupt_turn(&bot).unwrap();
+            // Claude takes a moment to close the stopped turn.
+            send_agent(&bot, "next").unwrap();
+            let pid = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "no answer after the stop", || {
+                told(&bot, &format!("answer 2 from {pid}"))
+            });
+            wait_idle(&bot);
+            assert_eq!(started_pids(&starts), [pid.clone()]);
+            assert!(pid_alive(&pid), "the stop killed Claude");
+            assert_eq!(assistant_texts(&bot), [format!("answer 2 from {pid}")]);
+            let lines = fs::read_to_string(&stdin).unwrap();
+            let lines: Vec<&str> = lines.lines().collect();
+            assert_eq!(lines.len(), 3, "{lines:?}");
+            assert!(lines[1].contains(r#""subtype":"interrupt""#), "{lines:?}");
+            assert!(lines[2].ends_with(r#"\n\nnext"}}"#), "{lines:?}");
+            assert!(
+                !turn_failed(&bot),
+                "a stopped turn then an answer reads failed"
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A stop before Claude said a word puts the prompt back, as before, and
+    /// still only asks Claude to drop it: the process stays up.
+    #[test]
+    fn a_stop_before_claude_speaks_keeps_the_process() {
+        paths::testing::with_home("live-stop-mute", || {
+            let bot = test_id("livemute");
+            let (starts, stdin) = fake_live_claude(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "mute now").unwrap();
+            eventually(Duration::from_secs(5), "the prompt never went", || {
+                fs::read_to_string(&stdin).is_ok_and(|s| s.contains("mute now"))
+            });
+            assert!(!turn_heard(&bot));
+            interrupt_turn(&bot).unwrap();
+            wait_idle(&bot);
+            assert_eq!(
+                queued_text(&bot),
+                ["mute now"],
+                "the prompt was not put back"
+            );
+            eventually(Duration::from_secs(5), "no stop request", || {
+                fs::read_to_string(&stdin).is_ok_and(|s| s.contains(r#""subtype":"interrupt""#))
+            });
+            // Past the wait for a stopped turn to close.
+            std::thread::sleep(Duration::from_millis(1500));
+            let pids = started_pids(&starts);
+            assert_eq!(pids.len(), 1, "{pids:?}");
+            assert!(pid_alive(&pids[0]), "the stop killed Claude");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// Claude that does not end a stopped turn is stuck, and goes as a stop
+    /// took it before, with all it started. The next turn starts it again on
+    /// its session.
+    #[test]
+    fn claude_that_ignores_a_stop_is_killed() {
+        paths::testing::with_home("live-stop-deaf", || {
+            let bot = test_id("livedeaf");
+            let (starts, _) = fake_live_claude(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "hang, deaf").unwrap();
+            eventually(Duration::from_secs(5), "the turn never spoke", || {
+                turn_heard(&bot)
+            });
+            interrupt_turn(&bot).unwrap();
+            wait_idle(&bot);
+            let first = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "the stuck Claude stayed", || {
+                !pid_alive(&first)
+            });
+            // Its whole group went: the child it left never wakes.
+            std::thread::sleep(Duration::from_millis(2500));
+            assert!(!paths::home_dir().join("outlived").exists());
+            send_agent(&bot, "again").unwrap();
+            eventually(Duration::from_secs(5), "no answer after the kill", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            let log = fs::read_to_string(&starts).unwrap();
+            assert_eq!(log.lines().count(), 2, "{log}");
+            assert!(resumes_first_session(&log), "{log}");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// Claude kept up between turns says a session it was started on is gone
+    /// in its `result` and stays quiet on stdout otherwise. That session is
+    /// dropped, as a one-shot process's exit dropped it, and the next turn
+    /// opens a new one instead of failing on it forever.
+    #[test]
+    fn a_gone_claude_session_is_dropped() {
+        paths::testing::with_home("live-gone", || {
+            let bot = test_id("livegone");
+            let (starts, _) = fake_live_claude(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "die after this").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            let first = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "the first process stayed", || {
+                !pid_alive(&first)
+            });
+            fs::write(paths::home_dir().join("resume-fails"), "").unwrap();
+            send_agent(&bot, "two").unwrap();
+            eventually(Duration::from_secs(5), "the failed resume ran on", || {
+                started_pids(&starts).len() == 2 && !agent_busy(&bot).unwrap()
+            });
+            assert!(turn_failed(&bot), "a turn on a gone session read as fine");
+            send_agent(&bot, "three").unwrap();
+            eventually(Duration::from_secs(5), "no answer on a new session", || {
+                let pids = started_pids(&starts);
+                pids.len() == 3 && told(&bot, &format!("answer 1 from {}", pids[2]))
+            });
+            wait_idle(&bot);
+            let log = fs::read_to_string(&starts).unwrap();
+            let lines: Vec<&str> = log.lines().collect();
+            assert_eq!(lines.len(), 3, "{log}");
+            assert!(lines[1].contains("--resume"), "{log}");
+            assert!(!lines[2].contains("--resume"), "{log}");
+            assert!(lines[2].contains("--session-id"), "{log}");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// What Claude was started with changed, here the model: the next turn
+    /// starts a new process on the same session, and the old one goes.
+    #[test]
+    fn a_model_change_starts_claude_again() {
+        paths::testing::with_home("live-model", || {
+            let bot = test_id("livemodel");
+            let (starts, _) = fake_live_claude(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "one").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            configs().lock().unwrap().get_mut(&bot).unwrap().model = Some("other-model".into());
+            send_agent(&bot, "two").unwrap();
+            eventually(Duration::from_secs(5), "no second answer", || {
+                assistant_texts(&bot).len() == 2
+            });
+            wait_idle(&bot);
+            let pids = started_pids(&starts);
+            assert_eq!(pids.len(), 2, "{pids:?}");
+            let log = fs::read_to_string(&starts).unwrap();
+            assert!(
+                log.lines().nth(1).unwrap().contains("--model other-model"),
+                "{log}"
+            );
+            assert!(resumes_first_session(&log), "{log}");
+            assert!(!pid_alive(&pids[0]), "the old one stayed");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A stand-in grok or agy that stays up and speaks ACP on stdio, as the
+    /// real ones do under `grok agent ... stdio` and `agy acp`. Each start goes
+    /// on a line of `starts` (pid, then argv), each stdin line on one of
+    /// `stdin`. It opens session `s-<pid>`, or loads the one asked for, and
+    /// tells a loaded session's history over first, as the real ones do. A
+    /// prompt answers `answer <n> from <pid>`; with `hang` it says a word and
+    /// waits for a cancel, with `mute` it says nothing, with `deaf` it ignores
+    /// the cancel too, and with `die` it answers and exits. With `watch` it
+    /// starts a CI watch, answers, and once the watch ends a moment later says
+    /// so in a reply of its own. With `stray` it says a word after the answer.
+    /// With `spawn` a subagent answers for it. With
+    /// `load-fails` in the home, the next load finds no session.
+    fn fake_acp(id: &str, cli: &str, args: &[&str]) -> (PathBuf, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        paths::write_notifications_enabled(false);
+        let home = paths::home_dir();
+        let (starts, stdin) = (home.join("starts"), home.join("stdin"));
+        let script = r#"#!/bin/sh
+{ printf '%s ' "$$" "$@" | tr '\n' ' '; echo; } >> '{STARTS}'
+sid=; n=0; pending=; deaf=
+answer() { printf '{"jsonrpc":"2.0","id":%s,"result":%s}\n' "$1" "$2"; }
+upd() { printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"%s","update":{%s}}}\n' "$sid" "$1"; }
+note() { printf '{"jsonrpc":"2.0","method":"_x.ai/session_notification","params":{"sessionId":"%s","update":{%s}}}\n' "${2:-$sid}" "$1"; }
+say() { printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"%s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"%s"}}}}\n' "${2:-$sid}" "$1"; }
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> '{STDIN}'
+  id=$(printf '%s' "$line" | sed -n 's/^{"id":\([0-9]*\),.*/\1/p')
+  case "$line" in
+  *'"method":"initialize"'*) answer "$id" '{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}' ;;
+  *'"method":"session/new"'*) sid="s-$$"; answer "$id" "{\"sessionId\":\"$sid\"}" ;;
+  *'"method":"session/set_'*) answer "$id" '{}' ;;
+  *'"method":"session/load"'*)
+    if [ -e '{FAILS}' ]; then
+      rm '{FAILS}'
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Path not found."}}\n' "$id"
+    else
+      sid=$(printf '%s' "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
+      say "replayed history"
+      answer "$id" '{}'
+    fi ;;
+  *'"method":"session/cancel"'*)
+    if [ -z "$deaf" ] && [ -n "$pending" ]; then answer "$pending" '{"stopReason":"cancelled"}'; pending=; fi ;;
+  *'"method":"session/prompt"'*)
+    p=$(printf '%s' "$line" | sed -e 's/.*"prompt":\[{"text":"//' -e 's/","type":"text"}\].*//')
+    # The message is the last line: notes above it name other bots.
+    p=${p##*\\n}
+    n=$((n+1))
+    case "$p" in *deaf*) deaf=1 ;; *) deaf= ;; esac
+    case "$p" in
+    *mute*) pending=$id ;;
+    *hang*) say "working on it"; pending=$id ;;
+    *watch*)
+      upd '"sessionUpdate":"tool_call","toolCallId":"c1","title":"monitor","rawInput":{"command":"watch.sh","description":"Watch PR 12 CI"},"_meta":{"x.ai/tool":{"name":"monitor"}}'
+      note '"sessionUpdate":"background_tasks","tasks":[{"task_id":"t1","description":"Watch PR 12 CI","kind":"monitor","status":"running"}]'
+      say "CI 끝나면 알려줄게요"
+      note '"sessionUpdate":"turn_completed","prompt_id":"p1","stop_reason":"end_turn"'
+      answer "$id" '{"stopReason":"end_turn"}'
+      ( sleep 2
+        note '"sessionUpdate":"background_tasks","tasks":[{"task_id":"t1","description":"Watch PR 12 CI","kind":"monitor","status":"completed"}]'
+        say "CI 통과했어요"
+        note '"sessionUpdate":"turn_completed","prompt_id":"task-completed-t1","stop_reason":"end_turn"' ) & ;;
+    *spawn*)
+      upd '"sessionUpdate":"tool_call","toolCallId":"c2","title":"spawn_subagent","rawInput":{"description":"Find KIWI","prompt":"Reply with KIWI."},"_meta":{"x.ai/tool":{"name":"spawn_subagent"}}'
+      note '"sessionUpdate":"subagent_spawned","subagent_id":"kid-1","child_session_id":"kid-1","description":"Find KIWI"'
+      say "KIWI is" kid-1; say " the word" kid-1; say " the subagent found for you" kid-1
+      note '"sessionUpdate":"turn_completed","prompt_id":"kid-p","stop_reason":"end_turn"' kid-1
+      note '"sessionUpdate":"subagent_finished","subagent_id":"kid-1","child_session_id":"kid-1","status":"completed","output":"KIWI is the word the subagent found for you"'
+      upd '"sessionUpdate":"tool_call_update","toolCallId":"c2","status":"completed","content":[{"type":"content","content":{"type":"text","text":"KIWI is the word the subagent found for you"}}]'
+      say "The subagent is done."
+      answer "$id" '{"stopReason":"end_turn"}' ;;
+    *stray*) say "answer $n from $$"; answer "$id" '{"stopReason":"end_turn"}'; ( sleep 0.5; say "a stray word" ) & ;;
+    *) say "answer $n from $$"; answer "$id" '{"stopReason":"end_turn"}' ;;
+    esac
+    case "$p" in *die*) exit 0 ;; esac ;;
+  esac
+done
+"#
+        .replace("{STARTS}", &starts.display().to_string())
+        .replace("{STDIN}", &stdin.display().to_string())
+        .replace("{FAILS}", &home.join("load-fails").display().to_string());
+        let bin = home.join(cli);
+        fs::write(&bin, script).unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut cmd = vec![bin.display().to_string()];
+        cmd.extend(args.iter().map(|a| a.to_string()));
+        insert_spawned_agent(AgentConfig::new(
+            id.into(),
+            id.into(),
+            cmd,
+            Some(home.display().to_string()),
+        ))
+        .unwrap();
+        (starts, stdin)
+    }
+
+    /// The ACP requests a fake took, in order, by method.
+    fn acp_methods(stdin: &std::path::Path) -> Vec<String> {
+        fs::read_to_string(stdin)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter_map(|v| v.get("method").and_then(|m| m.as_str()).map(str::to_string))
+            .collect()
+    }
+
+    /// The ACP requests a fake took for `method`.
+    fn acp_requests(stdin: &std::path::Path, method: &str) -> Vec<serde_json::Value> {
+        fs::read_to_string(stdin)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter(|v| v.get("method").and_then(|m| m.as_str()) == Some(method))
+            .collect()
+    }
+
+    fn prompt_text(request: &serde_json::Value) -> String {
+        request
+            .pointer("/params/prompt/0/text")
+            .and_then(|t| t.as_str())
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// grok stays up between turns as an ACP server: the process that
+    /// answered the first prompt answers the second, in the session it opened
+    /// with the team rules, and no prompt goes on its command line.
+    #[test]
+    fn grok_answers_every_turn_from_one_process() {
+        paths::testing::with_home("acp-one", || {
+            let bot = test_id("acpone");
+            let (starts, stdin) = fake_acp(&bot, "grok", &["--always-approve"]);
+            wait_idle(&bot);
+            send_agent(&bot, "first-prompt").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            send_agent(&bot, "- two").unwrap();
+            let pid = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "no second answer", || {
+                told(&bot, &format!("answer 2 from {pid}"))
+            });
+            wait_idle(&bot);
+            assert_eq!(
+                assistant_texts(&bot),
+                [
+                    format!("answer 1 from {pid}"),
+                    format!("answer 2 from {pid}")
+                ]
+            );
+            assert_eq!(started_pids(&starts), [pid.clone()]);
+            let argv = fs::read_to_string(&starts).unwrap();
+            assert!(
+                argv.contains("agent --always-approve --no-leader stdio"),
+                "{argv}"
+            );
+            assert!(!argv.contains("first-prompt"), "the prompt went on argv");
+            assert_eq!(
+                acp_methods(&stdin),
+                [
+                    "initialize",
+                    "session/new",
+                    "session/prompt",
+                    "session/prompt"
+                ]
+            );
+            let opened = &acp_requests(&stdin, "session/new")[0];
+            let rules = opened
+                .pointer("/params/_meta/rules")
+                .unwrap()
+                .as_str()
+                .unwrap();
+            assert!(rules.contains("crew tell"), "{rules}");
+            let prompts = acp_requests(&stdin, "session/prompt");
+            assert!(prompt_text(&prompts[0]).ends_with("first-prompt"));
+            assert!(prompt_text(&prompts[1]).ends_with("- two"));
+            for prompt in &prompts {
+                assert_eq!(
+                    prompt.pointer("/params/sessionId").unwrap(),
+                    &format!("s-{pid}")
+                );
+            }
+            remove_agent(&bot).unwrap();
+            eventually(Duration::from_secs(5), "removal left grok up", || {
+                !pid_alive(&pid)
+            });
+        });
+    }
+
+    /// grok answered and left a CI watch running. The bot is idle and shows
+    /// the watch, a send goes to the same process at once while it runs, and
+    /// grok's word when the watch ends is a reply of its own.
+    #[test]
+    fn grok_takes_a_send_while_it_watches() {
+        paths::testing::with_home("acp-watch", || {
+            let bot = test_id("acpwatch");
+            let (starts, _) = fake_acp(&bot, "grok", &["--always-approve"]);
+            wait_idle(&bot);
+            send_agent(&bot, "watch the CI").unwrap();
+            eventually(Duration::from_secs(5), "the watch was not shown", || {
+                watch_of(&bot) == ["Watch PR 12 CI"] && !agent_busy(&bot).unwrap()
+            });
+            send_agent(&bot, "다음 거").unwrap();
+            assert!(queued_text(&bot).is_empty(), "a send waited on the watch");
+            let pid = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(3), "the send was not answered", || {
+                told(&bot, &format!("answer 2 from {pid}"))
+            });
+            assert_eq!(
+                watch_of(&bot),
+                ["Watch PR 12 CI"],
+                "the send stopped the watch"
+            );
             eventually(
                 Duration::from_secs(5),
-                "the waiting send never went",
-                || queued_text(&bot).is_empty(),
+                "the later answer was dropped",
+                || told(&bot, "CI 통과했어요"),
             );
             wait_idle(&bot);
+            assert_eq!(
+                assistant_texts(&bot),
+                [
+                    "CI 끝나면 알려줄게요".to_string(),
+                    format!("answer 2 from {pid}"),
+                    "CI 통과했어요".to_string()
+                ]
+            );
+            let monitor = crate::transcript::messages(&bot)
+                .into_iter()
+                .find(|m| m.kind == Some(crate::protocol::MessageKind::Tool));
+            let monitor = monitor.expect("no tool card for the watch");
+            assert_eq!(monitor.from, "monitor");
+            assert!(monitor.text.contains("watch.sh"), "{}", monitor.text);
             assert!(watch_of(&bot).is_empty(), "the watch outlived the task");
+            assert_eq!(started_pids(&starts), [pid]);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A grok subagent's words are a side chat, not the bot's reply, as with
+    /// one-shot grok. Over ACP they come a token at a time, spaces and all.
+    #[test]
+    fn a_grok_subagent_speaks_in_a_side_chat() {
+        paths::testing::with_home("acp-spawn", || {
+            let bot = test_id("acpspawn");
+            fake_acp(&bot, "grok", &["--always-approve"]);
+            wait_idle(&bot);
+            send_agent(&bot, "spawn a helper").unwrap();
+            eventually(Duration::from_secs(5), "no answer", || {
+                told(&bot, "The subagent is done.")
+            });
+            wait_idle(&bot);
+            assert_eq!(assistant_texts(&bot), ["The subagent is done."]);
+            let notes: Vec<_> = crate::transcript::messages(&bot)
+                .into_iter()
+                .filter(|m| m.kind == Some(crate::protocol::MessageKind::Received))
+                .collect();
+            assert_eq!(notes.len(), 1, "{notes:?}");
+            assert_eq!(notes[0].text, "KIWI is the word the subagent found for you");
+            assert!(notes[0].from.starts_with("sub:c2:"), "{}", notes[0].from);
+            let cards = crate::transcript::messages(&bot)
+                .into_iter()
+                .filter(|m| m.kind == Some(crate::protocol::MessageKind::Tool))
+                .count();
+            assert_eq!(cards, 0, "the spawn showed as a tool card");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A grok process that went away between turns is started again for the
+    /// next one and loads the session it had. What the load tells over again
+    /// is not a reply.
+    #[test]
+    fn grok_that_exited_loads_its_session_again() {
+        paths::testing::with_home("acp-respawn", || {
+            let bot = test_id("acprespawn");
+            let (starts, stdin) = fake_acp(&bot, "grok", &["--always-approve"]);
+            wait_idle(&bot);
+            send_agent(&bot, "die after this").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            let first = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "the first process stayed", || {
+                !pid_alive(&first)
+            });
+            send_agent(&bot, "again").unwrap();
+            eventually(Duration::from_secs(5), "no answer after the exit", || {
+                assistant_texts(&bot).len() == 2
+            });
+            wait_idle(&bot);
+            let pids = started_pids(&starts);
+            assert_eq!(pids.len(), 2, "{pids:?}");
+            assert_eq!(
+                assistant_texts(&bot),
+                [
+                    format!("answer 1 from {first}"),
+                    format!("answer 1 from {}", pids[1])
+                ]
+            );
+            let loaded = acp_requests(&stdin, "session/load");
+            assert_eq!(loaded.len(), 1);
+            assert_eq!(
+                loaded[0].pointer("/params/sessionId").unwrap(),
+                &format!("s-{first}")
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A stop cancels the grok turn and leaves the process up, with what it
+    /// runs in the background. The next prompt goes to the same process.
+    #[test]
+    fn a_stop_cancels_the_grok_turn_and_keeps_the_process() {
+        paths::testing::with_home("acp-stop", || {
+            let bot = test_id("acpstop");
+            let (starts, stdin) = fake_acp(&bot, "grok", &["--always-approve"]);
+            wait_idle(&bot);
+            send_agent(&bot, "hang on").unwrap();
+            eventually(Duration::from_secs(5), "the turn never spoke", || {
+                turn_heard(&bot)
+            });
+            interrupt_turn(&bot).unwrap();
+            wait_idle(&bot);
+            send_agent(&bot, "next").unwrap();
+            let pid = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "no answer after the stop", || {
+                told(&bot, &format!("answer 2 from {pid}"))
+            });
+            wait_idle(&bot);
+            assert_eq!(started_pids(&starts), [pid.clone()]);
+            assert!(pid_alive(&pid), "the stop killed grok");
+            assert_eq!(
+                acp_methods(&stdin),
+                [
+                    "initialize",
+                    "session/new",
+                    "session/prompt",
+                    "session/cancel",
+                    "session/prompt"
+                ]
+            );
+            assert!(
+                !turn_failed(&bot),
+                "a stopped turn then an answer reads failed"
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// grok that does not end a cancelled turn is stuck, and goes as a stop
+    /// took it before. The next turn starts it again on its session.
+    #[test]
+    fn grok_that_ignores_a_stop_is_killed() {
+        paths::testing::with_home("acp-deaf", || {
+            let bot = test_id("acpdeaf");
+            let (starts, stdin) = fake_acp(&bot, "grok", &["--always-approve"]);
+            wait_idle(&bot);
+            send_agent(&bot, "hang, deaf").unwrap();
+            eventually(Duration::from_secs(5), "the turn never spoke", || {
+                turn_heard(&bot)
+            });
+            interrupt_turn(&bot).unwrap();
+            wait_idle(&bot);
+            let first = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "the stuck grok stayed", || {
+                !pid_alive(&first)
+            });
+            send_agent(&bot, "again").unwrap();
+            eventually(Duration::from_secs(5), "no answer after the kill", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            assert_eq!(started_pids(&starts).len(), 2);
+            assert_eq!(acp_requests(&stdin, "session/load").len(), 1);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A session grok cannot load is dropped, as a one-shot resume that found
+    /// no session was, and the next turn opens a new one.
+    #[test]
+    fn a_grok_session_that_will_not_load_is_dropped() {
+        paths::testing::with_home("acp-gone", || {
+            let bot = test_id("acpgone");
+            let (starts, stdin) = fake_acp(&bot, "grok", &["--always-approve"]);
+            wait_idle(&bot);
+            send_agent(&bot, "die after this").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            let first = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "the first process stayed", || {
+                !pid_alive(&first)
+            });
+            fs::write(paths::home_dir().join("load-fails"), "").unwrap();
+            send_agent(&bot, "two").unwrap();
+            eventually(Duration::from_secs(5), "the failed load ran on", || {
+                started_pids(&starts).len() == 2 && !agent_busy(&bot).unwrap()
+            });
+            assert!(turn_failed(&bot), "a turn on a gone session read as fine");
+            assert!(
+                crate::transcript::messages(&bot).iter().any(|m| m
+                    .text
+                    .contains(&format!("could not open session s-{first}"))),
+                "the failure was not said"
+            );
+            send_agent(&bot, "three").unwrap();
+            eventually(Duration::from_secs(5), "no answer on a new session", || {
+                let pids = started_pids(&starts);
+                pids.len() == 3 && told(&bot, &format!("answer 1 from {}", pids[2]))
+            });
+            wait_idle(&bot);
+            assert_eq!(
+                acp_methods(&stdin)
+                    .iter()
+                    .filter(|m| *m == "session/new")
+                    .count(),
+                2
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// What grok was started with changed, here the model: the next turn
+    /// starts a new process on the same session, and the old one goes.
+    #[test]
+    fn a_model_change_starts_grok_again() {
+        paths::testing::with_home("acp-model", || {
+            let bot = test_id("acpmodel");
+            let (starts, stdin) = fake_acp(&bot, "grok", &["--always-approve"]);
+            wait_idle(&bot);
+            send_agent(&bot, "one").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            configs().lock().unwrap().get_mut(&bot).unwrap().model = Some("other-model".into());
+            send_agent(&bot, "two").unwrap();
+            eventually(Duration::from_secs(5), "no second answer", || {
+                assistant_texts(&bot).len() == 2
+            });
+            wait_idle(&bot);
+            let pids = started_pids(&starts);
+            assert_eq!(pids.len(), 2, "{pids:?}");
+            let log = fs::read_to_string(&starts).unwrap();
+            assert!(
+                log.lines().nth(1).unwrap().contains("--model other-model"),
+                "{log}"
+            );
+            let loaded = acp_requests(&stdin, "session/load");
+            assert_eq!(
+                loaded[0].pointer("/params/sessionId").unwrap(),
+                &format!("s-{}", pids[0])
+            );
+            assert!(!pid_alive(&pids[0]), "the old one stayed");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// agy starts no reply by itself and has nothing that would end one, so
+    /// a word it says between turns opens no turn: the bot stays idle, and
+    /// the next send goes through.
+    #[test]
+    fn a_stray_agy_line_between_turns_opens_no_turn() {
+        paths::testing::with_home("acp-agy-stray", || {
+            let bot = test_id("acpagystray");
+            let (starts, _) = fake_acp(&bot, "agy", &[]);
+            wait_idle(&bot);
+            send_agent(&bot, "stray").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            std::thread::sleep(Duration::from_millis(1000));
+            assert!(!agent_busy(&bot).unwrap(), "a stray line held the bot");
+            send_agent(&bot, "next").unwrap();
+            let pid = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "no second answer", || {
+                told(&bot, &format!("answer 2 from {pid}"))
+            });
+            wait_idle(&bot);
+            assert_eq!(
+                assistant_texts(&bot),
+                [
+                    format!("answer 1 from {pid}"),
+                    format!("answer 2 from {pid}")
+                ]
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// agy stays up as an ACP server too. It gets its model, effort and the
+    /// team rules on the session, and keeps the conversation itself, so a
+    /// later prompt is the message alone.
+    #[test]
+    fn agy_answers_every_turn_from_one_session() {
+        paths::testing::with_home("acp-agy", || {
+            let bot = test_id("acpagy");
+            let (starts, stdin) = fake_acp(&bot, "agy", &[]);
+            {
+                let mut configs = configs().lock().unwrap();
+                let cfg = configs.get_mut(&bot).unwrap();
+                cfg.model = Some("gemini-3.8-flash-low".into());
+                cfg.effort = Some(crate::config::Effort::Low);
+            }
+            wait_idle(&bot);
+            send_agent(&bot, "first-prompt").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            send_agent(&bot, "second-prompt").unwrap();
+            let pid = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "no second answer", || {
+                told(&bot, &format!("answer 2 from {pid}"))
+            });
+            wait_idle(&bot);
+            assert_eq!(started_pids(&starts), [pid.clone()]);
+            let argv = fs::read_to_string(&starts).unwrap();
+            assert!(
+                argv.contains(" acp --dangerously-skip-permissions"),
+                "{argv}"
+            );
+            assert_eq!(
+                acp_methods(&stdin),
+                [
+                    "initialize",
+                    "session/new",
+                    "session/set_model",
+                    "session/set_config_option",
+                    "session/prompt",
+                    "session/prompt"
+                ]
+            );
+            let opened = &acp_requests(&stdin, "session/new")[0];
+            let append = opened
+                .pointer("/params/_meta/antigravity/systemPrompt/append")
+                .and_then(|a| a.as_str())
+                .unwrap();
+            assert!(append.contains("crew tell"), "{append}");
+            let model = &acp_requests(&stdin, "session/set_model")[0];
+            assert_eq!(
+                model.pointer("/params/modelId").unwrap(),
+                "gemini-3.8-flash-low"
+            );
+            let effort = &acp_requests(&stdin, "session/set_config_option")[0];
+            assert_eq!(effort.pointer("/params/value").unwrap(), "low");
+            let prompts = acp_requests(&stdin, "session/prompt");
+            // The rules went to the session, not ahead of each prompt.
+            assert!(!prompt_text(&prompts[0]).contains("crew tell"));
+            assert!(prompt_text(&prompts[1]).ends_with("second-prompt"));
+            assert!(!prompt_text(&prompts[1]).contains("first-prompt"));
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A stand-in codex that stays up and speaks app-server JSON-RPC on stdio,
+    /// as `codex app-server` does. Each start goes on a line of `starts` (pid,
+    /// then argv), each stdin line on one of `stdin`. It opens thread `t-<pid>`,
+    /// or resumes the one asked for. A prompt answers `answer <n> from <pid>`.
+    /// With `hang` it opens a turn and waits for `turn/interrupt`. With `deaf`
+    /// it ignores that and leaves a child that touches `outlived`. With `die`
+    /// it answers and exits. With `watch` it starts a command, answers, and
+    /// once that command ends a moment later says so in a reply of its own.
+    /// The first ordinary turn also asks for a command approval. With
+    /// `load-fails` in the home, the next resume finds no thread.
+    fn fake_codex(id: &str) -> (PathBuf, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        paths::write_notifications_enabled(false);
+        let home = paths::home_dir();
+        let (starts, stdin) = (home.join("starts"), home.join("stdin"));
+        let script = r#"#!/bin/sh
+{ printf '%s ' "$$" "$@" | tr '\n' ' '; echo; } >> '{STARTS}'
+sid=; n=0; tid=; deaf=
+req_id() { printf '%s' "$1" | sed -n 's/^{"id":\([0-9]*\).*/\1/p'; }
+say() {
+  printf '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"delta":"%s","itemId":"m%s","threadId":"%s","turnId":"%s"}}\n' "$1" "$n" "$sid" "$tid"
+  printf '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"m%s","text":"%s","type":"agentMessage"},"threadId":"%s","turnId":"%s"}}\n' "$n" "$1" "$sid" "$tid"
+}
+finish() {
+  printf '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"%s","turn":{"id":"%s","status":"%s"}}}\n' "$sid" "$tid" "$1"
+}
+begin() {
+  n=$((n+1))
+  tid="turn-$n"
+  printf '{"jsonrpc":"2.0","id":%s,"result":{"turn":{"id":"%s","status":"inProgress"}}}\n' "$id" "$tid"
+  printf '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"%s","turn":{"id":"%s","status":"inProgress"}}}\n' "$sid" "$tid"
+}
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> '{STDIN}'
+  case "$line" in
+  *'"method":"initialize"'*)
+    printf '{"jsonrpc":"2.0","id":%s,"result":{"userAgent":"fake"}}\n' "$(req_id "$line")" ;;
+  *'"method":"initialized"'*) ;;
+  *'"method":"thread/start"'*)
+    sid="t-$$"
+    printf '{"jsonrpc":"2.0","id":%s,"result":{"thread":{"id":"%s"}}}\n' "$(req_id "$line")" "$sid" ;;
+  *'"method":"thread/resume"'*)
+    id=$(req_id "$line")
+    want=$(printf '%s' "$line" | sed -n 's/.*"threadId":"\([^"]*\)".*/\1/p')
+    if [ -e '{FAILS}' ]; then
+      rm '{FAILS}'
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"no rollout found for thread id %s"}}\n' "$id" "$want"
+    else
+      sid=$want
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"thread":{"id":"%s"}}}\n' "$id" "$sid"
+    fi ;;
+  *'"method":"turn/interrupt"'*)
+    id=$(req_id "$line")
+    printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32600,"message":"interrupt ack"}}\n' "$id"
+    if [ -z "$deaf" ] && [ -n "$tid" ]; then finish interrupted; tid=; fi ;;
+  *'"method":"turn/start"'*)
+    id=$(req_id "$line")
+    p=$(printf '%s' "$line" | sed -e 's/.*"text":"//' -e 's/","type":"text".*//')
+    p=${p##*\\n}
+    case "$p" in *deaf*) deaf=1 ;; *) deaf= ;; esac
+    case "$p" in
+    *hang*) begin ;;
+    *watch*)
+      begin
+      printf '{"jsonrpc":"2.0","method":"item/started","params":{"item":{"command":"Watch PR 12 CI","id":"c1","status":"inProgress","type":"commandExecution"},"threadId":"%s","turnId":"%s"}}\n' "$sid" "$tid"
+      say "CI 끝나면 알려줄게요"
+      finish completed
+      ( sleep 2
+        printf '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"command":"Watch PR 12 CI","id":"c1","status":"completed","type":"commandExecution"},"threadId":"%s"}}\n' "$sid"
+        printf '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"%s","turn":{"id":"later","status":"inProgress"}}}\n' "$sid"
+        printf '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"delta":"CI 통과했어요","itemId":"mlater","threadId":"%s","turnId":"later"}}\n' "$sid"
+        printf '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"mlater","text":"CI 통과했어요","type":"agentMessage"},"threadId":"%s","turnId":"later"}}\n' "$sid"
+        printf '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"%s","turn":{"id":"later","status":"completed"}}}\n' "$sid"
+      ) & ;;
+    *die*) begin; say "answer $n from $$"; finish completed; exit 0 ;;
+    *)
+      begin
+      if [ "$n" -eq 1 ]; then
+        printf '{"jsonrpc":"2.0","id":7,"method":"item/commandExecution/requestApproval","params":{"threadId":"%s"}}\n' "$sid"
+        printf '{"jsonrpc":"2.0","id":8,"method":"item/permissions/requestApproval","params":{"permissions":{"network":{"enabled":true}},"threadId":"%s"}}\n' "$sid"
+      fi
+      say "answer $n from $$"
+      finish completed ;;
+    esac
+    case "$p" in *deaf*) ( sleep 2.5; touch '{OUTLIVED}' ) & ;; esac ;;
+  esac
+done
+"#
+        .replace("{STARTS}", &starts.display().to_string())
+        .replace("{STDIN}", &stdin.display().to_string())
+        .replace("{FAILS}", &home.join("load-fails").display().to_string())
+        .replace("{OUTLIVED}", &home.join("outlived").display().to_string());
+        let bin = home.join("codex");
+        fs::write(&bin, script).unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        insert_spawned_agent(AgentConfig::new(
+            id.into(),
+            id.into(),
+            vec![bin.display().to_string(), "--yolo".into()],
+            Some(home.display().to_string()),
+        ))
+        .unwrap();
+        (starts, stdin)
+    }
+
+    fn codex_input(request: &serde_json::Value) -> String {
+        request
+            .pointer("/params/input/0/text")
+            .and_then(|t| t.as_str())
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// Codex stays up between turns as `codex app-server`: the process that
+    /// answered the first prompt answers the second, `--yolo` is the thread's
+    /// approval policy rather than a flag, and a command approval is accepted.
+    #[test]
+    fn codex_answers_every_turn_from_one_process() {
+        paths::testing::with_home("codex-one", || {
+            let bot = test_id("codexone");
+            let (starts, stdin) = fake_codex(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "first-prompt").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            send_agent(&bot, "- two").unwrap();
+            let pid = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "no second answer", || {
+                told(&bot, &format!("answer 2 from {pid}"))
+            });
+            wait_idle(&bot);
+            assert_eq!(
+                assistant_texts(&bot),
+                [
+                    format!("answer 1 from {pid}"),
+                    format!("answer 2 from {pid}")
+                ]
+            );
+            assert_eq!(started_pids(&starts), [pid.clone()]);
+            let argv = fs::read_to_string(&starts).unwrap();
+            assert!(argv.contains(" app-server"), "{argv}");
+            assert!(!argv.contains("--yolo"), "{argv}");
+            assert!(!argv.contains("first-prompt"), "the prompt went on argv");
+            assert_eq!(
+                acp_methods(&stdin),
+                [
+                    "initialize",
+                    "initialized",
+                    "thread/start",
+                    "turn/start",
+                    "turn/start"
+                ]
+            );
+            let opened = &acp_requests(&stdin, "thread/start")[0];
+            let rules = opened
+                .pointer("/params/developerInstructions")
+                .and_then(|t| t.as_str())
+                .unwrap_or("");
+            assert!(rules.contains("crew tell"), "{rules}");
+            assert_eq!(
+                opened
+                    .pointer("/params/approvalPolicy")
+                    .and_then(|t| t.as_str()),
+                Some("never")
+            );
+            assert_eq!(
+                opened.pointer("/params/sandbox").and_then(|t| t.as_str()),
+                Some("danger-full-access")
+            );
+            let prompts = acp_requests(&stdin, "turn/start");
+            assert!(codex_input(&prompts[0]).ends_with("first-prompt"));
+            assert!(codex_input(&prompts[1]).ends_with("- two"));
+            assert_eq!(
+                prompts[1]
+                    .pointer("/params/sandboxPolicy/type")
+                    .and_then(|t| t.as_str()),
+                Some("dangerFullAccess")
+            );
+            let lines = fs::read_to_string(&stdin).unwrap();
+            assert!(
+                lines.contains(r#""decision":"accept""#),
+                "a command approval was not accepted: {lines}"
+            );
+            assert!(
+                lines.contains(r#""id":8,"jsonrpc":"2.0","result":{"permissions":{"network":{"enabled":true}}}"#),
+                "a permissions approval was not granted: {lines}"
+            );
+            remove_agent(&bot).unwrap();
+            eventually(Duration::from_secs(5), "removal left codex up", || {
+                !pid_alive(&pid)
+            });
+        });
+    }
+
+    /// Codex answered and left a command running. The bot is idle and shows
+    /// it, a send goes to the same process at once, and the word when the
+    /// command ends is a reply of its own. The command is a tool card.
+    #[test]
+    fn codex_takes_a_send_while_it_watches() {
+        paths::testing::with_home("codex-watch", || {
+            let bot = test_id("codexwatch");
+            let (starts, _) = fake_codex(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "watch the CI").unwrap();
+            eventually(Duration::from_secs(5), "the watch was not shown", || {
+                watch_of(&bot) == ["Watch PR 12 CI"] && !agent_busy(&bot).unwrap()
+            });
+            send_agent(&bot, "다음 거").unwrap();
+            assert!(queued_text(&bot).is_empty(), "a send waited on the watch");
+            let pid = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(3), "the send was not answered", || {
+                told(&bot, &format!("answer 2 from {pid}"))
+            });
+            assert_eq!(
+                watch_of(&bot),
+                ["Watch PR 12 CI"],
+                "the send stopped the watch"
+            );
+            eventually(
+                Duration::from_secs(5),
+                "the later answer was dropped",
+                || told(&bot, "CI 통과했어요"),
+            );
+            wait_idle(&bot);
+            assert_eq!(
+                assistant_texts(&bot),
+                [
+                    "CI 끝나면 알려줄게요".to_string(),
+                    format!("answer 2 from {pid}"),
+                    "CI 통과했어요".to_string()
+                ]
+            );
+            let card = crate::transcript::messages(&bot)
+                .into_iter()
+                .find(|m| m.kind == Some(crate::protocol::MessageKind::Tool));
+            let card = card.expect("no tool card for the command");
+            assert_eq!(card.from, "command");
+            assert!(card.text.contains("Watch PR 12 CI"), "{}", card.text);
+            assert!(watch_of(&bot).is_empty(), "the watch outlived the task");
+            assert_eq!(started_pids(&starts), [pid]);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A codex process that went away between turns is started again and
+    /// resumes the thread it had.
+    #[test]
+    fn codex_that_exited_resumes_its_thread() {
+        paths::testing::with_home("codex-respawn", || {
+            let bot = test_id("codexrespawn");
+            let (starts, stdin) = fake_codex(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "die after this").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            let first = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "the first process stayed", || {
+                !pid_alive(&first)
+            });
+            send_agent(&bot, "again").unwrap();
+            eventually(Duration::from_secs(5), "no answer after the exit", || {
+                assistant_texts(&bot).len() == 2
+            });
+            wait_idle(&bot);
+            let pids = started_pids(&starts);
+            assert_eq!(pids.len(), 2, "{pids:?}");
+            assert_eq!(
+                assistant_texts(&bot),
+                [
+                    format!("answer 1 from {first}"),
+                    format!("answer 1 from {}", pids[1])
+                ]
+            );
+            let loaded = acp_requests(&stdin, "thread/resume");
+            assert_eq!(loaded.len(), 1);
+            assert_eq!(
+                loaded[0]
+                    .pointer("/params/threadId")
+                    .and_then(|t| t.as_str()),
+                Some(format!("t-{first}")).as_deref()
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A stop on the next turn interrupts that turn, not the one that already
+    /// finished, and its request id is not a `turn/start`.
+    #[test]
+    fn a_stop_interrupts_the_codex_turn_that_just_started() {
+        paths::testing::with_home("codex-stop-next", || {
+            let bot = test_id("codexstop2");
+            let (starts, stdin) = fake_codex(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "one").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            send_agent(&bot, "hang on").unwrap();
+            eventually(
+                Duration::from_secs(5),
+                "the second turn never spoke",
+                || turn_heard(&bot),
+            );
+            interrupt_turn(&bot).unwrap();
+            send_agent(&bot, "next").unwrap();
+            let pid = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "no answer after the stop", || {
+                told(&bot, &format!("answer 3 from {pid}"))
+            });
+            wait_idle(&bot);
+            assert_eq!(started_pids(&starts), [pid.clone()]);
+            assert!(pid_alive(&pid), "the stop killed codex");
+            assert_eq!(
+                assistant_texts(&bot),
+                [
+                    format!("answer 1 from {pid}"),
+                    format!("answer 3 from {pid}")
+                ]
+            );
+            let interrupts = acp_requests(&stdin, "turn/interrupt");
+            assert_eq!(interrupts.len(), 1, "{interrupts:?}");
+            assert_eq!(
+                interrupts[0]
+                    .pointer("/params/turnId")
+                    .and_then(|t| t.as_str()),
+                Some("turn-2")
+            );
+            let start_ids: Vec<_> = acp_requests(&stdin, "turn/start")
+                .iter()
+                .map(|r| r.get("id").and_then(|id| id.as_u64()))
+                .collect();
+            let interrupt_id = interrupts[0].get("id").and_then(|id| id.as_u64());
+            assert!(
+                interrupt_id.is_some() && !start_ids.contains(&interrupt_id),
+                "interrupt id {interrupt_id:?} collided with {start_ids:?}"
+            );
+            assert!(!turn_failed(&bot), "the stop read as a failed turn");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// Without `--yolo` a command approval is declined. The thread is not
+    /// opened with approval `never`.
+    #[test]
+    fn codex_without_yolo_declines_a_command() {
+        paths::testing::with_home("codex-noyolo", || {
+            let bot = test_id("codexnoyolo");
+            let (_starts, stdin) = fake_codex(&bot);
+            configs().lock().unwrap().get_mut(&bot).unwrap().cmd.pop();
+            wait_idle(&bot);
+            send_agent(&bot, "first-prompt").unwrap();
+            eventually(Duration::from_secs(5), "no answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            let opened = &acp_requests(&stdin, "thread/start")[0];
+            assert!(opened.pointer("/params/approvalPolicy").is_none());
+            let lines = fs::read_to_string(&stdin).unwrap();
+            assert!(
+                lines.contains(r#""decision":"decline""#),
+                "a command was accepted without yolo: {lines}"
+            );
+            assert!(
+                !lines.contains(r#""permissions":{"network""#),
+                "permissions were granted without yolo: {lines}"
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A stop asks codex to interrupt the turn and leaves the process up.
+    /// The next prompt goes to that same process.
+    #[test]
+    fn a_stop_interrupts_the_codex_turn_and_keeps_the_process() {
+        paths::testing::with_home("codex-stop", || {
+            let bot = test_id("codexstop");
+            let (starts, stdin) = fake_codex(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "hang on").unwrap();
+            eventually(Duration::from_secs(5), "the turn never spoke", || {
+                turn_heard(&bot)
+            });
+            interrupt_turn(&bot).unwrap();
+            send_agent(&bot, "next").unwrap();
+            let pid = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "no answer after the stop", || {
+                told(&bot, &format!("answer 2 from {pid}"))
+            });
+            wait_idle(&bot);
+            assert_eq!(started_pids(&starts), [pid.clone()]);
+            assert!(pid_alive(&pid), "the stop killed codex");
+            assert_eq!(assistant_texts(&bot), [format!("answer 2 from {pid}")]);
+            assert!(
+                acp_methods(&stdin).contains(&"turn/interrupt".to_string()),
+                "no turn/interrupt"
+            );
+            assert!(
+                !turn_failed(&bot),
+                "a stopped turn then an answer reads failed"
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// Codex that does not end a stopped turn is stuck, and goes as a stop
+    /// took it before, with all it started. The next turn resumes its thread.
+    #[test]
+    fn codex_that_ignores_a_stop_is_killed() {
+        paths::testing::with_home("codex-deaf", || {
+            let bot = test_id("codexdeaf");
+            let (starts, stdin) = fake_codex(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "hang, deaf").unwrap();
+            eventually(Duration::from_secs(5), "the turn never spoke", || {
+                turn_heard(&bot)
+            });
+            interrupt_turn(&bot).unwrap();
+            wait_idle(&bot);
+            let first = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "the stuck codex stayed", || {
+                !pid_alive(&first)
+            });
+            std::thread::sleep(Duration::from_millis(2500));
+            assert!(!paths::home_dir().join("outlived").exists());
+            send_agent(&bot, "again").unwrap();
+            eventually(Duration::from_secs(5), "no answer after the kill", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            assert_eq!(started_pids(&starts).len(), 2);
+            let loaded = acp_requests(&stdin, "thread/resume");
+            assert_eq!(
+                loaded[0]
+                    .pointer("/params/threadId")
+                    .and_then(|t| t.as_str()),
+                Some(format!("t-{first}")).as_deref()
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// What codex was started with changed, here the model. The next turn
+    /// starts a new process, resumes the thread, and the old process goes.
+    #[test]
+    fn a_model_change_starts_codex_again() {
+        paths::testing::with_home("codex-model", || {
+            let bot = test_id("codexmodel");
+            let (starts, stdin) = fake_codex(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "one").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            configs().lock().unwrap().get_mut(&bot).unwrap().model = Some("other-model".into());
+            send_agent(&bot, "two").unwrap();
+            eventually(Duration::from_secs(5), "no second answer", || {
+                assistant_texts(&bot).len() == 2
+            });
+            wait_idle(&bot);
+            let pids = started_pids(&starts);
+            assert_eq!(pids.len(), 2, "{pids:?}");
+            let loaded = acp_requests(&stdin, "thread/resume");
+            assert_eq!(loaded.len(), 1, "{loaded:?}");
+            assert_eq!(
+                loaded[0].pointer("/params/model").and_then(|t| t.as_str()),
+                Some("other-model")
+            );
+            assert_eq!(
+                loaded[0]
+                    .pointer("/params/threadId")
+                    .and_then(|t| t.as_str()),
+                Some(format!("t-{}", pids[0])).as_deref()
+            );
+            assert!(!pid_alive(&pids[0]), "the old one stayed");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A resume of a thread codex no longer has drops that id. The next turn
+    /// opens a new thread instead of failing on the old one forever.
+    #[test]
+    fn a_gone_codex_thread_is_dropped() {
+        paths::testing::with_home("codex-gone", || {
+            let bot = test_id("codexgone");
+            let (starts, stdin) = fake_codex(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "die after this").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            let first = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "the first process stayed", || {
+                !pid_alive(&first)
+            });
+            fs::write(paths::home_dir().join("load-fails"), "").unwrap();
+            send_agent(&bot, "two").unwrap();
+            eventually(Duration::from_secs(5), "the failed resume ran on", || {
+                started_pids(&starts).len() == 2 && !agent_busy(&bot).unwrap()
+            });
+            assert!(turn_failed(&bot), "a turn on a gone thread read as fine");
+            send_agent(&bot, "three").unwrap();
+            eventually(Duration::from_secs(5), "no answer on a new thread", || {
+                let pids = started_pids(&starts);
+                pids.len() == 3 && told(&bot, &format!("answer 1 from {}", pids[2]))
+            });
+            wait_idle(&bot);
+            assert_eq!(acp_requests(&stdin, "thread/resume").len(), 1);
+            assert_eq!(acp_requests(&stdin, "thread/start").len(), 2);
             remove_agent(&bot).unwrap();
         });
     }
@@ -7484,7 +8958,7 @@ printf '%s\n' '{"type":"tool_call_update","toolCallId":"c1","status":null,"rawOu
             insert_spawned_agent(AgentConfig::new(
                 bot.clone(),
                 bot.clone(),
-                vec![bin.display().to_string()],
+                grok_per_turn(&bin),
                 Some(paths::home_dir().display().to_string()),
             ))
             .unwrap();
@@ -7512,7 +8986,7 @@ printf '%s\n' '{"type":"tool_call_update","toolCallId":"c1","status":null,"rawOu
 
     /// Claude stays up past `result` while a task it put in the background
     /// runs, then answers again on its own. The tell goes out at `result`, the
-    /// bot shows working until the CLI is done, and the later answer is a reply
+    /// bot is idle while only the task runs, and the later answer is a reply
     /// of its own instead of being dropped.
     #[test]
     fn a_background_task_does_not_hold_the_tell() {
@@ -7546,7 +9020,7 @@ printf '%s\n' '{"type":"system","subtype":"background_tasks_changed","tasks":[]}
                     .find(|a| a.id == id)
                     .map(|a| a.status)
             };
-            assert_eq!(shown(&bot), Some(AgentStatus::Working));
+            assert_eq!(shown(&bot), Some(AgentStatus::Idle));
             eventually(
                 Duration::from_secs(10),
                 "the later answer was dropped",
