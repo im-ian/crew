@@ -63,7 +63,13 @@ export function ChatHeader({
         : t("header.remoteOffline")
       : modelLine(currentAgent, cli ? defaults[cli] : null, t);
   const status = currentAgent?.status;
-  const watching = !remote && isWatching(currentAgent);
+  // The list shows while the bot is idle or working. Blocked and exited keep
+  // their own word: those are what the user has to act on.
+  const watching =
+    !remote &&
+    isWatching(currentAgent) &&
+    status !== "blocked" &&
+    status !== "exited";
   const statusKey =
     remote && currentAgent?.asking
       ? "header.statusOwner"

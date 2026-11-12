@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { translate } from "./i18n";
 import type { AgentInfo } from "./types";
-import { isWatching, watchLabel } from "./watchView";
+import { isWatching, watchHoldsSend, watchLabel } from "./watchView";
 
 const ko = (
   key: Parameters<typeof translate>[1],
@@ -21,13 +21,29 @@ function bot(over: Partial<AgentInfo>): AgentInfo {
 }
 
 describe("isWatching", () => {
-  it("is a working bot with background work left", () => {
+  it("lists background work even while the bot is idle", () => {
     expect(isWatching(bot({ watch: [{ what: "CI", since: 0 }] }))).toBe(true);
     expect(isWatching(bot({}))).toBe(false);
     expect(
       isWatching(bot({ status: "idle", watch: [{ what: "CI", since: 0 }] })),
-    ).toBe(false);
+    ).toBe(true);
+    expect(
+      isWatching(bot({ status: "blocked", watch: [{ what: "CI", since: 0 }] })),
+    ).toBe(true);
     expect(isWatching(null)).toBe(false);
+  });
+});
+
+describe("watchHoldsSend", () => {
+  it("waits only while that work is still the turn", () => {
+    expect(watchHoldsSend(bot({ watch: [{ what: "CI", since: 0 }] }))).toBe(
+      true,
+    );
+    expect(
+      watchHoldsSend(bot({ status: "idle", watch: [{ what: "CI", since: 0 }] })),
+    ).toBe(false);
+    expect(watchHoldsSend(bot({}))).toBe(false);
+    expect(watchHoldsSend(null)).toBe(false);
   });
 });
 

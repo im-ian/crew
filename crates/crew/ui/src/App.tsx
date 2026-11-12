@@ -49,7 +49,7 @@ import { useCrew } from "./useCrew";
 import { useUpdater } from "./updater";
 import { api } from "./api";
 import { escapeLayerOpen } from "./escapeLayer";
-import { isWatching } from "./watchView";
+import { watchHoldsSend } from "./watchView";
 import { AskHoldDialog, type AskPick } from "./components/AskHoldDialog";
 import { openQuestionIds, questionFocusTarget } from "./questionJump";
 
@@ -493,7 +493,7 @@ export function App() {
           onStick={crew.setStick}
           streaming={
             crew.selectedKind === "agent" &&
-            !isWatching(crew.currentAgent) &&
+            !watchHoldsSend(crew.currentAgent) &&
             (crew.currentAgent?.status === "working" ||
               crew.currentAgent?.status === "blocked")
           }
@@ -558,7 +558,7 @@ export function App() {
             crew.currentAgent?.status === "blocked"
           }
           canSteer={crew.currentAgent?.status === "working"}
-          watching={isWatching(crew.currentAgent)}
+          watching={watchHoldsSend(crew.currentAgent)}
           delivery={delivery}
           onStop={() => stopTurn(() => void crew.stopAgent())}
           onOpenSkills={() => setSkillsOpen(true)}
