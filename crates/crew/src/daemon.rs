@@ -3051,6 +3051,12 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
         Request::Ask { .. } => vec![Event::Error {
             message: "ask waits on the calling connection".into(),
         }],
+        Request::ShowFile { agent, path } => match show_file(&agent, &path) {
+            Ok(()) => vec![Event::Ok],
+            Err(err) => vec![Event::Error {
+                message: err.to_string(),
+            }],
+        },
         Request::AnswerChoice {
             agent,
             message_id,
@@ -4478,6 +4484,18 @@ fn reset_agent(id: &str, drop_routines: bool) -> anyhow::Result<String> {
         dir.display()
     );
     Ok(dir.display().to_string())
+}
+
+/// `crew show`: a file row in `agent`'s chat, which the window opens beside it.
+fn show_file(agent: &str, path: &str) -> anyhow::Result<()> {
+    if !known_agent(agent) {
+        anyhow::bail!("unknown agent {agent}");
+    }
+    if path.trim().is_empty() {
+        anyhow::bail!("show needs a file path");
+    }
+    crate::transcript::push_file(agent, path.trim());
+    Ok(())
 }
 
 fn known_agent(id: &str) -> bool {

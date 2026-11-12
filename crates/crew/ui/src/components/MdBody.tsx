@@ -25,6 +25,14 @@ import { api } from "../api";
 import type { AgentInfo } from "../types";
 import { useT } from "../LocaleContext";
 import { useLabelGroups } from "../BotLabelContext";
+import {
+  codePathRef,
+  opensInPanel,
+  parseFileRef,
+  resolveFilePath,
+  useFileOpen,
+  type FileTarget,
+} from "../fileRef";
 import { CornerDownRight, Play, Terminal, X, ZoomIn, ZoomOut } from "../icons";
 import { GALLERY_CAP, galleryExtra, imageStep } from "../imageAlbum";
 import {
@@ -355,18 +363,9 @@ function nodeToReact(
     }
     if (isLocalHref(href, baseDir)) {
       return (
-        <a
-          key={key}
-          href={href}
-          title={title}
-          onClick={(e) => {
-            e.preventDefault();
-            const path = resolveLocalPath(href, baseDir);
-            if (path) void api.openPath(path);
-          }}
-        >
+        <LocalLink key={key} href={href} title={title} path={resolveLocalPath(href, baseDir)}>
           {kids}
-        </a>
+        </LocalLink>
       );
     }
     // Only the web and mail open outside the app. `#section`, a relative path
@@ -395,6 +394,12 @@ function nodeToReact(
         {kids}
       </a>
     );
+  }
+  if (tag === "CODE" && el.parentElement?.tagName !== "PRE") {
+    const text = el.textContent || "";
+    const ref = codePathRef(text);
+    const path = ref ? resolveFilePath(ref.path, baseDir) : null;
+    if (ref && path) return <PathCode key={key} text={text} target={{ ...ref, path }} />;
   }
   const cls = el.getAttribute("class");
   if (cls === "md-cmd") {
@@ -936,5 +941,65 @@ function useImageZoom(
   return useMemo(
     () => ({ view, live, space, step, fit, onPointerDown, onDoubleClick, takeDrag }),
     [view, live, space, step, fit, onPointerDown, onDoubleClick, takeDrag],
+  );
+}
+
+/**
+ * A link to a file on this Mac. A text or code file opens beside the chat; a
+ * folder, a picture or a document opens in its own app, as it always did.
+ */
+function LocalLink({
+  href,
+  title,
+  path,
+  children,
+}: {
+  href: string;
+  title?: string;
+  path: string | null;
+  children: ReactNode;
+}) {
+  const openFile = useFileOpen();
+  return (
+    <a
+      href={href}
+      title={title}
+      onClick={(e) => {
+        e.preventDefault();
+        if (!path) return;
+        const target = parseFileRef(path);
+        if (openFile && opensInPanel(target.path)) openFile.open(target);
+        else void api.openPath(path);
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
+/** Inline code that names a file, `src/foo.ts:53`: a click shows it beside the chat. */
+function PathCode({ text, target }: { text: string; target: FileTarget }) {
+  const openFile = useFileOpen();
+  const t = useT();
+  if (!openFile) return <code>{text}</code>;
+  return (
+    <code
+      className="md-path"
+      role="button"
+      tabIndex={0}
+      title={t("file.show")}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openFile.open(target);
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        openFile.open(target);
+      }}
+    >
+      {text}
+    </code>
   );
 }

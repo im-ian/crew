@@ -135,7 +135,8 @@ pub fn classify_row(
             MessageKind::Received => RowClass::Received,
             MessageKind::Routine => RowClass::Routine,
             MessageKind::Handoff => RowClass::Handoff,
-            MessageKind::Tool => RowClass::Tool,
+            // How the turn went, like a tool call: not said to anyone.
+            MessageKind::Tool | MessageKind::File => RowClass::Tool,
             // Crew's own line, like any other it writes.
             MessageKind::Compact => RowClass::Received,
         };

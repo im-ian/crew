@@ -9,6 +9,7 @@ mod cron;
 mod daemon;
 mod desktop;
 mod escape_layer;
+mod files;
 mod groups;
 mod headless;
 mod interrupt;
@@ -71,6 +72,15 @@ enum Cmd {
         /// Message. Read from stdin when left out, so a heredoc works too
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         message: Vec<String>,
+    },
+    /// Show the user a text or code file beside this chat. `path:line` opens
+    /// it at that line
+    Show {
+        /// File path, relative to the current folder or absolute; `:line` opens at a line
+        path: String,
+        /// Agent id. Defaults to $CREW_AGENT_ID.
+        #[arg(long)]
+        agent: Option<String>,
     },
     /// Ask the human user to pick or type in this chat; print their answer.
     /// Repeat --question for more questions on one card: each --option,
@@ -400,6 +410,7 @@ fn run() -> anyhow::Result<()> {
             })?)
         }
         Some(Cmd::Tell { to, from, message }) => run_tell(to, from, message),
+        Some(Cmd::Show { path, agent }) => run_show(path, agent),
         Some(Cmd::Ask { .. }) => {
             let ask = matches.subcommand_matches("ask").expect("ask matches");
             run_ask(ask_questions(ask)?)
@@ -888,6 +899,24 @@ fn connect_for_tell() -> anyhow::Result<()> {
         Ok(())
     } else {
         client::ensure_daemon()
+    }
+}
+
+fn run_show(path: String, agent: Option<String>) -> anyhow::Result<()> {
+    let agent = require_agent_id(agent, "show")?;
+    let cwd = std::env::current_dir()?;
+    let (file, line) = files::resolve_show(&path, &cwd).map_err(anyhow::Error::msg)?;
+    let text = files::row_text(&file, line);
+    connect_for_tell()?;
+    match client::rpc(Request::ShowFile {
+        agent,
+        path: text.clone(),
+    })? {
+        Event::Error { message } => anyhow::bail!(message),
+        _ => {
+            println!("ok {text}");
+            Ok(())
+        }
     }
 }
 

@@ -928,6 +928,12 @@ fn pick_folder() -> Result<Option<String>, String> {
     Ok(Some(path))
 }
 
+/// A text or code file to draw beside the chat. Up to 1 MiB, cut at a line.
+#[tauri::command(async)]
+fn read_text_file(path: String) -> Result<crate::files::TextFile, String> {
+    crate::files::read_text(&path)
+}
+
 #[tauri::command(async)]
 fn open_path(path: String) -> Result<(), String> {
     let raw = path.trim();
@@ -1083,6 +1089,7 @@ pub fn run() -> anyhow::Result<()> {
             save_upload,
             peek_pending_focus,
             take_pending_focus,
+            read_text_file,
             open_path,
             open_url,
             pick_folder,

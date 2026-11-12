@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatThread, sideOnlyPeer } from "./components/ChatThread";
@@ -21,6 +21,15 @@ import { chatOrder, loadRemoteFolds, loadRemoteLayout, representing } from "./re
 import { copyText } from "./components/CopyButton";
 import { useT } from "./LocaleContext";
 import { BotLabelProvider } from "./BotLabelContext";
+import {
+  FileOpenContext,
+  fileRun,
+  freshFileRow,
+  parseFileRef,
+  sameFile,
+  type FileTarget,
+} from "./fileRef";
+import { FileView } from "./components/FileView";
 import type { TFn } from "./i18n";
 import { isTypingTarget, shortcutId } from "./shortcuts";
 import { popoverIsOpen } from "./usePopover";
@@ -94,6 +103,21 @@ export function App() {
   const searchRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<ComposerHandle>(null);
   const peekOpen = !!(peek && crew.currentAgent);
+  // Files beside the chat take the panel's place; one or the other is open.
+  // `list` is the files shown together, one tab each; `at` is the one shown.
+  const [file, setFile] = useState<{ list: FileTarget[]; at: number } | null>(null);
+  const fileOpen = !!(file && crew.currentAgent);
+  const current = file ? file.list[file.at] ?? null : null;
+  // The file rows each chat had when it was first loaded. One that arrives
+  // after is a bot running `crew show` now, and opens.
+  const seenFiles = useRef(new Map<string, Set<string>>());
+  const openFile = useCallback((target: FileTarget, group?: FileTarget[]) => {
+    setPeek(null);
+    const list = group?.length ? group : [target];
+    const at = list.findIndex((f) => sameFile(f, target));
+    setFile(at < 0 ? { list: [...list, target], at: list.length } : { list, at });
+  }, []);
+  const fileCtx = useMemo(() => ({ open: openFile, current }), [openFile, current]);
   const autoFor = useRef<string | null>(null);
   const hitFor = useRef<string | null>(null);
 
@@ -124,8 +148,22 @@ export function App() {
   // one opens, with no frame painted between.
   useLayoutEffect(() => {
     setPeek(null);
+    setFile(null);
     autoFor.current = null;
   }, [crew.selected, crew.selectedKind]);
+
+  useEffect(() => {
+    const chat = crew.messagesFor;
+    if (!chat) return;
+    const files = crew.messages.filter((m) => m.kind === "file").map((m) => m.id);
+    const seen = seenFiles.current.get(chat);
+    const fresh = freshFileRow(seen, crew.messages);
+    seenFiles.current.set(chat, new Set([...(seen ?? []), ...files]));
+    if (fresh) {
+      const run = fileRun(crew.messages, fresh.id).map((m) => parseFileRef(m.text));
+      openFile(parseFileRef(fresh.text), run);
+    }
+  }, [crew.messagesFor, crew.messages, openFile]);
 
   // A bot with only side chats opens its latest beside the empty thread, and
   // a search hit opens the one it is in. Once per pick, when that bot's own
@@ -139,7 +177,10 @@ export function App() {
     autoFor.current = sel;
     hitFor.current = hit;
     const peer = sideOnlyPeer(crew.messages, crew.agents, hit, crew.selected);
-    if (peer) setPeek({ peer, focus: hit ? [hit] : [], openAtFocus: !!hit });
+    if (peer) {
+      setFile(null);
+      setPeek({ peer, focus: hit ? [hit] : [], openAtFocus: !!hit });
+    }
   }, [
     crew.selected,
     crew.messagesFor,
@@ -207,6 +248,7 @@ export function App() {
   }
 
   function togglePeek(peer: string, focus: string[] = []) {
+    setFile(null);
     setPeek((cur) =>
       cur && cur.peer === peer && cur.focus[0] === focus[0]
         ? null
@@ -280,10 +322,11 @@ export function App() {
       const c = crewRef.current;
       if (c.confirmOpen) return;
       const typing = isTypingTarget(e.target);
-      if (peek && e.key === "Escape") {
+      if ((peek || file) && e.key === "Escape") {
         if (typing) return;
         e.preventDefault();
         setPeek(null);
+        setFile(null);
         return;
       }
       const id = shortcutId(e, typing);
@@ -369,7 +412,7 @@ export function App() {
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [helpOpen, settingsOpen, skillsOpen, peek, leaveOpen]);
+  }, [helpOpen, settingsOpen, skillsOpen, peek, file, leaveOpen]);
 
   const app = (
     <div className="app">
@@ -413,7 +456,7 @@ export function App() {
       />
       <main
         className={
-          [peekOpen && "has-peek", chatWidth === "narrow" && "narrow-chat"]
+          [(peekOpen || fileOpen) && "has-peek", chatWidth === "narrow" && "narrow-chat"]
             .filter(Boolean)
             .join(" ") || undefined
         }
@@ -550,6 +593,14 @@ export function App() {
           onDeleteRoutine={crew.deleteRoutine}
           onRunRoutine={crew.runRoutine}
         />
+        {file && crew.currentAgent ? (
+          <FileView
+            files={file.list}
+            at={file.at}
+            onPick={(at) => setFile((cur) => (cur ? { ...cur, at } : cur))}
+            onClose={() => setFile(null)}
+          />
+        ) : null}
         {peek && crew.currentAgent ? (
           <PeekRoom
             peerId={peek.peer}
@@ -684,7 +735,7 @@ export function App() {
       groups={crew.groups}
       viewer={crew.selectedKind === "agent" ? crew.selected : null}
     >
-      {app}
+      <FileOpenContext.Provider value={fileCtx}>{app}</FileOpenContext.Provider>
     </BotLabelProvider>
   );
 }

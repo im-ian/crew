@@ -3,6 +3,9 @@
 // app as it is. Production builds only bundle index.html, so this never ships.
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import type { AgentInfo, ChatMessage, Group, PlanUsage, RemoteInfo, RemoteServer } from "./types";
+import fontPrefSource from "./fontPref.ts?raw";
+import fontPrefTestSource from "./fontPref.test.ts?raw";
+import settingsPaneSource from "./components/SettingsPane.tsx?raw";
 
 const MIN = 60_000;
 const now = Date.now();
@@ -163,6 +166,46 @@ if (remoteShot) {
     { id: "x3", role: "assistant", from: "acme/acc_k3j9x0", ts: at(3), text: "마이그레이션 쓰는 중이에요. @acme/acc_p2m8q1 에게 화면 문구도 물어볼게요." },
   ];
 }
+// `?shot=file`: asked to show a file, the bot runs `crew show`. Its row lands
+// a moment after the chat opens, so the panel opens the way it does live.
+// `?shot=files` shows three, the last one open. `&theme=light` shows the
+// light colors.
+const UI_SRC = "/Users/ian/Projects/crew/crates/crew/ui/src";
+const SHOWN_FILE = `${UI_SRC}/fontPref.ts`;
+const sources: Record<string, string> = {
+  "fontPref.ts": fontPrefSource,
+  "fontPref.test.ts": fontPrefTestSource,
+  "SettingsPane.tsx": settingsPaneSource,
+};
+const fileRows: ChatMessage[] = [];
+if (shot === "files") {
+  thread.impl = [
+    { id: "f1", role: "user", from: "user", ts: at(3), text: "폰트 설정이랑 관련된 파일 다 보여줘." },
+  ];
+  fileRows.push(
+    { id: "f2", role: "system", from: "impl", kind: "file", ts: at(2), text: `${SHOWN_FILE}:53` },
+    { id: "f3", role: "system", from: "impl", kind: "file", ts: at(2), text: `${UI_SRC}/components/SettingsPane.tsx:81` },
+    { id: "f4", role: "system", from: "impl", kind: "file", ts: at(2), text: `${UI_SRC}/fontPref.test.ts:34` },
+    {
+      id: "f5", role: "assistant", from: "impl", ts: at(2),
+      text: "세 개 열어 뒀어요. 판별 로직, 그걸 쓰는 설정 화면, 테스트 순서예요.",
+    },
+  );
+  setTimeout(() => thread.impl.push(...fileRows), 900);
+}
+if (shot === "file") {
+  thread.impl = [
+    { id: "f1", role: "user", from: "user", ts: at(3), text: "설치 폰트 판별하는 코드 보여줘." },
+  ];
+  fileRows.push(
+    { id: "f2", role: "system", from: "impl", kind: "file", ts: at(2), text: `${SHOWN_FILE}:53` },
+    {
+      id: "f3", role: "assistant", from: "impl", ts: at(2),
+      text: "옆에 열어 뒀어요. 판별은 `crates/crew/ui/src/fontPref.ts:53`의 `missingFonts`가 하고, 너비는 `pageMeasure`가 화면에 잠깐 붙인 span으로 재요. 설정 화면 쪽은 `crates/crew/ui/src/components/SettingsPane.tsx`예요.",
+    },
+  );
+  setTimeout(() => thread.impl.push(...fileRows), 900);
+}
 const probe: RemoteServer = {
   url: "wss://router.acme.dev:7420", name: "crew-router", version: "0.1.0", protocol: 1, title: "Acme Team", signup: "invite",
 };
@@ -172,7 +215,7 @@ const first =
 agents.sort((a, b) => (a.id === first ? -1 : b.id === first ? 1 : 0));
 
 localStorage.clear();
-localStorage.setItem("crew.theme", "dark");
+localStorage.setItem("crew.theme", params.get("theme") === "light" ? "light" : "dark");
 // Only the reviewer and the server bot wait to be read.
 localStorage.setItem("crew.read", JSON.stringify({ "agent:design": now, "agent:brief": now, "agent:impl": now }));
 localStorage.setItem("crew.locale", "ko");
@@ -196,6 +239,12 @@ mockIPC(
         return { models: list, default: list[0] ?? null, installed: true };
       }
       case "get_group_memory": return "";
+      case "read_text_file": {
+        const path = String(a.path);
+        if (!path.endsWith(".ts") && !path.endsWith(".tsx")) throw `not found: ${path}`;
+        const text = sources[path.split("/").pop() ?? ""] ?? fontPrefSource;
+        return { path: path.startsWith("~") ? path.replace("~", "/Users/ian") : path, text, size: text.length, truncated: false };
+      }
       case "peek_pending_focus":
       case "take_pending_focus": return null;
       case "search_crew": return [];

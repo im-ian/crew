@@ -188,7 +188,10 @@ fn is_for_user(msg: &ChatMessage) -> bool {
 /// away too. Either one lit the unread dot on a chat with nothing new in it.
 /// A card on a tool call still waits on the user.
 fn is_news(msg: &ChatMessage) -> bool {
-    if !is_for_user(msg) || is_subagent_note(msg) || msg.kind == Some(MessageKind::Compact) {
+    if !is_for_user(msg)
+        || is_subagent_note(msg)
+        || matches!(msg.kind, Some(MessageKind::Compact | MessageKind::File))
+    {
         return false;
     }
     msg.kind != Some(MessageKind::Tool) || msg.choice.is_some() || msg.approval.is_some()
@@ -785,10 +788,19 @@ pub fn push_subagent(agent: &str, key: &str, from: &str, text: &str) -> ChatMess
     push_in_turn(agent, Some(key), from, text, kind)
 }
 
-/// How the turn went, not what was said: a tool call, a subagent note, or a
-/// compact. A recap of the chat leaves these out.
+/// How the turn went, not what was said: a tool call, a subagent note, a
+/// compact, or a file shown beside the chat. A recap of the chat leaves these out.
 fn is_work(msg: &ChatMessage) -> bool {
-    matches!(msg.kind, Some(MessageKind::Tool | MessageKind::Compact)) || is_subagent_note(msg)
+    matches!(
+        msg.kind,
+        Some(MessageKind::Tool | MessageKind::Compact | MessageKind::File)
+    ) || is_subagent_note(msg)
+}
+
+/// A file the bot showed with `crew show`, in the turn it ran in: above the
+/// reply still being written. `text` is the path, with `:<line>` when there is one.
+pub fn push_file(agent: &str, text: &str) -> ChatMessage {
+    push_in_turn(agent, None, agent, text, MessageKind::File)
 }
 
 /// A bot's talk with its own subagent. Like a tool call, it is how the bot

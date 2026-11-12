@@ -86,7 +86,9 @@ import {
   type JumpFrame,
   type JumpMode,
 } from "../questionJump";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, Reply, X } from "../icons";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, FileText, Reply, X } from "../icons";
+import { parseFileRef, sameFile, useFileOpen } from "../fileRef";
+import { splitFilePath } from "./FileView";
 import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
 import { MdBody } from "./MdBody";
@@ -287,7 +289,7 @@ export function ChatThread({
   const all = threadRows(visible, agents);
   // A bot that has only talked with other bots has no conversation here: the
   // thread stays empty, and its side chat opens beside it (`sideOnlyPeer`).
-  const direct = all.some((row) => row.kind === "msg");
+  const direct = all.some((row) => row.kind === "msg" || row.kind === "files");
   const rows = direct ? all : [];
   // Keyed by row id, not by index: a filter or an inserted row would slide a
   // parallel array and stamp the wrong stretch.
@@ -704,6 +706,8 @@ export function ChatThread({
     let node: ReactNode;
     if (row.kind === "tools") {
       node = <ToolGroup items={row.msgs} highlightId={highlightId} />;
+    } else if (row.kind === "files") {
+      node = <FileGroup msgs={row.msgs} flashId={highlightId} />;
     } else if (row.kind === "notes") {
       node = (
         <NoteGroup
@@ -1315,6 +1319,7 @@ function SystemOrIncoming({
       />
     );
   }
+  if (m.kind === "file") return <FileGroup msgs={[m]} flashId={flash ? m.id : null} />;
   const from = String(m.from || "");
   if (from === "crew") {
     // A note the daemon wrote about the conversation itself, not a bot speaking.
@@ -2831,7 +2836,7 @@ export function sideOnlyPeer(
   selfId: string | null = null,
 ): string | null {
   const rows = threadRows(visibleMessages(messages, false, selfId), agents);
-  if (rows.some((row) => row.kind === "msg")) return null;
+  if (rows.some((row) => row.kind === "msg" || row.kind === "files")) return null;
   let peer: string | null = null;
   for (const row of rows) {
     if (row.kind !== "notes" || row.peerId.startsWith("#")) continue;
@@ -2857,4 +2862,53 @@ function visibleMessages(
     return stripCrewMarkers(raw).length > 0 || !!m.choice;
   });
   return oneCompactNote(shown);
+}
+
+/**
+ * Files a bot showed with `crew show`, one after another: one card, a line
+ * each. They opened beside the chat as tabs; a line opens its tab again, and
+ * the one the panel shows says so.
+ */
+function FileGroup({ msgs, flashId }: { msgs: ChatMessage[]; flashId?: string | null }) {
+  const t = useT();
+  const files = useFileOpen();
+  const targets = msgs.map((m) => parseFileRef(m.text || ""));
+  // In the bot's column, past the empty spot its face takes, like its bubbles.
+  return (
+    <div className="row them" data-msg-id={msgs[0].id}>
+      <div className="msg-avatar" aria-hidden="true" />
+      <div className={"file-card" + (msgs.some((m) => m.id === flashId) ? " flash" : "")}>
+        {msgs.map((m, i) => {
+          const target = targets[i];
+          const { name, dir } = splitFilePath(target.path);
+          const open = sameFile(files?.current, target);
+          return (
+            <button
+              key={m.id}
+              type="button"
+              className={"file-card-row" + (open ? " open" : "")}
+              data-msg-id={m.id}
+              title={target.path}
+              disabled={!files}
+              onClick={() => files?.open(target, targets)}
+            >
+              <FileText className="file-card-icon" size={16} />
+              <span className="file-card-text">
+                <span className="file-card-name">
+                  {name}
+                  {target.line ? <span className="file-line">:{target.line}</span> : null}
+                </span>
+                {dir ? (
+                  <span className="file-card-dir">
+                    <bdi>{dir}</bdi>
+                  </span>
+                ) : null}
+              </span>
+              <span className="file-card-action">{open ? t("file.shown") : t("file.show")}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
