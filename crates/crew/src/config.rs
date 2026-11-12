@@ -898,8 +898,10 @@ impl AgentConfig {
     /// Claude, grok, agy and codex stay up between turns and read each prompt
     /// from their stdin, so a send reaches them while a task they put in the
     /// background still runs. grok and agy do that over ACP, codex over
-    /// `codex app-server`. Those modes take fewer flags than a one-shot turn:
-    /// a command with one they do not take runs a process per turn, as before.
+    /// `codex app-server`. Codex stays up only when its approval policy is
+    /// `never` (`--yolo`); any other policy stays on `codex exec`. Those
+    /// modes take fewer flags than a one-shot turn: a command with one they
+    /// do not take runs a process per turn, as before.
     pub fn live_cli(&self) -> bool {
         self.stays_up()
     }
@@ -935,7 +937,8 @@ impl AgentConfig {
 
     /// How to start a codex bot that stays up: `codex app-server`, and what
     /// the thread is opened with instead of `exec`'s flags. None for any
-    /// other CLI, and for a command with a flag app-server does not take.
+    /// other CLI, for a command with a flag app-server does not take, and
+    /// when the approval policy is not `never`.
     pub fn codex_launch(
         &self,
         roster: &[AgentConfig],
@@ -1945,6 +1948,12 @@ fn codex_app_launch(args: &[String]) -> Option<CodexLaunch> {
             sandbox = Some("danger-full-access".into());
         }
     }
+    // `--yolo` is `never`. Any other policy is the CLI's to ask about, and a
+    // one-shot `exec` applies it. app-server would ask Crew, which does not
+    // answer for the user, so that bot stays on a process per turn.
+    if approval.as_deref() != Some("never") {
+        return None;
+    }
     Some(CodexLaunch {
         argv,
         rules,
@@ -2620,6 +2629,33 @@ mod tests {
         assert!(argv.contains(&"--search".to_string()));
     }
 
+    /// A resident codex accepts approvals itself. Anything short of `never`
+    /// stays on `exec`, which applies the policy without Crew answering.
+    #[test]
+    fn codex_stays_up_only_when_approval_is_never() {
+        let plain = cfg(&["codex"], None, None);
+        assert!(!plain.live_cli());
+        assert!(plain.codex_launch(&[], "", None).is_none());
+        assert_eq!(plain.turn_cmd("hi", None, &[], "")[1], "exec");
+
+        let ask = cfg(&["codex", "--ask-for-approval", "on-request"], None, None);
+        assert!(!ask.live_cli());
+        assert_eq!(ask.turn_cmd("hi", None, &[], "")[1], "exec");
+
+        let overridden = cfg(
+            &["codex", "--yolo", "--ask-for-approval", "on-request"],
+            None,
+            None,
+        );
+        assert!(!overridden.live_cli());
+
+        let never = cfg(&["codex", "-c", "approval_policy=never"], None, None);
+        assert!(never.live_cli());
+        let launch = never.codex_launch(&[], "", None).unwrap();
+        assert_eq!(launch.approval.as_deref(), Some("never"));
+        assert_eq!(launch.argv, ["codex", "app-server"]);
+    }
+
     #[test]
     fn codex_turn_inserts_exec_json_and_resume() {
         let c = cfg(&["codex", "--yolo"], None, None);
@@ -2947,6 +2983,8 @@ mod tests {
             &["grok", "--always-approve", "--search"][..],
             &["agy", "--dangerously-skip-permissions", "--search"][..],
             &["codex", "--yolo", "--search"][..],
+            &["codex"][..],
+            &["codex", "--ask-for-approval", "on-request"][..],
         ];
         for cmd in per_turn {
             let agent = cfg(cmd, None, None);
