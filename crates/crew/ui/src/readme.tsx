@@ -4,6 +4,8 @@
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import type { AgentInfo, ChatMessage, Group, PlanUsage, RemoteInfo, RemoteServer } from "./types";
 import fontPrefSource from "./fontPref.ts?raw";
+import fontPrefTestSource from "./fontPref.test.ts?raw";
+import settingsPaneSource from "./components/SettingsPane.tsx?raw";
 
 const MIN = 60_000;
 const now = Date.now();
@@ -166,9 +168,31 @@ if (remoteShot) {
 }
 // `?shot=file`: asked to show a file, the bot runs `crew show`. Its row lands
 // a moment after the chat opens, so the panel opens the way it does live.
-// `&theme=light` shows the light colors.
-const SHOWN_FILE = "/Users/ian/Projects/crew/crates/crew/ui/src/fontPref.ts";
+// `?shot=files` shows three, the last one open. `&theme=light` shows the
+// light colors.
+const UI_SRC = "/Users/ian/Projects/crew/crates/crew/ui/src";
+const SHOWN_FILE = `${UI_SRC}/fontPref.ts`;
+const sources: Record<string, string> = {
+  "fontPref.ts": fontPrefSource,
+  "fontPref.test.ts": fontPrefTestSource,
+  "SettingsPane.tsx": settingsPaneSource,
+};
 const fileRows: ChatMessage[] = [];
+if (shot === "files") {
+  thread.impl = [
+    { id: "f1", role: "user", from: "user", ts: at(3), text: "폰트 설정이랑 관련된 파일 다 보여줘." },
+  ];
+  fileRows.push(
+    { id: "f2", role: "system", from: "impl", kind: "file", ts: at(2), text: `${SHOWN_FILE}:53` },
+    { id: "f3", role: "system", from: "impl", kind: "file", ts: at(2), text: `${UI_SRC}/components/SettingsPane.tsx:81` },
+    { id: "f4", role: "system", from: "impl", kind: "file", ts: at(2), text: `${UI_SRC}/fontPref.test.ts:34` },
+    {
+      id: "f5", role: "assistant", from: "impl", ts: at(2),
+      text: "세 개 열어 뒀어요. 판별 로직, 그걸 쓰는 설정 화면, 테스트 순서예요.",
+    },
+  );
+  setTimeout(() => thread.impl.push(...fileRows), 900);
+}
 if (shot === "file") {
   thread.impl = [
     { id: "f1", role: "user", from: "user", ts: at(3), text: "설치 폰트 판별하는 코드 보여줘." },
@@ -218,7 +242,7 @@ mockIPC(
       case "read_text_file": {
         const path = String(a.path);
         if (!path.endsWith(".ts") && !path.endsWith(".tsx")) throw `not found: ${path}`;
-        const text = fontPrefSource;
+        const text = sources[path.split("/").pop() ?? ""] ?? fontPrefSource;
         return { path: path.startsWith("~") ? path.replace("~", "/Users/ian") : path, text, size: text.length, truncated: false };
       }
       case "peek_pending_focus":

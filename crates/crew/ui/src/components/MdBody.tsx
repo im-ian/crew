@@ -968,7 +968,7 @@ function LocalLink({
         e.preventDefault();
         if (!path) return;
         const target = parseFileRef(path);
-        if (openFile && opensInPanel(target.path)) openFile(target);
+        if (openFile && opensInPanel(target.path)) openFile.open(target);
         else void api.openPath(path);
       }}
     >
@@ -991,12 +991,12 @@ function PathCode({ text, target }: { text: string; target: FileTarget }) {
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        openFile(target);
+        openFile.open(target);
       }}
       onKeyDown={(e) => {
         if (e.key !== "Enter" && e.key !== " ") return;
         e.preventDefault();
-        openFile(target);
+        openFile.open(target);
       }}
     >
       {text}

@@ -23,7 +23,9 @@ export function saveShowTools(show: boolean) {
 export type ThreadRow =
   | { kind: "msg"; msg: ChatMessage }
   | { kind: "tools"; msgs: ChatMessage[] }
-  | { kind: "notes"; peerId: string; msgs: ChatMessage[] };
+  | { kind: "notes"; peerId: string; msgs: ChatMessage[] }
+  /** Files a bot showed one after another, as one card. */
+  | { kind: "files"; msgs: ChatMessage[] };
 
 /**
  * One compact note for a run of them. A long turn can compact several times,
@@ -57,9 +59,15 @@ export function threadRows(
   for (const msg of list) {
     const last = rows[rows.length - 1];
     // A file a bot showed stays in the thread the user reads, even in a turn
-    // another bot asked for.
+    // another bot asked for. Files shown one after another are one card.
+    // Each `crew show` is a tool call, so tool cards between two files do
+    // not part them.
     if (msg.kind === "file") {
-      rows.push({ kind: "msg", msg });
+      let j = rows.length - 1;
+      while (j >= 0 && rows[j].kind === "tools") j--;
+      const run = rows[j];
+      if (run?.kind === "files") run.msgs.push(msg);
+      else rows.push({ kind: "files", msgs: [msg] });
       continue;
     }
     const peer = runPeer(msg, agents);

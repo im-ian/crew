@@ -40,9 +40,23 @@ export function splitFilePath(path: string): { name: string; dir: string } {
   return { name, dir: dir.replace(/^\/Users\/[^/]+/, "~") };
 }
 
-/** A text or code file beside the chat, colored, opened at its line. */
-export function FileView({ target, onClose }: { target: FileTarget; onClose: () => void }) {
+/**
+ * Text or code files beside the chat, colored, each opened at its line. Files
+ * a bot showed together are tabs; `at` is the one shown.
+ */
+export function FileView({
+  files,
+  at,
+  onPick,
+  onClose,
+}: {
+  files: FileTarget[];
+  at: number;
+  onPick: (at: number) => void;
+  onClose: () => void;
+}) {
   const t = useT();
+  const target = files[at] ?? files[0];
   const bodyRef = useRef<HTMLDivElement>(null);
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   const [tokens, setTokens] = useState<Token[][] | null>(null);
@@ -132,6 +146,26 @@ export function FileView({ target, onClose }: { target: FileTarget; onClose: () 
           <X />
         </button>
       </header>
+      {files.length > 1 ? (
+        <div className="file-tabs" role="tablist" aria-label={t("file.tabs")}>
+          {files.map((f, i) => (
+            <button
+              key={`${f.path}:${f.line ?? ""}`}
+              type="button"
+              role="tab"
+              aria-selected={i === at}
+              className={"file-tab" + (i === at ? " active" : "")}
+              title={f.path}
+              onClick={() => onPick(i)}
+            >
+              {splitFilePath(f.path).name}
+              {f.line ? <span className="file-line">:{f.line}</span> : null}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div />
+      )}
       <div className="file-body" ref={bodyRef}>
         {loaded.state === "loading" ? <p className="file-state">{t("file.loading")}</p> : null}
         {loaded.state === "error" ? <p className="file-state">{t(loaded.key)}</p> : null}

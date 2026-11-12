@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   codePathRef,
+  fileRun,
   freshFileRow,
   opensInPanel,
   parseFileRef,
   resolveFilePath,
+  sameFile,
 } from "./fileRef";
 import { fileErrorKey, fileLines, splitFilePath } from "./components/FileView";
 import { threadRows } from "./tools";
@@ -66,10 +68,31 @@ describe("freshFileRow", () => {
   });
 });
 
-describe("a file row in the thread", () => {
-  it("stays in the thread even in a turn another bot asked for", () => {
+describe("files in the thread", () => {
+  it("stay in the thread even in a turn another bot asked for", () => {
     const rows = threadRows([row("1", "file", "other")], []);
-    expect(rows).toEqual([{ kind: "msg", msg: expect.objectContaining({ id: "1" }) }]);
+    expect(rows).toEqual([{ kind: "files", msgs: [expect.objectContaining({ id: "1" })] }]);
+  });
+
+  it("shown one after another are one card, past the tool calls between", () => {
+    const said = { ...row("s"), role: "assistant", kind: undefined } as ChatMessage;
+    const rows = threadRows([row("1", "file"), row("t1", "tool"), row("2", "file"), said, row("3", "file")], []);
+    expect(rows.map((r) => r.kind)).toEqual(["files", "tools", "msg", "files"]);
+    expect(rows[0].kind === "files" && rows[0].msgs.map((m) => m.id)).toEqual(["1", "2"]);
+  });
+
+  it("open together as tabs: the run around a row", () => {
+    const said = { ...row("s"), role: "assistant", kind: undefined } as ChatMessage;
+    const list = [row("1", "file"), row("t1", "tool"), row("2", "file"), said, row("3", "file")];
+    expect(fileRun(list, "2").map((m) => m.id)).toEqual(["1", "2"]);
+    expect(fileRun(list, "3").map((m) => m.id)).toEqual(["3"]);
+    expect(fileRun(list, "nope")).toEqual([]);
+  });
+
+  it("are the same file at the same line", () => {
+    expect(sameFile({ path: "/a" }, { path: "/a" })).toBe(true);
+    expect(sameFile({ path: "/a", line: 2 }, { path: "/a" })).toBe(false);
+    expect(sameFile(null, { path: "/a" })).toBe(false);
   });
 });
 

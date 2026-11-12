@@ -256,6 +256,8 @@ export const KO = {
   "file.truncated": "앞쪽 1MB만 보여요",
   "file.line": "{line}번째 줄",
   "file.show": "파일 보기",
+  "file.shown": "보는 중",
+  "file.tabs": "함께 보여준 파일",
   "thread.peekResize": "사이드 채팅 너비 조절",
 
   "askHold.title": "질문에 아직 답하지 않았어요",
@@ -722,6 +724,8 @@ export const EN: { [K in MessageKey]: string } = {
   "file.truncated": "Showing the first 1 MB",
   "file.line": "Line {line}",
   "file.show": "Show file",
+  "file.shown": "Open",
+  "file.tabs": "Files shown together",
   "thread.peekResize": "Resize side chat",
 
   "askHold.title": "The question is still waiting",

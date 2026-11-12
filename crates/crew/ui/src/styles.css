@@ -4422,28 +4422,77 @@ html.peek-resizing .peek-resize::after {
 html[data-theme="light"] .file-src span {
   color: var(--l, inherit);
 }
-/* `crew show` in the thread: the file a bot opened beside the chat. */
+/* The panel's rows with tabs for files shown together (an empty row without). */
+.file-view {
+  grid-template-rows: var(--titlebar) auto auto minmax(0, 1fr) auto;
+}
+.file-tabs {
+  display: flex;
+  gap: var(--space-2);
+  padding: 0 var(--content-pad) var(--space-6);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.file-tab {
+  flex: none;
+  max-width: 220px;
+  padding: var(--space-4) var(--space-10);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.file-tab:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.file-tab.active {
+  background: var(--field);
+  color: var(--ink);
+}
+/* `crew show` in the thread: the files a bot opened beside the chat, a line each. */
 .file-card {
   display: flex;
+  flex-direction: column;
   min-width: 0;
-  align-items: center;
-  gap: var(--space-10);
-  max-width: min(100%, 420px);
+  width: min(100%, 440px);
   margin: var(--space-2) 0;
-  padding: var(--space-8) var(--space-12);
+  padding: var(--space-4);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--field);
+}
+.file-card.flash {
+  animation: msg-flash 3s var(--ease-out);
+}
+.file-card-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  min-width: 0;
+  padding: var(--space-6) var(--space-8);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--ink);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
-.file-card:hover:not(:disabled) {
+.file-card-row:hover:not(:disabled) {
   background: var(--field-hover);
 }
-.file-card.flash {
-  animation: msg-flash 3s var(--ease-out);
+.file-card-row.open {
+  background: color-mix(in srgb, var(--working) 14%, transparent);
+}
+.file-card-row.open .file-card-action {
+  color: var(--muted);
 }
 .file-card-icon {
   flex: none;

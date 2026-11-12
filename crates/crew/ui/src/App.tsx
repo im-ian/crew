@@ -21,7 +21,14 @@ import { chatOrder, loadRemoteFolds, loadRemoteLayout, representing } from "./re
 import { copyText } from "./components/CopyButton";
 import { useT } from "./LocaleContext";
 import { BotLabelProvider } from "./BotLabelContext";
-import { FileOpenContext, freshFileRow, parseFileRef, type FileTarget } from "./fileRef";
+import {
+  FileOpenContext,
+  fileRun,
+  freshFileRow,
+  parseFileRef,
+  sameFile,
+  type FileTarget,
+} from "./fileRef";
 import { FileView } from "./components/FileView";
 import type { TFn } from "./i18n";
 import { isTypingTarget, shortcutId } from "./shortcuts";
@@ -96,16 +103,21 @@ export function App() {
   const searchRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<ComposerHandle>(null);
   const peekOpen = !!(peek && crew.currentAgent);
-  // A file beside the chat takes the panel's place; one or the other is open.
-  const [file, setFile] = useState<FileTarget | null>(null);
+  // Files beside the chat take the panel's place; one or the other is open.
+  // `list` is the files shown together, one tab each; `at` is the one shown.
+  const [file, setFile] = useState<{ list: FileTarget[]; at: number } | null>(null);
   const fileOpen = !!(file && crew.currentAgent);
+  const current = file ? file.list[file.at] ?? null : null;
   // The file rows each chat had when it was first loaded. One that arrives
   // after is a bot running `crew show` now, and opens.
   const seenFiles = useRef(new Map<string, Set<string>>());
-  const openFile = useCallback((target: FileTarget) => {
+  const openFile = useCallback((target: FileTarget, group?: FileTarget[]) => {
     setPeek(null);
-    setFile(target);
+    const list = group?.length ? group : [target];
+    const at = list.findIndex((f) => sameFile(f, target));
+    setFile(at < 0 ? { list: [...list, target], at: list.length } : { list, at });
   }, []);
+  const fileCtx = useMemo(() => ({ open: openFile, current }), [openFile, current]);
   const autoFor = useRef<string | null>(null);
   const hitFor = useRef<string | null>(null);
 
@@ -147,7 +159,10 @@ export function App() {
     const seen = seenFiles.current.get(chat);
     const fresh = freshFileRow(seen, crew.messages);
     seenFiles.current.set(chat, new Set([...(seen ?? []), ...files]));
-    if (fresh) openFile(parseFileRef(fresh.text));
+    if (fresh) {
+      const run = fileRun(crew.messages, fresh.id).map((m) => parseFileRef(m.text));
+      openFile(parseFileRef(fresh.text), run);
+    }
   }, [crew.messagesFor, crew.messages, openFile]);
 
   // A bot with only side chats opens its latest beside the empty thread, and
@@ -576,7 +591,12 @@ export function App() {
           onRunRoutine={crew.runRoutine}
         />
         {file && crew.currentAgent ? (
-          <FileView target={file} onClose={() => setFile(null)} />
+          <FileView
+            files={file.list}
+            at={file.at}
+            onPick={(at) => setFile((cur) => (cur ? { ...cur, at } : cur))}
+            onClose={() => setFile(null)}
+          />
         ) : null}
         {peek && crew.currentAgent ? (
           <PeekRoom
@@ -712,7 +732,7 @@ export function App() {
       groups={crew.groups}
       viewer={crew.selectedKind === "agent" ? crew.selected : null}
     >
-      <FileOpenContext.Provider value={openFile}>{app}</FileOpenContext.Provider>
+      <FileOpenContext.Provider value={fileCtx}>{app}</FileOpenContext.Provider>
     </BotLabelProvider>
   );
 }

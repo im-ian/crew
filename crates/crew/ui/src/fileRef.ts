@@ -4,11 +4,38 @@ import type { ChatMessage } from "./types";
 /** A file to show beside the chat, at a line when one was given. */
 export type FileTarget = { path: string; line?: number };
 
-/** Opens a file in the panel beside the chat. Null where nothing can show one. */
-export const FileOpenContext = createContext<((target: FileTarget) => void) | null>(null);
+/** The panel beside the chat, as the thread sees it. */
+export type FileOpen = {
+  /** Shows `target`. `group` is the files shown with it, each a tab. */
+  open: (target: FileTarget, group?: FileTarget[]) => void;
+  /** The file the panel shows now. */
+  current: FileTarget | null;
+};
 
-export function useFileOpen(): ((target: FileTarget) => void) | null {
+/** Null where nothing can show a file. */
+export const FileOpenContext = createContext<FileOpen | null>(null);
+
+export function useFileOpen(): FileOpen | null {
   return useContext(FileOpenContext);
+}
+
+export function sameFile(a: FileTarget | null | undefined, b: FileTarget | null | undefined): boolean {
+  return !!a && !!b && a.path === b.path && (a.line ?? 0) === (b.line ?? 0);
+}
+
+/**
+ * The files shown one after another with the row `id`: file rows with only
+ * tool calls between them, since each `crew show` is a tool call of its own.
+ */
+export function fileRun(messages: readonly ChatMessage[], id: string): ChatMessage[] {
+  const at = messages.findIndex((m) => m.id === id);
+  if (at < 0) return [];
+  const joins = (m: ChatMessage) => m.kind === "file" || m.kind === "tool";
+  let start = at;
+  while (start > 0 && joins(messages[start - 1])) start--;
+  let end = at;
+  while (end < messages.length - 1 && joins(messages[end + 1])) end++;
+  return messages.slice(start, end + 1).filter((m) => m.kind === "file");
 }
 
 /** `path` or `path:12`, the way a file row and `crew show` write it. */
