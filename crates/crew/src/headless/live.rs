@@ -2481,6 +2481,56 @@ mod tests {
         assert_eq!(result_failure(&fine), None);
     }
 
+    /// A command approval is accepted only when the thread policy is `never`.
+    /// Anything else is declined, and a permissions ask is not granted.
+    #[test]
+    fn a_codex_approval_is_declined_unless_the_policy_is_never() {
+        let command = serde_json::json!({
+            "method": "item/commandExecution/requestApproval",
+            "id": 7
+        });
+        let permissions = serde_json::json!({
+            "method": "item/permissions/requestApproval",
+            "id": 8,
+            "params": { "permissions": { "network": { "enabled": true } } }
+        });
+        assert_eq!(
+            codex_approval(
+                "item/commandExecution/requestApproval",
+                &command,
+                Some("never")
+            ),
+            Some(serde_json::json!({ "decision": "accept" }))
+        );
+        assert_eq!(
+            codex_approval(
+                "item/commandExecution/requestApproval",
+                &command,
+                Some("on-request")
+            ),
+            Some(serde_json::json!({ "decision": "decline" }))
+        );
+        assert_eq!(
+            codex_approval("item/commandExecution/requestApproval", &command, None),
+            Some(serde_json::json!({ "decision": "decline" }))
+        );
+        assert_eq!(
+            codex_approval(
+                "item/permissions/requestApproval",
+                &permissions,
+                Some("never")
+            )
+            .unwrap()["permissions"]["network"]["enabled"],
+            true
+        );
+        assert!(codex_approval(
+            "item/permissions/requestApproval",
+            &permissions,
+            Some("on-request")
+        )
+        .is_none());
+    }
+
     /// A start that arrived before the prompt was written is not that
     /// prompt's, and finishing it does not idle the prompt.
     #[test]
