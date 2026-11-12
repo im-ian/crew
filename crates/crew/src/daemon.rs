@@ -8419,6 +8419,432 @@ done
         });
     }
 
+    /// A stand-in codex that stays up and speaks app-server JSON-RPC on stdio,
+    /// as `codex app-server` does. Each start goes on a line of `starts` (pid,
+    /// then argv), each stdin line on one of `stdin`. It opens thread `t-<pid>`,
+    /// or resumes the one asked for. A prompt answers `answer <n> from <pid>`.
+    /// With `hang` it opens a turn and waits for `turn/interrupt`. With `deaf`
+    /// it ignores that and leaves a child that touches `outlived`. With `die`
+    /// it answers and exits. With `watch` it starts a command, answers, and
+    /// once that command ends a moment later says so in a reply of its own.
+    /// The first ordinary turn also asks for a command approval. With
+    /// `load-fails` in the home, the next resume finds no thread.
+    fn fake_codex(id: &str) -> (PathBuf, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        paths::write_notifications_enabled(false);
+        let home = paths::home_dir();
+        let (starts, stdin) = (home.join("starts"), home.join("stdin"));
+        let script = r#"#!/bin/sh
+{ printf '%s ' "$$" "$@" | tr '\n' ' '; echo; } >> '{STARTS}'
+sid=; n=0; tid=; deaf=
+req_id() { printf '%s' "$1" | sed -n 's/^{"id":\([0-9]*\).*/\1/p'; }
+say() {
+  printf '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"delta":"%s","itemId":"m%s","threadId":"%s","turnId":"%s"}}\n' "$1" "$n" "$sid" "$tid"
+  printf '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"m%s","text":"%s","type":"agentMessage"},"threadId":"%s","turnId":"%s"}}\n' "$n" "$1" "$sid" "$tid"
+}
+finish() {
+  printf '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"%s","turn":{"id":"%s","status":"%s"}}}\n' "$sid" "$tid" "$1"
+}
+begin() {
+  n=$((n+1))
+  tid="turn-$n"
+  printf '{"jsonrpc":"2.0","id":%s,"result":{"turn":{"id":"%s","status":"inProgress"}}}\n' "$id" "$tid"
+  printf '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"%s","turn":{"id":"%s","status":"inProgress"}}}\n' "$sid" "$tid"
+}
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> '{STDIN}'
+  case "$line" in
+  *'"method":"initialize"'*)
+    printf '{"jsonrpc":"2.0","id":%s,"result":{"userAgent":"fake"}}\n' "$(req_id "$line")" ;;
+  *'"method":"initialized"'*) ;;
+  *'"method":"thread/start"'*)
+    sid="t-$$"
+    printf '{"jsonrpc":"2.0","id":%s,"result":{"thread":{"id":"%s"}}}\n' "$(req_id "$line")" "$sid" ;;
+  *'"method":"thread/resume"'*)
+    id=$(req_id "$line")
+    want=$(printf '%s' "$line" | sed -n 's/.*"threadId":"\([^"]*\)".*/\1/p')
+    if [ -e '{FAILS}' ]; then
+      rm '{FAILS}'
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"no rollout found for thread id %s"}}\n' "$id" "$want"
+    else
+      sid=$want
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"thread":{"id":"%s"}}}\n' "$id" "$sid"
+    fi ;;
+  *'"method":"turn/interrupt"'*)
+    if [ -z "$deaf" ] && [ -n "$tid" ]; then finish interrupted; tid=; fi ;;
+  *'"method":"turn/start"'*)
+    id=$(req_id "$line")
+    p=$(printf '%s' "$line" | sed -e 's/.*"text":"//' -e 's/","type":"text".*//')
+    p=${p##*\\n}
+    case "$p" in *deaf*) deaf=1 ;; *) deaf= ;; esac
+    case "$p" in
+    *hang*) begin ;;
+    *watch*)
+      begin
+      printf '{"jsonrpc":"2.0","method":"item/started","params":{"item":{"command":"Watch PR 12 CI","id":"c1","status":"inProgress","type":"commandExecution"},"threadId":"%s","turnId":"%s"}}\n' "$sid" "$tid"
+      say "CI 끝나면 알려줄게요"
+      finish completed
+      ( sleep 2
+        printf '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"command":"Watch PR 12 CI","id":"c1","status":"completed","type":"commandExecution"},"threadId":"%s"}}\n' "$sid"
+        printf '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"%s","turn":{"id":"later","status":"inProgress"}}}\n' "$sid"
+        printf '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"delta":"CI 통과했어요","itemId":"mlater","threadId":"%s","turnId":"later"}}\n' "$sid"
+        printf '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"mlater","text":"CI 통과했어요","type":"agentMessage"},"threadId":"%s","turnId":"later"}}\n' "$sid"
+        printf '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"%s","turn":{"id":"later","status":"completed"}}}\n' "$sid"
+      ) & ;;
+    *die*) begin; say "answer $n from $$"; finish completed; exit 0 ;;
+    *)
+      begin
+      if [ "$n" -eq 1 ]; then
+        printf '{"jsonrpc":"2.0","id":7,"method":"item/commandExecution/requestApproval","params":{"threadId":"%s"}}\n' "$sid"
+      fi
+      say "answer $n from $$"
+      finish completed ;;
+    esac
+    case "$p" in *deaf*) ( sleep 2.5; touch '{OUTLIVED}' ) & ;; esac ;;
+  esac
+done
+"#
+        .replace("{STARTS}", &starts.display().to_string())
+        .replace("{STDIN}", &stdin.display().to_string())
+        .replace("{FAILS}", &home.join("load-fails").display().to_string())
+        .replace("{OUTLIVED}", &home.join("outlived").display().to_string());
+        let bin = home.join("codex");
+        fs::write(&bin, script).unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        insert_spawned_agent(AgentConfig::new(
+            id.into(),
+            id.into(),
+            vec![bin.display().to_string(), "--yolo".into()],
+            Some(home.display().to_string()),
+        ))
+        .unwrap();
+        (starts, stdin)
+    }
+
+    fn codex_input(request: &serde_json::Value) -> String {
+        request
+            .pointer("/params/input/0/text")
+            .and_then(|t| t.as_str())
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// Codex stays up between turns as `codex app-server`: the process that
+    /// answered the first prompt answers the second, `--yolo` is the thread's
+    /// approval policy rather than a flag, and a command approval is accepted.
+    #[test]
+    fn codex_answers_every_turn_from_one_process() {
+        paths::testing::with_home("codex-one", || {
+            let bot = test_id("codexone");
+            let (starts, stdin) = fake_codex(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "first-prompt").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            send_agent(&bot, "- two").unwrap();
+            let pid = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "no second answer", || {
+                told(&bot, &format!("answer 2 from {pid}"))
+            });
+            wait_idle(&bot);
+            assert_eq!(
+                assistant_texts(&bot),
+                [
+                    format!("answer 1 from {pid}"),
+                    format!("answer 2 from {pid}")
+                ]
+            );
+            assert_eq!(started_pids(&starts), [pid.clone()]);
+            let argv = fs::read_to_string(&starts).unwrap();
+            assert!(argv.contains(" app-server"), "{argv}");
+            assert!(!argv.contains("--yolo"), "{argv}");
+            assert!(!argv.contains("first-prompt"), "the prompt went on argv");
+            assert_eq!(
+                acp_methods(&stdin),
+                [
+                    "initialize",
+                    "initialized",
+                    "thread/start",
+                    "turn/start",
+                    "turn/start"
+                ]
+            );
+            let opened = &acp_requests(&stdin, "thread/start")[0];
+            let rules = opened
+                .pointer("/params/developerInstructions")
+                .and_then(|t| t.as_str())
+                .unwrap_or("");
+            assert!(rules.contains("crew tell"), "{rules}");
+            assert_eq!(
+                opened
+                    .pointer("/params/approvalPolicy")
+                    .and_then(|t| t.as_str()),
+                Some("never")
+            );
+            assert_eq!(
+                opened.pointer("/params/sandbox").and_then(|t| t.as_str()),
+                Some("danger-full-access")
+            );
+            let prompts = acp_requests(&stdin, "turn/start");
+            assert!(codex_input(&prompts[0]).ends_with("first-prompt"));
+            assert!(codex_input(&prompts[1]).ends_with("- two"));
+            assert_eq!(
+                prompts[1]
+                    .pointer("/params/sandboxPolicy/type")
+                    .and_then(|t| t.as_str()),
+                Some("dangerFullAccess")
+            );
+            let lines = fs::read_to_string(&stdin).unwrap();
+            assert!(
+                lines.contains(r#""decision":"accept""#),
+                "a command approval was not accepted: {lines}"
+            );
+            remove_agent(&bot).unwrap();
+            eventually(Duration::from_secs(5), "removal left codex up", || {
+                !pid_alive(&pid)
+            });
+        });
+    }
+
+    /// Codex answered and left a command running. The bot is idle and shows
+    /// it, a send goes to the same process at once, and the word when the
+    /// command ends is a reply of its own. The command is a tool card.
+    #[test]
+    fn codex_takes_a_send_while_it_watches() {
+        paths::testing::with_home("codex-watch", || {
+            let bot = test_id("codexwatch");
+            let (starts, _) = fake_codex(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "watch the CI").unwrap();
+            eventually(Duration::from_secs(5), "the watch was not shown", || {
+                watch_of(&bot) == ["Watch PR 12 CI"] && !agent_busy(&bot).unwrap()
+            });
+            send_agent(&bot, "다음 거").unwrap();
+            assert!(queued_text(&bot).is_empty(), "a send waited on the watch");
+            let pid = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(3), "the send was not answered", || {
+                told(&bot, &format!("answer 2 from {pid}"))
+            });
+            assert_eq!(
+                watch_of(&bot),
+                ["Watch PR 12 CI"],
+                "the send stopped the watch"
+            );
+            eventually(
+                Duration::from_secs(5),
+                "the later answer was dropped",
+                || told(&bot, "CI 통과했어요"),
+            );
+            wait_idle(&bot);
+            assert_eq!(
+                assistant_texts(&bot),
+                [
+                    "CI 끝나면 알려줄게요".to_string(),
+                    format!("answer 2 from {pid}"),
+                    "CI 통과했어요".to_string()
+                ]
+            );
+            let card = crate::transcript::messages(&bot)
+                .into_iter()
+                .find(|m| m.kind == Some(crate::protocol::MessageKind::Tool));
+            let card = card.expect("no tool card for the command");
+            assert_eq!(card.from, "command");
+            assert!(card.text.contains("Watch PR 12 CI"), "{}", card.text);
+            assert!(watch_of(&bot).is_empty(), "the watch outlived the task");
+            assert_eq!(started_pids(&starts), [pid]);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A codex process that went away between turns is started again and
+    /// resumes the thread it had.
+    #[test]
+    fn codex_that_exited_resumes_its_thread() {
+        paths::testing::with_home("codex-respawn", || {
+            let bot = test_id("codexrespawn");
+            let (starts, stdin) = fake_codex(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "die after this").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            let first = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "the first process stayed", || {
+                !pid_alive(&first)
+            });
+            send_agent(&bot, "again").unwrap();
+            eventually(Duration::from_secs(5), "no answer after the exit", || {
+                assistant_texts(&bot).len() == 2
+            });
+            wait_idle(&bot);
+            let pids = started_pids(&starts);
+            assert_eq!(pids.len(), 2, "{pids:?}");
+            assert_eq!(
+                assistant_texts(&bot),
+                [
+                    format!("answer 1 from {first}"),
+                    format!("answer 1 from {}", pids[1])
+                ]
+            );
+            let loaded = acp_requests(&stdin, "thread/resume");
+            assert_eq!(loaded.len(), 1);
+            assert_eq!(
+                loaded[0]
+                    .pointer("/params/threadId")
+                    .and_then(|t| t.as_str()),
+                Some(format!("t-{first}")).as_deref()
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A stop asks codex to interrupt the turn and leaves the process up.
+    /// The next prompt goes to that same process.
+    #[test]
+    fn a_stop_interrupts_the_codex_turn_and_keeps_the_process() {
+        paths::testing::with_home("codex-stop", || {
+            let bot = test_id("codexstop");
+            let (starts, stdin) = fake_codex(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "hang on").unwrap();
+            eventually(Duration::from_secs(5), "the turn never spoke", || {
+                turn_heard(&bot)
+            });
+            interrupt_turn(&bot).unwrap();
+            send_agent(&bot, "next").unwrap();
+            let pid = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "no answer after the stop", || {
+                told(&bot, &format!("answer 2 from {pid}"))
+            });
+            wait_idle(&bot);
+            assert_eq!(started_pids(&starts), [pid.clone()]);
+            assert!(pid_alive(&pid), "the stop killed codex");
+            assert_eq!(assistant_texts(&bot), [format!("answer 2 from {pid}")]);
+            assert!(
+                acp_methods(&stdin).contains(&"turn/interrupt".to_string()),
+                "no turn/interrupt"
+            );
+            assert!(
+                !turn_failed(&bot),
+                "a stopped turn then an answer reads failed"
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// Codex that does not end a stopped turn is stuck, and goes as a stop
+    /// took it before, with all it started. The next turn resumes its thread.
+    #[test]
+    fn codex_that_ignores_a_stop_is_killed() {
+        paths::testing::with_home("codex-deaf", || {
+            let bot = test_id("codexdeaf");
+            let (starts, stdin) = fake_codex(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "hang, deaf").unwrap();
+            eventually(Duration::from_secs(5), "the turn never spoke", || {
+                turn_heard(&bot)
+            });
+            interrupt_turn(&bot).unwrap();
+            wait_idle(&bot);
+            let first = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "the stuck codex stayed", || {
+                !pid_alive(&first)
+            });
+            std::thread::sleep(Duration::from_millis(2500));
+            assert!(!paths::home_dir().join("outlived").exists());
+            send_agent(&bot, "again").unwrap();
+            eventually(Duration::from_secs(5), "no answer after the kill", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            assert_eq!(started_pids(&starts).len(), 2);
+            let loaded = acp_requests(&stdin, "thread/resume");
+            assert_eq!(
+                loaded[0]
+                    .pointer("/params/threadId")
+                    .and_then(|t| t.as_str()),
+                Some(format!("t-{first}")).as_deref()
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// What codex was started with changed, here the model. The next turn
+    /// starts a new process, resumes the thread, and the old process goes.
+    #[test]
+    fn a_model_change_starts_codex_again() {
+        paths::testing::with_home("codex-model", || {
+            let bot = test_id("codexmodel");
+            let (starts, stdin) = fake_codex(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "one").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            configs().lock().unwrap().get_mut(&bot).unwrap().model = Some("other-model".into());
+            send_agent(&bot, "two").unwrap();
+            eventually(Duration::from_secs(5), "no second answer", || {
+                assistant_texts(&bot).len() == 2
+            });
+            wait_idle(&bot);
+            let pids = started_pids(&starts);
+            assert_eq!(pids.len(), 2, "{pids:?}");
+            let loaded = acp_requests(&stdin, "thread/resume");
+            assert_eq!(loaded.len(), 1, "{loaded:?}");
+            assert_eq!(
+                loaded[0].pointer("/params/model").and_then(|t| t.as_str()),
+                Some("other-model")
+            );
+            assert_eq!(
+                loaded[0]
+                    .pointer("/params/threadId")
+                    .and_then(|t| t.as_str()),
+                Some(format!("t-{}", pids[0])).as_deref()
+            );
+            assert!(!pid_alive(&pids[0]), "the old one stayed");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A resume of a thread codex no longer has drops that id. The next turn
+    /// opens a new thread instead of failing on the old one forever.
+    #[test]
+    fn a_gone_codex_thread_is_dropped() {
+        paths::testing::with_home("codex-gone", || {
+            let bot = test_id("codexgone");
+            let (starts, stdin) = fake_codex(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "die after this").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            let first = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "the first process stayed", || {
+                !pid_alive(&first)
+            });
+            fs::write(paths::home_dir().join("load-fails"), "").unwrap();
+            send_agent(&bot, "two").unwrap();
+            eventually(Duration::from_secs(5), "the failed resume ran on", || {
+                started_pids(&starts).len() == 2 && !agent_busy(&bot).unwrap()
+            });
+            assert!(turn_failed(&bot), "a turn on a gone thread read as fine");
+            send_agent(&bot, "three").unwrap();
+            eventually(Duration::from_secs(5), "no answer on a new thread", || {
+                let pids = started_pids(&starts);
+                pids.len() == 3 && told(&bot, &format!("answer 1 from {}", pids[2]))
+            });
+            wait_idle(&bot);
+            assert_eq!(acp_requests(&stdin, "thread/resume").len(), 1);
+            assert_eq!(acp_requests(&stdin, "thread/start").len(), 2);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
     /// Grok has no event for "the reply is over". A response with no tool call
     /// after it, while a `monitor` runs, is that. The reply closes, the bot
     /// shows the watch, and grok's answer when the watch ends is a new reply.
