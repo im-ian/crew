@@ -892,6 +892,28 @@ impl AgentConfig {
         }
         args
     }
+
+    /// Claude stays up between turns and reads each prompt from its stdin, so
+    /// a send reaches it while a task it put in the background still runs.
+    pub fn live_cli(&self) -> bool {
+        self.binary_name() == "claude"
+    }
+
+    /// argv for a `live_cli` process: `turn_cmd_in` without the prompt, which
+    /// goes to stdin as a stream-json line, so no argument can be read as a flag.
+    pub fn live_cmd_in(
+        &self,
+        session: Option<&TurnSession>,
+        roster: &[AgentConfig],
+        memory: &str,
+        isolated: Option<&Isolated>,
+    ) -> Vec<String> {
+        let mut args = self.argv_with_memory(true, roster, memory, isolated);
+        if !args.is_empty() {
+            apply_claude_live(&mut args, session);
+        }
+        args
+    }
 }
 
 /// The prompt goes on the command line, and a CLI reads an argument that
@@ -1618,19 +1640,41 @@ fn apply_grok_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSe
 const GROK_BACKGROUND_WAIT_SECS: u64 = 60 * 60;
 
 fn apply_claude_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSession>) {
+    apply_claude_stream(args);
+    apply_session_flags(args, session, "--resume", "--session-id");
+    args.push(prompt.to_string());
+}
+
+/// Claude reading stream-json on stdin: one `{"type":"user",…}` line a turn,
+/// and the process stays up until stdin closes.
+fn apply_claude_live(args: &mut Vec<String>, session: Option<&TurnSession>) {
+    apply_claude_stream(args);
+    args.push("--input-format".into());
+    args.push("stream-json".into());
+    apply_session_flags(args, session, "--resume", "--session-id");
+}
+
+fn apply_claude_stream(args: &mut Vec<String>) {
     remove_switch(
         args,
         &["-p", "--print", "--include-partial-messages", "--verbose"],
     );
-    remove_flag_with_value(args, &["--output-format", "--resume", "-r", "--session-id"]);
+    remove_flag_with_value(
+        args,
+        &[
+            "--output-format",
+            "--input-format",
+            "--resume",
+            "-r",
+            "--session-id",
+        ],
+    );
     args.push("-p".into());
     args.push("--output-format".into());
     args.push("stream-json".into());
     args.push("--include-partial-messages".into());
     // Claude CLI 2.x: `-p --output-format=stream-json` exits unless `--verbose`.
     args.push("--verbose".into());
-    apply_session_flags(args, session, "--resume", "--session-id");
-    args.push(prompt.to_string());
 }
 
 fn apply_codex_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSession>) {
@@ -2072,6 +2116,33 @@ mod tests {
         let argv = c.turn_cmd("next", Some(&resume), &[], "");
         assert!(argv.contains(&"--resume".to_string()));
         assert_eq!(argv.last().map(|s| s.as_str()), Some("next"));
+    }
+
+    #[test]
+    fn live_claude_reads_its_prompts_from_stdin() {
+        let pair = |argv: &[String], flag: &str, value: &str| {
+            argv.windows(2).any(|w| w[0] == flag && w[1] == value)
+        };
+        let cmd = ["claude", "--input-format", "text", "--yolo"];
+        let c = cfg(&cmd, Some("haiku"), None);
+        assert!(c.live_cli());
+        assert!(!cfg(&["grok"], None, None).live_cli());
+        let resume = TurnSession {
+            id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee".into(),
+            resume: true,
+        };
+        let argv = c.live_cmd_in(Some(&resume), &[], "", None);
+        assert!(pair(&argv, "--input-format", "stream-json"), "{argv:?}");
+        assert!(!argv.iter().any(|a| a == "text"), "{argv:?}");
+        assert!(pair(&argv, "--output-format", "stream-json"), "{argv:?}");
+        assert!(pair(&argv, "--model", "haiku"), "{argv:?}");
+        assert!(argv.contains(&"--yolo".to_string()));
+        assert_eq!(&argv[argv.len() - 2..], ["--resume", resume.id.as_str()]);
+        // Without a session it is what the process was started with, so two
+        // turns compare equal while nothing they would spawn with changed.
+        let bare = c.live_cmd_in(None, &[], "", None);
+        assert!(!bare.iter().any(|a| a == "--resume" || a == "--session-id"));
+        assert_eq!(bare, c.live_cmd_in(None, &[], "", None));
     }
 
     #[test]
