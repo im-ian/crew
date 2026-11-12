@@ -41,10 +41,12 @@ export function rowTs(row: ThreadRow): number {
 }
 
 /**
- * Consecutive tool cards collapse into one row so a long run reads as one line,
- * and so does a back-and-forth with one bot: sent, received and handoff notes,
- * and the reply to a turn that bot asked for, are one exchange (`runPeer`), and
- * four of them in a row is most of a screen.
+ * Consecutive tool cards collapse into one row so a long run reads as one line.
+ * Notes do too: sent, received and handoff notes, and the reply to a turn
+ * another bot asked for, are one exchange (`runPeer`). Notes stay on that one
+ * row when the other bot changes, so 기획자 then 개발자 then 기획자 is one
+ * line. A balloon, a tool run, or a shown file between them starts the next
+ * row. `peerId` is the first bot; the chips are `notePeers`, in first-seen order.
  *
  * A note run is emitted even when it holds one note, so a row does not change
  * element type the moment a reply arrives — React would unmount the note the
@@ -72,7 +74,7 @@ export function threadRows(
     }
     const peer = runPeer(msg, agents);
     if (peer) {
-      if (last?.kind === "notes" && last.peerId === peer) {
+      if (last?.kind === "notes") {
         last.msgs.push(msg);
       } else {
         rows.push({ kind: "notes", peerId: peer, msgs: [msg] });
@@ -117,6 +119,56 @@ export function momentStamp(row: ThreadRow): number {
   const m = row.msg;
   if (m.role === "system" && m.from !== "user") return 0;
   return m.ts || 0;
+}
+
+export type NotePeer = { peerId: string; msgs: ChatMessage[] };
+
+/**
+ * Bots in one note row, in the order each first appears, with that bot's
+ * notes gathered on its chip. A later note from a bot already on the line
+ * joins that chip instead of opening another.
+ */
+export function notePeers(
+  msgs: readonly ChatMessage[],
+  agents: readonly AgentInfo[],
+): NotePeer[] {
+  const groups: NotePeer[] = [];
+  for (const msg of msgs) {
+    const peer = runPeer(msg, agents);
+    if (!peer) continue;
+    const group = groups.find((g) => g.peerId === peer);
+    if (group) group.msgs.push(msg);
+    else groups.push({ peerId: peer, msgs: [msg] });
+  }
+  return groups;
+}
+
+/**
+ * Lines the "새 메시지" divider can land on. A note bundle lists every note:
+ * the row's own key is only the first one, so a later unread note would
+ * otherwise be skipped. The divider still draws above that whole row. The
+ * chips follow first-seen order, not time, so a rule between two chips would
+ * not sit on the first unread note, and splitting the row would stack the
+ * lines this fold exists to avoid.
+ */
+export function dividerCandidates(
+  rows: readonly ThreadRow[],
+): { id: string; ts: number; mine: boolean }[] {
+  const out: { id: string; ts: number; mine: boolean }[] = [];
+  for (const row of rows) {
+    if (row.kind === "notes") {
+      for (const m of row.msgs) out.push({ id: m.id, ts: m.ts || 0, mine: false });
+      continue;
+    }
+    out.push({
+      id: row.kind === "msg" ? row.msg.id : row.msgs[0].id,
+      ts: rowTs(row),
+      mine:
+        row.kind === "msg" &&
+        (row.msg.role === "user" || row.msg.from === "user"),
+    });
+  }
+  return out;
 }
 
 /**

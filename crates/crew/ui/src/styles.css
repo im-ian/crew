@@ -3425,6 +3425,19 @@ button.choice-option:active:not(:disabled) .choice-badge {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.note-run-line {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  column-gap: var(--space-8);
+  row-gap: var(--space-4);
+  max-width: 100%;
+}
+.note-run-label {
+  color: var(--muted);
+  font-size: var(--text-md);
+}
 .note-run-chip {
   display: inline-flex;
   align-items: center;
