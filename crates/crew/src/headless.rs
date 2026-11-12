@@ -906,6 +906,35 @@ fn live_launch(
                 setup: String::new(),
             },
             acp: None,
+            codex: None,
+        });
+    }
+    if cfg.binary_name() == "codex" {
+        let codex = cfg.codex_launch(roster, memory, isolated)?;
+        // Model, effort, approval, sandbox and the instructions are not on
+        // the argv. A change to any of them starts a new process once idle.
+        let setup = format!(
+            "{:?}\0{:?}\0{:?}\0{:?}\0{}",
+            codex.model, codex.effort, codex.approval, codex.sandbox, codex.rules
+        );
+        return Some(live::Launch {
+            proto: live::Proto::Codex,
+            argv: codex.argv.clone(),
+            started: live::Started {
+                argv: codex.argv,
+                cwd: cwd.to_path_buf(),
+                session_id,
+                setup,
+            },
+            acp: None,
+            codex: Some(live::CodexSetup {
+                rules: codex.rules,
+                model: codex.model,
+                effort: codex.effort,
+                approval: codex.approval,
+                sandbox: codex.sandbox,
+                load: turn_session.filter(|s| s.resume).map(|s| s.id.clone()),
+            }),
         });
     }
     let acp = cfg.acp_launch(roster, memory, isolated)?;
@@ -932,6 +961,7 @@ fn live_launch(
             effort: acp.effort,
             load: turn_session.filter(|s| s.resume).map(|s| s.id.clone()),
         }),
+        codex: None,
     })
 }
 

@@ -1,20 +1,21 @@
-//! Claude, grok and agy kept up between turns.
+//! Claude, grok, agy and codex kept up between turns.
 //!
 //! A turn used to be its own process, and the CLI keeps that process up past
 //! its answer while a task it put in the background runs. A send in that time
 //! waited for the task, forever for a dev server, and stopping the CLI to let
 //! it through stopped the task too. Now one process stays up and reads each
 //! prompt from stdin: Claude as a stream-json line, grok and agy as an ACP
-//! `session/prompt` request (JSON-RPC, a line each way). A turn ends at
-//! Claude's `result` or at the answer to its request; the next prompt goes to
-//! the same process, and its background tasks go on.
+//! `session/prompt` request, codex as an app-server `turn/start` (JSON-RPC, a
+//! line each way). A turn ends at Claude's `result`, at the answer to grok or
+//! agy's request, or at codex's `turn/completed`; the next prompt goes to the
+//! same process, and its background tasks go on.
 //!
 //! One reader thread owns the process's stdout. Each turn gets the lines up
 //! to its end over a channel. Lines that come while no turn is open are the
 //! CLI's own: the task list, a subagent's notes, and the reply Claude or grok
 //! starts by itself once a task ends, which becomes a turn of its own.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, ExitStatus, Stdio};
@@ -55,6 +56,8 @@ pub(super) struct LiveCli {
     /// ACP: what the last turn knew of grok's subagents. Their notes go on
     /// between turns, and the next turn goes on from here.
     grok_state: Option<ParseState>,
+    /// Codex: the turn app-server is running, so a stop can interrupt it.
+    turn_id: Option<String>,
 }
 
 /// How a process takes prompts and ends turns.
@@ -64,6 +67,8 @@ pub(super) enum Proto {
     Claude,
     /// ACP: a `session/prompt` request, a turn ends at its answer.
     Acp(AcpCli),
+    /// app-server: a `turn/start` request, a turn ends at `turn/completed`.
+    Codex,
 }
 
 impl Proto {
@@ -74,6 +79,7 @@ impl Proto {
             Proto::Claude => CliKind::Claude,
             Proto::Acp(AcpCli::Grok) => CliKind::Grok,
             Proto::Acp(AcpCli::Agy) => CliKind::Other,
+            Proto::Codex => CliKind::Codex,
         }
     }
 
@@ -82,6 +88,7 @@ impl Proto {
             Proto::Claude => "Claude",
             Proto::Acp(AcpCli::Grok) => "grok",
             Proto::Acp(AcpCli::Agy) => "agy",
+            Proto::Codex => "codex",
         }
     }
 
@@ -89,7 +96,7 @@ impl Proto {
     fn own_end(self) -> TurnEnd {
         match self {
             Proto::Claude => TurnEnd::Result,
-            Proto::Acp(_) => TurnEnd::Completed,
+            Proto::Acp(_) | Proto::Codex => TurnEnd::Completed,
         }
     }
 }
@@ -117,6 +124,21 @@ pub(super) struct Launch {
     pub started: Started,
     /// ACP: how the session is set up.
     pub acp: Option<AcpSetup>,
+    /// Codex: how the thread is set up.
+    pub codex: Option<CodexSetup>,
+}
+
+/// Codex sets the thread up over app-server, not on the command line.
+pub(super) struct CodexSetup {
+    pub rules: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// `--yolo` is `never`. None leaves the server's own policy.
+    pub approval: Option<String>,
+    /// `--yolo` is `danger-full-access`.
+    pub sandbox: Option<String>,
+    /// The saved thread to resume. None opens a new one.
+    pub load: Option<String>,
 }
 
 /// ACP has the session set up over the protocol, not on the command line.
@@ -196,26 +218,39 @@ pub(super) fn run_turn(
         let (tx, rx) = channel();
         let claimed = claim(session, launch, generation, tx, fresh)?;
         let reused = claimed.reused;
-        if let (Proto::Acp(cli), Some(setup), false) = (launch.proto, launch.acp.as_ref(), reused) {
+        if !reused {
             let cwd = &launch.started.cwd;
-            match open_session(session, &claimed, cli, setup, cwd, &rx, generation) {
-                Ok(()) => {}
-                Err(Setup::Stale) => {
-                    close_serial(session, claimed.serial);
-                    anyhow::bail!("turn cancelled");
-                }
-                // Its session did not open, so the process has nothing to
-                // keep. A session it could not load is dropped, as a one-shot
-                // turn's failed resume was: the error quotes its id.
-                Err(Setup::Failed(why)) => {
-                    close_serial(session, claimed.serial);
-                    return Ok(TurnOutcome {
-                        session_id: None,
-                        got_text: false,
-                        error: Some(why),
-                        compacted: false,
-                        watched: Vec::new(),
-                    });
+            let opened = match launch.proto {
+                Proto::Acp(cli) => launch
+                    .acp
+                    .as_ref()
+                    .map(|setup| open_session(session, &claimed, cli, setup, cwd, &rx, generation)),
+                Proto::Codex => launch
+                    .codex
+                    .as_ref()
+                    .map(|setup| open_codex(session, &claimed, setup, cwd, &rx, generation)),
+                Proto::Claude => None,
+            };
+            if let Some(opened) = opened {
+                match opened {
+                    Ok(()) => {}
+                    Err(Setup::Stale) => {
+                        close_serial(session, claimed.serial);
+                        anyhow::bail!("turn cancelled");
+                    }
+                    // Its session did not open, so the process has nothing to
+                    // keep. A session it could not load is dropped, as a one-shot
+                    // turn's failed resume was: the error quotes its id.
+                    Err(Setup::Failed(why)) => {
+                        close_serial(session, claimed.serial);
+                        return Ok(TurnOutcome {
+                            session_id: None,
+                            got_text: false,
+                            error: Some(why),
+                            compacted: false,
+                            watched: Vec::new(),
+                        });
+                    }
                 }
             }
         }
@@ -223,6 +258,12 @@ pub(super) fn run_turn(
             Proto::Claude => prompt_line(prompt),
             Proto::Acp(_) => match acp_session(session, claimed.serial) {
                 Some(id) => acp_prompt_line(claimed.prompt_id, &id, prompt),
+                None => anyhow::bail!("turn cancelled"),
+            },
+            Proto::Codex => match acp_session(session, claimed.serial) {
+                Some(id) => {
+                    codex_prompt_line(claimed.prompt_id, &id, prompt, launch.codex.as_ref())
+                }
                 None => anyhow::bail!("turn cancelled"),
             },
         };
@@ -344,6 +385,7 @@ fn claim(
                 acp_session: None,
                 next_id: 1,
                 grok_state: None,
+                turn_id: None,
             };
             let (prompt_id, end) = live.prompt_end();
             live.turns.push_back(Sink {
@@ -396,6 +438,9 @@ impl LiveCli {
                 let id = self.take_id();
                 (id, TurnEnd::Response(id))
             }
+            // The request's answer arrives at once, with the turn id. The
+            // turn itself ends later, at `turn/completed`.
+            Proto::Codex => (self.take_id(), TurnEnd::Completed),
         }
     }
 }
@@ -519,6 +564,90 @@ fn open_session(
     Ok(())
 }
 
+/// `initialize`, then the thread this turn speaks on: the saved one, or a
+/// new one with the developer instructions. Lines up to each answer are the
+/// setup's, and none of them is this turn's reply.
+fn open_codex(
+    session: &HeadlessSession,
+    claimed: &Claimed,
+    setup: &CodexSetup,
+    cwd: &Path,
+    rx: &Receiver<LiveLine>,
+    generation: u64,
+) -> Result<(), Setup> {
+    let deadline = Instant::now() + SETUP_WAIT;
+    let ask = |method: &str, params: Value| -> Result<Value, Setup> {
+        acp_request(session, claimed, rx, generation, deadline, method, params)
+    };
+    let init = ask(
+        "initialize",
+        serde_json::json!({
+            "clientInfo": { "name": "crew", "version": env!("CARGO_PKG_VERSION") },
+        }),
+    )?;
+    if let Some(why) = rpc_error(&init) {
+        return Err(Setup::Failed(format!("codex did not start: {why}")));
+    }
+    // The client says the handshake is done. app-server does not answer it.
+    let _ = write_line(
+        &claimed.stdin,
+        &serde_json::json!({ "jsonrpc": "2.0", "method": "initialized" }).to_string(),
+    );
+    let cwd = std::fs::canonicalize(cwd)
+        .unwrap_or_else(|_| cwd.to_path_buf())
+        .display()
+        .to_string();
+    let mut params = serde_json::json!({ "cwd": cwd });
+    if let Some(model) = setup.model.as_deref().filter(|m| !m.is_empty()) {
+        params["model"] = Value::String(model.to_string());
+    }
+    if let Some(approval) = setup.approval.as_deref().filter(|s| !s.is_empty()) {
+        params["approvalPolicy"] = Value::String(approval.to_string());
+    }
+    if let Some(sandbox) = setup.sandbox.as_deref().filter(|s| !s.is_empty()) {
+        params["sandbox"] = Value::String(sandbox.to_string());
+    }
+    if !setup.rules.trim().is_empty() {
+        params["developerInstructions"] = Value::String(setup.rules.clone());
+    }
+    let id = match setup.load.as_deref().filter(|id| !id.is_empty()) {
+        Some(id) => {
+            params["threadId"] = Value::String(id.to_string());
+            let loaded = ask("thread/resume", params)?;
+            if let Some(why) = rpc_error(&loaded) {
+                return Err(Setup::Failed(format!(
+                    "codex could not open session {id}: {why}"
+                )));
+            }
+            id.to_string()
+        }
+        None => {
+            let opened = ask("thread/start", params)?;
+            if let Some(why) = rpc_error(&opened) {
+                return Err(Setup::Failed(format!(
+                    "codex could not open a session: {why}"
+                )));
+            }
+            opened
+                .pointer("/result/thread/id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| Setup::Failed("codex opened a session with no id".into()))?
+                .to_string()
+        }
+    };
+    if let Ok(mut inner) = session.inner.lock() {
+        if inner.generation == generation {
+            inner.session_id = Some(id.clone());
+        }
+        if let Some(live) = inner.live.as_mut().filter(|l| l.serial == claimed.serial) {
+            live.started.session_id = Some(id.clone());
+            live.acp_session = Some(id);
+        }
+    }
+    Ok(())
+}
+
 /// One setup request and its answer. Other lines that come first are not
 /// this turn's.
 fn acp_request(
@@ -629,6 +758,44 @@ fn prompt_line(prompt: &str) -> String {
     format!(r#"{{"type":"user","message":{{"role":"user","content":{content}}}}}"#)
 }
 
+/// The app-server `turn/start` for one prompt, on one line. Effort is the
+/// turn's; the thread already has the model and the instructions.
+fn codex_prompt_line(id: u64, thread_id: &str, prompt: &str, setup: Option<&CodexSetup>) -> String {
+    let mut params = serde_json::json!({
+        "threadId": thread_id,
+        "input": [{ "type": "text", "text": prompt }],
+    });
+    if let Some(setup) = setup {
+        if let Some(effort) = setup.effort.as_deref().filter(|s| !s.is_empty()) {
+            params["effort"] = Value::String(effort.to_string());
+        }
+        if let Some(approval) = setup.approval.as_deref().filter(|s| !s.is_empty()) {
+            params["approvalPolicy"] = Value::String(approval.to_string());
+        }
+        if let Some(policy) = setup.sandbox.as_deref().and_then(codex_sandbox_policy) {
+            params["sandboxPolicy"] = policy;
+        }
+    }
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "turn/start",
+        "params": params,
+    })
+    .to_string()
+}
+
+/// app-server's turn sandbox, from the `sandbox_mode` string `--yolo` sets.
+fn codex_sandbox_policy(mode: &str) -> Option<Value> {
+    let kind = match mode {
+        "danger-full-access" => "dangerFullAccess",
+        "read-only" => "readOnly",
+        "workspace-write" => "workspaceWrite",
+        _ => return None,
+    };
+    Some(serde_json::json!({ "type": kind }))
+}
+
 /// The ACP `session/prompt` request for one prompt, on one line.
 fn acp_prompt_line(id: u64, session_id: &str, prompt: &str) -> String {
     serde_json::json!({
@@ -705,16 +872,23 @@ struct TurnCtx {
     end: TurnEnd,
 }
 
-/// What a turn starts from. Claude's is new each turn. An ACP turn goes on
-/// from what the last one knew of grok's subagents, in the session the
-/// process holds.
+/// What a turn starts from. Claude's and codex's are new each turn. An ACP
+/// turn goes on from what the last one knew of grok's subagents, in the
+/// session the process holds.
 fn start_state(session: &HeadlessSession, ctx: &TurnCtx) -> ParseState {
     let Ok(mut inner) = session.inner.lock() else {
         return ParseState::default();
     };
-    if ctx.proto == Proto::Claude {
+    if ctx.proto == Proto::Claude || ctx.proto == Proto::Codex {
         let mut state = ParseState::default();
-        state.session_id = inner.session_id.clone();
+        state.session_id = match ctx.proto {
+            Proto::Codex => inner
+                .live
+                .as_ref()
+                .filter(|l| l.serial == ctx.serial)
+                .and_then(|l| l.acp_session.clone()),
+            _ => inner.session_id.clone(),
+        };
         return state;
     }
     let Some(live) = inner.live.as_mut().filter(|l| l.serial == ctx.serial) else {
@@ -743,6 +917,8 @@ fn read_turn(
     let mut plain = String::new();
     let mut heard = false;
     let mut exit = None;
+    let mut codex_text = HashMap::new();
+    let mut rollout = None;
     // Set at the `result`: what went wrong, when it says the turn failed.
     let mut ended: Option<Option<String>> = None;
     loop {
@@ -771,6 +947,7 @@ fn read_turn(
                 (end, failure)
             }
             Proto::Acp(_) => acp_line(session, ctx, &line, &mut state),
+            Proto::Codex => codex_line(session, &line, &mut state, &mut codex_text, &mut rollout),
         };
         show_compacts(session, &mut state);
         if let Some(id) = state.session_id.as_ref() {
@@ -781,7 +958,7 @@ fn read_turn(
         if turn_end {
             ended = Some(failure);
             // What grok held back while a subagent spoke goes before the end.
-            if ctx.proto != Proto::Claude {
+            if matches!(ctx.proto, Proto::Acp(_)) {
                 settle_grok_reply(session, &mut state);
             }
             // The process stays up, with what it runs in the background. The
@@ -792,7 +969,7 @@ fn read_turn(
             break;
         }
     }
-    if ctx.proto != Proto::Claude {
+    if matches!(ctx.proto, Proto::Acp(_)) {
         settle_grok_reply(session, &mut state);
     }
     let mut error = state.error.take();
@@ -832,7 +1009,7 @@ fn read_turn(
         compacted: state.compacted,
         watched: Vec::new(),
     };
-    if ctx.proto != Proto::Claude {
+    if matches!(ctx.proto, Proto::Acp(_)) {
         keep_grok_state(session, ctx.serial, state.next_turn());
     }
     ReadTurn {
@@ -893,6 +1070,235 @@ fn acp_line(
         }
     }
     (false, None)
+}
+
+/// One app-server line of a turn, read as `codex exec --json` was: reply text
+/// replaces the bubble, a command or tool is a card, and `turn/completed`
+/// ends the turn. A compact in the stream or in the rollout file shows once.
+fn codex_line(
+    session: &HeadlessSession,
+    line: &str,
+    state: &mut ParseState,
+    spoken: &mut HashMap<String, String>,
+    rollout: &mut Option<crate::codex_rollout::Rollout>,
+) -> (bool, Option<String>) {
+    let Ok(v) = serde_json::from_str::<Value>(line.trim()) else {
+        return (false, None);
+    };
+    if v.get("method").is_none() {
+        // `turn/start` answers at once. An error is the turn failing to start.
+        return (v.get("error").is_some(), rpc_error(&v));
+    }
+    let method = v.get("method").and_then(Value::as_str).unwrap_or("");
+    let thread = v.pointer("/params/threadId").and_then(Value::as_str);
+    if thread.is_some() && thread != state.session_id.as_deref() {
+        return (false, None);
+    }
+    if !state.compacted {
+        super::note_codex_compacts(rollout, state);
+    }
+    if codex_compact(&v) && !state.compacted {
+        state.compacted = true;
+        state.compact_unshown = true;
+    }
+    match method {
+        "turn/completed" => {
+            let status = v
+                .pointer("/params/turn/status")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let message = v
+                .pointer("/params/turn/error/message")
+                .and_then(Value::as_str);
+            let failure = match status {
+                "failed" => Some(
+                    message
+                        .unwrap_or("codex could not finish the turn")
+                        .to_string(),
+                ),
+                "interrupted" if !state.got_text => {
+                    Some(message.unwrap_or("codex interrupted the turn").to_string())
+                }
+                _ => None,
+            };
+            (true, failure)
+        }
+        "item/agentMessage/delta" => {
+            let Some(id) = v.pointer("/params/itemId").and_then(Value::as_str) else {
+                return (false, None);
+            };
+            let delta = v
+                .pointer("/params/delta")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if delta.is_empty() {
+                return (false, None);
+            }
+            let text = spoken.entry(id.to_string()).or_default();
+            text.push_str(delta);
+            let exec = serde_json::json!({
+                "type": "item.updated",
+                "item": { "id": id, "type": "agent_message", "text": text },
+            });
+            let _ = stream_line(
+                session,
+                CliKind::Codex,
+                &exec.to_string(),
+                state,
+                &mut String::new(),
+            );
+            (false, None)
+        }
+        "item/started" | "item/completed" => {
+            if let Some(item) = v.pointer("/params/item") {
+                if let Some(exec) = codex_exec_item(method, item, spoken) {
+                    let _ = stream_line(session, CliKind::Codex, &exec, state, &mut String::new());
+                }
+            }
+            (false, None)
+        }
+        _ => (false, None),
+    }
+}
+
+/// A compact app-server says in the stream. The rollout file is the other
+/// place, and `note_codex_compacts` reads that.
+fn codex_compact(v: &Value) -> bool {
+    let method = v.get("method").and_then(Value::as_str).unwrap_or("");
+    if method == "thread/compacted" {
+        return true;
+    }
+    matches!(method, "item/started" | "item/completed")
+        && v.pointer("/params/item/type").and_then(Value::as_str) == Some("contextCompaction")
+}
+
+/// An app-server item as the `exec --json` item the tool cards and the reply
+/// already read. An agent message is its final text; deltas built that text.
+fn codex_exec_item(
+    method: &str,
+    item: &Value,
+    spoken: &mut HashMap<String, String>,
+) -> Option<String> {
+    let kind = item.get("type").and_then(Value::as_str)?;
+    let id = item.get("id").and_then(Value::as_str).unwrap_or("");
+    let mapped = match kind {
+        "agentMessage" if method == "item/completed" => {
+            let text = item.get("text").and_then(Value::as_str).unwrap_or("");
+            if text.is_empty() || spoken.get(id).is_some_and(|full| full == text) {
+                return None;
+            }
+            spoken.insert(id.to_string(), text.to_string());
+            serde_json::json!({ "id": id, "type": "agent_message", "text": text })
+        }
+        "commandExecution" => serde_json::json!({
+            "id": id,
+            "type": "command",
+            "command": item.get("command").and_then(Value::as_str).unwrap_or(""),
+        }),
+        "mcpToolCall" => serde_json::json!({
+            "id": id,
+            "type": "mcp_tool_call",
+            "name": item.get("tool").and_then(Value::as_str).unwrap_or("mcp"),
+            "arguments": item.get("arguments").cloned().unwrap_or(Value::Null),
+        }),
+        "dynamicToolCall" => serde_json::json!({
+            "id": id,
+            "type": "tool",
+            "name": item.get("tool").and_then(Value::as_str).unwrap_or("tool"),
+            "arguments": item.get("arguments").cloned().unwrap_or(Value::Null),
+        }),
+        "fileChange" => serde_json::json!({
+            "id": id,
+            "type": "tool",
+            "name": "file_change",
+            "arguments": item.get("changes").cloned().unwrap_or(Value::Null),
+        }),
+        "webSearch" => serde_json::json!({
+            "id": id,
+            "type": "tool",
+            "name": "web_search",
+            "arguments": item.get("query").cloned().unwrap_or(Value::Null),
+        }),
+        _ => return None,
+    };
+    let ty = if method == "item/started" {
+        "item.started"
+    } else {
+        "item.completed"
+    };
+    Some(serde_json::json!({ "type": ty, "item": mapped }).to_string())
+}
+
+/// Commands still `inProgress` when their item updates. The turn can end
+/// while one runs; that list is what the bot watches.
+fn codex_commands(
+    existing: &[(String, crate::protocol::Watch)],
+    v: &Value,
+) -> Option<Vec<(String, String)>> {
+    let method = v.get("method").and_then(Value::as_str)?;
+    if method != "item/started" && method != "item/completed" {
+        return None;
+    }
+    let item = v.pointer("/params/item")?;
+    if item.get("type").and_then(Value::as_str) != Some("commandExecution") {
+        return None;
+    }
+    let id = item
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if id.is_empty() {
+        return None;
+    }
+    let what = item
+        .get("command")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("command")
+        .to_string();
+    let status = item.get("status").and_then(Value::as_str).unwrap_or("");
+    let running = status == "inProgress" || (method == "item/started" && status.is_empty());
+    let mut next: Vec<(String, String)> = existing
+        .iter()
+        .map(|(key, watch)| (key.clone(), watch.what.clone()))
+        .collect();
+    if running {
+        if let Some(slot) = next.iter_mut().find(|(key, _)| key == &id) {
+            slot.1 = what;
+        } else {
+            next.push((id, what));
+        }
+    } else {
+        next.retain(|(key, _)| key != &id);
+    }
+    Some(next)
+}
+
+fn codex_turn_id(v: &Value) -> Option<String> {
+    let method = v.get("method").and_then(Value::as_str).unwrap_or("");
+    let id = if method == "turn/started" || method == "turn/completed" {
+        v.pointer("/params/turn/id")
+    } else if v.get("method").is_none() {
+        v.pointer("/result/turn/id")
+    } else {
+        None
+    }?;
+    id.as_str().filter(|s| !s.is_empty()).map(str::to_string)
+}
+
+/// `--yolo` answers a command approval itself. Anything else is refused, as
+/// an ACP tool without leave is: Crew does not invent the user's answer.
+fn codex_approval(method: &str) -> Option<Value> {
+    match method {
+        "item/commandExecution/requestApproval"
+        | "item/fileChange/requestApproval"
+        | "item/permissions/requestApproval" => Some(serde_json::json!({ "decision": "accept" })),
+        "execCommandApproval" | "applyPatchApproval" => {
+            Some(serde_json::json!({ "decision": "approved" }))
+        }
+        _ => None,
+    }
 }
 
 /// Why a turn that ended for `reason` failed: an end that is not the model
@@ -997,6 +1403,8 @@ struct Routing {
     tasks: Option<Vec<(String, String)>>,
     /// ACP: the session it is about. Only the process's own counts above.
     session: Option<String>,
+    /// A JSON-RPC error. It ends the open turn: the request did not start.
+    failed: bool,
 }
 
 fn routing(proto: Proto, v: &Value) -> Routing {
@@ -1028,6 +1436,22 @@ fn routing(proto: Proto, v: &Value) -> Routing {
                     ),
                 tasks: (kind == "background_tasks").then(|| acp_background(event)),
                 session: event_session_id(v).map(str::to_string),
+                ..Routing::default()
+            }
+        }
+        Proto::Codex => {
+            let method = v.get("method").and_then(Value::as_str).unwrap_or("");
+            Routing {
+                ends: (method == "turn/completed").then_some(TurnEnd::Completed),
+                // A `turn/started` while a turn is open is that turn's. One
+                // with no turn open is codex speaking again, as when a
+                // command it left running finishes.
+                starts: method == "turn/started",
+                session: v
+                    .pointer("/params/threadId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                failed: v.get("method").is_none() && v.get("error").is_some(),
                 ..Routing::default()
             }
         }
@@ -1077,7 +1501,9 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, proto: Proto, line: String
             return;
         }
         // The CLI asks Crew something, such as leave to run a tool.
-        (Proto::Acp(_), Some(v)) if v.get("method").is_some() && v.get("id").is_some() => {
+        (Proto::Acp(_) | Proto::Codex, Some(v))
+            if v.get("method").is_some() && v.get("id").is_some() =>
+        {
             answer_request(session, serial, v);
             return;
         }
@@ -1101,6 +1527,18 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, proto: Proto, line: String
             };
             // Claude speaks for itself only. An ACP line about a subagent's
             // session is the subagent's.
+            if proto == Proto::Codex {
+                if let Some(v) = v.as_ref() {
+                    if let Some(id) = codex_turn_id(v) {
+                        live.turn_id = Some(id);
+                    }
+                    if tasks.is_none() {
+                        if let Some(next) = codex_commands(&live.background, v) {
+                            tasks = Some(next);
+                        }
+                    }
+                }
+            }
             let own = proto == Proto::Claude
                 || routing.session.is_some() && routing.session == live.acp_session;
             if let Some(next) = tasks.take().filter(|_| own) {
@@ -1138,7 +1576,8 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, proto: Proto, line: String
                 let _ = front
                     .tx
                     .send(LiveLine::Line(line.take().unwrap_or_default()));
-                if own && routing.ends.is_some_and(|end| end == front.end) {
+                let ends = own && routing.ends.is_some_and(|end| end == front.end);
+                if ends || routing.failed {
                     live.turns.pop_front();
                 }
             } else if own && routing.starts {
@@ -1227,7 +1666,9 @@ fn answer_request(session: &HeadlessSession, serial: u64, v: &Value) {
     };
     let method = v.get("method").and_then(Value::as_str).unwrap_or_default();
     let id = v.get("id").cloned().unwrap_or(Value::Null);
-    let reply = if method == "session/request_permission" {
+    let reply = if let Some(result) = codex_approval(method) {
+        serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result })
+    } else if method == "session/request_permission" {
         let options = v.pointer("/params/options").and_then(Value::as_array);
         let reject = options.into_iter().flatten().find(|o| {
             o.get("kind")
@@ -1368,9 +1809,16 @@ pub(super) fn stop(session: &Arc<HeadlessSession>, pulled: Option<u64>, keep_cli
         inner.watch = watch_of(&live.background);
         inner.seq += 1;
         let acp = live.acp_session.clone();
-        Some((Arc::clone(&live.stdin), live.serial, live.proto, acp))
+        let turn_id = live.turn_id.clone();
+        Some((
+            Arc::clone(&live.stdin),
+            live.serial,
+            live.proto,
+            acp,
+            turn_id,
+        ))
     });
-    let Some((stdin, serial, proto, acp)) = target else {
+    let Some((stdin, serial, proto, acp, turn_id)) = target else {
         return;
     };
     let request = match proto {
@@ -1391,6 +1839,24 @@ pub(super) fn stop(session: &Arc<HeadlessSession>, pulled: Option<u64>, keep_cli
             // Still opening its session: that sees the stop and closes it.
             None => return,
         },
+        Proto::Codex => match (acp, turn_id) {
+            (Some(thread), Some(turn)) => {
+                let id = STOP_ID.fetch_add(1, Ordering::Relaxed);
+                serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "method": "turn/interrupt",
+                    "params": { "threadId": thread, "turnId": turn },
+                })
+            }
+            // The turn id arrives with `turn/started`. Until then there is
+            // nothing to interrupt; the wait below sends it once there is,
+            // and kills the process if the turn never closes.
+            _ => {
+                codex_stop_later(session, stdin, serial, generation);
+                return;
+            }
+        },
     }
     .to_string();
     if write_line(&stdin, &request).is_err() {
@@ -1399,17 +1865,79 @@ pub(super) fn stop(session: &Arc<HeadlessSession>, pulled: Option<u64>, keep_cli
     }
     // The CLI ends the stopped turn at once. One that does not is stuck, and
     // goes as a stop took it before.
+    arm_stop_wait(session, serial, generation, proto);
+}
+
+/// Codex had no turn id when the stop landed. Send `turn/interrupt` once the
+/// id shows up. Either way, a turn that is still open after `STOP_WAIT` goes,
+/// process and all, as a stop that the CLI ignored does.
+fn codex_stop_later(
+    session: &Arc<HeadlessSession>,
+    stdin: Arc<Mutex<ChildStdin>>,
+    serial: u64,
+    generation: u64,
+) {
+    let session = Arc::clone(session);
+    let _ = std::thread::Builder::new()
+        .name(format!("crew-stop-{}", session.id))
+        .spawn(move || {
+            let start = Instant::now();
+            let mut sent = false;
+            loop {
+                if !sent {
+                    let ids = session.inner.lock().ok().and_then(|inner| {
+                        let live = inner.live.as_ref().filter(|l| l.serial == serial)?;
+                        Some((live.acp_session.clone()?, live.turn_id.clone()?))
+                    });
+                    if let Some((thread, turn)) = ids {
+                        let id = STOP_ID.fetch_add(1, Ordering::Relaxed);
+                        let request = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "method": "turn/interrupt",
+                            "params": { "threadId": thread, "turnId": turn },
+                        })
+                        .to_string();
+                        if write_line(&stdin, &request).is_err() {
+                            close_serial(&session, serial);
+                            return;
+                        }
+                        sent = true;
+                    }
+                }
+                let stuck = stop_still_open(&session, serial, generation);
+                if !stuck {
+                    return;
+                }
+                if start.elapsed() >= STOP_WAIT {
+                    eprintln!(
+                        "[crew] {}: codex did not stop its turn; killing it",
+                        session.id
+                    );
+                    close_serial(&session, serial);
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        });
+}
+
+fn stop_still_open(session: &HeadlessSession, serial: u64, generation: u64) -> bool {
+    session.inner.lock().is_ok_and(|inner| {
+        inner.live.as_ref().is_some_and(|live| {
+            live.serial == serial && live.turns.iter().any(|t| t.generation == generation)
+        })
+    })
+}
+
+/// Kill the process if the stopped turn is still open after `STOP_WAIT`.
+fn arm_stop_wait(session: &Arc<HeadlessSession>, serial: u64, generation: u64, proto: Proto) {
     let session = Arc::clone(session);
     let _ = std::thread::Builder::new()
         .name(format!("crew-stop-{}", session.id))
         .spawn(move || {
             std::thread::sleep(STOP_WAIT);
-            let stuck = session.inner.lock().is_ok_and(|inner| {
-                inner.live.as_ref().is_some_and(|live| {
-                    live.serial == serial && live.turns.iter().any(|t| t.generation == generation)
-                })
-            });
-            if stuck {
+            if stop_still_open(&session, serial, generation) {
                 eprintln!(
                     "[crew] {}: {} did not stop its turn; killing it",
                     session.id,
