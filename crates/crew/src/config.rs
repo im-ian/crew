@@ -899,6 +899,26 @@ impl AgentConfig {
         self.binary_name() == "claude"
     }
 
+    /// How to start a grok or agy bot that stays up over ACP: the argv, and
+    /// what goes to the session instead of the command line. None for any
+    /// other CLI, and for a command with a flag the ACP mode does not take.
+    pub fn acp_launch(
+        &self,
+        roster: &[AgentConfig],
+        memory: &str,
+        isolated: Option<&Isolated>,
+    ) -> Option<AcpLaunch> {
+        let args = self.argv_with_memory(true, roster, memory, isolated);
+        if args.is_empty() {
+            return None;
+        }
+        match self.binary_name().as_str() {
+            "grok" => grok_agent_launch(&args),
+            "agy" => agy_acp_launch(&args, system_text(self, roster, memory, isolated)),
+            _ => None,
+        }
+    }
+
     /// argv for a `live_cli` process: `turn_cmd_in` without the prompt, which
     /// goes to stdin as a stream-json line, so no argument can be read as a flag.
     pub fn live_cmd_in(
@@ -1517,12 +1537,12 @@ fn inject_team_rules(
     }
 }
 
-/// Team rules and memory have no flag on these CLIs, so they lead the prompt.
-fn prompt_with_preamble(
+/// Team rules, then memory under its heading: what a CLI with no system
+/// prompt flag reads ahead of the prompt.
+fn system_text(
     agent: &AgentConfig,
     roster: &[AgentConfig],
     memory: &str,
-    prompt: &str,
     isolated: Option<&Isolated>,
 ) -> String {
     let mut body = team_rules_for(agent, roster, isolated);
@@ -1533,6 +1553,18 @@ fn prompt_with_preamble(
         body.push('\n');
         body.push_str(memory);
     }
+    body
+}
+
+/// Team rules and memory have no flag on these CLIs, so they lead the prompt.
+fn prompt_with_preamble(
+    agent: &AgentConfig,
+    roster: &[AgentConfig],
+    memory: &str,
+    prompt: &str,
+    isolated: Option<&Isolated>,
+) -> String {
+    let mut body = system_text(agent, roster, memory, isolated);
     if !body.ends_with('\n') {
         body.push('\n');
     }
@@ -1638,6 +1670,159 @@ fn apply_grok_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSe
 
 /// How long a grok turn waits on the background work it started.
 const GROK_BACKGROUND_WAIT_SECS: u64 = 60 * 60;
+
+/// Which CLI an ACP process is: they set up a session differently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AcpCli {
+    Grok,
+    Agy,
+}
+
+/// A grok or agy process that stays up and speaks ACP on stdio.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AcpLaunch {
+    pub cli: AcpCli,
+    pub argv: Vec<String>,
+    /// The team rules and memory, for the session's system prompt.
+    pub rules: String,
+    /// agy takes these per session; grok has them on `argv`.
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+/// One flag of a bot's command, with its value when it takes one.
+struct CmdFlag<'a> {
+    name: &'a str,
+    value: Option<String>,
+}
+
+/// Walk `args` after the program the way `remove_flag_with_value` reads them:
+/// a value flag takes `--flag=value`, or the next word unless it starts with
+/// `-`. `takes_value` names the value flags. None for a bare word, which no
+/// command Crew starts over ACP can place.
+fn cmd_flags<'a>(args: &'a [String], takes_value: &[&str]) -> Option<Vec<CmdFlag<'a>>> {
+    let mut out = Vec::new();
+    let mut i = 1;
+    while i < args.len() {
+        let arg = args[i].as_str();
+        if !arg.starts_with('-') {
+            return None;
+        }
+        let (name, inline) = match arg.split_once('=') {
+            Some((name, value)) if arg.starts_with("--") => (name, Some(value.to_string())),
+            _ => (arg, None),
+        };
+        let value = if inline.is_some() {
+            inline
+        } else if takes_value.contains(&name) {
+            match args.get(i + 1).filter(|next| !next.starts_with('-')) {
+                Some(next) => {
+                    i += 1;
+                    Some(next.clone())
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+        out.push(CmdFlag { name, value });
+        i += 1;
+    }
+    Some(out)
+}
+
+/// `grok agent [options] --no-leader stdio`. The rules go to `session/new`:
+/// `grok agent` has no `--rules`. Crew's one-shot flags have no use there.
+fn grok_agent_launch(args: &[String]) -> Option<AcpLaunch> {
+    const AGENT_VALUES: [&str; 6] = [
+        "--model",
+        "-m",
+        "--reasoning-effort",
+        "--effort",
+        "--agent-profile",
+        "--plugin-dir",
+    ];
+    const TURN_VALUES: [&str; 8] = [
+        "--rules",
+        "--output-format",
+        "-p",
+        "--single",
+        "--background-wait-timeout",
+        "--background-shell-timeout",
+        "--prompt-file",
+        "--prompt-json",
+    ];
+    let takes: Vec<&str> = AGENT_VALUES.iter().chain(&TURN_VALUES).copied().collect();
+    let mut argv = vec![args[0].clone(), "agent".to_string()];
+    let mut rules: Vec<String> = Vec::new();
+    for flag in cmd_flags(args, &takes)? {
+        match flag.name {
+            "--always-approve" | "--yolo" if flag.value.is_none() => {
+                argv.push("--always-approve".into())
+            }
+            name if AGENT_VALUES.contains(&name) => {
+                argv.push(name.to_string());
+                argv.push(flag.value?);
+            }
+            "--rules" => rules.extend(flag.value.filter(|v| !v.trim().is_empty())),
+            name if TURN_VALUES.contains(&name) => {}
+            "--no-wait-for-background" | "--no-leader" => {}
+            _ => return None,
+        }
+    }
+    argv.push("--no-leader".into());
+    argv.push("stdio".into());
+    Some(AcpLaunch {
+        cli: AcpCli::Grok,
+        argv,
+        rules: rules.join("\n\n"),
+        model: None,
+        effort: None,
+    })
+}
+
+/// `agy acp [options] --dangerously-skip-permissions`. `agy acp` takes no
+/// model or effort: those are set on the session.
+fn agy_acp_launch(args: &[String], rules: String) -> Option<AcpLaunch> {
+    const ACP_VALUES: [&str; 2] = ["--add-dir", "--agent"];
+    const TURN_VALUES: [&str; 3] = ["--output-format", "--input-format", "--conversation"];
+    let takes: Vec<&str> = ACP_VALUES
+        .iter()
+        .chain(&TURN_VALUES)
+        .chain(&["--model", "-m", "--effort"])
+        .copied()
+        .collect();
+    let mut argv = vec![args[0].clone(), "acp".to_string()];
+    let (mut model, mut effort) = (None, None);
+    for flag in cmd_flags(args, &takes)? {
+        match flag.name {
+            "--dangerously-skip-permissions" | "--sandbox" if flag.value.is_none() => {
+                if flag.name == "--sandbox" {
+                    argv.push("--sandbox".into());
+                }
+            }
+            name if ACP_VALUES.contains(&name) => {
+                argv.push(name.to_string());
+                argv.push(flag.value?);
+            }
+            "--model" | "-m" => model = Some(flag.value?),
+            "--effort" => effort = Some(flag.value?),
+            name if TURN_VALUES.contains(&name) => {}
+            "-p" | "--print" | "--prompt" | "-i" | "--prompt-interactive" => {}
+            "--continue" | "-c" => {}
+            _ => return None,
+        }
+    }
+    // A one-shot turn always runs with it (see `apply_agy_turn`).
+    argv.push("--dangerously-skip-permissions".into());
+    Some(AcpLaunch {
+        cli: AcpCli::Agy,
+        argv,
+        rules,
+        model,
+        effort,
+    })
+}
 
 fn apply_claude_turn(args: &mut Vec<String>, prompt: &str, session: Option<&TurnSession>) {
     apply_claude_stream(args);
@@ -2143,6 +2328,80 @@ mod tests {
         let bare = c.live_cmd_in(None, &[], "", None);
         assert!(!bare.iter().any(|a| a == "--resume" || a == "--session-id"));
         assert_eq!(bare, c.live_cmd_in(None, &[], "", None));
+    }
+
+    #[test]
+    fn acp_grok_is_grok_agent_on_stdio_with_rules_for_the_session() {
+        let c = cfg(
+            &[
+                "grok",
+                "--always-approve",
+                "--rules",
+                "Be brief.",
+                "-r",
+                "old",
+            ],
+            Some("grok-4.7-build-fast"),
+            Some(Effort::Low),
+        );
+        let launch = c.acp_launch(&[], "likes tea", None).unwrap();
+        assert_eq!(launch.cli, AcpCli::Grok);
+        assert_eq!(
+            launch.argv,
+            [
+                "grok",
+                "agent",
+                "--always-approve",
+                "--model",
+                "grok-4.7-build-fast",
+                "--reasoning-effort",
+                "low",
+                "--no-leader",
+                "stdio"
+            ]
+        );
+        // The bot's own rules, then the team rules, then memory, as `--rules`
+        // had them.
+        assert!(
+            launch.rules.starts_with("Be brief.\n\n"),
+            "{}",
+            launch.rules
+        );
+        assert!(launch.rules.contains("crew tell"));
+        assert!(launch.rules.ends_with("# Your memory\nlikes tea"));
+        assert_eq!(launch.model, None);
+        // A flag `grok agent` does not take keeps the bot on a process a turn.
+        let web = ["grok", "--always-approve", "--disable-web-search"];
+        assert!(cfg(&web, None, None).acp_launch(&[], "", None).is_none());
+        let stray = cfg(&["grok", "stray"], None, None);
+        assert!(stray.acp_launch(&[], "", None).is_none());
+    }
+
+    #[test]
+    fn acp_agy_is_agy_acp_with_model_and_effort_for_the_session() {
+        let c = cfg(
+            &["agy", "--add-dir", "/tmp/x", "-c"],
+            Some("gemini-3.8-flash-low"),
+            Some(Effort::Low),
+        );
+        let launch = c.acp_launch(&[], "likes tea", None).unwrap();
+        assert_eq!(launch.cli, AcpCli::Agy);
+        assert_eq!(
+            launch.argv,
+            [
+                "agy",
+                "acp",
+                "--add-dir",
+                "/tmp/x",
+                "--dangerously-skip-permissions"
+            ]
+        );
+        assert_eq!(launch.model.as_deref(), Some("gemini-3.8-flash-low"));
+        assert_eq!(launch.effort.as_deref(), Some("low"));
+        assert!(launch.rules.contains("crew tell"));
+        assert!(launch.rules.ends_with("# Your memory\nlikes tea"));
+        let mode = cfg(&["agy", "--mode", "plan"], None, None);
+        assert!(mode.acp_launch(&[], "", None).is_none());
     }
 
     #[test]
