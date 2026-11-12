@@ -172,12 +172,18 @@ pub fn save_session(agent_id: &str, session_id: &str, cwd: &Path) -> anyhow::Res
     Ok(())
 }
 
-/// The saved session was opened in another folder than `cwd`. claude and grok
-/// keep a session under its folder, so a resume from here finds nothing.
+/// The saved session was opened in another folder than `cwd`. A link and the
+/// folder it points at are one folder: grok resolves both before it looks.
 fn session_moved(agent_id: &str, cwd: &Path) -> bool {
+    let real = |p: &Path| {
+        fs::canonicalize(p)
+            .unwrap_or_else(|_| p.to_path_buf())
+            .to_string_lossy()
+            .into_owned()
+    };
     load_session_at(agent_id)
         .and_then(|(_, at)| at)
-        .is_some_and(|at| at != cwd)
+        .is_some_and(|at| real(&at) != real(cwd))
 }
 
 /// Write the turn's session id unless a reset or delete already took this
@@ -572,9 +578,22 @@ fn give_back_if_unheard(session: Arc<HeadlessSession>, generation: u64) {
     }
 }
 
-/// Forget a session the next turn cannot resume: it hung, or it was opened in
-/// another folder. The next turn starts a new one and reads the chat before
-/// the prompt it is about to send.
+/// Forget a session opened in another folder, like a hung one. A recap still
+/// waiting (a CLI switch whose first turn failed) is kept: it was written for
+/// this bot's move and holds more than the chat here would.
+fn drop_moved_session(session: &HeadlessSession, msg_ids: &[String]) {
+    if load_recap(&session.id).is_some() {
+        if let Ok(mut inner) = session.inner.lock() {
+            inner.session_id = None;
+        }
+        clear_session(&session.id);
+    } else {
+        drop_stuck_session(session, msg_ids);
+    }
+}
+
+/// Forget the session a resumed turn hung in. The next turn starts a new one
+/// and reads the chat before the prompt it is about to send again.
 fn drop_stuck_session(session: &HeadlessSession, msg_ids: &[String]) {
     if let Ok(mut inner) = session.inner.lock() {
         inner.session_id = None;
@@ -811,10 +830,12 @@ fn run_turn(
     let place = crate::worktree::place_for(&cfg.id, &crate::config::Config::default_cwd(&cfg));
     let cwd = place.cwd.clone();
     // The bot moved to another folder, or worktrees were turned on or off since
-    // its session was opened. Resumed from here the CLI finds nothing and the
-    // message is lost, so a new session reads the chat so far instead.
-    if !cfg.prompt_mode() && session_moved(&session.id, &cwd) {
-        drop_stuck_session(&session, &skip_rows);
+    // its session was opened. claude and grok keep a session under its folder,
+    // so resumed from here they find nothing and the message is lost. A new
+    // session reads the chat so far instead. codex finds a thread from anywhere.
+    let per_folder = matches!(program.as_str(), "claude" | "grok");
+    if per_folder && !cfg.prompt_mode() && session_moved(&session.id, &cwd) {
+        drop_moved_session(&session, &skip_rows);
     }
     let stored = session
         .inner
@@ -4195,6 +4216,14 @@ mod tests {
             assert_eq!(load_session("bot").as_deref(), Some("sess-1"));
             assert!(!session_moved("bot", Path::new("/work/a")));
             assert!(session_moved("bot", Path::new("/work/b")));
+
+            // A link to the same folder is the same folder.
+            let real = paths::home_dir().join("real");
+            fs::create_dir_all(&real).unwrap();
+            let link = paths::home_dir().join("link");
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            save_session("bot", "sess-1", &real).unwrap();
+            assert!(!session_moved("bot", &link));
 
             fs::write(paths::cli_session_path("bot"), "sess-old\n").unwrap();
             assert_eq!(load_session("bot").as_deref(), Some("sess-old"));
