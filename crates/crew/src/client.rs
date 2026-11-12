@@ -44,6 +44,7 @@ fn answer_timeout(req: &Request) -> Option<Duration> {
         Request::List
         | Request::Send { .. }
         | Request::Tell { .. }
+        | Request::ShowFile { .. }
         | Request::Input { .. }
         | Request::Resize { .. }
         | Request::Snapshot { .. }

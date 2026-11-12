@@ -176,6 +176,12 @@ pub enum Request {
         #[serde(default)]
         always: bool,
     },
+    /// Show the user a text or code file beside `agent`'s chat. `path` is
+    /// absolute, with `:<line>` when it opens at a line.
+    ShowFile {
+        agent: String,
+        path: String,
+    },
     /// Show a picker or form in chat and wait for the user's answer.
     Ask {
         agent: String,
@@ -439,6 +445,9 @@ pub enum MessageKind {
     Tool,
     /// Crew's line where the CLI folded the earlier conversation.
     Compact,
+    /// A file the bot showed with `crew show`. The text is its absolute path,
+    /// with `:<line>` when it opens at a line. The window draws it beside the chat.
+    File,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

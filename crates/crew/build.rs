@@ -47,6 +47,7 @@ fn main() {
             "save_upload",
             "peek_pending_focus",
             "take_pending_focus",
+            "read_text_file",
             "open_path",
             "open_url",
             "pick_folder",

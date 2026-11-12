@@ -54,6 +54,7 @@
     "allow-save-upload",
     "allow-peek-pending-focus",
     "allow-take-pending-focus",
+    "allow-read-text-file",
     "allow-open-path",
     "allow-open-url",
     "allow-pick-folder",
