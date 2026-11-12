@@ -1086,7 +1086,7 @@ fn spawn_and_stream(
         }
         if cli != CliKind::Grok {
             if let Some(chunk) = ingest_line(cli, &line, &mut state) {
-                feed_text(cli, session, &chunk);
+                feed_text(cli, session, &chunk, state.codex_new_message);
                 if let Ok(mut inner) = session.inner.lock() {
                     inner.last_output = Instant::now();
                     inner.seq += 1;
@@ -1212,7 +1212,7 @@ fn read_lines(
 fn settle_grok_reply(session: &HeadlessSession, state: &mut ParseState) {
     release_held_reply(state);
     if let Some(chunk) = state.parent_release.take() {
-        feed_text(CliKind::Grok, session, &chunk);
+        feed_text(CliKind::Grok, session, &chunk, false);
         state.got_text = true;
     }
     flush_held_tools(session, state);
@@ -1451,9 +1451,9 @@ fn watch_list(state: &ParseState) -> Vec<Watch> {
     state.background.iter().map(|(_, w)| w.clone()).collect()
 }
 
-fn feed_text(cli: CliKind, session: &HeadlessSession, chunk: &str) {
+fn feed_text(cli: CliKind, session: &HeadlessSession, chunk: &str, new_message: bool) {
     match cli {
-        CliKind::Codex => crate::transcript::set_pending_assistant(&session.id, chunk),
+        CliKind::Codex => crate::transcript::set_codex_message(&session.id, chunk, new_message),
         _ => crate::transcript::on_assistant_delta(&session.id, chunk),
     }
 }
@@ -1507,7 +1507,7 @@ fn apply_grok_stdout(session: &HeadlessSession, state: &mut ParseState, line: &s
     }
     let chunk = ingest_line(CliKind::Grok, line, state);
     if let Some(text) = chunk.as_deref() {
-        feed_text(CliKind::Grok, session, text);
+        feed_text(CliKind::Grok, session, text, false);
     }
     flush_held_tools(session, state);
     chunk
@@ -1545,6 +1545,9 @@ struct ParseState {
     error: Option<String>,
     last_codex_item: Option<String>,
     last_codex_text: Option<String>,
+    /// The last Codex text was a message of its own, not an update to the one
+    /// before it (`transcript::set_codex_message`).
+    codex_new_message: bool,
     tool_after_text: bool,
     /// The CLI closed this reply (`turn_completed`) and then kept talking.
     /// The next text is another reply and needs the blank line a new balloon
@@ -1664,7 +1667,7 @@ fn ingest_line(cli: CliKind, line: &str, state: &mut ParseState) -> Option<Strin
     let chunk = match cli {
         CliKind::Grok => grok_text(&v, state),
         CliKind::Claude => claude_text(&v, state),
-        // Each codex message replaces the last, so there is nothing to glue.
+        // Codex hands over whole messages, joined in the transcript.
         CliKind::Codex => return codex_text(&v, state),
         CliKind::Other => return None,
     };
@@ -2870,11 +2873,12 @@ fn codex_text(v: &Value, state: &mut ParseState) -> Option<String> {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    if state.last_codex_item.as_deref() == Some(item_id.as_str())
-        && state.last_codex_text.as_deref() == Some(text)
-    {
+    let same_item = state.last_codex_item.as_deref() == Some(item_id.as_str());
+    if same_item && state.last_codex_text.as_deref() == Some(text) {
         return None;
     }
+    // Another item is another message, not this one growing.
+    state.codex_new_message = !same_item;
     state.last_codex_item = Some(item_id);
     state.last_codex_text = Some(text.to_string());
     state.got_text = true;
@@ -4425,6 +4429,26 @@ mod tests {
         );
         assert_eq!(d.as_deref(), Some("OK"));
     }
+
+    /// codex-cli 0.167 sends a progress line and the answer as two messages
+    /// in one turn; another item id is another message, the same id an update.
+    #[test]
+    fn codex_tells_a_new_message_from_an_update() {
+        let mut st = ParseState::default();
+        let said = |id: &str, text: &str| {
+            format!(r#"{{"type":"item.completed","item":{{"id":"{id}","type":"agent_message","text":"{text}"}}}}"#)
+        };
+        assert!(ingest_line(CliKind::Codex, &said("item_0", "Running it."), &mut st).is_some());
+        assert!(st.codex_new_message);
+        let run = r#"{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"echo hi"}}"#;
+        assert!(ingest_line(CliKind::Codex, run, &mut st).is_none());
+        assert_eq!(ingest_line(CliKind::Codex, &said("item_2", "ok"), &mut st).as_deref(), Some("ok"));
+        assert!(st.codex_new_message);
+        assert!(ingest_line(CliKind::Codex, &said("item_2", "ok"), &mut st).is_none());
+        assert_eq!(ingest_line(CliKind::Codex, &said("item_2", "ok, done"), &mut st).as_deref(), Some("ok, done"));
+        assert!(!st.codex_new_message);
+    }
+
 
     #[test]
     fn strip_starting_session_and_opt_out() {

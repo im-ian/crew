@@ -43,6 +43,9 @@ struct AgentChat {
     /// The bot that asked for the turn in progress, if one did. The rows the
     /// turn adds carry it as their `peer`.
     peer: Option<String>,
+    /// Codex's earlier messages in the reply row being written, by that row's
+    /// id. A row a card starts afresh does not carry them.
+    codex_said: Option<(String, String)>,
 }
 
 impl AgentChat {
@@ -60,6 +63,8 @@ impl AgentChat {
             turn_gen: 0,
             tool_ids: HashMap::new(),
             peer: None,
+
+            codex_said: None,
         }
     }
 }
@@ -113,6 +118,7 @@ fn load_key(key: &str, path: &Path) {
                 turn_gen: 0,
                 tool_ids: HashMap::new(),
                 peer: None,
+                codex_said: None,
             },
         );
     }
@@ -1549,6 +1555,45 @@ fn pin_queued_below_reply(chat: &mut AgentChat) {
     chat.messages.retain(|m| !m.queued);
     chat.pending_idx = chat.messages.iter().position(|m| m.id == id);
     chat.messages.extend(queued);
+}
+
+/// One of Codex's messages, whole. codex-cli sends a progress line ("I'll run
+/// the tests.") and the answer as separate messages in one turn. A new one goes
+/// under what the reply row says so far; an update to the message being written
+/// replaces only that message.
+pub fn set_codex_message(agent: &str, text: &str, new_message: bool) {
+    let said = {
+        let Ok(mut map) = chats().lock() else {
+            return;
+        };
+        let Some(chat) = map.get_mut(agent) else {
+            return;
+        };
+        match chat.pending_idx {
+            Some(idx) => {
+                let row = chat.messages[idx].id.clone();
+                if new_message {
+                    let so_far = chat.messages[idx].text.clone();
+                    chat.codex_said = Some((row, so_far.clone()));
+                    so_far
+                } else {
+                    match &chat.codex_said {
+                        Some((id, so_far)) if *id == row => so_far.clone(),
+                        _ => String::new(),
+                    }
+                }
+            }
+            None => {
+                chat.codex_said = None;
+                String::new()
+            }
+        }
+    };
+    if said.trim().is_empty() {
+        set_pending_assistant(agent, text);
+    } else {
+        set_pending_assistant(agent, &format!("{said}\n\n{text}"));
+    }
 }
 
 pub fn set_pending_assistant(agent: &str, text: &str) {
@@ -3157,6 +3202,36 @@ Severity must be one of: bug.";
         );
         assert_eq!(msgs[0].id, first.id);
         assert_eq!(msgs[1].id, second.id);
+        drop_agent(&agent);
+    }
+
+    /// codex-cli 0.167 says what it will do and then answers, as two messages.
+    /// The answer goes under the first; a card between them starts a row that
+    /// does not repeat what the row above said.
+    #[test]
+    fn codex_messages_join_in_their_row() {
+        let agent = format!(
+            "codex-join-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        drop_agent(&agent);
+        begin_turn(&agent);
+        set_codex_message(&agent, "테스트를 돌려 볼게요.", true);
+        set_codex_message(&agent, "다 통과했어요.", true);
+        set_codex_message(&agent, "다 통과했어요. 12개예요.", false);
+        let card =
+            crate::choice::card_from_cli("머지할까요?", &["네".to_string(), "아니요".to_string()], &[], None)
+                .unwrap();
+        attach_choice(&agent, None, card);
+        set_codex_message(&agent, "머지했어요.", true);
+        end_turn(&agent);
+        let msgs = messages(&agent);
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].text, "테스트를 돌려 볼게요.\n\n다 통과했어요. 12개예요.");
+        assert_eq!(msgs[1].text, "머지했어요.");
         drop_agent(&agent);
     }
 
