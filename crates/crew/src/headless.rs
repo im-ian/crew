@@ -974,7 +974,13 @@ fn spawn_and_stream(
         }
         if sealed {
             match cli {
-                CliKind::Grok => note_sealed_grok_child(session, &mut state, &line),
+                CliKind::Grok => {
+                    note_sealed_grok_child(session, &mut state, &line);
+                    show_watch(session, generation, watch_list(&state));
+                    // The reply stays sealed. Work that finished after it is
+                    // not a reason to look busy until the process exits.
+                    release_sealed_if_idle(session, generation, &state);
+                }
                 // Claude keeps the process up past `result` while a task it put in
                 // the background runs, and answers again when the task ends. Its
                 // `init` opens that reply, which then reads like any other.
@@ -987,7 +993,16 @@ fn spawn_and_stream(
                     }
                     Ok(v) => {
                         note_claude_background(&v, &mut state);
+                        for note in claude_subagent_notes(&v, &mut state) {
+                            crate::transcript::push_subagent(
+                                &session.id,
+                                &note.key,
+                                &note.from,
+                                &note.text,
+                            );
+                        }
                         show_watch(session, generation, watch_list(&state));
+                        release_sealed_if_idle(session, generation, &state);
                     }
                     Err(_) => {}
                 },
@@ -1091,9 +1106,13 @@ fn spawn_and_stream(
         }
         // Without text the exit path still has an error to post, so wait for it.
         if turn_end && state.got_text {
-            let background = !state.background.is_empty();
-            end_turn_early(session, generation, *turn, background);
-            if background && cli == CliKind::Claude {
+            // `background` is the task list the header names. A subagent still
+            // running is work too, and sealing the answer must not look idle.
+            // A process that has only not exited yet does not count: a CLI
+            // that stays up between turns is idle once this work is done.
+            let running = turn_still_busy(&state);
+            end_turn_early(session, generation, *turn, running);
+            if !state.background.is_empty() && cli == CliKind::Claude {
                 show_watch(session, generation, watch_list(&state));
             }
             sealed = true;
@@ -1236,14 +1255,46 @@ fn is_turn_end(cli: CliKind, v: &Value) -> bool {
     }
 }
 
+/// True while a task or a subagent from this turn is still running.
+/// A process that has only not exited yet does not count.
+fn turn_still_busy(state: &ParseState) -> bool {
+    !state.background.is_empty()
+        || !state.open_subagents.is_empty()
+        || !state.background_calls.is_empty()
+        || !state.claude_waiting.is_empty()
+}
+
 /// Seal the reply and show the agent idle before the CLI exits. `inner.child`
 /// stays set until exit, so a send in that gap still queues instead of resuming
 /// a session the CLI is still writing; run_turn pumps the inbox after exit.
-/// With a task still in the background the agent stays working: the CLI is
-/// not done, and a send waits for it.
+/// With work still running the agent stays working: the CLI is not done, and
+/// a send waits for it. That work is a background task or a subagent, not the
+/// process merely still being alive.
 ///
 /// What waited on the answer goes now, not at exit: a background task can
 /// keep the CLI up for minutes, and the tells this turn ran sat that long.
+/// The work that held a sealed reply open has finished. The reply stays
+/// sealed. Only a process that has not exited yet does not count.
+fn release_sealed_if_idle(session: &HeadlessSession, generation: u64, state: &ParseState) {
+    if turn_still_busy(state) {
+        return;
+    }
+    let changed = {
+        let Ok(mut inner) = session.inner.lock() else {
+            return;
+        };
+        if inner.generation != generation || inner.status != AgentStatus::Working {
+            return;
+        }
+        inner.status = AgentStatus::Idle;
+        inner.seq += 1;
+        true
+    };
+    if changed {
+        crate::daemon::emit_agent_frame(&session.id);
+    }
+}
+
 fn end_turn_early(session: &HeadlessSession, generation: u64, turn: u64, background: bool) {
     crate::transcript::end_turn_gen(&session.id, Some(turn));
     let blocked = {
@@ -1414,9 +1465,13 @@ fn note_sealed_grok_child(session: &HeadlessSession, state: &mut ParseState, lin
     let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
         return;
     };
+    // A completion after `end` still has to drop the call, or the sealed
+    // reply stays working until the process exits.
+    note_grok_background(&v, state);
     for note in grok_subagent_notes(&v, state) {
         crate::transcript::push_subagent(&session.id, &note.key, &note.from, &note.text);
     }
+    note_subagent_call(&v, state);
     state.parent_release = None;
 }
 
@@ -1536,6 +1591,9 @@ struct ParseState {
     /// This turn's Claude subagent calls: call id → the note peer the report
     /// is from. A later report for the same call replaces the first.
     claude_subagents: HashMap<String, String>,
+    /// Claude subagent calls that have not reported yet. The turn stays
+    /// working until they do.
+    claude_waiting: HashSet<String>,
     /// Grok spawns, keyed by tool call id. The side chat is `peer`.
     grok_children: HashMap<String, GrokChild>,
     /// Child grok session id → tool call id.
@@ -2648,6 +2706,7 @@ fn claude_subagent_notes(v: &Value, state: &mut ParseState) -> Vec<SubagentNote>
                     text: prompt.to_string(),
                 });
                 state.claude_subagents.insert(id.to_string(), peer);
+                state.claude_waiting.insert(id.to_string());
             }
         }
         // The tool result wraps the report in a hand-back frame; this is the
@@ -2656,6 +2715,13 @@ fn claude_subagent_notes(v: &Value, state: &mut ParseState) -> Vec<SubagentNote>
             let Some(id) = v.get("tool_use_id").and_then(Value::as_str) else {
                 return out;
             };
+            let done = matches!(
+                v.get("status").and_then(Value::as_str).unwrap_or(""),
+                "completed" | "failed" | "cancelled" | "canceled" | "stopped" | "error"
+            );
+            if done {
+                state.claude_waiting.remove(id);
+            }
             if let (Some(peer), Some(text)) = (state.claude_subagents.get(id), subagent_report(v)) {
                 out.push(SubagentNote {
                     key: format!("{id}/report"),
@@ -4079,6 +4145,107 @@ mod tests {
                 r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_3","name":"Task","input":{"prompt":"Say hi"}}]}}"#
             ),
             [note("toolu_3", "to:sub:toolu_3:general-purpose", "Say hi")]
+        );
+    }
+
+    #[test]
+    fn a_running_subagent_keeps_the_turn_busy() {
+        let mut st = ParseState::default();
+        assert!(!turn_still_busy(&st));
+        st.open_subagents.insert("call-a".into());
+        assert!(turn_still_busy(&st));
+        st.open_subagents.clear();
+        st.background_calls.insert("call-a".into());
+        assert!(turn_still_busy(&st));
+        st.background_calls.clear();
+        st.background.push((
+            "t1".into(),
+            Watch {
+                what: "CI".into(),
+                since: 0,
+            },
+        ));
+        assert!(turn_still_busy(&st));
+
+        let mut st = ParseState::default();
+        let start: Value = serde_json::from_str(
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Agent","input":{"prompt":"Where?"}}]}}"#,
+        )
+        .unwrap();
+        assert!(!claude_subagent_notes(&start, &mut st).is_empty());
+        assert!(st.claude_waiting.contains("toolu_1"));
+        assert!(turn_still_busy(&st));
+        let other: Value = serde_json::from_str(
+            r#"{"type":"system","subtype":"task_notification","tool_use_id":"toolu_9","status":"completed","summary":"Background command completed"}"#,
+        )
+        .unwrap();
+        assert!(claude_subagent_notes(&other, &mut st).is_empty());
+        assert!(st.claude_waiting.contains("toolu_1"));
+        let report: Value = serde_json::from_str(
+            r#"{"type":"system","subtype":"task_notification","tool_use_id":"toolu_1","status":"completed","summary":"done"}"#,
+        )
+        .unwrap();
+        assert!(!claude_subagent_notes(&report, &mut st).is_empty());
+        assert!(st.claude_subagents.contains_key("toolu_1"));
+        assert!(!st.claude_waiting.contains("toolu_1"));
+        assert!(!turn_still_busy(&st));
+        let again: Value = serde_json::from_str(
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_3","name":"Task","input":{"prompt":"Say hi"}}]}}"#,
+        )
+        .unwrap();
+        assert!(!claude_subagent_notes(&again, &mut st).is_empty());
+        assert!(turn_still_busy(&st));
+        let failed: Value = serde_json::from_str(
+            r#"{"type":"system","subtype":"task_notification","tool_use_id":"toolu_3","status":"failed","summary":"API error"}"#,
+        )
+        .unwrap();
+        assert!(claude_subagent_notes(&failed, &mut st).is_empty());
+        assert!(!turn_still_busy(&st));
+    }
+
+    /// A report that arrives after the reply was sealed has to drop the
+    /// working state. The process is still up, and that alone is not work.
+    #[test]
+    fn a_sealed_report_lets_the_turn_go_idle() {
+        let session = grok_session("sealed-report");
+        let mut st = ParseState::default();
+        let start: Value = serde_json::from_str(
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Agent","input":{"prompt":"Where?"}}]}}"#,
+        )
+        .unwrap();
+        assert!(!claude_subagent_notes(&start, &mut st).is_empty());
+        assert!(turn_still_busy(&st));
+        let report: Value = serde_json::from_str(
+            r#"{"type":"system","subtype":"task_notification","tool_use_id":"toolu_1","status":"completed","summary":"done"}"#,
+        )
+        .unwrap();
+        assert!(!claude_subagent_notes(&report, &mut st).is_empty());
+        release_sealed_if_idle(&session, 0, &st);
+        assert!(!turn_still_busy(&st));
+        assert_eq!(
+            session.inner.lock().unwrap().status,
+            crate::protocol::AgentStatus::Idle
+        );
+
+        let session = grok_session("sealed-spawn");
+        let mut st = ParseState::default();
+        st.background_calls.insert("call-a".into());
+        note_sealed_grok_child(
+            &session,
+            &mut st,
+            &serde_json::json!({
+                "type": "tool_call_update",
+                "toolCallId": "call-a",
+                "status": "completed",
+                "content": [{"type": "content", "content": {"type": "text", "text": "finished"}}]
+            })
+            .to_string(),
+        );
+        assert!(st.background_calls.is_empty());
+        release_sealed_if_idle(&session, 0, &st);
+        assert_eq!(
+            session.inner.lock().unwrap().status,
+            crate::protocol::AgentStatus::Idle
         );
     }
 
