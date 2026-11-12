@@ -57,7 +57,10 @@ pub(super) struct LiveCli {
     /// between turns, and the next turn goes on from here.
     grok_state: Option<ParseState>,
     /// Codex: the turn app-server is running, so a stop can interrupt it.
+    /// Cleared when that turn completes, so a stop never interrupts the last one.
     turn_id: Option<String>,
+    /// Codex: the thread's approval policy. `never` is `--yolo`.
+    approval: Option<String>,
 }
 
 /// How a process takes prompts and ends turns.
@@ -154,6 +157,9 @@ struct Sink {
     generation: u64,
     tx: Sender<LiveLine>,
     end: TurnEnd,
+    /// The request this turn is waiting on. `0` is not one. A JSON-RPC error
+    /// ends the turn only when its id is this, so an interrupt's error does not.
+    prompt_id: u64,
 }
 
 /// The line a turn ends at.
@@ -340,6 +346,7 @@ fn claim(
                 generation,
                 tx,
                 end,
+                prompt_id,
             });
             let claimed = Claimed {
                 stdin: Arc::clone(&live.stdin),
@@ -386,12 +393,14 @@ fn claim(
                 next_id: 1,
                 grok_state: None,
                 turn_id: None,
+                approval: launch.codex.as_ref().and_then(|c| c.approval.clone()),
             };
             let (prompt_id, end) = live.prompt_end();
             live.turns.push_back(Sink {
                 generation,
                 tx,
                 end,
+                prompt_id,
             });
             inner.live = Some(live);
             open_turn(&mut inner);
@@ -1277,7 +1286,9 @@ fn codex_commands(
 
 fn codex_turn_id(v: &Value) -> Option<String> {
     let method = v.get("method").and_then(Value::as_str).unwrap_or("");
-    let id = if method == "turn/started" || method == "turn/completed" {
+    // `turn/completed` is the turn that just ended. Keeping its id would make
+    // the next stop interrupt that one, and the new turn would run on.
+    let id = if method == "turn/started" {
         v.pointer("/params/turn/id")
     } else if v.get("method").is_none() {
         v.pointer("/result/turn/id")
@@ -1287,15 +1298,37 @@ fn codex_turn_id(v: &Value) -> Option<String> {
     id.as_str().filter(|s| !s.is_empty()).map(str::to_string)
 }
 
-/// `--yolo` answers a command approval itself. Anything else is refused, as
-/// an ACP tool without leave is: Crew does not invent the user's answer.
-fn codex_approval(method: &str) -> Option<Value> {
+/// `--yolo` (`approval` `never`) answers a command approval itself, and grants
+/// the permissions a prompt asked for. Anything else is declined or refused:
+/// Crew does not invent the user's answer, and a command without `--yolo`
+/// does not get one.
+fn codex_approval(method: &str, v: &Value, approval: Option<&str>) -> Option<Value> {
+    let yolo = approval == Some("never");
+    if !yolo {
+        return match method {
+            "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
+                Some(serde_json::json!({ "decision": "decline" }))
+            }
+            "execCommandApproval" | "applyPatchApproval" => Some(serde_json::json!({
+                "decision": { "denied": { "rejection": "not approved" } }
+            })),
+            _ => None,
+        };
+    }
     match method {
-        "item/commandExecution/requestApproval"
-        | "item/fileChange/requestApproval"
-        | "item/permissions/requestApproval" => Some(serde_json::json!({ "decision": "accept" })),
+        "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
+            Some(serde_json::json!({ "decision": "accept" }))
+        }
         "execCommandApproval" | "applyPatchApproval" => {
             Some(serde_json::json!({ "decision": "approved" }))
+        }
+        // The response is the profile it asked for, not a `decision`.
+        "item/permissions/requestApproval" => {
+            let permissions = v
+                .pointer("/params/permissions")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            Some(serde_json::json!({ "permissions": permissions }))
         }
         _ => None,
     }
@@ -1529,7 +1562,10 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, proto: Proto, line: String
             // session is the subagent's.
             if proto == Proto::Codex {
                 if let Some(v) = v.as_ref() {
-                    if let Some(id) = codex_turn_id(v) {
+                    let method = v.get("method").and_then(Value::as_str).unwrap_or("");
+                    if method == "turn/completed" {
+                        live.turn_id = None;
+                    } else if let Some(id) = codex_turn_id(v) {
                         live.turn_id = Some(id);
                     }
                     if tasks.is_none() {
@@ -1577,7 +1613,15 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, proto: Proto, line: String
                     .tx
                     .send(LiveLine::Line(line.take().unwrap_or_default()));
                 let ends = own && routing.ends.is_some_and(|end| end == front.end);
-                if ends || routing.failed {
+                // An error for this turn's own request ends it. One for a stop,
+                // or for setup, does not: those ids are not the prompt's.
+                let prompt_failed = routing.failed
+                    && front.prompt_id != 0
+                    && v.as_ref()
+                        .and_then(|val| val.get("id"))
+                        .and_then(Value::as_u64)
+                        == Some(front.prompt_id);
+                if ends || prompt_failed {
                     live.turns.pop_front();
                 }
             } else if own && routing.starts {
@@ -1609,6 +1653,7 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, proto: Proto, line: String
                         generation: inner.generation,
                         tx,
                         end,
+                        prompt_id: 0,
                     });
                     inner.interrupted = false;
                     if inner.status == AgentStatus::Idle {
@@ -1657,16 +1702,16 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, proto: Proto, line: String
 /// The CLI asked Crew for something. Crew asks nobody: a bot that may not
 /// run a tool without leave does not run it, and anything else is refused.
 fn answer_request(session: &HeadlessSession, serial: u64, v: &Value) {
-    let stdin = session.inner.lock().ok().and_then(|inner| {
+    let answered = session.inner.lock().ok().and_then(|inner| {
         let live = inner.live.as_ref().filter(|l| l.serial == serial)?;
-        Some(Arc::clone(&live.stdin))
+        Some((Arc::clone(&live.stdin), live.approval.clone()))
     });
-    let Some(stdin) = stdin else {
+    let Some((stdin, approval)) = answered else {
         return;
     };
     let method = v.get("method").and_then(Value::as_str).unwrap_or_default();
     let id = v.get("id").cloned().unwrap_or(Value::Null);
-    let reply = if let Some(result) = codex_approval(method) {
+    let reply = if let Some(result) = codex_approval(method, v, approval.as_deref()) {
         serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result })
     } else if method == "session/request_permission" {
         let options = v.pointer("/params/options").and_then(Value::as_array);
@@ -1805,20 +1850,26 @@ pub(super) fn stop(session: &Arc<HeadlessSession>, pulled: Option<u64>, keep_cli
     };
     let target = session.inner.lock().ok().and_then(|mut inner| {
         let inner = &mut *inner;
-        let live = inner.live.as_ref()?;
-        inner.watch = watch_of(&live.background);
-        inner.seq += 1;
+        let live = inner.live.as_mut()?;
+        let watch = watch_of(&live.background);
         let acp = live.acp_session.clone();
         let turn_id = live.turn_id.clone();
-        Some((
+        // From the same counter as `turn/start`, so the two answers cannot share an id.
+        let interrupt_id = (live.proto == Proto::Codex && acp.is_some() && turn_id.is_some())
+            .then(|| live.take_id());
+        let found = (
             Arc::clone(&live.stdin),
             live.serial,
             live.proto,
             acp,
             turn_id,
-        ))
+            interrupt_id,
+        );
+        inner.watch = watch;
+        inner.seq += 1;
+        Some(found)
     });
-    let Some((stdin, serial, proto, acp, turn_id)) = target else {
+    let Some((stdin, serial, proto, acp, turn_id, interrupt_id)) = target else {
         return;
     };
     let request = match proto {
@@ -1839,16 +1890,13 @@ pub(super) fn stop(session: &Arc<HeadlessSession>, pulled: Option<u64>, keep_cli
             // Still opening its session: that sees the stop and closes it.
             None => return,
         },
-        Proto::Codex => match (acp, turn_id) {
-            (Some(thread), Some(turn)) => {
-                let id = STOP_ID.fetch_add(1, Ordering::Relaxed);
-                serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "method": "turn/interrupt",
-                    "params": { "threadId": thread, "turnId": turn },
-                })
-            }
+        Proto::Codex => match (acp, turn_id, interrupt_id) {
+            (Some(thread), Some(turn), Some(id)) => serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "turn/interrupt",
+                "params": { "threadId": thread, "turnId": turn },
+            }),
             // The turn id arrives with `turn/started`. Until then there is
             // nothing to interrupt; the wait below sends it once there is,
             // and kills the process if the turn never closes.
@@ -1885,12 +1933,13 @@ fn codex_stop_later(
             let mut sent = false;
             loop {
                 if !sent {
-                    let ids = session.inner.lock().ok().and_then(|inner| {
-                        let live = inner.live.as_ref().filter(|l| l.serial == serial)?;
-                        Some((live.acp_session.clone()?, live.turn_id.clone()?))
+                    let ids = session.inner.lock().ok().and_then(|mut inner| {
+                        let live = inner.live.as_mut().filter(|l| l.serial == serial)?;
+                        let thread = live.acp_session.clone()?;
+                        let turn = live.turn_id.clone()?;
+                        Some((thread, turn, live.take_id()))
                     });
-                    if let Some((thread, turn)) = ids {
-                        let id = STOP_ID.fetch_add(1, Ordering::Relaxed);
+                    if let Some((thread, turn, id)) = ids {
                         let request = serde_json::json!({
                             "jsonrpc": "2.0",
                             "id": id,

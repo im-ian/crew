@@ -8471,6 +8471,8 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{"thread":{"id":"%s"}}}\n' "$id" "$sid"
     fi ;;
   *'"method":"turn/interrupt"'*)
+    id=$(req_id "$line")
+    printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32600,"message":"interrupt ack"}}\n' "$id"
     if [ -z "$deaf" ] && [ -n "$tid" ]; then finish interrupted; tid=; fi ;;
   *'"method":"turn/start"'*)
     id=$(req_id "$line")
@@ -8496,6 +8498,7 @@ while IFS= read -r line; do
       begin
       if [ "$n" -eq 1 ]; then
         printf '{"jsonrpc":"2.0","id":7,"method":"item/commandExecution/requestApproval","params":{"threadId":"%s"}}\n' "$sid"
+        printf '{"jsonrpc":"2.0","id":8,"method":"item/permissions/requestApproval","params":{"permissions":{"network":{"enabled":true}},"threadId":"%s"}}\n' "$sid"
       fi
       say "answer $n from $$"
       finish completed ;;
@@ -8601,6 +8604,10 @@ done
                 lines.contains(r#""decision":"accept""#),
                 "a command approval was not accepted: {lines}"
             );
+            assert!(
+                lines.contains(r#""id":8,"jsonrpc":"2.0","result":{"permissions":{"network":{"enabled":true}}}"#),
+                "a permissions approval was not granted: {lines}"
+            );
             remove_agent(&bot).unwrap();
             eventually(Duration::from_secs(5), "removal left codex up", || {
                 !pid_alive(&pid)
@@ -8696,6 +8703,92 @@ done
                     .pointer("/params/threadId")
                     .and_then(|t| t.as_str()),
                 Some(format!("t-{first}")).as_deref()
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A stop on the next turn interrupts that turn, not the one that already
+    /// finished, and its request id is not a `turn/start`.
+    #[test]
+    fn a_stop_interrupts_the_codex_turn_that_just_started() {
+        paths::testing::with_home("codex-stop-next", || {
+            let bot = test_id("codexstop2");
+            let (starts, stdin) = fake_codex(&bot);
+            wait_idle(&bot);
+            send_agent(&bot, "one").unwrap();
+            eventually(Duration::from_secs(5), "no first answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            send_agent(&bot, "hang on").unwrap();
+            eventually(
+                Duration::from_secs(5),
+                "the second turn never spoke",
+                || turn_heard(&bot),
+            );
+            interrupt_turn(&bot).unwrap();
+            send_agent(&bot, "next").unwrap();
+            let pid = started_pids(&starts)[0].clone();
+            eventually(Duration::from_secs(5), "no answer after the stop", || {
+                told(&bot, &format!("answer 3 from {pid}"))
+            });
+            wait_idle(&bot);
+            assert_eq!(started_pids(&starts), [pid.clone()]);
+            assert!(pid_alive(&pid), "the stop killed codex");
+            assert_eq!(
+                assistant_texts(&bot),
+                [
+                    format!("answer 1 from {pid}"),
+                    format!("answer 3 from {pid}")
+                ]
+            );
+            let interrupts = acp_requests(&stdin, "turn/interrupt");
+            assert_eq!(interrupts.len(), 1, "{interrupts:?}");
+            assert_eq!(
+                interrupts[0]
+                    .pointer("/params/turnId")
+                    .and_then(|t| t.as_str()),
+                Some("turn-2")
+            );
+            let start_ids: Vec<_> = acp_requests(&stdin, "turn/start")
+                .iter()
+                .map(|r| r.get("id").and_then(|id| id.as_u64()))
+                .collect();
+            let interrupt_id = interrupts[0].get("id").and_then(|id| id.as_u64());
+            assert!(
+                interrupt_id.is_some() && !start_ids.contains(&interrupt_id),
+                "interrupt id {interrupt_id:?} collided with {start_ids:?}"
+            );
+            assert!(!turn_failed(&bot), "the stop read as a failed turn");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// Without `--yolo` a command approval is declined. The thread is not
+    /// opened with approval `never`.
+    #[test]
+    fn codex_without_yolo_declines_a_command() {
+        paths::testing::with_home("codex-noyolo", || {
+            let bot = test_id("codexnoyolo");
+            let (_starts, stdin) = fake_codex(&bot);
+            configs().lock().unwrap().get_mut(&bot).unwrap().cmd.pop();
+            wait_idle(&bot);
+            send_agent(&bot, "first-prompt").unwrap();
+            eventually(Duration::from_secs(5), "no answer", || {
+                assistant_texts(&bot).len() == 1
+            });
+            wait_idle(&bot);
+            let opened = &acp_requests(&stdin, "thread/start")[0];
+            assert!(opened.pointer("/params/approvalPolicy").is_none());
+            let lines = fs::read_to_string(&stdin).unwrap();
+            assert!(
+                lines.contains(r#""decision":"decline""#),
+                "a command was accepted without yolo: {lines}"
+            );
+            assert!(
+                !lines.contains(r#""permissions":{"network""#),
+                "permissions were granted without yolo: {lines}"
             );
             remove_agent(&bot).unwrap();
         });
