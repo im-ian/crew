@@ -722,6 +722,7 @@ fn start_state(session: &HeadlessSession, ctx: &TurnCtx) -> ParseState {
     };
     let mut state = live.grok_state.take().unwrap_or_default();
     state.session_id = live.acp_session.clone();
+    state.child_tokens = true;
     // A spawn that names no folder keeps its session in grok's.
     state.grok_cwd = std::fs::canonicalize(&live.started.cwd)
         .unwrap_or_else(|_| live.started.cwd.clone())

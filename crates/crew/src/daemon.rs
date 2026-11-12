@@ -7922,7 +7922,7 @@ while IFS= read -r line; do
     *spawn*)
       upd '"sessionUpdate":"tool_call","toolCallId":"c2","title":"spawn_subagent","rawInput":{"description":"Find KIWI","prompt":"Reply with KIWI."},"_meta":{"x.ai/tool":{"name":"spawn_subagent"}}'
       note '"sessionUpdate":"subagent_spawned","subagent_id":"kid-1","child_session_id":"kid-1","description":"Find KIWI"'
-      say "KIWI is the word the subagent found for you" kid-1
+      say "KIWI is" kid-1; say " the word" kid-1; say " the subagent found for you" kid-1
       note '"sessionUpdate":"turn_completed","prompt_id":"kid-p","stop_reason":"end_turn"' kid-1
       note '"sessionUpdate":"subagent_finished","subagent_id":"kid-1","child_session_id":"kid-1","status":"completed","output":"KIWI is the word the subagent found for you"'
       upd '"sessionUpdate":"tool_call_update","toolCallId":"c2","status":"completed","content":[{"type":"content","content":{"type":"text","text":"KIWI is the word the subagent found for you"}}]'
@@ -8097,7 +8097,7 @@ done
     }
 
     /// A grok subagent's words are a side chat, not the bot's reply, as with
-    /// one-shot grok.
+    /// one-shot grok. Over ACP they come a token at a time, spaces and all.
     #[test]
     fn a_grok_subagent_speaks_in_a_side_chat() {
         paths::testing::with_home("acp-spawn", || {

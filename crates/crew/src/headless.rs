@@ -1713,6 +1713,9 @@ struct ParseState {
     /// Canonical directory of this grok process. A spawn with no `cwd` stores
     /// its session here.
     grok_cwd: String,
+    /// A subagent's words come a token at a time, spaces and all, as over
+    /// ACP, not a sentence at a time.
+    child_tokens: bool,
 }
 
 impl ParseState {
@@ -1737,6 +1740,7 @@ impl ParseState {
             grok_child_lines: self.grok_child_lines,
             grok_sessions_root: self.grok_sessions_root,
             grok_cwd: self.grok_cwd,
+            child_tokens: self.child_tokens,
             ..ParseState::default()
         }
     }
@@ -1760,6 +1764,8 @@ struct GrokChild {
     /// The last utterance folded into `report`, so the finish output is not
     /// appended a second time.
     last: String,
+    /// The tokens it said so far, when they come one at a time.
+    streamed: String,
 }
 
 fn other_reply_line(cli: CliKind, line: &str) -> Option<&str> {
@@ -2214,18 +2220,29 @@ fn push_child_text(state: &mut ParseState, call_id: &str, text: &str) -> Option<
 }
 
 fn take_child_text(state: &mut ParseState, sid: &str, text: &str) -> Option<SubagentNote> {
+    let token = text;
     let text = text.trim();
-    if text.is_empty() {
+    if text.is_empty() && !state.child_tokens {
         return None;
     }
+    let push = |state: &mut ParseState, call: &str| {
+        if state.child_tokens {
+            push_child_token(state, call, token)
+        } else {
+            push_child_text(state, call, text)
+        }
+    };
     if let Some(call) = state.grok_sessions.get(sid).cloned() {
-        return push_child_text(state, &call, text);
+        return push(state, &call);
     }
     let unbound = unbound_calls(state);
     if unbound.len() == 1 {
         let call = unbound[0].clone();
         remember_session(state, &call, sid);
-        return push_child_text(state, &call, text);
+        return push(state, &call);
+    }
+    if text.is_empty() {
+        return None;
     }
     state
         .grok_pending
@@ -2233,6 +2250,24 @@ fn take_child_text(state: &mut ParseState, sid: &str, text: &str) -> Option<Suba
         .or_default()
         .push(text.to_string());
     None
+}
+
+/// A subagent's words as they stream, a token at a time. Its session file
+/// has them as sentences once it finishes, and those replace these (see
+/// `backfill_child`).
+fn push_child_token(state: &mut ParseState, call_id: &str, token: &str) -> Option<SubagentNote> {
+    let child = state.grok_children.get_mut(call_id)?;
+    child.streamed.push_str(token);
+    let text = child.streamed.trim();
+    if text.is_empty() || child.report == text {
+        return None;
+    }
+    child.report = text.to_string();
+    Some(SubagentNote {
+        key: format!("{call_id}/report"),
+        from: child.peer.clone(),
+        text: child.report.clone(),
+    })
 }
 
 fn join_utterances(lines: &[String]) -> String {
@@ -2718,6 +2753,7 @@ fn grok_subagent_notes(v: &Value, state: &mut ParseState) -> Vec<SubagentNote> {
                         session_id: None,
                         report: String::new(),
                         last: String::new(),
+                        streamed: String::new(),
                     },
                 );
             }
