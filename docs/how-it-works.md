@@ -18,9 +18,11 @@ README에서 뺀 개념 설명이에요. 쓰는 데는 몰라도 되지만, 봇�
 | Copilot | `copilot --allow-all --no-ask-user` |
 | OpenCode | `opencode run --auto` |
 
-Grok / Claude / Codex는 턴 단위 헤드리스로 실행돼요. `-p` / `exec`의 스트리밍 JSON만 읽기 때문에 배너나 스피너, 단축키 안내가 말풍선에 섞이지 않아요. CLI 세션 id는 봇별로 보관하니까 대화를 이어서 할 수 있고, 대화를 지우면 새 세션이 열려요.
+Claude / Grok / Antigravity는 봇마다 CLI 프로세스 하나를 띄워 두고, 메시지를 그 프로세스의 stdin으로 넘겨요. Claude는 `-p --input-format stream-json`으로, Grok은 `grok agent … stdio`로, Antigravity는 `agy acp`로 띄워요. Grok과 Antigravity는 ACP(JSON-RPC)로 말해요. 답이 끝나면 봇은 바로 대기 상태가 되고, CLI가 백그라운드로 돌리는 작업(CI 감시, 개발 서버)은 그대로 이어지면서 봇 옆에 표시돼요. 그동안 보낸 메시지도 바로 같은 프로세스로 가요. 작업이 끝나 Claude나 Grok이 스스로 다시 말하면 그 말은 말풍선이 따로 생겨요. 중지는 지금 턴만 멈추고 프로세스와 백그라운드 작업은 남겨요. 프로세스가 죽으면 다음 메시지 때 같은 세션으로 다시 띄우고, 명령이나 모델, 작업 폴더가 바뀌면 다음 메시지 때 새로 띄워요. Grok이나 Antigravity라도 그 모드가 받지 않는 플래그가 `cmd`에 있으면 예전처럼 메시지마다 프로세스를 띄워요.
 
-Antigravity / Gemini / Copilot / OpenCode도 턴 단위로 실행하지만 세션 id는 두지 않아요. 대신 매 턴 지금까지의 대화를 프롬프트에 같이 보내요.
+Codex는 턴 단위 헤드리스로 실행돼요(`exec`). 어느 쪽이든 스트리밍 JSON만 읽기 때문에 배너나 스피너, 단축키 안내가 말풍선에 섞이지 않아요. CLI 세션 id는 봇별로 보관하니까 대화를 이어서 할 수 있고, 대화를 지우면 새 세션이 열려요.
+
+Gemini / Copilot / OpenCode도 턴 단위로 실행하지만 세션 id는 두지 않아요. 대신 매 턴 지금까지의 대화를 프롬프트에 같이 보내요. 메시지마다 띄우는 Antigravity도 그래요.
 
 목록에 없는 명령도 봇으로 쓸 수 있어요. `--headless`로 만들면 메시지마다 그 명령을 실행하고, 메시지는 마지막 인자로 붙어요. `--headless`가 없으면 `cat` 같은 스텁처럼 긴 PTY 세션, 즉 터미널로 남아요. 테스트나 간단한 에코 봇에 쓰면 돼요.
 
