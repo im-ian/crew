@@ -13,6 +13,9 @@ pub struct ToolCard {
 pub fn from_events(v: &Value) -> Vec<ToolCard> {
     let event = unwrap_stream(v);
     let mut out = Vec::new();
+    if let Some(card) = acp_tool(v) {
+        out.push(card);
+    }
     if let Some(card) = grok_tool(event) {
         out.push(card);
     }
@@ -28,6 +31,29 @@ fn unwrap_stream(v: &Value) -> &Value {
     } else {
         v
     }
+}
+
+/// An ACP `session/update` that starts a tool call, as grok and agy kept up
+/// between turns send it. Its updates repeat the input, grok's tagged with a
+/// `variant`, and title the call by what it does, so only the start is a card.
+fn acp_tool(v: &Value) -> Option<ToolCard> {
+    let method = v.get("method").and_then(Value::as_str)?;
+    if !method.ends_with("session/update") {
+        return None;
+    }
+    let update = v.pointer("/params/update")?;
+    if update.get("sessionUpdate").and_then(Value::as_str) != Some("tool_call") {
+        return None;
+    }
+    let named = update
+        .pointer("/_meta/x.ai~1tool/name")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
+    card(
+        first_str(update, &["toolCallId"]),
+        named.or_else(|| first_str(update, &["toolName", "name", "title"])),
+        args_detail(update),
+    )
 }
 
 fn grok_tool(v: &Value) -> Option<ToolCard> {
@@ -152,6 +178,31 @@ mod tests {
         let card = from_events(&v).into_iter().next().expect("card");
         assert_eq!(card.id.as_deref(), Some("call-1"));
         assert_eq!(card.name, "run_terminal_command");
+        assert!(card.detail.contains("echo hi"));
+    }
+
+    #[test]
+    fn an_acp_tool_call_is_a_card_and_its_updates_are_not() {
+        let call: Value = serde_json::from_str(
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"run_terminal_command","rawInput":{"command":"echo hi"},"_meta":{"x.ai/tool":{"name":"run_terminal_command"}}}}}"#,
+        )
+        .unwrap();
+        let card = from_events(&call).into_iter().next().expect("card");
+        assert_eq!(card.id.as_deref(), Some("call-1"));
+        assert_eq!(card.name, "run_terminal_command");
+        assert!(card.detail.contains("echo hi"));
+        let update: Value = serde_json::from_str(
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","title":"Execute `echo hi`","rawInput":{"variant":"Bash","command":"echo hi"}}}}"#,
+        )
+        .unwrap();
+        assert!(from_events(&update).is_empty());
+        // agy names the tool and titles the call by its command.
+        let agy: Value = serde_json::from_str(
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"tool_call","toolCallId":"call_2","name":"run_command","title":"echo hi","rawInput":{"CommandLine":"echo hi"}}}}"#,
+        )
+        .unwrap();
+        let card = from_events(&agy).into_iter().next().expect("card");
+        assert_eq!(card.name, "run_command");
         assert!(card.detail.contains("echo hi"));
     }
 
