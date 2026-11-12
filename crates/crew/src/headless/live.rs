@@ -29,10 +29,12 @@ use anyhow::Context;
 use serde_json::Value;
 
 use super::{
-    apply_grok_stdout, arm_first_output_watch, claude_background, cli_command, end_turn_early,
-    event_session_id, grok_event, is_claude_turn_start, is_stale, is_turn_end, keep_background,
-    kill_all, note_sealed_grok_child, note_stdout, settle_grok_reply, show_compacts, stream_line,
-    strip_tui_noise, CliKind, HeadlessInner, HeadlessSession, ParseState, TurnOutcome,
+    apply_grok_stdout, arm_first_output_watch, claude_background, claude_subagent_notes,
+    cli_command, end_turn_early, event_session_id, grok_event, is_claude_turn_start, is_stale,
+    is_turn_end, keep_background, kill_all, note_claude_background, note_sealed_grok_child,
+    note_stdout, release_sealed_if_idle, settle_grok_reply, show_compacts, stream_line,
+    strip_tui_noise, CliKind, HeadlessInner, HeadlessSession, ParseState, SubagentNote,
+    TurnOutcome,
 };
 use crate::config::AcpCli;
 use crate::protocol::{AgentStatus, Watch};
@@ -56,6 +58,9 @@ pub(super) struct LiveCli {
     /// ACP: what the last turn knew of grok's subagents. Their notes go on
     /// between turns, and the next turn goes on from here.
     grok_state: Option<ParseState>,
+    /// Claude: subagents still running after the reply, so a report that
+    /// arrives once the turn has closed can let the bot go idle.
+    claude_state: Option<ParseState>,
     /// Codex: the turn app-server is running, so a stop can interrupt it.
     /// Cleared when that turn completes, so a stop never interrupts the last one.
     turn_id: Option<String>,
@@ -255,6 +260,7 @@ pub(super) fn run_turn(
                             error: Some(why),
                             compacted: false,
                             watched: Vec::new(),
+                            subagents: false,
                         });
                     }
                 }
@@ -392,6 +398,7 @@ fn claim(
                 acp_session: None,
                 next_id: 1,
                 grok_state: None,
+                claude_state: None,
                 turn_id: None,
                 approval: launch.codex.as_ref().and_then(|c| c.approval.clone()),
             };
@@ -971,9 +978,13 @@ fn read_turn(
                 settle_grok_reply(session, &mut state);
             }
             // The process stays up, with what it runs in the background. The
-            // agent is idle, and the next send goes to it.
+            // agent is idle, and the next send goes to it. A subagent that has
+            // not reported yet is still this turn's work, so the bot stays
+            // working until that line arrives.
             if state.got_text {
-                end_turn_early(session, generation, *turn, false);
+                let waiting =
+                    ctx.proto == Proto::Claude && claude_still_waiting(session, ctx.serial);
+                end_turn_early(session, generation, *turn, waiting);
             }
             break;
         }
@@ -1017,6 +1028,7 @@ fn read_turn(
         error,
         compacted: state.compacted,
         watched: Vec::new(),
+        subagents: ctx.proto == Proto::Claude && claude_still_waiting(session, ctx.serial),
     };
     if matches!(ctx.proto, Proto::Acp(_)) {
         keep_grok_state(session, ctx.serial, state.next_turn());
@@ -1025,6 +1037,21 @@ fn read_turn(
         unheard: !heard,
         outcome,
     }
+}
+
+/// The Claude subagents this process still has out, after the reply.
+fn claude_still_waiting(session: &HeadlessSession, serial: u64) -> bool {
+    session
+        .inner
+        .lock()
+        .ok()
+        .and_then(|inner| {
+            let live = inner.live.as_ref().filter(|l| l.serial == serial)?;
+            live.claude_state
+                .as_ref()
+                .map(|state| !state.claude_waiting.is_empty())
+        })
+        .unwrap_or(false)
 }
 
 /// What the next turn and the lines between turns go on from.
@@ -1546,6 +1573,11 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, proto: Proto, line: String
     let waited_since = Instant::now();
     let mut line = Some(line);
     let mut tasks = routing.tasks;
+    // Notes for a Claude line no turn is reading. The turn's own reader pushes
+    // the ones it sees, so these are only the lines that arrive after it.
+    let mut claude_notes: Vec<SubagentNote> = Vec::new();
+    let mut tracked = false;
+    let mut release_at: Option<u64> = None;
     loop {
         let mut emit = false;
         let mut start = None;
@@ -1574,6 +1606,15 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, proto: Proto, line: String
                         }
                     }
                 }
+            }
+            if proto == Proto::Claude && !tracked {
+                if let Some(v) = v.as_ref() {
+                    let mut state = live.claude_state.take().unwrap_or_default();
+                    claude_notes = claude_subagent_notes(v, &mut state);
+                    note_claude_background(v, &mut state);
+                    live.claude_state = Some(state);
+                }
+                tracked = true;
             }
             let own = proto == Proto::Claude
                 || routing.session.is_some() && routing.session == live.acp_session;
@@ -1668,6 +1709,9 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, proto: Proto, line: String
                 if let Some(v) = v.as_ref() {
                     crate::usage::note_claude_event(v);
                 }
+                // The reply is already sealed. A subagent's report is a side
+                // note, and the bot is idle once nothing it started is left.
+                release_at = Some(inner.generation);
             } else {
                 // A subagent grok left running reports between turns.
                 between = live.grok_state.take();
@@ -1675,6 +1719,26 @@ fn route(session: &Arc<HeadlessSession>, serial: u64, proto: Proto, line: String
         }
         if emit {
             crate::daemon::emit_agent_frame(&session.id);
+        }
+        if let Some(generation) = release_at {
+            for note in claude_notes.drain(..) {
+                crate::transcript::push_subagent(&session.id, &note.key, &note.from, &note.text);
+            }
+            let state = session.inner.lock().ok().and_then(|mut inner| {
+                inner
+                    .live
+                    .as_mut()
+                    .filter(|l| l.serial == serial)
+                    .and_then(|l| l.claude_state.take())
+            });
+            if let Some(state) = state {
+                release_sealed_if_idle(session, generation, &state);
+                if let Ok(mut inner) = session.inner.lock() {
+                    if let Some(live) = inner.live.as_mut().filter(|l| l.serial == serial) {
+                        live.claude_state = Some(state);
+                    }
+                }
+            }
         }
         if let (Some(mut state), Some(line)) = (between, line.as_deref()) {
             note_sealed_grok_child(session, &mut state, line);

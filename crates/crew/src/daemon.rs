@@ -9035,6 +9035,48 @@ printf '%s\n' '{"type":"system","subtype":"background_tasks_changed","tasks":[]}
         });
     }
 
+    /// A subagent still running at `result` keeps the bot working. Its report
+    /// arrives while that reply is sealed, and the bot is idle again before
+    /// the process exits. The answer it writes after that is a new reply.
+    #[test]
+    fn a_finished_subagent_lets_the_sealed_reply_go_idle() {
+        paths::testing::with_home("subagent-idle", || {
+            let bot = test_id("subidle");
+            fake_bot_running(
+                &bot,
+                r#"printf '%s\n' '{"type":"system","subtype":"init","session_id":"s1"}' '{"type":"assistant","message":{"content":[{"type":"text","text":"맡겼어요"}]}}' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Agent","input":{"prompt":"찾아줘"}}]}}' '{"type":"result","subtype":"success","result":"맡겼어요"}'
+sleep 0.4
+printf '%s\n' '{"type":"system","subtype":"task_notification","tool_use_id":"toolu_1","status":"completed","summary":"찾았어요"}'
+sleep 0.8
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"s1"}' '{"type":"assistant","message":{"content":[{"type":"text","text":"끝났어요"}]}}' '{"type":"result","subtype":"success","result":"끝났어요"}'
+sleep 1"#,
+            );
+            let shown = |id: &str| {
+                list_agents()
+                    .into_iter()
+                    .find(|a| a.id == id)
+                    .map(|a| a.status)
+            };
+            wait_idle(&bot);
+            send_agent(&bot, "찾아줘").unwrap();
+            eventually(Duration::from_secs(3), "the hand-off was not shown", || {
+                told(&bot, "맡겼어요") && shown(&bot) == Some(AgentStatus::Working)
+            });
+            eventually(
+                Duration::from_secs(3),
+                "the report left the bot working",
+                || shown(&bot) == Some(AgentStatus::Idle),
+            );
+            eventually(
+                Duration::from_secs(5),
+                "the later answer stayed working",
+                || told(&bot, "끝났어요") && shown(&bot) == Some(AgentStatus::Idle),
+            );
+            wait_idle(&bot);
+            remove_agent(&bot).unwrap();
+        });
+    }
+
     #[test]
     fn a_busy_tell_keeps_its_place_in_the_chain() {
         let anchor = test_id("serial-upgrade");

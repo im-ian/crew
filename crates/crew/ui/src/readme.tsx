@@ -87,9 +87,9 @@ thread.brief = [
 ];
 
 const usage: PlanUsage[] = [
-  { cli: "claude", fiveHour: { usedPercent: 42, resetsAt: now / 1000 + 2 * hour }, weekly: { usedPercent: 63, resetsAt: now / 1000 + 3 * 24 * hour }, capturedAt: now / 1000 - 60 },
-  { cli: "grok", weekly: { usedPercent: 84, resetsAt: now / 1000 + 2 * 24 * hour }, capturedAt: now / 1000 - 300 },
-  { cli: "codex", fiveHour: { usedPercent: 18, resetsAt: now / 1000 + 4 * hour }, weekly: { usedPercent: 31, resetsAt: now / 1000 + 5 * 24 * hour }, capturedAt: now / 1000 - 600 },
+  { cli: "claude", windows: [{ usedPercent: 42, resetsAt: now / 1000 + 2 * hour, minutes: 300 }, { usedPercent: 63, resetsAt: now / 1000 + 3 * 24 * hour, minutes: 10080 }], capturedAt: now / 1000 - 60 },
+  { cli: "grok", windows: [{ usedPercent: 84, resetsAt: now / 1000 + 2 * 24 * hour, minutes: 10080 }], capturedAt: now / 1000 - 300 },
+  { cli: "codex", windows: [{ usedPercent: 41, resetsAt: now / 1000 + 9 * 24 * hour, minutes: 43200 }], capturedAt: now / 1000 - 600 },
 ];
 
 const params = new URLSearchParams(location.search);
