@@ -322,8 +322,10 @@ function nameAfter(rest: string, agent: AgentInfo): number {
   const m = rest.match(/^\(([^()\n<]{1,40})\)/);
   const said = m?.[1].trim().toLowerCase();
   if (!m || !said) return 0;
-  const name = (agent.name || agent.id).toLowerCase();
-  return name.includes(said) || mentionLabel(agent).toLowerCase().includes(said) ? m[0].length : 0;
+  // The whole name, or one word of it: `(Moon)` for "개발자 Moon".
+  const names = [agent.name || agent.id, mentionLabel(agent)].map((n) => n.toLowerCase());
+  const fits = names.some((n) => n === said || n.split(/[\s·]+/).includes(said));
+  return fits ? m[0].length : 0;
 }
 
 /**

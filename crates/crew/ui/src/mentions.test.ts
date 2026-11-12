@@ -374,6 +374,12 @@ describe("a name in parentheses after an id", () => {
     expect(mentionsId("@alpha(alpha) 봐줘", "alpha")).toBe(true);
   });
 
+  it("hides only the whole name or one word of it", () => {
+    const moon = { ...agents[0], id: "dev2", name: "개발자 Moon" };
+    expect(mentionRuns("@dev2(Moon) 봐줘", [moon]).map((r) => r.text)).toEqual(["@개발자 Moon", " 봐줘"]);
+    expect(mentionRuns("@dev2(o)", [moon]).map((r) => r.text)).toEqual(["@개발자 Moon", "(o)"]);
+  });
+
   it("keeps other words in the parentheses as text", () => {
     expect(mentionRuns("@alpha(이거 봐줘)", agents)).toEqual([
       { text: "@Alpha", agent: agents[0] },
