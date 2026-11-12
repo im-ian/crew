@@ -3425,15 +3425,18 @@ button.choice-option:active:not(:disabled) .choice-badge {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Several bots: the phrase, then one chip per bot under it. The chips share
-   one width so their faces line up and the counts sit in one column. */
 .note-run-list {
   display: inline-flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: var(--space-2);
+  align-items: center;
   max-width: 100%;
   min-width: 0;
+}
+/* Several bots: the phrase, then one chip per bot under it. The chips share
+   one width so their faces line up and the counts sit in one column. */
+.note-run-list.is-stacked {
+  align-items: stretch;
+  gap: var(--space-2);
 }
 .note-run-label {
   align-self: center;
@@ -3450,17 +3453,24 @@ button.choice-option:active:not(:disabled) .choice-badge {
   border: 0;
   border-radius: var(--radius-pill);
   background: none;
-  padding: var(--space-4) var(--space-10) var(--space-4) var(--space-8);
+  padding: var(--space-2) var(--space-8);
   color: var(--muted);
   font: inherit;
   font-size: var(--text-md);
   line-height: 1.2;
   cursor: pointer;
 }
-.note-run-list > .note-run-head {
-  justify-content: flex-start;
+.note-run-head:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ink) 40%, transparent);
+  outline-offset: 2px;
 }
-.note-run-list .note-run-count {
+.is-stacked > .note-run-head {
+  justify-content: flex-start;
+  padding: var(--space-4) var(--space-10) var(--space-4) var(--space-8);
+}
+/* The count follows the name here, at the chip's right edge. */
+.is-stacked .note-run-count {
+  order: 1;
   margin-left: auto;
   padding-left: var(--space-10);
   font-variant-numeric: tabular-nums;

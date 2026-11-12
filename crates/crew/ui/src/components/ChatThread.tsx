@@ -1809,7 +1809,8 @@ function NoteGroup({
 
   // The whole chip is one button: the count, the face and the name all open
   // that bot's side chat. Going to the bot itself is the sidebar's job.
-  function chip(peerId: string, msgs: ChatMessage[], label: string | null) {
+  const stacked = groups.length > 1;
+  function chip(peerId: string, msgs: ChatMessage[]) {
     const agent = agents.find((a) => a.id === peerId) ?? null;
     const side =
       onPeek && !peerId.startsWith("#")
@@ -1817,26 +1818,24 @@ function NoteGroup({
         : null;
     const peeking = peekFocus === msgs[0].id;
     const who = displayWho(peerId, agent, t, labelOf);
+    const count = t("thread.noteRun", { n: msgs.length });
     return (
       <button
         type="button"
         key={peerId}
         className={"note-run-head" + (peeking ? " is-peeking" : "")}
         aria-expanded={side ? peeking : show}
-        aria-label={who + " " + msgs.length}
+        aria-label={count + ", " + who}
         title={who}
         onClick={side ?? (() => setOpen((v) => !v))}
       >
         <ChevronDown className="note-caret" size={12} />
-        {label !== null ? <span className="note-run-count">{label}</span> : null}
+        <span className="note-run-count">{stacked ? msgs.length : count}</span>
         <WhoLabel
           agent={agent ?? subagentFace(peerId, t)}
           who={who}
           fallbackId={peerId}
         />
-        {label === null ? (
-          <span className="note-run-count">{msgs.length}</span>
-        ) : null}
       </button>
     );
   }
@@ -1857,18 +1856,17 @@ function NoteGroup({
       )
     : "";
   // One bot keeps the old chip. Several bots share the phrase and stack one
-  // under another, each chip opening only that bot's notes. The row stays one
-  // element as notes arrive, so an open note is not remounted.
+  // under another, each chip opening that bot's side chat. A room has none,
+  // so its chip unfolds the whole run here. The list and the first chip stay
+  // mounted when a second bot joins, so focus and an open note survive it.
   return (
     <div className={"note-run" + (queued ? " queued" : "")}>
-      {groups.length === 1 ? (
-        chip(groups[0].peerId, groups[0].msgs, t("thread.noteRun", { n: groups[0].msgs.length }))
-      ) : (
-        <div className="note-run-list">
+      <div className={"note-run-list" + (stacked ? " is-stacked" : "")}>
+        {stacked ? (
           <span className="note-run-label">{t("thread.notePeers")}</span>
-          {groups.map((g) => chip(g.peerId, g.msgs, null))}
-        </div>
-      )}
+        ) : null}
+        {groups.map((g) => chip(g.peerId, g.msgs))}
+      </div>
       {live !== undefined && liveGroup ? (
         <button
           type="button"
