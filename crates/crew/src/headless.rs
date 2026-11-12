@@ -842,6 +842,29 @@ fn session_is_dead(
     }
 }
 
+/// The CLI process for `argv`, stdout and stderr piped. The caller sets stdin.
+fn cli_command(session: &HeadlessSession, argv: &[String], cwd: &Path) -> Command {
+    let program = paths::resolve_program(&argv[0]);
+    let mut cmd = Command::new(program.as_os_str());
+    for arg in argv.iter().skip(1) {
+        cmd.arg(arg);
+    }
+    cmd.current_dir(cwd);
+    cmd.env("PATH", paths::enriched_path());
+    cmd.env("CREW_AGENT_ID", &session.id);
+    cmd.env("CREW_HOME", paths::home_dir());
+    // grok reads ~/.claude/CLAUDE.md, the user's own Claude Code setup, and goes
+    // looking for its `@file` imports in the bot's folder before every answer.
+    cmd.env("GROK_CLAUDE_AGENTS_ENABLED", "false");
+    cmd.env("TERM", "dumb");
+    cmd.env("NO_COLOR", "1");
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    // Its own group, so a stop reaches all of it (see `kill_all`).
+    cmd.process_group(0);
+    cmd
+}
+
 struct TurnOutcome {
     session_id: Option<String>,
     got_text: bool,
@@ -862,25 +885,8 @@ fn spawn_and_stream(
     if argv.is_empty() {
         anyhow::bail!("empty command");
     }
-    let program = paths::resolve_program(&argv[0]);
-    let mut cmd = Command::new(program.as_os_str());
-    for arg in argv.iter().skip(1) {
-        cmd.arg(arg);
-    }
-    cmd.current_dir(cwd);
-    cmd.env("PATH", paths::enriched_path());
-    cmd.env("CREW_AGENT_ID", &session.id);
-    cmd.env("CREW_HOME", paths::home_dir());
-    // grok reads ~/.claude/CLAUDE.md, the user's own Claude Code setup, and goes
-    // looking for its `@file` imports in the bot's folder before every answer.
-    cmd.env("GROK_CLAUDE_AGENTS_ENABLED", "false");
-    cmd.env("TERM", "dumb");
-    cmd.env("NO_COLOR", "1");
+    let mut cmd = cli_command(session, argv, cwd);
     cmd.stdin(Stdio::null());
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-    // Its own group, so a stop reaches all of it (see `kill_all`).
-    cmd.process_group(0);
 
     let mut child = cmd
         .spawn()
@@ -1041,47 +1047,8 @@ fn spawn_and_stream(
                     state.error = Some(err);
                 }
             }
-        } else if cli != CliKind::Other {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
-                for card in crate::tool_card::from_events(&v) {
-                    if cli == CliKind::Claude && is_subagent_call(&v, &card.name) {
-                        continue;
-                    }
-                    crate::transcript::push_tool(
-                        &session.id,
-                        card.id.as_deref(),
-                        &card.name,
-                        &card.detail,
-                    );
-                }
-                if cli == CliKind::Claude {
-                    note_claude_background(&v, &mut state);
-                    crate::usage::note_claude_event(&v);
-                    for note in claude_subagent_notes(&v, &mut state) {
-                        crate::transcript::push_subagent(
-                            &session.id,
-                            &note.key,
-                            &note.from,
-                            &note.text,
-                        );
-                    }
-                }
-                turn_end = is_turn_end(cli, &v);
-            }
-        }
-        if cli != CliKind::Grok {
-            if let Some(chunk) = ingest_line(cli, &line, &mut state) {
-                feed_text(cli, session, &chunk);
-                if let Ok(mut inner) = session.inner.lock() {
-                    inner.last_output = Instant::now();
-                    inner.seq += 1;
-                }
-            } else if let Some(line) = other_reply_line(cli, &line) {
-                if !plain.is_empty() {
-                    plain.push('\n');
-                }
-                plain.push_str(line);
-            }
+        } else {
+            turn_end = stream_line(session, cli, &line, &mut state, &mut plain);
         }
         show_compacts(session, &mut state);
         if let Some(id) = state.session_id.as_ref() {
@@ -1162,6 +1129,59 @@ fn spawn_and_stream(
         compacted: state.compacted,
         watched,
     })
+}
+
+/// Tool cards, side-chat notes, and reply text for one stdout line of a CLI
+/// other than grok. True on the line that ends the CLI's turn.
+fn stream_line(
+    session: &HeadlessSession,
+    cli: CliKind,
+    line: &str,
+    state: &mut ParseState,
+    plain: &mut String,
+) -> bool {
+    let mut turn_end = false;
+    if cli != CliKind::Other {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+            for card in crate::tool_card::from_events(&v) {
+                if cli == CliKind::Claude && is_subagent_call(&v, &card.name) {
+                    continue;
+                }
+                crate::transcript::push_tool(
+                    &session.id,
+                    card.id.as_deref(),
+                    &card.name,
+                    &card.detail,
+                );
+            }
+            if cli == CliKind::Claude {
+                note_claude_background(&v, state);
+                crate::usage::note_claude_event(&v);
+                for note in claude_subagent_notes(&v, state) {
+                    crate::transcript::push_subagent(
+                        &session.id,
+                        &note.key,
+                        &note.from,
+                        &note.text,
+                    );
+                }
+            }
+            turn_end = is_turn_end(cli, &v);
+        }
+    }
+    if let Some(chunk) = ingest_line(cli, line, state) {
+        feed_text(cli, session, &chunk);
+        if let Ok(mut inner) = session.inner.lock() {
+            inner.last_output = Instant::now();
+            inner.seq += 1;
+        }
+    } else if let Some(line) = other_reply_line(cli, line) {
+        if !plain.is_empty() {
+            plain.push('\n');
+        }
+        plain.push_str(line);
+    }
+    turn_end
 }
 
 /// grok's exit after its wait on background work ran out, such as `the wait for
@@ -1290,10 +1310,17 @@ fn is_claude_turn_start(v: &Value) -> bool {
 
 /// Claude lists the tasks still running in the background on every change.
 fn note_claude_background(v: &Value, state: &mut ParseState) {
+    if let Some(next) = claude_background(v) {
+        keep_background(&mut state.background, next);
+    }
+}
+
+/// The task list in Claude's `background_tasks_changed`, as (id, description).
+fn claude_background(v: &Value) -> Option<Vec<(String, String)>> {
     if v.get("type").and_then(Value::as_str) != Some("system")
         || v.get("subtype").and_then(Value::as_str) != Some("background_tasks_changed")
     {
-        return;
+        return None;
     }
     let tasks = v.get("tasks").and_then(Value::as_array);
     let next = tasks
@@ -1312,23 +1339,23 @@ fn note_claude_background(v: &Value, state: &mut ParseState) {
             (key, what.to_string())
         })
         .collect();
-    keep_background(state, next);
+    Some(next)
 }
 
 /// Replace the running list, keeping when each task that stays started.
-fn keep_background(state: &mut ParseState, next: Vec<(String, String)>) {
+fn keep_background(background: &mut Vec<(String, Watch)>, next: Vec<(String, String)>) {
     let now = now_ms();
-    state.background = next
+    let kept = next
         .into_iter()
         .map(|(key, what)| {
-            let since = state
-                .background
+            let since = background
                 .iter()
                 .find(|(k, _)| *k == key)
                 .map_or(now, |(_, w)| w.since);
             (key, Watch { what, since })
         })
         .collect();
+    *background = kept;
 }
 
 /// The background tasks grok starts and finishes, from its tool calls.
