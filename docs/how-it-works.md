@@ -18,7 +18,7 @@ README에서 뺀 개념 설명이에요. 쓰는 데는 몰라도 되지만, 봇�
 | Copilot | `copilot --allow-all --no-ask-user` |
 | OpenCode | `opencode run --auto` |
 
-Claude / Grok / Antigravity / Codex는 봇마다 CLI 프로세스 하나를 띄워 두고, 메시지를 그 프로세스의 stdin으로 넘겨요. Claude는 `-p --input-format stream-json`으로, Grok은 `grok agent … stdio`로, Antigravity는 `agy acp`로, Codex는 `codex app-server`로 띄워요. Grok과 Antigravity는 ACP(JSON-RPC)로, Codex는 app-server JSON-RPC로 말해요. Codex의 `--yolo`는 그 프로토콜의 승인 정책 `never`와 샌드박스 `danger-full-access`예요. app-server는 `--yolo` 플래그 자체를 받지 않아요. 답이 끝나면 봇은 바로 대기 상태가 되고, CLI가 백그라운드로 돌리는 작업(CI 감시, 개발 서버)은 그대로 이어지면서 봇 옆에 표시돼요. 그동안 보낸 메시지도 바로 같은 프로세스로 가요. 작업이 끝나 Claude나 Grok이 스스로 다시 말하면 그 말은 말풍선이 따로 생겨요. 중지는 지금 턴만 멈추고 프로세스와 백그라운드 작업은 남겨요. Codex는 `turn/interrupt`로 턴만 끊어요. 프로세스가 죽으면 다음 메시지 때 같은 세션으로 다시 띄우고, 명령이나 모델, 추론 수준, 작업 폴더, 지침이 바뀌면 다음 메시지 때 새로 띄워요. Grok, Antigravity, Codex라도 그 모드가 받지 않는 플래그가 `cmd`에 있으면 예전처럼 메시지마다 프로세스를 띄워요.
+Claude / Grok / Antigravity / Codex는 봇마다 CLI 프로세스 하나를 띄워 두고, 메시지를 그 프로세스의 stdin으로 넘겨요. Claude는 `-p --input-format stream-json`으로, Grok은 `grok agent … stdio`로, Antigravity는 `agy acp`로, Codex는 `codex app-server`로 띄워요. Grok과 Antigravity는 ACP(JSON-RPC)로, Codex는 app-server JSON-RPC로 말해요. Codex의 `--yolo`는 그 프로토콜의 승인 정책 `never`와 샌드박스 `danger-full-access`예요. app-server는 `--yolo` 플래그 자체를 받지 않아요. 답이 끝나면 봇은 바로 대기 상태가 되고, 그동안 보낸 메시지도 바로 같은 프로세스로 가요. Claude, Grok, Antigravity가 백그라운드로 돌리는 작업(CI 감시, 개발 서버)은 그대로 이어지면서 봇 옆에 표시돼요. Codex는 명령 항목이 끝나면 그 작업도 같이 꺼져요. 답 뒤에도 떠 있을 프로그램은 `nohup`이나 `open -a`로 따로 띄워요. 작업이 끝나 Claude, Grok, Codex가 스스로 다시 말하면 그 말은 말풍선이 따로 생겨요. 중지는 지금 턴만 멈추고 프로세스와 백그라운드 작업은 남겨요. Codex는 `turn/interrupt`로 턴만 끊어요. 프로세스가 죽으면 다음 메시지 때 같은 세션으로 다시 띄우고, 명령이나 모델, 추론 수준, 작업 폴더, 지침이 바뀌면 다음 메시지 때 새로 띄워요. Grok, Antigravity, Codex라도 그 모드가 받지 않는 플래그가 `cmd`에 있으면 예전처럼 메시지마다 프로세스를 띄워요.
 
 어느 쪽이든 스트리밍 JSON만 읽기 때문에 배너나 스피너, 단축키 안내가 말풍선에 섞이지 않아요. CLI 세션 id는 봇별로 보관하니까 대화를 이어서 할 수 있고, 대화를 지우면 새 세션이 열려요.
 
@@ -37,12 +37,17 @@ Gemini / Copilot / OpenCode도 턴 단위로 실행하지만 세션 id는 두지
 > 사용자가 `@id`를 쓰면 그건 **너에게** 다른 봇을 가리키는 것이다. 이 세션에 남아라. 필요하면 직접 `crew tell <id> <text>`를 실행해라. 답에 동료를 적을 때는 `@id`만 쓰고 바로 뒤에 띄어쓰기나 문장부호를 둬라. 이름은 Crew가 보여 주니 덧붙이지 마라.
 > 이름을 바꿔 달라면 `crew agent set --name "새 이름"`을 실행해라. 봇을 만들라면 `crew agent add`를, 사이드바 그룹을 만들라면 `crew group add`를 실행해라. 반복 일을 맡기면 그 말을 cron으로 바꿔 `crew routine add`로 루틴을 만들고, 고치거나 지우라면 `crew routine edit` / `remove`를 실행해라.
 > 사람에게 고르라고 물으려면 `crew ask --question "..." --option A --option B`를 실행해라. 여럿 고를 수 있으면 `--multi`, 값을 적으라고 하려면 `--input 아이디`를 보태라. 정할 게 여러 개면 답장에 늘어놓지 말고 `--question`을 반복해 한 번에 물어라. `crew ask`가 답 없이 끝나거나 CLI가 끊어도 카드는 열려 있고 답은 나중에 메시지로 온다. 다시 묻지 말고, 카드가 닫혔다고 말하지 마라. 다른 봇에게 묻지 마라.
-> 답한 뒤에도 계속 떠 있어야 하는 프로그램(개발 서버, 사용자에게 띄워 준 앱)은 CLI의 백그라운드 작업으로 돌리지 마라. CLI가 그 작업을 기다리며 떠 있어서 사용자의 다음 메시지가 들어오지 못한다. `nohup <명령> > /tmp/<이름>.log 2>&1 &`이나 `open -a <앱>`으로 따로 띄우고 로그 위치를 알려라. CLI 백그라운드 작업은 CI 감시처럼 끝나면 보고할 일에만 써라.
 > 서로 의존하지 않는 일 여러 개는 CLI 자체 서브에이전트(Claude Agent, grok spawn_subagent, agy invoke_subagent)에게 나눠 병렬로 돌리고, 답은 다 모인 뒤 한 번에 해라. 서브에이전트는 팀원이 아니다.
 > 일을 받으면 도구를 쓰기 전에 어떻게 할지 한두 문장으로 말하고, 옆자리 동료처럼 지금 하는 일을 한 줄씩 알려 준 뒤 결과로 끝내라. 작은 일은 답만 해라.
 > 나중 대화에 필요한 걸 알게 되면 `crew memory append`로 적어라. 고치거나 잊으라면 `crew memory show`로 보고 `crew memory set`으로 다시 써라. 비밀은 적지 마라.
 > 팀 전체 메모와 지금 봇 목록은 공유 메모리에 있다. `crew share show`로 보고, 팀 메모는 `crew share append`로 더하고 `crew share set`으로 노트만 다시 쓴다. 봇 목록은 Crew가 매번 다시 쓴다. 그룹에 있으면 그 그룹의 메모는 `crew group memory show|append|set`으로 다룬다.
 > 워크트리에서 작업이 켜져 있고 이번 턴이 그 봇의 git 워크트리 안에서 시작하면, 셸은 그 워크트리 안에 있다. 편집과 커밋과 명령은 거기서 하고, 공유 체크아웃으로 옮겨 고치지 마라. 워크트리를 또 만들지 마라. 꺼져 있거나 폴더가 git 저장소가 아니면 이 문장은 프롬프트에 없다.
+
+상주하지 않는 CLI에게는 이 문단도 들어가요. Gemini, Copilot, OpenCode, 직접 등록한 명령, 그리고 그 모드가 받지 않는 옵션 때문에 메시지마다 프로세스를 띄우는 봇이에요.
+
+> 답한 뒤에도 계속 떠 있어야 하는 프로그램(개발 서버, 사용자에게 띄워 준 앱)은 CLI의 백그라운드 작업으로 돌리지 마라. CLI가 그 작업을 기다리며 떠 있어서 사용자의 다음 메시지가 들어오지 못한다. `nohup <명령> > /tmp/<이름>.log 2>&1 &`이나 `open -a <앱>`으로 따로 띄우고 로그 위치를 알려라. CLI 백그라운드 작업은 CI 감시처럼 끝나면 보고할 일에만 써라.
+
+Claude, Grok, Antigravity가 상주일 때는 이 문단을 넣지 않아요. 백그라운드 작업이 다음 메시지를 막지 않고, 그 메시지는 같은 프로세스로 바로 가요. Codex가 상주일 때는 다음 메시지가 들어오므로 그 이유는 빠지고, 명령 항목이 끝나면 작업도 같이 꺼진다는 안내만 남아요. 계속 떠 있을 프로그램은 `nohup`이나 `open -a`로 따로 띄우라고 해요.
 
 멘션은 `@id`로 저장되고 화면에는 봇 이름으로 보여요. 입력창에 이름을 적어도 보낼 때 id로 바뀌고, 봇도 답에 동료를 `@id`로 적어요. 사용자가 이름을 여러 개 적으면 지금 봇이 답을 끝낸 뒤에, 적힌 순서대로 한 명씩 답해요. 봇이 한 턴에 여러 봇에게 `crew tell`을 보내면 그 일들은 함께 시작해요. 봇 사이의 릴레이는 사용자 메시지 하나당 최대 4홉이에요.
 

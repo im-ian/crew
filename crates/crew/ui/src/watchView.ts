@@ -1,9 +1,17 @@
 import type { TFn } from "./i18n";
 import type { AgentInfo } from "./types";
 
-/** It answered, and its CLI is up only for background work such as a CI watch. */
+/** Background work is still listed, including while a resident CLI is idle. */
 export function isWatching(agent: AgentInfo | null | undefined): boolean {
-  return agent?.status === "working" && !!agent.watch?.length;
+  return !!agent?.watch?.length;
+}
+
+/**
+ * The turn that owns this watch is still running, so a send waits for it.
+ * An idle bot with a watch is a resident CLI: the next message goes now.
+ */
+export function watchHoldsSend(agent: AgentInfo | null | undefined): boolean {
+  return agent?.status === "working" && isWatching(agent);
 }
 
 /** What it watches and for how long, counted from the oldest task. */

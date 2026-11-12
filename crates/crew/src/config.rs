@@ -901,10 +901,34 @@ impl AgentConfig {
     /// `codex app-server`. Those modes take fewer flags than a one-shot turn:
     /// a command with one they do not take runs a process per turn, as before.
     pub fn live_cli(&self) -> bool {
+        self.stays_up()
+    }
+
+    /// The same decision as [`Self::live_cli`], read off the command.
+    /// Building the argv injects these rules, so the rules must not ask
+    /// `argv_with_memory` whether this bot stays up.
+    fn stays_up(&self) -> bool {
         match self.binary_name().as_str() {
             "claude" => true,
-            "grok" | "agy" => self.acp_launch(&[], "", None).is_some(),
-            "codex" => self.codex_launch(&[], "", None).is_some(),
+            "grok" | "agy" | "codex" => self.launch_known(),
+            _ => false,
+        }
+    }
+
+    /// The resident mode accepts this command. A flag it does not take means
+    /// a process per turn, the way `acp_launch` and `codex_launch` decide.
+    fn launch_known(&self) -> bool {
+        let mut args = self.cmd.clone();
+        if args.is_empty() {
+            return false;
+        }
+        let program = self.binary_name();
+        strip_resume_flags(&program, &mut args);
+        inject_model_effort(&program, &mut args, self.model.as_deref(), self.effort);
+        match program.as_str() {
+            "grok" => grok_agent_launch(&args).is_some(),
+            "agy" => agy_acp_launch(&args, String::new()).is_some(),
+            "codex" => codex_app_launch(&args).is_some(),
             _ => false,
         }
     }
@@ -1130,6 +1154,21 @@ pub fn cloned_bot_ask(source_name: &str, english: bool) -> String {
     )
 }
 
+/// What to say about a program that should outlive the reply.
+/// None when the CLI stays up and keeps that work running, so the next
+/// message already reaches it. A process per turn still hears that the task
+/// would hold the next message. Resident Codex hears a different reason:
+/// the command item ending stops the work.
+fn background_note(agent: &AgentConfig) -> Option<&'static str> {
+    if !agent.stays_up() {
+        Some("A program that should keep running after your reply, such as a dev server or an app you opened for the user, must not run as your CLI's background task: your CLI then stays up waiting for it, and the user's next message cannot reach you until it ends. Start it on its own instead, for example `nohup <command> > /tmp/<name>.log 2>&1 &` or `open -a <App>`, and tell the user where its log is. Keep your CLI's background tasks for work you will report on when it ends, like watching CI.")
+    } else if agent.binary_name() == "codex" {
+        Some("A program that should keep running after your command finishes, such as a dev server or an app you opened for the user, does not: Codex ends that work when the command item completes. Start it on its own instead, for example `nohup <command> > /tmp/<name>.log 2>&1 &` or `open -a <App>`, and tell the user where its log is.")
+    } else {
+        None
+    }
+}
+
 /// Short spawn-time prompt: identity, where the live team list lives, and how to `crew tell`.
 pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
     team_rules_for(agent, roster, None)
@@ -1154,9 +1193,10 @@ pub fn team_rules_for(
     s.push_str(
         "A teammate is written `@<id>`, and Crew shows it as their name. To name a teammate in your reply, write `@<id>` too; that only shows their name and sends nothing. Crew already shows the name, so do not add it after the id, and put a space or punctuation right after the id: `@bot-3(기획자)` shows as plain text and tells no one, `@bot-3` shows as their name. When the user writes one, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, so after `crew tell`, end your turn. Do not wait, sleep, or check for the reply. A group is written `#<group-id>`, and Crew shows it as the group's name. When the user writes one, they are naming the group the work belongs to; it messages no one, and a note under their message gives that group's bots, folder, and memory.\n",
     );
-    s.push_str(
-        "A program that should keep running after your reply, such as a dev server or an app you opened for the user, must not run as your CLI's background task: your CLI then stays up waiting for it, and the user's next message cannot reach you until it ends. Start it on its own instead, for example `nohup <command> > /tmp/<name>.log 2>&1 &` or `open -a <App>`, and tell the user where its log is. Keep your CLI's background tasks for work you will report on when it ends, like watching CI.\n",
-    );
+    if let Some(note) = background_note(agent) {
+        s.push_str(note);
+        s.push('\n');
+    }
     s.push_str(
         "When one message asks for several pieces of work that do not depend on each other, hand them to your CLI's own subagents (Claude's Agent tool, grok's spawn_subagent, agy's invoke_subagent) and run them in parallel where your CLI can, instead of doing them one after another. Work that needs an earlier step's result waits for that step. A CLI without subagents does the work itself. Subagents are not teammates: a teammate gets work only through `crew tell`. Their reports may come back one at a time. Until the last one is in, a reply only says which are still running, and keeps what came back for the end. When the subagents are done, answer once with what they found together.\n",
     );
@@ -2870,9 +2910,59 @@ mod tests {
         assert!(rules.contains("@<id>"));
         // `@id(name)` reads as one word, so it is no chip and no tell.
         assert!(rules.contains("do not add it after the id"));
-        // A dev server run as a CLI background task kept the CLI up, and the
-        // user's next message waited behind it.
-        assert!(rules.contains("must not run as your CLI's background task"));
+        // This grok stays up, so a background task does not hold the next
+        // message. That warning is for a process per turn.
+        assert!(!rules.contains("must not run as your CLI's background task"));
+    }
+
+    #[test]
+    fn background_note_follows_whether_the_cli_stays_up() {
+        let blocks = "must not run as your CLI's background task";
+        let stays = [
+            &["claude", "--dangerously-skip-permissions"][..],
+            &["grok", "--always-approve"][..],
+            &["agy", "--dangerously-skip-permissions"][..],
+        ];
+        for cmd in stays {
+            let agent = cfg(cmd, None, None);
+            assert!(agent.live_cli(), "{cmd:?}");
+            let rules = team_rules_for(&agent, &[], None);
+            assert!(!rules.contains(blocks), "{cmd:?}");
+            assert!(!rules.contains("nohup"), "{cmd:?}");
+        }
+
+        for cmd in [
+            &["codex", "--yolo"][..],
+            &["codex"][..],
+            &["codex", "--ask-for-approval", "on-request"][..],
+        ] {
+            let agent = cfg(cmd, None, None);
+            assert!(agent.live_cli(), "{cmd:?}");
+            let rules = team_rules_for(&agent, &[], None);
+            assert!(!rules.contains(blocks), "{cmd:?}");
+            assert!(rules.contains("when the command item completes"), "{cmd:?}");
+            assert!(rules.contains("nohup"), "{cmd:?}");
+        }
+
+        let per_turn = [
+            &["gemini", "--approval-mode", "yolo"][..],
+            &["copilot", "--allow-all", "--no-ask-user"][..],
+            &["opencode", "run", "--auto"][..],
+            &["cat"][..],
+            &["grok", "--always-approve", "--search"][..],
+            &["agy", "--dangerously-skip-permissions", "--search"][..],
+            &["codex", "--yolo", "--search"][..],
+        ];
+        for cmd in per_turn {
+            let agent = cfg(cmd, None, None);
+            assert!(!agent.live_cli(), "{cmd:?}");
+            let rules = team_rules_for(&agent, &[], None);
+            assert!(rules.contains(blocks), "{cmd:?}");
+            assert!(
+                !rules.contains("when the command item completes"),
+                "{cmd:?}"
+            );
+        }
     }
 
     #[test]
