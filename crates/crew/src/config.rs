@@ -1043,6 +1043,25 @@ pub fn new_bot_ask(english: bool) -> String {
     )
 }
 
+/// One-shot note for a bot that was just duplicated. It greets, says it is the
+/// copy, and asks what to take on. `source_name` is the original's display name.
+pub fn cloned_bot_ask(source_name: &str, english: bool) -> String {
+    let lang = if english {
+        "Write in English."
+    } else {
+        "Write in Korean."
+    };
+    let who = source_name.split_whitespace().collect::<Vec<_>>().join(" ");
+    let who = if who.is_empty() {
+        "another bot".to_string()
+    } else {
+        who
+    };
+    format!(
+        "You were just duplicated from {who}. Your role and memory were copied, and this chat is empty. Greet the user in one short message, say you are that copy, and ask what work they want you to take. Do not ask permission to proceed, do not start other work, and do not use tools. {lang}"
+    )
+}
+
 /// Short spawn-time prompt: identity, where the live team list lives, and how to `crew tell`.
 pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
     team_rules_for(agent, roster, None)
@@ -2272,6 +2291,20 @@ mod tests {
         assert!(ko.contains("do not use tools"));
         assert!(ko.contains("Write in Korean."));
         assert!(new_bot_ask(true).contains("Write in English."));
+    }
+
+    #[test]
+    fn cloned_bot_ask_greets_as_the_copy() {
+        let ko = cloned_bot_ask("리뷰어", false);
+        assert!(ko.contains("duplicated from 리뷰어"));
+        assert!(ko.contains("one short message"));
+        assert!(ko.contains("say you are that copy"));
+        assert!(ko.contains("Do not ask permission"));
+        assert!(ko.contains("do not use tools"));
+        assert!(ko.contains("Write in Korean."));
+        assert!(cloned_bot_ask("리뷰어", true).contains("Write in English."));
+        assert!(cloned_bot_ask("  \n", false).contains("another bot"));
+        assert!(!cloned_bot_ask("a\nb", false).contains('\n'));
     }
 
     #[test]
