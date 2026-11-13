@@ -1668,8 +1668,8 @@ button.avatar {
    .rep-mark, the router representative's tag beside the name. */
 .lead-star {
   position: absolute;
-  right: -3px;
-  bottom: -3px;
+  right: -2px;
+  bottom: -2px;
   /* Over the working props (4): the lead is still the lead at work. */
   z-index: 5;
   display: block;
@@ -1678,16 +1678,12 @@ button.avatar {
   color: var(--lead);
   line-height: 0;
 }
-/* No disc behind it: a ring in the rail's colour sets the star off the face,
-   the way the status dot's border does. */
+/* The star alone: no disc, ring or shadow behind it. */
 .lead-star svg {
   fill: currentColor;
-  stroke: var(--rail);
-  paint-order: stroke;
+  stroke: none;
 }
 .lead-star.is-exited { color: var(--exited); }
-.rail-row.active .lead-star svg { stroke: var(--active); }
-.rail-row:hover .lead-star svg { stroke: var(--hover); }
 /* A teammate's PC: green while it is on the router, grey while it is away. */
 .badge.remote-dot { background: var(--exited); }
 .badge.remote-dot.is-on { background: var(--idle); }
