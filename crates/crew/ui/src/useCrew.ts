@@ -433,7 +433,8 @@ export function useCrew() {
     setComposerFocus((n) => n + 1);
   }
 
-  function selectAgent(id: string, highlight: string | null = null) {
+  /** `focus: false` leaves the keys where they are, as a click on a split half does. */
+  function selectAgent(id: string, highlight: string | null = null, focus = true) {
     // The chat may already be open, so the selection effect would not run.
     setPinnedGroup(null);
     selectedRef.current = { id, kind: "agent" };
@@ -442,7 +443,7 @@ export function useCrew() {
     setStick(!highlight);
     setHighlightId(highlight);
     closePane();
-    focusComposer();
+    if (focus) focusComposer();
     void refreshMessages();
   }
 
@@ -484,6 +485,17 @@ export function useCrew() {
       y: Math.round(r.bottom + 4),
       id: null,
       kind: "create",
+    });
+  }
+
+  function showSplitMenu(e: MouseEvent) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setCtx({
+      open: true,
+      x: Math.round(r.right - 168),
+      y: Math.round(r.bottom + 4),
+      id: null,
+      kind: "split",
     });
   }
 
@@ -1676,6 +1688,7 @@ export function useCrew() {
     cloneBot,
     showCtx,
     showCreateMenu,
+    showSplitMenu,
     showGroupMenu,
     hideCtx,
     createGroup,

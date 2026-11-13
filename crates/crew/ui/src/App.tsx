@@ -30,6 +30,7 @@ import {
   type FileTarget,
 } from "./fileRef";
 import { FileView } from "./components/FileView";
+import { X } from "./icons";
 import type { TFn } from "./i18n";
 import { isTypingTarget, shortcutId } from "./shortcuts";
 import { popoverIsOpen } from "./usePopover";
@@ -53,6 +54,21 @@ import { watchHoldsSend } from "./watchView";
 import { AskHoldDialog, type AskPick } from "./components/AskHoldDialog";
 import { openQuestionIds, questionFocusTarget } from "./questionJump";
 import { loadAiList } from "./aiListSync";
+import {
+  closeSlot,
+  dropInto,
+  dropSide,
+  openSlot,
+  openSplit,
+  placeOpen,
+  prunePanes,
+  type DropSide,
+  type Slot,
+  type Split,
+  type SplitDir,
+} from "./split";
+import { usePaneMessages } from "./usePaneMessages";
+import type { AgentInfo } from "./types";
 
 export function App() {
   const t = useT();
@@ -121,6 +137,130 @@ export function App() {
   const fileCtx = useMemo(() => ({ open: openFile, current }), [openFile, current]);
   const autoFor = useRef<string | null>(null);
   const hitFor = useRef<string | null>(null);
+
+  // The chat split in two. The open chat is one half and has the composer;
+  // the other half shows its own bot until it is clicked.
+  const [split, setSplit] = useState<Split | null>(null);
+  const openId = crew.selectedKind === "agent" ? crew.selected : null;
+  // What the effect below is about to store, so no frame shows the old half.
+  const view = useMemo(() => placeOpen(split, openId), [split, openId]);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  useEffect(() => {
+    setSplit((cur) => placeOpen(cur, openId));
+  }, [openId]);
+  useEffect(() => {
+    if (!crew.agents.length) return;
+    const live = new Set(crew.agents.map((a) => a.id));
+    setSplit((cur) => prunePanes(cur, live));
+  }, [crew.agents]);
+  const active = view ? openSlot(view, openId) : null;
+  const slotIds: [string | null, string | null] = view ? view.panes : [openId, null];
+  const slotAgents = slotIds.map((id) =>
+    id ? crew.agents.find((a) => a.id === id) ?? null : null,
+  ) as [AgentInfo | null, AgentInfo | null];
+  const liveRows = openId && crew.messagesFor === openId ? crew.messages : null;
+  const rows0 = usePaneMessages(
+    view ? slotIds[0] : null,
+    active === 0 ? liveRows : null,
+    paneHot(slotAgents[0]),
+  );
+  const rows1 = usePaneMessages(
+    view ? slotIds[1] : null,
+    active === 1 ? liveRows : null,
+    paneHot(slotAgents[1]),
+  );
+  // Where each half was scrolled. The open half's is the crew's own.
+  const [paneStick, setPaneStick] = useState<[boolean, boolean]>([true, true]);
+  useEffect(() => {
+    if (active === null) return;
+    setPaneStick((cur) => {
+      if (cur[active] === crew.stick) return cur;
+      const next: [boolean, boolean] = [...cur];
+      next[active] = crew.stick;
+      return next;
+    });
+  }, [active, crew.stick]);
+  const [dropHint, setDropHint] = useState<DropSide | null>(null);
+  const mainRef = useRef<HTMLElement>(null);
+
+  function splitChat(dir: SplitDir) {
+    setSplit((cur) => openSplit(placeOpen(cur, openId), dir, openId));
+  }
+
+  function unsplit() {
+    setSplit(null);
+  }
+
+  /**
+   * A click on a half: the next pick lands there, and its bot becomes the open
+   * chat. `type` puts the caret in the composer, as a click on its stand-in does.
+   */
+  function focusSlot(slot: Slot, type = false) {
+    const cur = viewRef.current;
+    if (!cur) return;
+    const id = cur.panes[slot];
+    if (cur.target !== slot) setSplit({ ...cur, target: slot });
+    const c = crewRef.current;
+    if (id && id !== c.selected) {
+      c.selectAgent(id, null, type);
+      c.setStick(paneStick[slot]);
+    }
+  }
+
+  function closeHalf(slot: Slot) {
+    const cur = viewRef.current;
+    if (!cur) return;
+    const { keep } = closeSlot(cur, slot);
+    setSplit(null);
+    const c = crewRef.current;
+    if (keep && keep !== c.selected) c.selectAgent(keep);
+  }
+
+  function chatSide(x: number, y: number): DropSide | null {
+    const el = mainRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    if (x < r.left || x > r.right || y < r.top || y > r.bottom) return null;
+    return dropSide(x, y, r);
+  }
+
+  function onChatDrag(id: string | null, x: number, y: number, drop: boolean) {
+    const side = id ? chatSide(x, y) : null;
+    if (!drop) {
+      setDropHint((cur) =>
+        cur && side && cur.dir === side.dir && cur.slot === side.slot ? cur : side,
+      );
+      return;
+    }
+    setDropHint(null);
+    if (!id || !side) return;
+    const c = crewRef.current;
+    const open = c.selectedKind === "agent" ? c.selected : null;
+    setSplit(dropInto(viewRef.current, id, side, open));
+    if (id !== open) c.selectAgent(id);
+  }
+
+  const splitCommand = useRef<(cmd: string) => void>(() => undefined);
+  splitCommand.current = (cmd: string) => {
+    if (cmd === "row" || cmd === "col") splitChat(cmd);
+    else if (cmd === "close") unsplit();
+  };
+  useEffect(() => {
+    let off: (() => void) | null = null;
+    let gone = false;
+    import("@tauri-apps/api/event")
+      .then(({ listen }) => listen<string>("split", (e) => splitCommand.current(e.payload)))
+      .then((stop) => {
+        if (gone) stop();
+        else off = stop;
+      })
+      .catch(() => undefined);
+    return () => {
+      gone = true;
+      off?.();
+    };
+  }, []);
 
   useEffect(() => {
     setQueuePick(null);
@@ -388,6 +528,10 @@ export function App() {
         setJumpSeq((n) => n + 1);
         return;
       }
+      if (id === "split-row" || id === "split-col") {
+        splitCommand.current(id === "split-row" ? "row" : "col");
+        return;
+      }
       if (id === "prev-chat" || id === "next-chat") {
         const order = chatOrder(
           { groups: c.groups, ungrouped: c.ungrouped, order: c.order },
@@ -421,70 +565,84 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [helpOpen, settingsOpen, skillsOpen, peek, file, leaveOpen]);
 
-  const app = (
-    <div className="app">
-      <Sidebar
-        agents={crew.agents}
-        remotes={crew.remotes}
-        groups={crew.groups}
-        ungrouped={crew.ungrouped}
-        order={crew.order}
-        selected={crew.selected}
-        selectedKind={crew.selectedKind}
-        query={crew.query}
-        searchHits={
-          showTools
-            ? crew.searchHits
-            : crew.searchHits.filter((hit) => hit.kind !== "tool")
+  function renderSlot(slot: Slot) {
+    const id = slotIds[slot];
+    const agent = slotAgents[slot];
+    const rows = slot === 0 ? rows0 : rows1;
+    const target = !!view && view.target === slot;
+    const onClose = view ? () => closeHalf(slot) : undefined;
+    const cls =
+      "split-pane" +
+      (view && slot === active ? " is-open" : "") +
+      (target ? " is-target" : "") +
+      (view && !id ? " is-empty" : "");
+    // The open half already has the keys. A click there leaves an empty
+    // half waiting for its pick.
+    const onPointerDownCapture = view
+      ? () => {
+          if (slot !== active) focusSlot(slot);
         }
-        renamingId={renamingId}
-        onQuery={crew.setQuery}
-        onSearchHit={crew.openSearchHit}
-        onSelectAgent={crew.selectAgent}
-        onCreateMenu={crew.showCreateMenu}
-        onAgentCtx={(e, id) => crew.showCtx(e, id, "agent")}
-        onGroupCtx={(e, id) => crew.showCtx(e, id, "group")}
-        onGroupMenu={crew.showGroupMenu}
-        onGroupNewBot={crew.openNewBot}
-        onToggleGroup={crew.toggleGroup}
-        focusedGroup={crew.focusedGroup}
-        onFocusGroup={crew.focusGroup}
-        onRenameGroup={crew.renameGroup}
-        onStartRenameGroup={(id) => {
-          crew.clearPendingRename();
-          setRenameId(id);
-        }}
-        onRenameAgent={(id, name) => void crew.renameAgent(id, name)}
-        onRenameDone={finishRename}
-        onMove={crew.moveToGroup}
-        onReorderGroup={crew.reorderGroup}
-        unread={crew.unread}
-        drafting={drafting}
-        searchRef={searchRef}
-        onOpenSettings={() => setSettingsOpen(true)}
-      />
-      <main
-        className={
-          [(peekOpen || fileOpen) && "has-peek", chatWidth === "narrow" && "narrow-chat"]
-            .filter(Boolean)
-            .join(" ") || undefined
-        }
-      >
-        <div className="titlebar-align" data-tauri-drag-region />
-        {/* `connected` starts null — not checked yet, which is not a failure. */}
-        <ConnectionBanner
-          visible={crew.connected === false}
-          detail={crew.connDetail}
-        />
-        <UpdateBanner
-          visible={updater.shouldNotify}
-          version={updater.available?.version}
-          busy={updater.busy}
-          error={updater.error}
-          onInstall={() => void updater.install()}
-          onLater={updater.dismiss}
-          onClearError={updater.clearError}
-        />
+      : undefined;
+    if (view && !id) {
+      return (
+        <section className={cls} data-slot={slot} onPointerDownCapture={onPointerDownCapture}>
+          <header data-tauri-drag-region="deep">
+            <div className="head-identity" />
+            <button
+              type="button"
+              className="head-action"
+              title={t("split.close")}
+              aria-label={t("split.close")}
+              onClick={onClose}
+            >
+              <X />
+            </button>
+          </header>
+          <div className="split-empty">
+            <p>{target ? t("split.emptyTarget") : t("split.empty")}</p>
+            <p className="split-empty-hint">{t("split.drop")}</p>
+          </div>
+        </section>
+      );
+    }
+    if (view && slot !== active) {
+      return (
+        <section className={cls} data-slot={slot} onPointerDownCapture={onPointerDownCapture}>
+          <ChatHeader
+            currentAgent={agent}
+            groups={crew.groups}
+            onOpenInfo={() => {
+              if (id) crew.openInfo(id);
+            }}
+            onRenameAgent={(bot, name) => void crew.renameAgent(bot, name)}
+            onClose={onClose}
+          />
+          <ChatThread
+            messages={rows ?? []}
+            agents={crew.agents}
+            selected={id}
+            selectedKind="agent"
+            currentAgent={agent}
+            stick={paneStick[slot]}
+            onStick={(stick) =>
+              setPaneStick((cur) => {
+                if (cur[slot] === stick) return cur;
+                const next: [boolean, boolean] = [...cur];
+                next[slot] = stick;
+                return next;
+              })
+            }
+            streaming={paneHot(agent)}
+            onSelectAgent={crew.selectAgent}
+            ready={!!rows}
+            showTools={showTools}
+            lookAtCaret={false}
+          />
+        </section>
+      );
+    }
+    return (
+      <section className={cls} data-slot={slot} onPointerDownCapture={onPointerDownCapture}>
         <ChatHeader
           currentAgent={crew.currentAgent}
           groups={crew.groups}
@@ -492,9 +650,10 @@ export function App() {
             if (crew.selected) crew.openInfo(crew.selected);
           }}
           onRenameAgent={(id, name) => void crew.renameAgent(id, name)}
+          onClose={onClose}
         />
         <ChatThread
-          messages={crew.messages}
+          messages={liveRows ?? rows ?? crew.messages}
           agents={crew.agents}
           selected={crew.selected}
           selectedKind={crew.selectedKind}
@@ -523,7 +682,7 @@ export function App() {
           highlightId={crew.highlightId}
           onHighlightDone={crew.clearHighlight}
           openedRead={crew.openedRead}
-          ready={crew.messagesFor === crew.selected}
+          ready={!!liveRows || !!rows || crew.messagesFor === crew.selected}
           jumpSeq={jumpSeq}
           onReply={(target) => composerRef.current?.replyTo(target)}
           onJump={crew.highlightMessage}
@@ -543,49 +702,148 @@ export function App() {
             crew.currentAgent?.status !== "exited"
           }
         />
-        <Composer
-          ref={composerRef}
-          agents={crew.agents}
-          selected={crew.selected}
-          selectedKind={crew.selectedKind}
-          focusNonce={crew.composerFocus}
-          placeholder={crew.placeholder}
-          onSend={crew.onSend}
-          onEdit={crew.editQueued}
-          waitingIds={waiting}
-          queuePick={queuePick}
-          onQueuePick={setQueuePick}
-          onEditWaiting={(id) => {
-            const message = crew.messages.find((m) => m.id === id);
-            if (!message) return;
-            const next = waitingEdit(message.text || "", crew.agents, t);
-            setQueuePick(null);
-            composerRef.current?.edit(id, next.body, next.reply);
-          }}
-          onJump={crew.highlightMessage}
-          busy={
-            crew.currentAgent?.status === "working" ||
-            crew.currentAgent?.status === "blocked"
-          }
-          canSteer={crew.currentAgent?.status === "working"}
-          watching={watchHoldsSend(crew.currentAgent)}
-          delivery={delivery}
-          onStop={() => stopTurn(() => void crew.stopAgent())}
-          onOpenSkills={() => setSkillsOpen(true)}
-          onCaret={publishCaret}
-          askHold={
-            openAsks.length && crew.selected
-              ? holdForQuestion.bind(null, crew.selected)
-              : undefined
-          }
-          onDrafts={(ids) =>
-            setDrafting((prev) =>
-              prev.length === ids.length && prev.every((id, i) => id === ids[i])
-                ? prev
-                : ids,
-            )
-          }
+      </section>
+    );
+  }
+
+  const app = (
+    <div className="app">
+      <Sidebar
+        agents={crew.agents}
+        remotes={crew.remotes}
+        groups={crew.groups}
+        ungrouped={crew.ungrouped}
+        order={crew.order}
+        selected={crew.selected}
+        selectedKind={crew.selectedKind}
+        query={crew.query}
+        searchHits={
+          showTools
+            ? crew.searchHits
+            : crew.searchHits.filter((hit) => hit.kind !== "tool")
+        }
+        renamingId={renamingId}
+        onQuery={crew.setQuery}
+        onSearchHit={crew.openSearchHit}
+        onSelectAgent={crew.selectAgent}
+        onCreateMenu={crew.showCreateMenu}
+        onSplitMenu={crew.showSplitMenu}
+        splitDir={view?.dir ?? null}
+        onChatDrag={onChatDrag}
+        onAgentCtx={(e, id) => crew.showCtx(e, id, "agent")}
+        onGroupCtx={(e, id) => crew.showCtx(e, id, "group")}
+        onGroupMenu={crew.showGroupMenu}
+        onGroupNewBot={crew.openNewBot}
+        onToggleGroup={crew.toggleGroup}
+        focusedGroup={crew.focusedGroup}
+        onFocusGroup={crew.focusGroup}
+        onRenameGroup={crew.renameGroup}
+        onStartRenameGroup={(id) => {
+          crew.clearPendingRename();
+          setRenameId(id);
+        }}
+        onRenameAgent={(id, name) => void crew.renameAgent(id, name)}
+        onRenameDone={finishRename}
+        onMove={crew.moveToGroup}
+        onReorderGroup={crew.reorderGroup}
+        unread={crew.unread}
+        drafting={drafting}
+        searchRef={searchRef}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
+      <main
+        ref={mainRef}
+        className={
+          [(peekOpen || fileOpen) && "has-peek", chatWidth === "narrow" && "narrow-chat"]
+            .filter(Boolean)
+            .join(" ") || undefined
+        }
+      >
+        <div className="titlebar-align" data-tauri-drag-region />
+        {/* `connected` starts null — not checked yet, which is not a failure. */}
+        <ConnectionBanner
+          visible={crew.connected === false}
+          detail={crew.connDetail}
         />
+        <UpdateBanner
+          visible={updater.shouldNotify}
+          version={updater.available?.version}
+          busy={updater.busy}
+          error={updater.error}
+          onInstall={() => void updater.install()}
+          onLater={updater.dismiss}
+          onClearError={updater.clearError}
+        />
+        <div
+          className={view ? "chat-split is-split" : "chat-split"}
+          data-dir={view?.dir}
+          data-open={active ?? undefined}
+        >
+          {renderSlot(0)}
+          {view ? renderSlot(1) : null}
+          <Composer
+            ref={composerRef}
+            agents={crew.agents}
+            selected={crew.selected}
+            selectedKind={crew.selectedKind}
+            focusNonce={crew.composerFocus}
+            placeholder={crew.placeholder}
+            onSend={crew.onSend}
+            onEdit={crew.editQueued}
+            waitingIds={waiting}
+            queuePick={queuePick}
+            onQueuePick={setQueuePick}
+            onEditWaiting={(id) => {
+              const message = crew.messages.find((m) => m.id === id);
+              if (!message) return;
+              const next = waitingEdit(message.text || "", crew.agents, t);
+              setQueuePick(null);
+              composerRef.current?.edit(id, next.body, next.reply);
+            }}
+            onJump={crew.highlightMessage}
+            busy={
+              crew.currentAgent?.status === "working" ||
+              crew.currentAgent?.status === "blocked"
+            }
+            canSteer={crew.currentAgent?.status === "working"}
+            watching={watchHoldsSend(crew.currentAgent)}
+            delivery={delivery}
+            onStop={() => stopTurn(() => void crew.stopAgent())}
+            onOpenSkills={() => setSkillsOpen(true)}
+            onCaret={publishCaret}
+            askHold={
+              openAsks.length && crew.selected
+                ? holdForQuestion.bind(null, crew.selected)
+                : undefined
+            }
+            onDrafts={(ids) =>
+              setDrafting((prev) =>
+                prev.length === ids.length && prev.every((id, i) => id === ids[i])
+                  ? prev
+                  : ids,
+              )
+            }
+          />
+          {view && active !== null && slotIds[active === 0 ? 1 : 0] ? (
+            <div className="composer split-standin" data-slot={active === 0 ? 1 : 0}>
+              <button
+                type="button"
+                className="composer-box"
+                onClick={() => focusSlot(active === 0 ? 1 : 0, true)}
+              >
+                {t("split.standin", {
+                  name:
+                    slotAgents[active === 0 ? 1 : 0]?.name ||
+                    slotIds[active === 0 ? 1 : 0] ||
+                    "",
+                })}
+              </button>
+            </div>
+          ) : null}
+        </div>
+        {dropHint ? (
+          <div className="split-drop" data-dir={dropHint.dir} data-slot={dropHint.slot} />
+        ) : null}
         <AgentPane
           open={crew.paneOpen}
           tab={crew.paneTab}
@@ -670,7 +928,17 @@ export function App() {
         open={crew.ctx.open}
         x={crew.ctx.x}
         y={crew.ctx.y}
-        items={menuItems(crew, setRenameId, t)}
+        items={menuItems(crew, setRenameId, t, {
+          on: !!view,
+          split: (dir) => {
+            crew.hideCtx();
+            splitChat(dir);
+          },
+          off: () => {
+            crew.hideCtx();
+            unsplit();
+          },
+        })}
       />
       <SettingsPane
         open={settingsOpen}
@@ -750,12 +1018,34 @@ export function App() {
   );
 }
 
+/** A half that works or waits is polled as fast as the open chat. */
+function paneHot(agent: AgentInfo | null): boolean {
+  return (
+    !!agent &&
+    !watchHoldsSend(agent) &&
+    (agent.status === "working" || agent.status === "blocked")
+  );
+}
+
+type SplitMenu = { on: boolean; split: (dir: SplitDir) => void; off: () => void };
+
 function menuItems(
   crew: ReturnType<typeof useCrew>,
   setRenameId: (id: string | null) => void,
   t: TFn,
+  split: SplitMenu,
 ): MenuEntry[] {
   const { ctx, groups } = crew;
+  if (ctx.kind === "split") {
+    const items: MenuEntry[] = [
+      { type: "action", label: t("split.row"), hint: "⌘D", onClick: () => split.split("row") },
+      { type: "action", label: t("split.col"), hint: "⌘⇧D", onClick: () => split.split("col") },
+    ];
+    if (split.on) {
+      items.push({ type: "sep" }, { type: "action", label: t("split.off"), onClick: split.off });
+    }
+    return items;
+  }
   if (ctx.kind === "create") {
     return [
       {

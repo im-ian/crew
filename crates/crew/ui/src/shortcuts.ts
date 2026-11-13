@@ -15,6 +15,8 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "prev-chat", combo: "Meta+Alt+ArrowUp", group: "nav" },
   { id: "next-chat", combo: "Meta+Alt+ArrowDown", group: "nav" },
   { id: "bottom", combo: "Meta+Shift+ArrowDown", group: "nav" },
+  { id: "split-row", combo: "Meta+D", group: "nav" },
+  { id: "split-col", combo: "Meta+Shift+D", group: "nav" },
   { id: "new-bot", combo: "Meta+N", group: "create" },
   { id: "quick-bot", combo: "Meta+Shift+N", group: "create" },
   { id: "info", combo: "Meta+I", group: "chat" },
@@ -147,6 +149,8 @@ function selfCheck() {
     [{ key: "Enter", metaKey: true, shiftKey: true }, true, "steer"],
     [{ key: "ArrowDown", metaKey: true, altKey: true }, false, "next-chat"],
     [{ key: "ArrowDown", metaKey: true, shiftKey: true }, false, "bottom"],
+    [{ key: "d", metaKey: true }, true, "split-row"],
+    [{ key: "D", metaKey: true, shiftKey: true }, false, "split-col"],
   ];
   for (const [e, typing, id] of cases) {
     const got = shortcutId(e, typing);
