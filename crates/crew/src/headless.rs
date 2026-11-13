@@ -592,6 +592,14 @@ fn drop_moved_session(session: &HeadlessSession, msg_ids: &[String]) {
     }
 }
 
+fn lost_session_line() -> &'static str {
+    if paths::locale() == "en" {
+        "The CLI could not open its last session. Sending again in a new one."
+    } else {
+        "CLI가 이전 세션을 열지 못해 새 세션으로 다시 보냅니다"
+    }
+}
+
 /// Forget the session a resumed turn hung in. The next turn starts a new one
 /// and reads the chat before the prompt it is about to send again.
 fn drop_stuck_session(session: &HeadlessSession, msg_ids: &[String]) {
@@ -824,6 +832,41 @@ fn run_turn(
             return;
         }
     }
+    let again = turn_once(
+        session.clone(),
+        cfg.clone(),
+        roster.clone(),
+        prompt.clone(),
+        generation,
+        skip_rows.clone(),
+        true,
+    );
+    if again {
+        turn_once(
+            session.clone(),
+            cfg,
+            roster,
+            prompt,
+            generation,
+            skip_rows,
+            false,
+        );
+    }
+}
+
+/// One go at the turn. True when the CLI could not open the session it was
+/// asked to resume and `may_retry` let it ask for one more go: that session
+/// is dropped, so the next go opens a new one that reads the chat so far.
+/// The message is the same turn, so what waits on it keeps waiting.
+fn turn_once(
+    session: Arc<HeadlessSession>,
+    cfg: AgentConfig,
+    roster: Vec<AgentConfig>,
+    prompt: String,
+    generation: u64,
+    skip_rows: Vec<String>,
+    may_retry: bool,
+) -> bool {
     let mut turn = crate::transcript::begin_turn(&session.id);
 
     let program = cfg.binary_name();
@@ -965,7 +1008,7 @@ fn run_turn(
 
     if is_stale(&session, generation) {
         crate::transcript::end_turn_gen(&session.id, Some(turn));
-        return;
+        return false;
     }
 
     // A turn that errored and said nothing is the one the user should see failed.
@@ -986,6 +1029,18 @@ fn run_turn(
                     .filter(|s| s.resume)
                     .map(|s| s.id.as_str()),
             );
+            // The CLI could not open the session it resumed: it lost it, or the
+            // bot ran somewhere that session was not. The message would be lost
+            // with it, so it goes once more on a new session.
+            if may_retry && dead && resume && created_id.is_none() && !outcome.got_text {
+                drop_stuck_session(&session, &skip_rows);
+                crate::transcript::end_turn_gen(&session.id, Some(turn));
+                if is_stale(&session, generation) {
+                    return false;
+                }
+                crate::transcript::push_system(&session.id, "crew", lost_session_line(), None);
+                return true;
+            }
             // Used up by a turn that answered; one that failed leaves it for the
             // next. Codex may never name a thread, so a saved session is not the test.
             if recap.is_some() && outcome.got_text {
@@ -1060,7 +1115,7 @@ fn run_turn(
     // A stop or the silence watch claimed this turn while the outcome was
     // being recorded. Pumping here would start the prompt just put back.
     if is_stale(&session, generation) {
-        return;
+        return false;
     }
     crate::daemon::forget_prompt(&session.id);
     // Before the idle frame goes out, so the window sees both in one look.
@@ -1090,6 +1145,7 @@ fn run_turn(
     // Before the inbox: the next turn replaces this origin.
     crate::daemon::turn_ended(&session.id);
     crate::daemon::pump_inbox(&session.id);
+    false
 }
 
 /// How a turn of a bot whose CLI stays up between turns reaches it. None
