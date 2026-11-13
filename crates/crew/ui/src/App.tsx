@@ -52,6 +52,7 @@ import { escapeLayerOpen } from "./escapeLayer";
 import { watchHoldsSend } from "./watchView";
 import { AskHoldDialog, type AskPick } from "./components/AskHoldDialog";
 import { openQuestionIds, questionFocusTarget } from "./questionJump";
+import { loadAiList } from "./aiListSync";
 
 export function App() {
   const t = useT();
@@ -133,6 +134,12 @@ export function App() {
     crew.clearPendingRename();
     setRenameId(null);
   }
+
+  // The default AI moved into a list the daemon reads when a bot's own AI
+  // is out of its limit. The old single default moves in once.
+  useEffect(() => {
+    void loadAiList().catch(() => {});
+  }, []);
 
   useEffect(() => {
     void updater.init();

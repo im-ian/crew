@@ -235,6 +235,10 @@ export const api = {
   /** False when a teammate changed it after `version` was read. */
   setTeamMemory: (alias: string, text: string, version: number) =>
     invoke<boolean>("team_memory_set", { alias, text, version }),
+  /** The default AI and the ones a turn falls back to. Null until first saved. */
+  getFallbackAis: () => invoke<unknown>("get_fallback_ais"),
+  setFallbackAis: (list: { cli: string; model: string; effort: string; cmd: string }[]) =>
+    invoke<void>("set_fallback_ais", { list }),
   listModels: (cli: string) => {
     let pending = modelLists.get(cli);
     if (!pending) {

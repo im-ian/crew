@@ -122,6 +122,19 @@ export function Plus(props: Props) {
   );
 }
 
+export function GripVertical(props: Props) {
+  return (
+    <Icon {...props}>
+      <circle cx="9" cy="12" r="1" />
+      <circle cx="9" cy="5" r="1" />
+      <circle cx="9" cy="19" r="1" />
+      <circle cx="15" cy="12" r="1" />
+      <circle cx="15" cy="5" r="1" />
+      <circle cx="15" cy="19" r="1" />
+    </Icon>
+  );
+}
+
 export function Paperclip(props: Props) {
   return (
     <Icon {...props}>
