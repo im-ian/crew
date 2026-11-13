@@ -724,14 +724,20 @@ pub(crate) fn retry_unheard(id: &str, flight: headless::InFlight) {
         park_unheard_again(id, flight);
         return;
     }
-    requeue_unanswered(id, flight);
-    unpark_prefix(id);
-    finish_halted_turn(id);
     let line = if crate::paths::locale() == "en" {
         "The CLI did not answer in its last session. Sending again in a new one."
     } else {
         "CLI가 이전 세션에서 응답하지 않아 새 세션으로 다시 보냅니다"
     };
+    send_again_on_new_session(id, flight, line);
+}
+
+/// The prompt goes back to the front, ready to start again on a new session,
+/// and the chat says why.
+fn send_again_on_new_session(id: &str, flight: headless::InFlight, line: &str) {
+    requeue_unanswered(id, flight);
+    unpark_prefix(id);
+    finish_halted_turn(id);
     crate::transcript::push_system(id, "crew", line, None);
 }
 
@@ -746,15 +752,12 @@ pub(crate) fn claim_lost_retry(id: &str, msg_ids: &[String], text: &str) -> bool
 /// front to start again on a new session. What waits on this turn keeps
 /// waiting: it is the same turn, sent again.
 pub(crate) fn retry_lost_session(id: &str, flight: headless::InFlight) {
-    requeue_unanswered(id, flight);
-    unpark_prefix(id);
-    finish_halted_turn(id);
     let line = if crate::paths::locale() == "en" {
         "The CLI could not open its last session. Sending again in a new one."
     } else {
         "CLI가 이전 세션을 열지 못해 새 세션으로 다시 보냅니다"
     };
-    crate::transcript::push_system(id, "crew", line, None);
+    send_again_on_new_session(id, flight, line);
 }
 
 /// The one retry was used. Leave the prompt parked and say so once.
@@ -5944,9 +5947,10 @@ fi
         });
     }
 
-    /// A new session that fails too is not sent a third time.
+    /// The new session the retry opens fails too. It was not resumed, so its
+    /// failure is the CLI's own: the prompt is not sent a third time.
     #[test]
-    fn a_lost_session_is_retried_only_once() {
+    fn a_failed_retry_is_not_sent_again() {
         paths::testing::with_home("lost-twice", || {
             let bot = test_id("lost2");
             let log = paths::home_dir().join("prompts");
