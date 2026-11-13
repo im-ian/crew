@@ -1609,6 +1609,7 @@ mod tests {
                 collapsed: false,
                 items: vec!["agent:review".into()],
                 path: None,
+                lead: None,
             }])
             .unwrap();
             let append = |text: &str| GroupMemoryCmd::Append {

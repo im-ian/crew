@@ -885,6 +885,17 @@ function menuItems(
       if (id) crew.createGroup({ kind: "agent", id });
     },
   });
+  const leads = !!currentGroup && groups.find((g) => g.id === currentGroup)?.lead === id;
+  if (currentGroup) {
+    items.push({
+      type: "action",
+      label: leads ? t("menu.clearLead") : t("menu.makeLead"),
+      onClick: () => {
+        crew.hideCtx();
+        if (id) crew.setLead(currentGroup, leads ? null : id);
+      },
+    });
+  }
   items.push({ type: "sep" });
   items.push({
     type: "action",

@@ -57,6 +57,8 @@ import {
   parseItemKey,
   pruneLayout,
   setGroupFolder,
+  setGroupLead,
+  settleLeads,
   toPersist,
   UNGROUPED_ID,
   uniqueGroupName,
@@ -486,7 +488,9 @@ export function useCrew() {
     });
   }
 
-  function persistLayout(next: RailLayout) {
+  function persistLayout(raw: RailLayout) {
+    // A bot that moved out of its group no longer leads it.
+    const next = settleLeads(raw);
     const groupsOnly = next.groups.filter((g) => g.id !== UNGROUPED_ID);
     const layout = applyOrder(
       groupsOnly,
@@ -694,6 +698,11 @@ export function useCrew() {
       ungrouped: groupsRef.current.ungrouped,
       order: groupsRef.current.order,
     });
+  }
+
+  /** Make `botId` lead the group it sits in, or clear that group's lead. */
+  function setLead(groupId: string, botId: string | null) {
+    persistLayout(setGroupLead(groupsRef.current, groupId, botId));
   }
 
   function itemGroupId(kind: Kind, id: string): string | null {
@@ -1669,6 +1678,7 @@ export function useCrew() {
     moveToGroup,
     reorderGroup,
     toggleGroup,
+    setLead,
     itemGroupId,
     onSend,
     stopAgent,

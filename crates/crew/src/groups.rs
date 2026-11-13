@@ -20,6 +20,10 @@ pub struct SidebarGroup {
     /// Working folder for the group's bots. A group need not have one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    /// The bot id that leads this group. Its row stays shown when the group
+    /// is collapsed. Not the router "representative", which is per router.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lead: Option<String>,
 }
 
 pub fn load() -> anyhow::Result<Vec<SidebarGroup>> {
@@ -42,6 +46,7 @@ pub fn load_from(path: &Path) -> anyhow::Result<Vec<SidebarGroup>> {
     }
     let mut groups: Vec<SidebarGroup> = serde_json::from_str(trimmed)?;
     drop_channel_items(&mut groups);
+    drop_stray_leads(&mut groups);
     Ok(groups)
 }
 
@@ -50,6 +55,20 @@ pub fn load_from(path: &Path) -> anyhow::Result<Vec<SidebarGroup>> {
 fn drop_channel_items(groups: &mut [SidebarGroup]) {
     for group in groups {
         group.items.retain(|item| !item.starts_with("channel:"));
+    }
+}
+
+/// A lead has to sit in its group. A bot that moved out or was deleted
+/// leads nothing.
+fn drop_stray_leads(groups: &mut [SidebarGroup]) {
+    for group in groups {
+        let held = group
+            .lead
+            .as_deref()
+            .is_some_and(|lead| holds(group, lead));
+        if !held {
+            group.lead = None;
+        }
     }
 }
 
@@ -85,8 +104,10 @@ pub fn add_group(
         collapsed: false,
         items,
         path: None,
+        lead: None,
     };
     groups.push(created.clone());
+    drop_stray_leads(groups);
     Ok(created)
 }
 
@@ -147,6 +168,7 @@ pub fn save_to(path: &Path, groups: &[SidebarGroup]) -> anyhow::Result<()> {
     }
     let mut groups = groups.to_vec();
     drop_channel_items(&mut groups);
+    drop_stray_leads(&mut groups);
     let raw = serde_json::to_string_pretty(&groups)?;
     fs::write(path, raw + "\n")?;
     Ok(())
@@ -175,6 +197,7 @@ mod tests {
             collapsed: true,
             items: vec!["agent:grok".into(), "channel:room".into()],
             path: None,
+            lead: None,
         }];
         save_to(&path, &groups).unwrap();
         let loaded = load_from(&path).unwrap();
@@ -201,6 +224,7 @@ mod tests {
                 collapsed: false,
                 items: vec!["agent:a2".into()],
                 path: None,
+                lead: None,
             },
             SidebarGroup {
                 id: "g1".into(),
@@ -208,6 +232,7 @@ mod tests {
                 collapsed: false,
                 items: vec!["agent:a1".into(), "channel:room".into()],
                 path: None,
+                lead: None,
             },
         ];
         let created = add_group(
@@ -236,6 +261,7 @@ mod tests {
             collapsed: false,
             items: vec![],
             path: None,
+            lead: None,
         }];
         assert!(add_group(&mut groups, "  ", &[], 1).is_err());
         assert_eq!(groups.len(), 1);
@@ -258,6 +284,7 @@ mod tests {
             collapsed: false,
             items: vec![],
             path: Some("/tmp/app".into()),
+            lead: None,
         }];
         save_to(&path, &groups).unwrap();
         let loaded = load_from(&path).unwrap();
@@ -277,6 +304,7 @@ mod tests {
                 collapsed: false,
                 items: vec!["agent:loose".into()],
                 path: None,
+                lead: None,
             },
             SidebarGroup {
                 id: "g1".into(),
@@ -284,6 +312,7 @@ mod tests {
                 collapsed: false,
                 items: vec!["agent:a1".into()],
                 path: Some("/tmp/app".into()),
+                lead: None,
             },
         ];
         assert_eq!(group_of(&groups, "a1").map(|g| g.id.as_str()), Some("g1"));
@@ -300,5 +329,59 @@ mod tests {
         let mut groups = groups;
         drop_channel_items(&mut groups);
         assert_eq!(groups[0].items, vec!["agent:grok".to_string()]);
+    }
+
+    #[test]
+    fn a_lead_roundtrips_and_one_outside_its_group_is_dropped() {
+        let dir = std::env::temp_dir().join(format!("crew-groups-lead-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("groups.json");
+        let groups = vec![
+            SidebarGroup {
+                id: "g1".into(),
+                name: "app".into(),
+                collapsed: true,
+                items: vec!["agent:a1".into(), "agent:a2".into()],
+                path: None,
+                lead: Some("a2".into()),
+            },
+            SidebarGroup {
+                id: "g2".into(),
+                name: "web".into(),
+                collapsed: false,
+                items: vec!["agent:b1".into()],
+                path: None,
+                lead: Some("gone".into()),
+            },
+        ];
+        save_to(&path, &groups).unwrap();
+        let loaded = load_from(&path).unwrap();
+        assert_eq!(loaded[0].lead.as_deref(), Some("a2"));
+        assert_eq!(loaded[1].lead, None);
+        let raw = fs::read_to_string(&path).unwrap();
+        assert_eq!(raw.matches("\"lead\"").count(), 1);
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn a_group_without_a_lead_reads_as_none() {
+        let groups: Vec<SidebarGroup> =
+            serde_json::from_str(r#"[{"id":"g1","name":"개인"}]"#).unwrap();
+        assert_eq!(groups[0].lead, None);
+    }
+
+    #[test]
+    fn add_group_drops_the_lead_of_a_bot_it_takes() {
+        let mut groups = vec![SidebarGroup {
+            id: "g1".into(),
+            name: "app".into(),
+            collapsed: true,
+            items: vec!["agent:a1".into(), "agent:a2".into()],
+            path: None,
+            lead: Some("a1".into()),
+        }];
+        add_group(&mut groups, "새", &["a1".into()], 1).unwrap();
+        assert_eq!(groups[0].lead, None);
     }
 }

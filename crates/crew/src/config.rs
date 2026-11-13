@@ -3385,6 +3385,7 @@ mod tests {
             collapsed: false,
             items: ids.iter().map(|id| format!("agent:{id}")).collect(),
             path: None,
+            lead: None,
         };
         let group = folder("Crew", &["me", "mate"]);
         let s = teammates_sentence(&me, &roster, Some(&group));
@@ -3518,6 +3519,7 @@ mod tests {
                 collapsed: false,
                 items: vec!["agent:alpha".into(), "agent:gone".into(), "agent:beta".into()],
                 path: Some("/work/crew".into()),
+                lead: None,
             },
             crate::groups::SidebarGroup {
                 id: crate::groups::UNGROUPED_ID.into(),
@@ -3525,6 +3527,7 @@ mod tests {
                 collapsed: false,
                 items: vec![],
                 path: None,
+                lead: None,
             },
         ];
         let memory = |id: &str| if id == "g1" { "ship on Friday\n".to_string() } else { String::new() };

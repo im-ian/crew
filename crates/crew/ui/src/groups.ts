@@ -59,6 +59,8 @@ export function normalizeGroups(raw: unknown): RailLayout {
       items: uniqueKeys(items),
     };
     if (path) next.path = path;
+    const lead = typeof g.lead === "string" ? g.lead.trim() : "";
+    if (lead && next.items.includes(itemKey("agent", lead))) next.lead = lead;
     out.push(next);
     order.push(id);
   }
@@ -87,7 +89,8 @@ export function setGroupFolder(layout: RailLayout, id: string, path: string): Ra
     groups: layout.groups.map((g) => {
       if (g.id !== id) return g;
       if (folder) return { ...g, path: folder };
-      return { id: g.id, name: g.name, collapsed: g.collapsed, items: g.items };
+      const { path: _gone, ...rest } = g;
+      return rest;
     }),
     ungrouped: layout.ungrouped,
     ...(layout.order ? { order: layout.order } : {}),
@@ -98,9 +101,51 @@ function persistedGroup(g: Group): Group {
   const path = groupCwd(g);
   if (!path) {
     if (g.path == null) return g;
-    return { id: g.id, name: g.name, collapsed: g.collapsed, items: g.items };
+    const { path: _gone, ...rest } = g;
+    return rest;
   }
   return { ...g, path };
+}
+
+/** The bot that leads `group`, while it still sits there. */
+export function groupLead(group: Group): string | null {
+  const lead = group.lead;
+  if (!lead || !group.items.includes(itemKey("agent", lead))) return null;
+  return lead;
+}
+
+/** Make `botId` lead its group, or clear the lead with null. A bot outside
+    the group cannot lead it. */
+export function setGroupLead(
+  layout: RailLayout,
+  groupId: string,
+  botId: string | null,
+): RailLayout {
+  return {
+    groups: layout.groups.map((g) => {
+      if (g.id !== groupId) return g;
+      if (botId && g.items.includes(itemKey("agent", botId))) return { ...g, lead: botId };
+      const { lead: _gone, ...rest } = g;
+      return rest;
+    }),
+    ungrouped: layout.ungrouped,
+    ...(layout.order ? { order: layout.order } : {}),
+  };
+}
+
+/** Clear each lead that moved out of its group or was deleted. Groups that
+    keep theirs are returned as they were. */
+export function settleLeads(layout: RailLayout): RailLayout {
+  if (!layout.groups.some((g) => g.lead != null && groupLead(g) == null)) return layout;
+  return {
+    groups: layout.groups.map((g) => {
+      if (g.lead == null || groupLead(g) != null) return g;
+      const { lead: _gone, ...rest } = g;
+      return rest;
+    }),
+    ungrouped: layout.ungrouped,
+    ...(layout.order ? { order: layout.order } : {}),
+  };
 }
 
 export function toPersist(layout: RailLayout): Group[] {
@@ -197,8 +242,10 @@ export function pruneLayout(layout: RailLayout, agents: AgentInfo[]): RailLayout
       items: g.items.filter((k) => valid.has(k)),
     }));
   const ungrouped = layout.ungrouped.filter((k) => valid.has(k));
-  if (!layout.order) return { groups, ungrouped };
-  return applyOrder(groups, orderedSlots({ groups, ungrouped, order: layout.order }));
+  if (!layout.order) return settleLeads({ groups, ungrouped });
+  return settleLeads(
+    applyOrder(groups, orderedSlots({ groups, ungrouped, order: layout.order })),
+  );
 }
 
 export function layoutChanged(a: RailLayout, b: RailLayout): boolean {
@@ -301,7 +348,7 @@ function insertAt(keys: string[], key: string, before: string | null): string[] 
   return rest;
 }
 
-/** Sidebar order for keyboard next/prev. Collapsed group children are skipped. */
+/** Sidebar order for keyboard next/prev. A collapsed group shows only its lead. */
 export function railOrder(
   groups: Group[],
   ungrouped: string[],
@@ -317,7 +364,14 @@ export function railOrder(
   for (const slot of railSlots(groups, ungrouped, agents, order)) {
     const group = byGroup.get(slot);
     if (group) {
-      if (group.collapsed) continue;
+      if (group.collapsed) {
+        const lead = groupLead(group);
+        const key = lead ? itemKey("agent", lead) : null;
+        if (!key || !valid.has(key) || used.has(key)) continue;
+        used.add(key);
+        out.push({ kind: "agent", id: lead! });
+        continue;
+      }
       for (const key of group.items) {
         if (!valid.has(key) || used.has(key)) continue;
         used.add(key);

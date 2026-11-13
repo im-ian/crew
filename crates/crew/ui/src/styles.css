@@ -24,6 +24,7 @@
   --working: #0a84ff;
   --blocked: #ff453a;
   --exited: #636366;
+  --lead: #ffd60a;
   --on-ink: #fff;
   --link: #8bb8ff;
   --link-me: #c5d8f5;
@@ -144,6 +145,7 @@ html[data-theme="light"] {
   --working: #0071e3;
   --blocked: #d70015;
   --exited: #8e8e93;
+  --lead: #f0b400;
   --on-ink: #fff;
   --link: #0066cc;
   --link-me: #0b4aa2;
@@ -1662,6 +1664,40 @@ button.avatar {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The group lead: a star right before the name, sized to it. It does not
+   shrink, so a long name is cut and the star stays whole. */
+.lead-mark {
+  flex-shrink: 0;
+  align-self: center;
+  display: inline-flex;
+  margin-right: 4px;
+  color: var(--lead);
+}
+.lead-mark svg {
+  width: 0.8em;
+  height: 0.8em;
+}
+/* On the folded rail, where no name shows: a star in the corner the status dot uses. Separate from
+   .rep-mark, the router representative's tag beside the name. */
+.lead-star {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  /* Over the working props (4): the lead is still the lead at work. */
+  z-index: 5;
+  display: block;
+  width: 14px;
+  height: 14px;
+  color: var(--lead);
+  line-height: 0;
+}
+/* The star alone: no disc, ring or shadow behind it. */
+.lead-star svg,
+.lead-mark svg {
+  fill: currentColor;
+  stroke: none;
+}
+.lead-star.is-exited { color: var(--exited); }
 /* A teammate's PC: green while it is on the router, grey while it is away. */
 .badge.remote-dot { background: var(--exited); }
 .badge.remote-dot.is-on { background: var(--idle); }

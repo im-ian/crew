@@ -14,6 +14,9 @@ import {
   firstOpenAgent,
   railOrder,
   setGroupFolder,
+  setGroupLead,
+  settleLeads,
+  groupLead,
   toPersist,
   visibleUngroupedKeys,
 } from "./groups";
@@ -369,5 +372,54 @@ describe("pruneLayout and groupIdOf", () => {
     const groups = [group("g1", ["agent:a1"])];
     expect(groupIdOf(groups, "agent", "a1")).toBe("g1");
     expect(groupIdOf(groups, "agent", "a2")).toBeNull();
+  });
+});
+
+describe("group lead", () => {
+  const agents = [agent("a1"), agent("a2"), agent("a3")];
+  const lead = (g: Group, id: string): Group => ({ ...g, lead: id });
+
+  it("keeps a lead that sits in its group and drops one that does not", () => {
+    const { groups } = normalizeGroups([
+      { id: "g1", name: "app", items: ["agent:a1", "agent:a2"], lead: "a2" },
+      { id: "g2", name: "web", items: ["agent:a3"], lead: "a1" },
+    ]);
+    expect(groups[0].lead).toBe("a2");
+    expect("lead" in groups[1]).toBe(false);
+  });
+
+  it("sets and clears a lead, and will not set one outside the group", () => {
+    const layout = { groups: [group("g1", ["agent:a1", "agent:a2"])], ungrouped: [] };
+    const set = setGroupLead(layout, "g1", "a2");
+    expect(groupLead(set.groups[0])).toBe("a2");
+    expect("lead" in setGroupLead(set, "g1", null).groups[0]).toBe(false);
+    expect("lead" in setGroupLead(layout, "g1", "a3").groups[0]).toBe(false);
+  });
+
+  it("is let go when its bot moves out or is deleted", () => {
+    const layout = { groups: [lead(group("g1", ["agent:a1", "agent:a2"]), "a1")], ungrouped: [] };
+    const moved = settleLeads(moveItem(layout, "agent:a1", null, null, []));
+    expect("lead" in moved.groups[0]).toBe(false);
+    const pruned = pruneLayout(layout, [agent("a2")]);
+    expect("lead" in pruned.groups[0]).toBe(false);
+    expect(settleLeads(layout)).toBe(layout);
+  });
+
+  it("survives a save and a folder change", () => {
+    const layout = {
+      groups: [{ ...lead(group("g1", ["agent:a1"]), "a1"), path: "/tmp/app" }],
+      ungrouped: [],
+    };
+    expect(toPersist(layout)[0].lead).toBe("a1");
+    expect(setGroupFolder(layout, "g1", "").groups[0].lead).toBe("a1");
+  });
+
+  it("stays in the keyboard order of a collapsed group, alone", () => {
+    const order = railOrder(
+      [lead(group("g1", ["agent:a1", "agent:a2"], true), "a2")],
+      [],
+      agents,
+    );
+    expect(order.map((o) => o.id)).toEqual(["a2", "a3"]);
   });
 });
