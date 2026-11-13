@@ -471,7 +471,8 @@ pub fn set_first_output_timeout(session: &HeadlessSession, wait: Duration) {
 
 struct PulledTurn {
     child: Option<Child>,
-    /// The prompt, when the CLI had not written a line yet.
+    /// The prompt in flight. `pull_turn` keeps it only when the CLI had not
+    /// written a line yet; `claim_turn` hands it over as it is.
     unheard: Option<InFlight>,
     /// The generation of the turn taken from the Claude process kept up
     /// between turns. That process is not in `child`.
@@ -501,6 +502,16 @@ fn pull_turn(
             return None;
         }
     }
+    let pulled = claim_turn(&mut inner);
+    Some(PulledTurn {
+        unheard: pulled.unheard.filter(|flight| !flight.got_output),
+        ..pulled
+    })
+}
+
+/// Take the running turn: a later stop, silence watch or turn end finds
+/// another generation and leaves it alone.
+fn claim_turn(inner: &mut HeadlessInner) -> PulledTurn {
     let live = inner.live_turn.then_some(inner.generation);
     inner.live_turn = false;
     inner.generation = inner.generation.wrapping_add(1);
@@ -510,14 +521,11 @@ fn pull_turn(
         inner.status = AgentStatus::Idle;
     }
     inner.seq += 1;
-    let flight = inner.in_flight.take();
-    let unheard = flight.filter(|flight| !flight.got_output);
-    let child = inner.child.take();
-    Some(PulledTurn {
-        child,
-        unheard,
+    PulledTurn {
+        child: inner.child.take(),
+        unheard: inner.in_flight.take(),
         live,
-    })
+    }
 }
 
 fn arm_first_output_watch(session: Arc<HeadlessSession>, generation: u64, cli: CliKind) {
@@ -578,9 +586,53 @@ fn give_back_if_unheard(session: Arc<HeadlessSession>, generation: u64) {
     }
 }
 
-/// Forget a session opened in another folder, like a hung one. A recap still
-/// waiting (a CLI switch whose first turn failed) is kept: it was written for
-/// this bot's move and holds more than the chat here would.
+/// The CLI could not open the session this turn resumed, and it wrote no
+/// stdout line first, so it ran nothing of the prompt: a CLI started per
+/// message that exited on the error, or a kept-up one whose session did not
+/// load before the prompt went. The turn gives its prompt back the way a hung
+/// resume does: the session is dropped and the prompt goes again, once, on a
+/// new one that reads the chat so far. A CLI that wrote anything may have
+/// acted on the prompt, and a prompt already sent again once is not sent a
+/// third time, so either turn fails on the CLI's error as before.
+fn give_back_lost(session: &Arc<HeadlessSession>, generation: u64, error: &str) -> bool {
+    let pulled = {
+        let Ok(mut inner) = session.inner.lock() else {
+            return false;
+        };
+        let Some(flight) = inner.in_flight.as_ref() else {
+            return false;
+        };
+        if inner.generation != generation
+            || flight.got_output
+            || !crate::daemon::claim_lost_retry(&session.id, &flight.msg_ids, &flight.text)
+        {
+            return false;
+        }
+        claim_turn(&mut inner)
+    };
+    eprintln!(
+        "[crew] {}: lost session, sending again: {}",
+        session.id,
+        error.trim()
+    );
+    // The CLI already exited on its error and was reaped; its pid may name
+    // another process by now, so it is not signalled.
+    drop(pulled.child);
+    if let Some(flight) = pulled.unheard {
+        drop_moved_session(session, &flight.msg_ids);
+        crate::daemon::retry_lost_session(&session.id, flight);
+    }
+    if pulled.live.is_some() {
+        live::close(session);
+    }
+    crate::daemon::resend_unheard(&session.id);
+    true
+}
+
+/// Forget a session the next turn cannot use: it was opened in another
+/// folder, or the CLI could not open it. A recap still waiting (a CLI switch
+/// whose first turn failed) is kept: it was written for this bot's move and
+/// holds more than the chat here would.
 fn drop_moved_session(session: &HeadlessSession, msg_ids: &[String]) {
     if load_recap(&session.id).is_some() {
         if let Ok(mut inner) = session.inner.lock() {
@@ -986,6 +1038,23 @@ fn run_turn(
                     .filter(|s| s.resume)
                     .map(|s| s.id.as_str()),
             );
+            // The CLI could not open the session it resumed, so the message
+            // goes again on a new one, as after a hung resume. A slash command
+            // would reach a new session as plain text, so it fails instead.
+            if dead && resume && !slash {
+                // The retry ended this turn's rows and may have started the
+                // next turn already, so nothing here touches them again.
+                let error = outcome.error.as_deref().unwrap_or_default();
+                if give_back_lost(&session, generation, error) {
+                    return;
+                }
+                // A stop or the silence watch took the turn as the CLI ended,
+                // and may have sent it again already: its rows are not ours.
+                if is_stale(&session, generation) {
+                    crate::transcript::end_turn_gen(&session.id, Some(turn));
+                    return;
+                }
+            }
             // Used up by a turn that answered; one that failed leaves it for the
             // next. Codex may never name a thread, so a saved session is not the test.
             if recap.is_some() && outcome.got_text {

@@ -724,15 +724,40 @@ pub(crate) fn retry_unheard(id: &str, flight: headless::InFlight) {
         park_unheard_again(id, flight);
         return;
     }
-    requeue_unanswered(id, flight);
-    unpark_prefix(id);
-    finish_halted_turn(id);
     let line = if crate::paths::locale() == "en" {
         "The CLI did not answer in its last session. Sending again in a new one."
     } else {
         "CLI가 이전 세션에서 응답하지 않아 새 세션으로 다시 보냅니다"
     };
+    send_again_on_new_session(id, flight, line);
+}
+
+/// The prompt goes back to the front, ready to start again on a new session,
+/// and the chat says why.
+fn send_again_on_new_session(id: &str, flight: headless::InFlight, line: &str) {
+    requeue_unanswered(id, flight);
+    unpark_prefix(id);
+    finish_halted_turn(id);
     crate::transcript::push_system(id, "crew", line, None);
+}
+
+/// Whether a prompt whose session the CLI could not open may go again. Once
+/// per prompt, counted with a hung resume's retry.
+pub(crate) fn claim_lost_retry(id: &str, msg_ids: &[String], text: &str) -> bool {
+    claim_silent_retry(id, msg_ids, text)
+}
+
+/// The CLI could not open the session the turn resumed, and the turn gave its
+/// prompt back with the retry already claimed. The prompt goes back to the
+/// front to start again on a new session. What waits on this turn keeps
+/// waiting: it is the same turn, sent again.
+pub(crate) fn retry_lost_session(id: &str, flight: headless::InFlight) {
+    let line = if crate::paths::locale() == "en" {
+        "The CLI could not open its last session. Sending again in a new one."
+    } else {
+        "CLI가 이전 세션을 열지 못해 새 세션으로 다시 보냅니다"
+    };
+    send_again_on_new_session(id, flight, line);
 }
 
 /// The one retry was used. Leave the prompt parked and say so once.
@@ -1219,8 +1244,9 @@ pub(crate) fn pump_inbox(id: &str) {
     pump_inbox_inner(id);
 }
 
-/// Start the prompt `retry_unheard` put back. The turn is not over, so what
-/// waits on it is not released here; the retried turn's end does that.
+/// Start the prompt `retry_unheard` or `retry_lost_session` put back. The
+/// turn is not over, so what waits on it is not released here; the retried
+/// turn's end does that.
 pub(crate) fn resend_unheard(id: &str) {
     pump_inbox_inner(id);
 }
@@ -5835,6 +5861,122 @@ fi
         session.inner.lock().unwrap().session_id = Some(session_id.to_string());
     }
 
+    /// The CLI could not open the session it was told to resume. The same
+    /// message goes once more on a new session that reads the chat so far,
+    /// instead of ending the turn on the CLI's error.
+    #[test]
+    fn a_session_the_cli_lost_is_retried_on_a_new_one() {
+        paths::testing::with_home("lost-session", || {
+            let bot = test_id("lost");
+            let log = paths::home_dir().join("prompts");
+            let body = format!(
+                "case \" $* \" in *' --resume '*) mode=resume ;; *) mode=fresh ;; esac\n\
+                 printf '%s:%s|' \"$mode\" \"$last\" >> '{log}'\n\
+                 if [ $mode = resume ]; then\n\
+                 printf 'No conversation found with session ID: lost-session\\n' >&2; exit 1\n\
+                 fi\n\
+                 printf '%s\\n' '{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"새 세션\"}}]}}}}'",
+                log = log.display(),
+            );
+            fake_bot_running(&bot, &body);
+            wait_idle(&bot);
+            crate::transcript::push_user(&bot, "user", "어제 시킨 일");
+            resume_from(&bot, "lost-session");
+            send_agent(&bot, "하나").unwrap();
+            eventually(Duration::from_secs(5), "never answered", || {
+                told(&bot, "새 세션")
+            });
+            wait_idle(&bot);
+            let sent = fs::read_to_string(&log).unwrap();
+            let tries: Vec<&str> = sent.split('|').filter(|t| t.contains("하나")).collect();
+            assert_eq!(tries.len(), 2, "{sent}");
+            assert!(tries[0].starts_with("resume:"), "{sent}");
+            assert!(tries[1].starts_with("fresh:"), "{sent}");
+            assert!(tries[1].contains("어제 시킨 일"), "no recap: {sent}");
+            let msgs = crate::transcript::messages(&bot);
+            assert!(msgs
+                .iter()
+                .any(|m| m.role == Role::Assistant && m.text == "새 세션"));
+            assert!(
+                !msgs
+                    .iter()
+                    .any(|m| m.text.contains("No conversation found")),
+                "the lost session's error reached the chat"
+            );
+            assert!(system_said(
+                &bot,
+                "CLI가 이전 세션을 열지 못해 새 세션으로 다시 보냅니다"
+            ));
+            assert!(!turn_failed(&bot));
+            assert_ne!(
+                headless::load_session(&bot).as_deref(),
+                Some("lost-session")
+            );
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A CLI that wrote anything before failing may have acted on the prompt,
+    /// so the prompt is not sent again even when the error names the session.
+    #[test]
+    fn a_session_lost_after_output_is_not_sent_again() {
+        paths::testing::with_home("lost-after-output", || {
+            let bot = test_id("lost3");
+            let log = paths::home_dir().join("prompts");
+            let body = format!(
+                "case \" $* \" in *' --resume '*) mode=resume ;; *) mode=fresh ;; esac\n\
+                 printf '%s:%s|' \"$mode\" \"$last\" >> '{log}'\n\
+                 printf '%s\\n' '{{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"lost-session\"}}'\n\
+                 printf 'Session lost-session ended: No conversation found\\n' >&2; exit 1",
+                log = log.display(),
+            );
+            fake_bot_running(&bot, &body);
+            wait_idle(&bot);
+            resume_from(&bot, "lost-session");
+            send_agent(&bot, "하나").unwrap();
+            eventually(Duration::from_secs(5), "the turn never failed", || {
+                turn_failed(&bot) && !agent_busy(&bot).unwrap()
+            });
+            std::thread::sleep(Duration::from_millis(300));
+            let sent = fs::read_to_string(&log).unwrap();
+            assert_eq!(sent.matches("하나").count(), 1, "{sent}");
+            assert!(!system_said(
+                &bot,
+                "CLI가 이전 세션을 열지 못해 새 세션으로 다시 보냅니다"
+            ));
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// The new session the retry opens fails too. It was not resumed, so its
+    /// failure is the CLI's own: the prompt is not sent a third time.
+    #[test]
+    fn a_failed_retry_is_not_sent_again() {
+        paths::testing::with_home("lost-twice", || {
+            let bot = test_id("lost2");
+            let log = paths::home_dir().join("prompts");
+            let body = format!(
+                "case \" $* \" in *' --resume '*) mode=resume ;; *) mode=fresh ;; esac\n\
+                 printf '%s:%s|' \"$mode\" \"$last\" >> '{log}'\n\
+                 printf 'No conversation found with session ID: lost-session\\n' >&2; exit 1",
+                log = log.display(),
+            );
+            fake_bot_running(&bot, &body);
+            wait_idle(&bot);
+            resume_from(&bot, "lost-session");
+            send_agent(&bot, "하나").unwrap();
+            eventually(
+                Duration::from_secs(5),
+                "the new session never failed",
+                || turn_failed(&bot) && !agent_busy(&bot).unwrap(),
+            );
+            std::thread::sleep(Duration::from_millis(300));
+            let sent = fs::read_to_string(&log).unwrap();
+            assert_eq!(sent.matches("하나").count(), 2, "{sent}");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
     /// claude and grok keep a session under the folder it was opened in. A bot
     /// whose folder changed since starts a new session that reads the chat so
     /// far, instead of resuming one the CLI cannot find.
@@ -7825,7 +7967,9 @@ while IFS= read -r line; do handle "$line"; done"#,
     /// Claude kept up between turns says a session it was started on is gone
     /// in its `result` and stays quiet on stdout otherwise. That session is
     /// dropped, as a one-shot process's exit dropped it, and the next turn
-    /// opens a new one instead of failing on it forever.
+    /// opens a new one instead of failing on it forever. The message is not
+    /// sent again: the `result` came after the prompt, so Claude may have
+    /// acted on it.
     #[test]
     fn a_gone_claude_session_is_dropped() {
         paths::testing::with_home("live-gone", || {
@@ -8276,7 +8420,8 @@ done
     }
 
     /// A session grok cannot load is dropped, as a one-shot resume that found
-    /// no session was, and the next turn opens a new one.
+    /// no session was, and the same message goes once more on a new one. A
+    /// cloned bot met this on the first message after its folder was set.
     #[test]
     fn a_grok_session_that_will_not_load_is_dropped() {
         paths::testing::with_home("acp-gone", || {
@@ -8294,22 +8439,22 @@ done
             });
             fs::write(paths::home_dir().join("load-fails"), "").unwrap();
             send_agent(&bot, "two").unwrap();
-            eventually(Duration::from_secs(5), "the failed load ran on", || {
-                started_pids(&starts).len() == 2 && !agent_busy(&bot).unwrap()
-            });
-            assert!(turn_failed(&bot), "a turn on a gone session read as fine");
-            assert!(
-                crate::transcript::messages(&bot).iter().any(|m| m
-                    .text
-                    .contains(&format!("could not open session s-{first}"))),
-                "the failure was not said"
-            );
-            send_agent(&bot, "three").unwrap();
             eventually(Duration::from_secs(5), "no answer on a new session", || {
                 let pids = started_pids(&starts);
                 pids.len() == 3 && told(&bot, &format!("answer 1 from {}", pids[2]))
             });
             wait_idle(&bot);
+            assert!(!turn_failed(&bot), "the message was lost with the session");
+            assert!(
+                !crate::transcript::messages(&bot).iter().any(|m| m
+                    .text
+                    .contains(&format!("could not open session s-{first}"))),
+                "the lost session's error reached the chat"
+            );
+            assert!(system_said(
+                &bot,
+                "CLI가 이전 세션을 열지 못해 새 세션으로 다시 보냅니다"
+            ));
             assert_eq!(
                 acp_methods(&stdin)
                     .iter()
@@ -8947,8 +9092,8 @@ done
         });
     }
 
-    /// A resume of a thread codex no longer has drops that id. The next turn
-    /// opens a new thread instead of failing on the old one forever.
+    /// A resume of a thread codex no longer has drops that id. The same message
+    /// goes once more on a new thread instead of failing.
     #[test]
     fn a_gone_codex_thread_is_dropped() {
         paths::testing::with_home("codex-gone", || {
@@ -8966,16 +9111,12 @@ done
             });
             fs::write(paths::home_dir().join("load-fails"), "").unwrap();
             send_agent(&bot, "two").unwrap();
-            eventually(Duration::from_secs(5), "the failed resume ran on", || {
-                started_pids(&starts).len() == 2 && !agent_busy(&bot).unwrap()
-            });
-            assert!(turn_failed(&bot), "a turn on a gone thread read as fine");
-            send_agent(&bot, "three").unwrap();
             eventually(Duration::from_secs(5), "no answer on a new thread", || {
                 let pids = started_pids(&starts);
                 pids.len() == 3 && told(&bot, &format!("answer 1 from {}", pids[2]))
             });
             wait_idle(&bot);
+            assert!(!turn_failed(&bot), "the message was lost with the thread");
             assert_eq!(acp_requests(&stdin, "thread/resume").len(), 1);
             assert_eq!(acp_requests(&stdin, "thread/start").len(), 2);
             remove_agent(&bot).unwrap();
