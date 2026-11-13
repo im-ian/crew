@@ -8,7 +8,7 @@ import { Lock, X } from "../icons";
 import { displayWho, peekMessages, subagentFace } from "../peek";
 import type { AgentInfo, ChatMessage } from "../types";
 import { Avatar } from "./Avatar";
-import { JumpBottom, MsgActions, useStick } from "./ChatThread";
+import { JumpBottom, MsgActions, useResized, useStick } from "./ChatThread";
 import { MdBody } from "./MdBody";
 import { workDir } from "../fileRef";
 import { SidePane } from "./SidePane";
@@ -55,13 +55,19 @@ export function PeekRoom({
   // Beside the thread the reader may be partway up an old run when a new
   // note lands; only follow the tail if they were already at it.
   const atBottom = useRef(true);
-  const { away, sync, jump } = useStick(threadRef, (stick) => {
+  const { away, sync, jump, pin } = useStick(threadRef, (stick) => {
     atBottom.current = stick;
   });
   const focusKey = focus.join(",");
 
-  // Every poll, not only a new note: an image grows its row when it loads,
-  // after the scroll, and that moves no scroll position to report it.
+  // An image grows its row when it loads, after the scroll, and that moves
+  // no scroll position to report it.
+  const resized = useRef(() => {});
+  resized.current = () => {
+    if (atBottom.current) pin();
+  };
+  useResized(threadRef, resized, [peerId]);
+
   useEffect(() => {
     const el = threadRef.current;
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
@@ -80,6 +86,9 @@ export function PeekRoom({
       : null;
     if (at) at.scrollIntoView({ block: "start" });
     else el.scrollTop = el.scrollHeight;
+    // Opened on a hit, the panel stays there. Only a move up turns following
+    // off, and a jump down onto the hit is not one.
+    atBottom.current = !at;
     // A switch keeps this panel mounted, and a scroll that moves nothing
     // fires no event, so the last bot's position would carry over.
     sync();
