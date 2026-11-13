@@ -471,7 +471,8 @@ pub fn set_first_output_timeout(session: &HeadlessSession, wait: Duration) {
 
 struct PulledTurn {
     child: Option<Child>,
-    /// The prompt, when the CLI had not written a line yet.
+    /// The prompt in flight. `pull_turn` keeps it only when the CLI had not
+    /// written a line yet; `claim_turn` hands it over as it is.
     unheard: Option<InFlight>,
     /// The generation of the turn taken from the Claude process kept up
     /// between turns. That process is not in `child`.
@@ -1045,6 +1046,12 @@ fn run_turn(
                 // next turn already, so nothing here touches them again.
                 let error = outcome.error.as_deref().unwrap_or_default();
                 if give_back_lost(&session, generation, error) {
+                    return;
+                }
+                // A stop or the silence watch took the turn as the CLI ended,
+                // and may have sent it again already: its rows are not ours.
+                if is_stale(&session, generation) {
+                    crate::transcript::end_turn_gen(&session.id, Some(turn));
                     return;
                 }
             }

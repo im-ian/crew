@@ -1244,8 +1244,9 @@ pub(crate) fn pump_inbox(id: &str) {
     pump_inbox_inner(id);
 }
 
-/// Start the prompt `retry_unheard` put back. The turn is not over, so what
-/// waits on it is not released here; the retried turn's end does that.
+/// Start the prompt `retry_unheard` or `retry_lost_session` put back. The
+/// turn is not over, so what waits on it is not released here; the retried
+/// turn's end does that.
 pub(crate) fn resend_unheard(id: &str) {
     pump_inbox_inner(id);
 }
