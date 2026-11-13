@@ -96,8 +96,8 @@ import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
 import { MdBody } from "./MdBody";
 import { WhoButton, WhoLabel, whoColor } from "./WhoButton";
+import { STICK_PX, stickMove, type StickMove } from "../stick";
 
-const STICK_PX = 24;
 /** How far below the thread's top edge a jumped question sits, clear of the fade. */
 const ASK_INSET = 16;
 
@@ -278,7 +278,7 @@ export function ChatThread({
   } | null>(null);
   const holdRef = useRef(false);
   holdRef.current = !!resume?.hold;
-  const { away, sync: syncStick, jump: jumpBottom } = useStick(ref, (at) => {
+  const { away, sync: syncStick, jump: jumpBottom, pin } = useStick(ref, (at) => {
     if (at && holdRef.current && settledRef.current) {
       holdRef.current = false;
       setResume((r) => (r && r.hold ? { ...r, hold: false } : r));
@@ -404,7 +404,7 @@ export function ChatThread({
   const born = useRef(new Map<string, number>());
   const opened = useRef(new Map<string, number>());
   const unpinnedRef = useRef(false);
-  const syncAskRef = useRef<() => void>(() => {});
+  const resizedRef = useRef<() => void>(() => {});
   const stickRef = useRef(stick);
   const offsetsRef = useRef<number[]>([]);
   const flowLenRef = useRef(0);
@@ -546,25 +546,9 @@ export function ChatThread({
     syncAsk();
   }, [scrollTop, viewport, heightRev, pendingAskId]);
 
-  useEffect(() => {
-    const root = ref.current;
-    if (!root) return;
-    const poke = () => syncAskRef.current();
-    const ro = new ResizeObserver(poke);
-    const arm = () => {
-      ro.disconnect();
-      for (const child of root.children) ro.observe(child);
-    };
-    arm();
-    const mo = new MutationObserver(arm);
-    mo.observe(root, { childList: true });
-    root.addEventListener("load", poke, true);
-    return () => {
-      mo.disconnect();
-      ro.disconnect();
-      root.removeEventListener("load", poke, true);
-    };
-  }, [selected, selectedKind]);
+  // Following the end, a row that grows or a thread that narrows pulls the
+  // thread back down before paint, so a reflow never leaves it short.
+  useResized(ref, resizedRef, [selected, selectedKind]);
 
   // The question row may mount only after this jump asks for it. Line the
   // card up once it is on the page, then let the reader scroll again.
@@ -859,7 +843,10 @@ export function ChatThread({
     }
     setAskDir((cur) => (cur === next ? cur : next));
   }
-  syncAskRef.current = syncAsk;
+  resizedRef.current = () => {
+    if (stickRef.current && !unpinnedRef.current && !highlightId && !holdRef.current) pin();
+    syncAsk();
+  };
 
   function jumpToQuestion() {
     const id = pendingAskId;
@@ -885,23 +872,21 @@ export function ChatThread({
   }
 
   function onThreadScroll() {
-    syncStick();
+    const move = syncStick();
     syncAsk();
+    if (move === "bottom" && unpinnedRef.current) {
+      unpinnedRef.current = false;
+      setUnpinned(false);
+    } else if (move === "up" && !unpinnedRef.current) {
+      unpinnedRef.current = true;
+      setUnpinned(true);
+    }
     const el = ref.current;
     if (!el || rowsLenRef.current <= VIRTUAL_THRESHOLD) return;
     const nextTop = el.scrollTop;
     const nextView = el.clientHeight;
     const gapPx = el.scrollHeight - nextTop - nextView;
     const atBottom = gapPx < STICK_PX;
-    if (atBottom) {
-      if (unpinnedRef.current) {
-        unpinnedRef.current = false;
-        setUnpinned(false);
-      }
-    } else if (stickRef.current && !unpinnedRef.current) {
-      unpinnedRef.current = true;
-      setUnpinned(true);
-    }
     const follow = atBottom && stickRef.current && !highlightId && !holdRef.current;
     const next = flowWindow({
       count: flowLenRef.current,
@@ -1014,26 +999,81 @@ export function useStick(
   onStick: (stick: boolean) => void,
 ) {
   const [away, setAway] = useState(false);
+  // Where the last check found the thread, to tell a move up from a reflow.
+  const lastTop = useRef<number | null>(null);
 
-  function sync() {
+  function sync(): StickMove {
     const el = ref.current;
-    if (!el) return;
+    if (!el) return null;
     if (el.scrollLeft !== 0) el.scrollLeft = 0;
-    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const top = el.scrollTop;
+    const gap = el.scrollHeight - top - el.clientHeight;
     const overflow = el.scrollHeight - el.clientHeight > 8;
-    onStick(gap < STICK_PX);
+    const move = stickMove(lastTop.current, top, gap);
+    lastTop.current = top;
+    if (move === "bottom") onStick(true);
+    else if (move === "up") onStick(false);
     setAway(overflow && gap >= STICK_PX);
+    return move;
   }
 
   function jump() {
     const el = ref.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
+    lastTop.current = el.scrollTop;
     onStick(true);
     setAway(false);
   }
 
-  return { away, sync, jump };
+  /**
+   * Back to the end after the thread changed size. A reader who has moved
+   * up since the last check is left there, and that move is reported.
+   */
+  function pin() {
+    const el = ref.current;
+    if (!el) return;
+    const top = el.scrollTop;
+    const gap = el.scrollHeight - top - el.clientHeight;
+    if (stickMove(lastTop.current, top, gap) !== "up" && gap > 1) {
+      el.scrollTop = el.scrollHeight;
+    }
+    sync();
+  }
+
+  return { away, sync, jump, pin };
+}
+
+/**
+ * Calls `onResize` when the thread or a row in it changes size: a picture
+ * that loads, a code block that wraps, a narrower window. None of these
+ * has to move the scroll, so no scroll event may say so.
+ */
+export function useResized(
+  ref: RefObject<HTMLDivElement | null>,
+  onResize: RefObject<() => void>,
+  deps: readonly unknown[],
+) {
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    const poke = () => onResize.current();
+    const ro = new ResizeObserver(poke);
+    const arm = () => {
+      ro.disconnect();
+      ro.observe(root);
+      for (const child of root.children) ro.observe(child);
+    };
+    arm();
+    const mo = new MutationObserver(arm);
+    mo.observe(root, { childList: true });
+    root.addEventListener("load", poke, true);
+    return () => {
+      mo.disconnect();
+      ro.disconnect();
+      root.removeEventListener("load", poke, true);
+    };
+  }, deps);
 }
 
 const JUMP_HIDDEN: JumpFrame = {
