@@ -16,9 +16,8 @@ static PREPARE: Mutex<()> = Mutex::new(());
 /// A bot in `dir` edits a worktree of its own: worktrees are on and `dir` is
 /// in a git repository with a commit to branch from.
 pub fn isolates(dir: &Path) -> bool {
-    paths::worktrees_enabled()
-        && git_toplevel(dir).ok().flatten().is_some()
-        && run_git(dir, &["rev-parse", "--verify", "-q", "HEAD"]).status
+    // Fails outside a repository too, so one call answers both.
+    paths::worktrees_enabled() && run_git(dir, &["rev-parse", "--verify", "-q", "HEAD"]).status
 }
 
 /// Where this turn actually runs, and the shared checkout when that place is a worktree.

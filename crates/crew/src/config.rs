@@ -802,9 +802,9 @@ impl AgentConfig {
     /// checkout. A demo folder is nobody's to share, however it is written.
     fn clone_folder(&self, isolates: impl Fn(&Path) -> bool) -> Option<String> {
         let dir = Config::default_cwd(self);
-        let real = |p: &Path| fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-        let demo = Path::new(DEMO_ROOT);
-        if dir.starts_with(demo) || real(&dir).starts_with(real(demo)) || !isolates(&dir) {
+        // macOS keeps /tmp at /private/tmp, so a resolved path reads that way.
+        let under = |root: &str| dir.starts_with(root);
+        if under(DEMO_ROOT) || under(&format!("/private{DEMO_ROOT}")) || !isolates(&dir) {
             return None;
         }
         self.cwd.clone()
