@@ -996,8 +996,8 @@ fn save_upload(name: String, data: String) -> Result<String, String> {
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let stamp = crate::paths::utc_timestamp();
     let safe = crate::paths::safe_agent_id(&name);
-    let path = dir.join(format!("{stamp}-{safe}"));
-    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    let path =
+        crate::paths::write_new_file(&dir, &stamp, &safe, &bytes).map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().into_owned())
 }
 

@@ -286,6 +286,38 @@ pub fn safe_agent_id(id: &str) -> String {
     }
 }
 
+/// Write `bytes` to a new file `<stamp>-<name>` in `dir`, never over another.
+/// Pasted pictures are all `image.png` and the stamp counts seconds, so two in
+/// one second would share a name: the later one is `<stamp>-2-<name>`.
+pub fn write_new_file(
+    dir: &Path,
+    stamp: &str,
+    name: &str,
+    bytes: &[u8],
+) -> std::io::Result<PathBuf> {
+    use std::io::Write;
+    for n in 1u32.. {
+        let path = if n == 1 {
+            dir.join(format!("{stamp}-{name}"))
+        } else {
+            dir.join(format!("{stamp}-{n}-{name}"))
+        };
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                file.write_all(bytes)?;
+                return Ok(path);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err),
+        }
+    }
+    unreachable!("ran out of names in {}", dir.display())
+}
+
 pub fn utc_timestamp() -> String {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -473,6 +505,31 @@ pub(crate) mod testing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two pastes in one second keep both pictures.
+    #[test]
+    fn a_new_file_never_writes_over_another() {
+        let dir = std::env::temp_dir().join(format!(
+            "crew-new-file-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let stamp = "2026-11-13T02-00-00Z";
+        let a = write_new_file(&dir, stamp, "image_png", b"first").unwrap();
+        let b = write_new_file(&dir, stamp, "image_png", b"second").unwrap();
+        let c = write_new_file(&dir, stamp, "image_png", b"third").unwrap();
+        assert_eq!(a, dir.join("2026-11-13T02-00-00Z-image_png"));
+        assert_eq!(b, dir.join("2026-11-13T02-00-00Z-2-image_png"));
+        assert_eq!(c, dir.join("2026-11-13T02-00-00Z-3-image_png"));
+        assert_eq!(fs::read(&a).unwrap(), b"first");
+        assert_eq!(fs::read(&b).unwrap(), b"second");
+        assert_eq!(fs::read(&c).unwrap(), b"third");
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     /// The whole orphan check rests on this telling one socket from the next
     /// at the same path — a comparison on the path alone would never fire.
