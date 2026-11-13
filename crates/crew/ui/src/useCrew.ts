@@ -45,6 +45,7 @@ import {
   adoptNewGroups,
   firstOpenAgent,
   groupCwd,
+  focusedGroupId,
   groupIdOf,
   itemKey,
   layoutChanged,
@@ -130,6 +131,8 @@ export function useCrew() {
   // The chat already on screen counts: the click had moved focus away.
   const [composerFocus, setComposerFocus] = useState(0);
   const [readMap, setReadMap] = useState(loadRead);
+  // A group whose head was clicked. Opening any chat lets go of it.
+  const [pinnedGroup, setPinnedGroup] = useState<string | null>(null);
 
   const selectedRef = useRef({ id: selected, kind: selectedKind });
   selectedRef.current = { id: selected, kind: selectedKind };
@@ -159,6 +162,9 @@ export function useCrew() {
   const groupsRef = useRef<RailLayout>({ groups, ungrouped, order });
   groupsRef.current = order ? { groups, ungrouped, order } : { groups, ungrouped };
   const groupsLoaded = useRef(false);
+  const focusedGroup = focusedGroupId(groups, pinnedGroup, selectedKind, selected);
+  const focusedGroupRef = useRef(focusedGroup);
+  focusedGroupRef.current = focusedGroup;
   // Each notice in the stack has its own clock. While the pointer is on the
   // stack every clock stands still: `end` is when it would have closed,
   // `left` how much was left when the pointer came.
@@ -210,6 +216,9 @@ export function useCrew() {
       return next;
     });
   }, [selected, selectedKind, currentAgent?.last_ts]);
+
+  // A chat opened by any route moves the focus to its group.
+  useEffect(() => setPinnedGroup(null), [selected, selectedKind]);
 
   // Opening the bot the island talks about, by any route, answers it.
   useEffect(() => {
@@ -425,6 +434,8 @@ export function useCrew() {
   }
 
   function selectAgent(id: string, highlight: string | null = null) {
+    // The chat may already be open, so the selection effect would not run.
+    setPinnedGroup(null);
     selectedRef.current = { id, kind: "agent" };
     setSelected(id);
     setSelectedKind("agent");
@@ -1334,13 +1345,8 @@ export function useCrew() {
 
   /**
    * ⌘⇧N: a bot on the default AI with a random face, no form. It joins the
-   * group of the chat that is open, so it works in that group's folder.
+   * focused group, so it works in that group's folder.
    */
-  function openGroupId(): string | null {
-    const { id, kind } = selectedRef.current;
-    return id ? groupIdOf(groupsRef.current.groups, kind, id) : null;
-  }
-
   async function createQuickBot() {
     if (quickBusy.current) return;
     quickBusy.current = true;
@@ -1355,7 +1361,7 @@ export function useCrew() {
         cmd: start.cmd,
         shape: face.shape,
         color: face.color,
-        groupId: openGroupId(),
+        groupId: focusedGroupRef.current,
       });
     } finally {
       quickBusy.current = false;
@@ -1679,6 +1685,8 @@ export function useCrew() {
     reorderGroup,
     toggleGroup,
     setLead,
+    focusedGroup,
+    focusGroup: setPinnedGroup,
     itemGroupId,
     onSend,
     stopAgent,

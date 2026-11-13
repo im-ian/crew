@@ -657,6 +657,10 @@ button.linkish {
   text-overflow: ellipsis;
 }
 .group-name:hover { color: var(--ink); }
+/* The focused group, where ⌘⇧N puts a new bot. Ink, not a fill, so it never
+   reads as the open chat's row. */
+.group-head.focused .group-name,
+.group-head.focused .group-chevron { color: var(--ink); }
 /* "+" and "..." on a folder head. Shown while the head is hovered, so a
    resting rail stays quiet. */
 .group-more {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   UNGROUPED_ID,
+  focusedGroupId,
   groupIdOf,
   groupOrderChanges,
   moveGroup,
@@ -421,5 +422,27 @@ describe("group lead", () => {
       agents,
     );
     expect(order.map((o) => o.id)).toEqual(["a2", "a3"]);
+  });
+});
+
+describe("focusedGroupId", () => {
+  const groups = [group("g1", ["agent:a1"]), group("g2", ["agent:a2"])];
+
+  it("follows the open chat's group when nothing is pinned", () => {
+    expect(focusedGroupId(groups, null, "agent", "a1")).toBe("g1");
+  });
+
+  it("is none for a loose bot or no chat", () => {
+    expect(focusedGroupId(groups, null, "agent", "loose")).toBeNull();
+    expect(focusedGroupId(groups, null, "agent", null)).toBeNull();
+  });
+
+  it("keeps a pinned group over the open chat's", () => {
+    expect(focusedGroupId(groups, "g2", "agent", "a1")).toBe("g2");
+    expect(focusedGroupId(groups, "g2", "agent", "loose")).toBe("g2");
+  });
+
+  it("drops a pin whose group is gone", () => {
+    expect(focusedGroupId(groups, "gone", "agent", "a1")).toBe("g1");
   });
 });

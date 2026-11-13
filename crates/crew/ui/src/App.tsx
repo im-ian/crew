@@ -447,6 +447,8 @@ export function App() {
         onGroupMenu={crew.showGroupMenu}
         onGroupNewBot={crew.openNewBot}
         onToggleGroup={crew.toggleGroup}
+        focusedGroup={crew.focusedGroup}
+        onFocusGroup={crew.focusGroup}
         onRenameGroup={crew.renameGroup}
         onStartRenameGroup={(id) => {
           crew.clearPendingRename();
