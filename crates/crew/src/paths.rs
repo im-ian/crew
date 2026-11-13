@@ -308,7 +308,11 @@ pub fn write_new_file(
             .open(&path)
         {
             Ok(mut file) => {
-                file.write_all(bytes)?;
+                // A half-written file would keep the name taken for nothing.
+                if let Err(err) = file.write_all(bytes) {
+                    let _ = fs::remove_file(&path);
+                    return Err(err);
+                }
                 return Ok(path);
             }
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
