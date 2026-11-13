@@ -10,6 +10,12 @@ export function groupOfBot(groups: readonly Group[], id: string): Group | null {
   return groups.find((g) => g.items.includes(key)) ?? null;
 }
 
+/** `#name` for the chat header. Empty when the bot sits in no group. */
+export function headerGroupMark(groups: readonly Group[], id: string): string {
+  const name = groupOfBot(groups, id)?.name.trim() ?? "";
+  return name ? `#${name}` : "";
+}
+
 /**
  * How a bot is named outside its own sidebar row: `group · name`, so two
  * bots with one name in two groups read apart. A bot in the same group as

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { botLabel, botSearchText } from "./botLabel";
+import { botLabel, botSearchText, headerGroupMark } from "./botLabel";
 import type { AgentInfo, Group } from "./types";
 
 const bot = (id: string, name?: string) => ({ id, name }) as AgentInfo;
@@ -32,6 +32,14 @@ describe("botLabel", () => {
 
   it("says the group to a loose bot's chat", () => {
     expect(botLabel(bot("dev", "개발자"), groups, "solo")).toBe("Crew · 개발자");
+  });
+});
+
+describe("headerGroupMark", () => {
+  it("is #name for a member and empty for a loose bot or a blank name", () => {
+    expect(headerGroupMark(groups, "dev")).toBe("#Crew");
+    expect(headerGroupMark(groups, "solo")).toBe("");
+    expect(headerGroupMark([{ ...groups[0], name: "  " }], "dev")).toBe("");
   });
 });
 

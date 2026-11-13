@@ -1,21 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { useT } from "../LocaleContext";
-import { cliFromCmd, modelLine, pinnedDefault } from "../options";
+import { cliFromCmd, headerModelLine, pinnedDefault } from "../options";
 import { isOnline, remoteLabel } from "../remote";
-import type { AgentInfo, CliKind } from "../types";
+import type { AgentInfo, CliKind, Group } from "../types";
 import { WhoButton } from "./WhoButton";
 import { Info } from "../icons";
 import { showsWatch, watchLabel } from "../watchView";
 
 type Props = {
   currentAgent: AgentInfo | null;
+  groups: readonly Group[];
   onOpenInfo: () => void;
   onRenameAgent: (id: string, name: string) => void;
 };
 
 export function ChatHeader({
   currentAgent,
+  groups,
   onOpenInfo,
   onRenameAgent,
 }: Props) {
@@ -61,7 +63,7 @@ export function ChatHeader({
       ? isOnline(currentAgent)
         ? t("header.remoteOnline")
         : t("header.remoteOffline")
-      : modelLine(currentAgent, cli ? defaults[cli] : null, t);
+      : headerModelLine(currentAgent, groups, cli ? defaults[cli] : null, t);
   const status = currentAgent?.status;
   const watching = showsWatch(currentAgent);
   const statusKey =
