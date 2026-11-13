@@ -1664,7 +1664,20 @@ button.avatar {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* The group lead: a star in the corner the status dot uses. Separate from
+/* The group lead: a star right before the name, sized to it. It does not
+   shrink, so a long name is cut and the star stays whole. */
+.lead-mark {
+  flex-shrink: 0;
+  align-self: center;
+  display: inline-flex;
+  margin-right: 4px;
+  color: var(--lead);
+}
+.lead-mark svg {
+  width: 0.8em;
+  height: 0.8em;
+}
+/* On the folded rail, where no name shows: a star in the corner the status dot uses. Separate from
    .rep-mark, the router representative's tag beside the name. */
 .lead-star {
   position: absolute;
@@ -1679,7 +1692,8 @@ button.avatar {
   line-height: 0;
 }
 /* The star alone: no disc, ring or shadow behind it. */
-.lead-star svg {
+.lead-star svg,
+.lead-mark svg {
   fill: currentColor;
   stroke: none;
 }

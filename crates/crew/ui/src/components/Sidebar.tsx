@@ -1712,7 +1712,8 @@ function ItemRow({
   const remote = !!a?.remote;
   const online = isOnline(a);
   const watches = watchCount(a);
-  // The star takes the corner the exited dot uses, and greys out for it.
+  // On the folded rail the star takes the corner the exited dot uses, and
+  // greys out for it.
   const exited = a?.status === "exited";
   const face = (
     <Avatar
@@ -1721,12 +1722,13 @@ function ItemRow({
       src={a?.avatar}
       shape={a?.avatar_shape}
       color={a?.avatar_color}
-      badge={(lead && exited ? undefined : a?.status) || undefined}
+      badge={(lead && compact && exited ? undefined : a?.status) || undefined}
       status={a?.status}
       overlay={
         remote ? (
           <span className={"badge remote-dot" + (online ? " is-on" : "")} />
-        ) : lead ? (
+        ) : lead && compact ? (
+          // The folded rail has no name to put the star beside.
           <span
             className={"lead-star" + (exited ? " is-exited" : "")}
             title={t("sidebar.groupLead")}
@@ -1746,6 +1748,11 @@ function ItemRow({
       <div className="rail-row-text">
         <div className="agent-name">
           <span className="agent-name-label">
+            {lead ? (
+              <span className="lead-mark" title={t("sidebar.groupLead")}>
+                <Star size={14} />
+              </span>
+            ) : null}
             {renaming ? (
               <RenameField
                 value={item.name}
