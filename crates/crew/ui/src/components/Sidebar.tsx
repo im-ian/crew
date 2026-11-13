@@ -39,13 +39,14 @@ import {
   type RemoteSection,
 } from "../remote";
 import { Avatar } from "./Avatar";
+import { watchCount } from "../watchView";
 import { RenameField } from "./RenameField";
 import { MentionRunsView } from "./MentionChip";
 import { BotLabelProvider, useLabelGroups } from "../BotLabelContext";
 import { botLabel, botSearchText } from "../botLabel";
 import { listedHits, matchRuns } from "../searchView";
 import { PlanUsageButton } from "./PlanUsageBar";
-import { ChevronDown, Ellipsis, Plus, Search, Settings } from "../icons";
+import { ChevronDown, Ellipsis, Layers, Plus, Search, Settings } from "../icons";
 
 const RAIL_DEFAULT = 232;
 const RAIL_MIN = 176;
@@ -1690,6 +1691,7 @@ function ItemRow({
   );
   const remote = !!a?.remote;
   const online = isOnline(a);
+  const watches = watchCount(a);
   const face = (
     <Avatar
       id={item.id}
@@ -1745,6 +1747,12 @@ function ItemRow({
             {item.ordinal ? (
               <span className="name-ordinal">#{item.ordinal}</span>
             ) : null}
+            {watches ? (
+              <span className="watch-count" title={t("sidebar.watchCount", { count: watches })}>
+                <Layers size={11} strokeWidth={2.4} />
+                {watches}
+              </span>
+            ) : null}
             {represents.length ? (
               <span className="rep-mark" title={repLabel}>
                 {represents.join(" · ")}
@@ -1773,6 +1781,7 @@ function ItemRow({
     (item.ordinal ? `${item.name} #${item.ordinal}` : item.name) +
     (remote ? ` · ${online ? t("sidebar.online") : t("sidebar.offline")}` : "") +
     (repLabel ? ` · ${repLabel}` : "") +
+    (watches ? ` · ${t("sidebar.watchCount", { count: watches })}` : "") +
     (drafting ? ` · ${t("sidebar.draft")}` : "");
   if (ghost) {
     return (

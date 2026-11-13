@@ -1599,6 +1599,25 @@ button.avatar {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
+/* Background tasks the bot is watching, beside its name. */
+.watch-count {
+  flex-shrink: 0;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: var(--space-6);
+  height: 16px;
+  padding: 0 5px 0 4px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--working) 16%, transparent);
+  color: var(--working);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
 /* The name truncates. The ordinal stays with it, and the stamp is outside
    this cluster so a narrow rail cuts the name before the clock. */
 .agent-name-label {

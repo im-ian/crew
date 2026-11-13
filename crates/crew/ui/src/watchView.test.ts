@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { translate } from "./i18n";
 import type { AgentInfo } from "./types";
-import { isWatching, watchHoldsSend, watchLabel } from "./watchView";
+import { isWatching, showsWatch, watchHoldsSend, watchLabel } from "./watchView";
 
 const ko = (
   key: Parameters<typeof translate>[1],
@@ -19,6 +19,20 @@ function bot(over: Partial<AgentInfo>): AgentInfo {
     ...over,
   };
 }
+
+describe("showsWatch", () => {
+  const watch = [{ what: "CI", since: 0 }];
+  it("spins for an idle or working local bot with background work", () => {
+    expect(showsWatch(bot({ status: "idle", watch }))).toBe(true);
+    expect(showsWatch(bot({ status: "working", watch }))).toBe(true);
+    expect(showsWatch(bot({ status: "idle" }))).toBe(false);
+  });
+  it("leaves blocked, exited and remote bots to their own mark", () => {
+    expect(showsWatch(bot({ status: "blocked", watch }))).toBe(false);
+    expect(showsWatch(bot({ status: "exited", watch }))).toBe(false);
+    expect(showsWatch(bot({ status: "idle", watch, remote: {} as AgentInfo["remote"] }))).toBe(false);
+  });
+});
 
 describe("isWatching", () => {
   it("lists background work even while the bot is idle", () => {

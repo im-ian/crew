@@ -6,7 +6,7 @@ import { isOnline, remoteLabel } from "../remote";
 import type { AgentInfo, CliKind } from "../types";
 import { WhoButton } from "./WhoButton";
 import { Info } from "../icons";
-import { isWatching, watchLabel } from "../watchView";
+import { showsWatch, watchLabel } from "../watchView";
 
 type Props = {
   currentAgent: AgentInfo | null;
@@ -63,13 +63,7 @@ export function ChatHeader({
         : t("header.remoteOffline")
       : modelLine(currentAgent, cli ? defaults[cli] : null, t);
   const status = currentAgent?.status;
-  // The list shows while the bot is idle or working. Blocked and exited keep
-  // their own word: those are what the user has to act on.
-  const watching =
-    !remote &&
-    isWatching(currentAgent) &&
-    status !== "blocked" &&
-    status !== "exited";
+  const watching = showsWatch(currentAgent);
   const statusKey =
     remote && currentAgent?.asking
       ? "header.statusOwner"
