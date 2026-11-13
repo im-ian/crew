@@ -578,35 +578,57 @@ fn give_back_if_unheard(session: Arc<HeadlessSession>, generation: u64) {
     }
 }
 
-/// The CLI could not open the session this turn resumed. The turn gives its
-/// prompt back the way a hung resume does: the session is dropped and the
-/// prompt goes again, once, on a new one that reads the chat so far. The CLI's
-/// only output was its error, so the prompt counts as unheard. False when a
-/// stop or the silence watch took the turn first.
+/// The CLI could not open the session this turn resumed, and it wrote no
+/// stdout line first, so it ran nothing of the prompt: a CLI started per
+/// message that exited on the error, or a kept-up one whose session did not
+/// load before the prompt went. The turn gives its prompt back the way a hung
+/// resume does: the session is dropped and the prompt goes again, once, on a
+/// new one that reads the chat so far. A CLI that wrote anything may have
+/// acted on the prompt, and a prompt already sent again once is not sent a
+/// third time, so either turn fails on the CLI's error as before.
 fn give_back_lost(session: &Arc<HeadlessSession>, generation: u64) -> bool {
-    {
+    let unheard = |inner: &HeadlessInner| {
+        inner.generation == generation && inner.in_flight.as_ref().is_some_and(|f| !f.got_output)
+    };
+    let (msg_ids, text) = {
+        let Ok(inner) = session.inner.lock() else {
+            return false;
+        };
+        if !unheard(&inner) {
+            return false;
+        }
+        let flight = inner.in_flight.as_ref().expect("checked above");
+        (flight.msg_ids.clone(), flight.text.clone())
+    };
+    if !crate::daemon::claim_lost_retry(&session.id, &msg_ids, &text) {
+        return false;
+    }
+    // Claimed as `pull_turn` claims one: a stop or the silence watch that
+    // comes later finds another generation and leaves it alone.
+    let (flight, live) = {
         let Ok(mut inner) = session.inner.lock() else {
             return false;
         };
-        if inner.generation != generation {
+        if !unheard(&inner) {
             return false;
         }
-        match inner.in_flight.as_mut() {
-            Some(flight) => flight.got_output = false,
-            None => return false,
+        let live = inner.live_turn.then_some(inner.generation);
+        inner.live_turn = false;
+        inner.generation = inner.generation.wrapping_add(1);
+        inner.interrupted = true;
+        inner.watch.clear();
+        if inner.status != AgentStatus::Exited {
+            inner.status = AgentStatus::Idle;
         }
-    }
-    let Some(pulled) = pull_turn(session, Some(generation), false) else {
-        return false;
+        inner.seq += 1;
+        // The CLI already exited on its error and was reaped; its pid may
+        // name another process by now, so it is not signalled.
+        inner.child = None;
+        (inner.in_flight.take().expect("checked above"), live)
     };
-    if let Some(flight) = pulled.unheard {
-        drop_moved_session(session, &flight.msg_ids);
-        crate::daemon::retry_lost_session(&session.id, flight);
-    }
-    if let Some(mut child) = pulled.child {
-        kill_all(&mut child);
-    }
-    if pulled.live.is_some() {
+    drop_moved_session(session, &flight.msg_ids);
+    crate::daemon::retry_lost_session(&session.id, flight);
+    if live.is_some() {
         live::close(session);
     }
     crate::daemon::resend_unheard(&session.id);
@@ -1029,8 +1051,9 @@ fn run_turn(
                 if let Some(err) = outcome.error.as_deref() {
                     eprintln!("[crew] {}: lost session: {}", session.id, err.trim());
                 }
+                // The retry ended this turn's rows and may have started the
+                // next turn already, so nothing here touches them again.
                 if give_back_lost(&session, generation) {
-                    crate::transcript::end_turn_gen(&session.id, Some(turn));
                     return;
                 }
             }

@@ -718,27 +718,6 @@ pub(crate) fn halt_unheard(id: &str, flight: headless::InFlight) {
 /// so the prompt goes back to the front ready to start again on a new one.
 /// What waits on this turn keeps waiting: it is the same turn, sent again.
 pub(crate) fn retry_unheard(id: &str, flight: headless::InFlight) {
-    let line = if crate::paths::locale() == "en" {
-        "The CLI did not answer in its last session. Sending again in a new one."
-    } else {
-        "CLI가 이전 세션에서 응답하지 않아 새 세션으로 다시 보냅니다"
-    };
-    retry_on_new_session(id, flight, line);
-}
-
-/// The CLI could not open the session the turn resumed. Its session is
-/// already dropped, and the prompt starts again on a new one, as above.
-pub(crate) fn retry_lost_session(id: &str, flight: headless::InFlight) {
-    let line = if crate::paths::locale() == "en" {
-        "The CLI could not open its last session. Sending again in a new one."
-    } else {
-        "CLI가 이전 세션을 열지 못해 새 세션으로 다시 보냅니다"
-    };
-    retry_on_new_session(id, flight, line);
-}
-
-/// Once per prompt: one already sent again is parked instead.
-fn retry_on_new_session(id: &str, flight: headless::InFlight, line: &str) {
     if !claim_silent_retry(id, &flight.msg_ids, &flight.text) {
         // This prompt was already sent again once. Park it. Do not send it
         // another time, and do not add a second copy of the line.
@@ -748,6 +727,33 @@ fn retry_on_new_session(id: &str, flight: headless::InFlight, line: &str) {
     requeue_unanswered(id, flight);
     unpark_prefix(id);
     finish_halted_turn(id);
+    let line = if crate::paths::locale() == "en" {
+        "The CLI did not answer in its last session. Sending again in a new one."
+    } else {
+        "CLI가 이전 세션에서 응답하지 않아 새 세션으로 다시 보냅니다"
+    };
+    crate::transcript::push_system(id, "crew", line, None);
+}
+
+/// Whether a prompt whose session the CLI could not open may go again. Once
+/// per prompt, counted with a hung resume's retry.
+pub(crate) fn claim_lost_retry(id: &str, msg_ids: &[String], text: &str) -> bool {
+    claim_silent_retry(id, msg_ids, text)
+}
+
+/// The CLI could not open the session the turn resumed, and the turn gave its
+/// prompt back with the retry already claimed. The prompt goes back to the
+/// front to start again on a new session. What waits on this turn keeps
+/// waiting: it is the same turn, sent again.
+pub(crate) fn retry_lost_session(id: &str, flight: headless::InFlight) {
+    requeue_unanswered(id, flight);
+    unpark_prefix(id);
+    finish_halted_turn(id);
+    let line = if crate::paths::locale() == "en" {
+        "The CLI could not open its last session. Sending again in a new one."
+    } else {
+        "CLI가 이전 세션을 열지 못해 새 세션으로 다시 보냅니다"
+    };
     crate::transcript::push_system(id, "crew", line, None);
 }
 
@@ -5906,6 +5912,38 @@ fi
         });
     }
 
+    /// A CLI that wrote anything before failing may have acted on the prompt,
+    /// so the prompt is not sent again even when the error names the session.
+    #[test]
+    fn a_session_lost_after_output_is_not_sent_again() {
+        paths::testing::with_home("lost-after-output", || {
+            let bot = test_id("lost3");
+            let log = paths::home_dir().join("prompts");
+            let body = format!(
+                "case \" $* \" in *' --resume '*) mode=resume ;; *) mode=fresh ;; esac\n\
+                 printf '%s:%s|' \"$mode\" \"$last\" >> '{log}'\n\
+                 printf '%s\\n' '{{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"lost-session\"}}'\n\
+                 printf 'Session lost-session ended: No conversation found\\n' >&2; exit 1",
+                log = log.display(),
+            );
+            fake_bot_running(&bot, &body);
+            wait_idle(&bot);
+            resume_from(&bot, "lost-session");
+            send_agent(&bot, "하나").unwrap();
+            eventually(Duration::from_secs(5), "the turn never failed", || {
+                turn_failed(&bot) && !agent_busy(&bot).unwrap()
+            });
+            std::thread::sleep(Duration::from_millis(300));
+            let sent = fs::read_to_string(&log).unwrap();
+            assert_eq!(sent.matches("하나").count(), 1, "{sent}");
+            assert!(!system_said(
+                &bot,
+                "CLI가 이전 세션을 열지 못해 새 세션으로 다시 보냅니다"
+            ));
+            remove_agent(&bot).unwrap();
+        });
+    }
+
     /// A new session that fails too is not sent a third time.
     #[test]
     fn a_lost_session_is_retried_only_once() {
@@ -7923,8 +7961,10 @@ while IFS= read -r line; do handle "$line"; done"#,
 
     /// Claude kept up between turns says a session it was started on is gone
     /// in its `result` and stays quiet on stdout otherwise. That session is
-    /// dropped, as a one-shot process's exit dropped it, and the same message
-    /// goes once more on a new one instead of failing.
+    /// dropped, as a one-shot process's exit dropped it, and the next turn
+    /// opens a new one instead of failing on it forever. The message is not
+    /// sent again: the `result` came after the prompt, so Claude may have
+    /// acted on it.
     #[test]
     fn a_gone_claude_session_is_dropped() {
         paths::testing::with_home("live-gone", || {
@@ -7942,12 +7982,16 @@ while IFS= read -r line; do handle "$line"; done"#,
             });
             fs::write(paths::home_dir().join("resume-fails"), "").unwrap();
             send_agent(&bot, "two").unwrap();
+            eventually(Duration::from_secs(5), "the failed resume ran on", || {
+                started_pids(&starts).len() == 2 && !agent_busy(&bot).unwrap()
+            });
+            assert!(turn_failed(&bot), "a turn on a gone session read as fine");
+            send_agent(&bot, "three").unwrap();
             eventually(Duration::from_secs(5), "no answer on a new session", || {
                 let pids = started_pids(&starts);
                 pids.len() == 3 && told(&bot, &format!("answer 1 from {}", pids[2]))
             });
             wait_idle(&bot);
-            assert!(!turn_failed(&bot), "the message was lost with the session");
             let log = fs::read_to_string(&starts).unwrap();
             let lines: Vec<&str> = log.lines().collect();
             assert_eq!(lines.len(), 3, "{log}");
