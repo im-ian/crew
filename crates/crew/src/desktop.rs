@@ -929,9 +929,15 @@ fn pick_folder() -> Result<Option<String>, String> {
 }
 
 /// A text or code file to draw beside the chat. Up to 1 MiB, cut at a line.
+/// `rel` is how the bot wrote a relative path and `base` the folder it works
+/// in; when `path` is not there, the file is looked for under `base`.
 #[tauri::command(async)]
-fn read_text_file(path: String) -> Result<crate::files::TextFile, String> {
-    crate::files::read_text(&path)
+fn read_text_file(
+    path: String,
+    base: Option<String>,
+    rel: Option<String>,
+) -> Result<crate::files::TextFile, String> {
+    crate::files::read_text_near(&path, base.as_deref(), rel.as_deref())
 }
 
 #[tauri::command(async)]

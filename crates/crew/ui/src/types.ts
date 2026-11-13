@@ -121,6 +121,8 @@ export type AgentInfo = {
   remote_online?: boolean;
   /** It answered, and its CLI is up only for this background work, such as a CI watch. */
   watch?: Watch[];
+  /** The folder its CLI runs in: its own worktree when worktrees are on. Paths it writes are read from here. */
+  work_dir?: string | null;
 };
 
 /** One task a bot left running after it answered. */

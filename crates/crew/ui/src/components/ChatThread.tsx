@@ -90,7 +90,7 @@ import {
   type JumpMode,
 } from "../questionJump";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, FileText, Reply, X } from "../icons";
-import { parseFileRef, sameFile, useFileOpen } from "../fileRef";
+import { parseFileRef, sameFile, useFileOpen, workDir } from "../fileRef";
 import { splitFilePath } from "./FileView";
 import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
@@ -1491,7 +1491,7 @@ function TransferNote({
               text={body}
               agents={agents}
               onMention={onSelectAgent}
-              baseDir={agent?.cwd || undefined}
+              baseDir={workDir(agent)}
             />
           ) : null}
           {side ? (
@@ -1676,7 +1676,7 @@ function Incoming({
                 defs={defs}
                 agents={agents}
                 onMention={onSelectAgent}
-                baseDir={agent?.cwd || undefined}
+                baseDir={workDir(agent)}
               />
             ))}
           </div>
@@ -1707,7 +1707,7 @@ function Incoming({
                 defs={defs}
                 agents={agents}
                 onMention={onSelectAgent}
-                baseDir={agent?.cwd || undefined}
+                baseDir={workDir(agent)}
               />
             );
             return (
@@ -2659,7 +2659,7 @@ function Bubble({
                 text={part}
                 agents={agents}
                 onMention={onSelectAgent}
-                baseDir={currentAgent?.cwd || undefined}
+                baseDir={workDir(currentAgent)}
               />
             ))}
           </div>
@@ -2671,7 +2671,7 @@ function Bubble({
               text={prose}
               agents={agents}
               onMention={onSelectAgent}
-              baseDir={currentAgent?.cwd || undefined}
+              baseDir={workDir(currentAgent)}
             />
             <MsgActions
               copy={prose.trim()}

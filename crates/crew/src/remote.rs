@@ -2506,6 +2506,7 @@ pub fn agent_infos() -> Vec<AgentInfo> {
                 remote: Some(link.cfg.alias.clone()),
                 remote_online: online,
                 watch: Vec::new(),
+                work_dir: None,
             });
         }
     }

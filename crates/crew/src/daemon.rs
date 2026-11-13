@@ -3339,6 +3339,7 @@ fn list_agents() -> Vec<AgentInfo> {
                 remote: None,
                 remote_online: false,
                 watch: s.watch(),
+                work_dir: Some(s.cwd().display().to_string()),
             }
         })
         .collect();

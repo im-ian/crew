@@ -10,6 +10,7 @@ import type { AgentInfo, ChatMessage } from "../types";
 import { Avatar } from "./Avatar";
 import { JumpBottom, MsgActions, useStick } from "./ChatThread";
 import { MdBody } from "./MdBody";
+import { workDir } from "../fileRef";
 import { SidePane } from "./SidePane";
 import { WhoButton, whoColor } from "./WhoButton";
 
@@ -229,7 +230,7 @@ function PeekBubble({
                   text={part}
                   defs={defs}
                   agents={agents}
-                  baseDir={agent?.cwd || undefined}
+                  baseDir={workDir(agent)}
                 />
                 {copy ? <MsgActions copy={copy} ts={m.ts} /> : null}
               </div>

@@ -92,6 +92,76 @@ pub fn read_text(raw: &str) -> Result<TextFile, String> {
     read_text_capped(raw, MAX_READ)
 }
 
+/// `read_text`, and when the file is not at `path`, the first file under
+/// `base` whose path ends in `rel`. A bot writes a path from the folder its
+/// shell is in, which can be below the one Crew knows: `watch-preview.html`
+/// made in `crates/crew/ui` is found from the worktree's root.
+pub fn read_text_near(path: &str, base: Option<&str>, rel: Option<&str>) -> Result<TextFile, String> {
+    let first = read_text(path);
+    let (Err(err), Some(base), Some(rel)) = (&first, base, rel) else {
+        return first;
+    };
+    if !err.starts_with("not found") {
+        return first;
+    }
+    match find_under(&crate::paths::expand_tilde(base), Path::new(rel)) {
+        Some(found) => read_text(&found.display().to_string()),
+        None => first,
+    }
+}
+
+/// Folders a search for a bot's file does not go into: build output,
+/// dependencies, and anything hidden.
+const SKIP_DIRS: &[&str] = &["node_modules", "target", "dist", "build"];
+/// How deep, and how many entries, a search looks at before it gives up.
+const FIND_DEPTH: usize = 6;
+const FIND_ENTRIES: usize = 20_000;
+
+/// The shallowest file under `base` whose path ends in `rel`, by whole parts.
+fn find_under(base: &Path, rel: &Path) -> Option<PathBuf> {
+    if rel.is_absolute() || rel.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return None;
+    }
+    let rel: PathBuf = rel.components().filter(|c| !matches!(c, std::path::Component::CurDir)).collect();
+    if rel.as_os_str().is_empty() {
+        return None;
+    }
+    let mut level = vec![base.to_path_buf()];
+    let mut seen = 0usize;
+    for _ in 0..=FIND_DEPTH {
+        let mut next = Vec::new();
+        for dir in level {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                seen += 1;
+                if seen > FIND_ENTRIES {
+                    return None;
+                }
+                let path = entry.path();
+                let Ok(kind) = entry.file_type() else {
+                    continue;
+                };
+                if kind.is_dir() {
+                    let name = entry.file_name();
+                    let name = name.to_string_lossy();
+                    if !name.starts_with('.') && !SKIP_DIRS.contains(&name.as_ref()) {
+                        next.push(path);
+                    }
+                } else if path.ends_with(&rel) {
+                    return Some(path);
+                }
+            }
+        }
+        if next.is_empty() {
+            break;
+        }
+        level = next;
+    }
+    None
+}
+
 fn read_text_capped(raw: &str, cap: u64) -> Result<TextFile, String> {
     let path = crate::paths::expand_tilde(raw.trim());
     let shown = path.display().to_string();
@@ -214,5 +284,26 @@ mod tests {
         assert_eq!(read.text, "ab");
         assert!(read.truncated);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A path a bot wrote from a folder below its worktree's root is found
+    /// from the root; one that is nowhere stays not found.
+    #[test]
+    fn a_relative_path_is_looked_for_under_the_work_dir() {
+        let root = dir();
+        std::fs::create_dir_all(root.join("crates/crew/ui")).unwrap();
+        std::fs::create_dir_all(root.join("node_modules/x")).unwrap();
+        std::fs::write(root.join("node_modules/x/watch-preview.html"), "dep").unwrap();
+        std::fs::write(root.join("crates/crew/ui/watch-preview.html"), "<html>").unwrap();
+        let base = root.display().to_string();
+        let guessed = root.join("watch-preview.html").display().to_string();
+        let file = read_text_near(&guessed, Some(&base), Some("watch-preview.html")).unwrap();
+        assert!(file.path.ends_with("crates/crew/ui/watch-preview.html"), "{}", file.path);
+        assert_eq!(file.text, "<html>");
+        let file = read_text_near(&guessed, Some(&base), Some("ui/watch-preview.html")).unwrap();
+        assert_eq!(file.text, "<html>");
+        let none = read_text_near(&root.join("gone.rs").display().to_string(), Some(&base), Some("gone.rs"));
+        assert!(none.unwrap_err().starts_with("not found"));
+        assert!(read_text_near(&guessed, Some(&base), Some("../watch-preview.html")).is_err());
     }
 }

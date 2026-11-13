@@ -67,13 +67,13 @@ export function FileView({
     setLoaded({ state: "loading" });
     setTokens(null);
     api
-      .readTextFile(target.path)
+      .readTextFile(target.path, target.base && target.rel ? { base: target.base, rel: target.rel } : undefined)
       .then((file) => !gone && setLoaded({ state: "ok", file }))
       .catch((err) => !gone && setLoaded({ state: "error", key: fileErrorKey(err) }));
     return () => {
       gone = true;
     };
-  }, [target.path]);
+  }, [target.path, target.base, target.rel]);
 
   const file = loaded.state === "ok" ? loaded.file : null;
   const lines = useMemo(() => (file ? fileLines(file.text) : []), [file]);
