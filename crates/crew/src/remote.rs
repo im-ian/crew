@@ -3021,6 +3021,7 @@ mod tests {
                 collapsed: false,
                 items: items.iter().map(|id| format!("agent:{id}")).collect(),
                 path: None,
+                lead: None,
             };
             crate::groups::save(&[folder(&["rep", "helper", "other-rep"])]).unwrap();
             let rep = ids(roster_for("rep", roster.clone()));

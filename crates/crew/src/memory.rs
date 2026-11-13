@@ -215,6 +215,7 @@ mod tests {
                 collapsed: false,
                 items: vec!["agent:alpha".into()],
                 path: None,
+                lead: None,
             }];
             crate::groups::save(&groups).unwrap();
             assert_eq!(

@@ -5180,6 +5180,7 @@ mod tests {
                 collapsed: false,
                 items: vec!["agent:alpha".into()],
                 path: Some("/tmp/app".into()),
+                lead: None,
             }])
             .unwrap();
             let empty = shared_note_for_turn("hi", &alpha, &roster).unwrap();
