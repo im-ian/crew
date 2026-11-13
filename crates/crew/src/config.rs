@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use clap::ValueEnum;
@@ -517,8 +517,11 @@ pub fn find_routine_index(routines: &[Routine], key: &str) -> Option<usize> {
         })
 }
 
+/// Where a bot with no folder of its own runs.
+const DEMO_ROOT: &str = "/tmp/crew-demo";
+
 pub fn default_add_cwd(id: &str) -> String {
-    format!("/tmp/crew-demo/{id}")
+    format!("{DEMO_ROOT}/{id}")
 }
 
 /// Display name for a cloned bot. `--name` wins; otherwise append " 복사본".
@@ -718,7 +721,7 @@ impl Config {
     pub fn default_cwd(agent: &AgentConfig) -> PathBuf {
         match &agent.cwd {
             Some(cwd) if !cwd.is_empty() => paths::expand_tilde(cwd),
-            _ => PathBuf::from("/tmp/crew-demo"),
+            _ => PathBuf::from(DEMO_ROOT),
         }
     }
 }
@@ -751,13 +754,10 @@ impl AgentConfig {
         }
     }
 
-    /// Same bot, new session: fresh id and routine ids. Avatar path is left
-    /// empty — caller copies bytes via `avatar::copy_for`. Shape and color copy
-    /// with the rest of the identity.
-    ///
-    /// A clone does the source's work, so it opens in the source's folder; with
-    /// worktrees on it still edits its own worktree, keyed by its id. A source
-    /// on its own demo folder hands the clone a demo folder of its own.
+    /// Same bot, new session: fresh id / cwd / routine ids. Avatar path is
+    /// left empty — caller copies bytes via `avatar::copy_for`. Shape and
+    /// color copy with the rest of the identity. The cwd is a demo folder of
+    /// the clone's own; `clone_folder` says when the source's folder is shared.
     pub fn duplicate<S: AsRef<str>>(
         &self,
         given_name: Option<&str>,
@@ -765,13 +765,8 @@ impl AgentConfig {
     ) -> Self {
         let name = clone_agent_name(&self.name, given_name);
         let id = unique_agent_id(&name, existing_ids);
-        let own_demo = default_add_cwd(&self.id);
-        let cwd = match self.cwd.as_deref().map(str::trim) {
-            Some(cwd) if !cwd.is_empty() && cwd != own_demo => cwd.to_string(),
-            _ => default_add_cwd(&id),
-        };
         Self {
-            cwd: Some(cwd),
+            cwd: Some(default_add_cwd(&id)),
             id,
             name,
             cmd: self.cmd.clone(),
@@ -795,6 +790,19 @@ impl AgentConfig {
                 })
                 .collect(),
         }
+    }
+
+    /// The folder a clone of this bot opens in instead of a demo folder of
+    /// its own: this bot's, when `isolates` says each bot there edits a
+    /// worktree of its own, so the two never edit one checkout. A demo folder
+    /// is nobody's to share.
+    pub fn clone_folder(&self, isolates: impl Fn(&Path) -> bool) -> Option<String> {
+        let cwd = self.cwd.as_deref().filter(|c| !c.trim().is_empty())?;
+        let dir = paths::expand_tilde(cwd);
+        if dir.starts_with(DEMO_ROOT) || !isolates(&dir) {
+            return None;
+        }
+        Some(cwd.to_string())
     }
 
     pub fn binary_name(&self) -> String {
@@ -3173,24 +3181,13 @@ mod tests {
         assert!(dup.id.starts_with("grok-"), "{}", dup.id);
         assert_ne!(dup.id, "grok");
         assert_eq!(dup.name, "Grok 복사본");
-        // A source on its own demo folder hands the clone one that follows
-        // the clone's id, so it never lands in the folder a deleted bot left
-        // behind. Pinned by value, not re-derived from `default_add_cwd`,
-        // which would hold for any id at all.
+        // The clone's folder follows its own id, so it never lands in the
+        // folder a deleted bot left behind. Pinned by value, not re-derived
+        // from `default_add_cwd`, which would hold for any id at all.
         let cwd = dup.cwd.as_deref().expect("clone has a folder");
         assert!(cwd.starts_with("/tmp/crew-demo/grok-"), "{cwd}");
         assert!(cwd.ends_with(&dup.id), "{cwd}");
         assert_ne!(Some(cwd), src.cwd.as_deref());
-        // One with no folder too: the shared demo root is nobody's.
-        let mut bare = src.clone();
-        bare.cwd = None;
-        let dup_bare = bare.duplicate(None, ["grok"]);
-        assert!(dup_bare.cwd.as_deref().unwrap().ends_with(&dup_bare.id));
-        // A source given a folder hands it on: the clone does the same work.
-        let mut work = src.clone();
-        work.cwd = Some("/Users/me/work-hub".into());
-        let dup_work = work.duplicate(None, ["grok"]);
-        assert_eq!(dup_work.cwd.as_deref(), Some("/Users/me/work-hub"));
         assert_eq!(dup.title.as_deref(), Some("Lead"));
         assert_eq!(dup.role.as_deref(), Some("PM"));
         assert_eq!(dup.description.as_deref(), Some("does things"));
@@ -3206,6 +3203,28 @@ mod tests {
         assert_eq!(dup.avatar_color.as_deref(), Some("#ff6a00"));
         // Same display name as the source is allowed; the id is still its own.
         // `clone_agent` passes the live roster, so the first clone is in it.
+        // A clone shares a real folder only where it gets a worktree there.
+        let mut work = src.clone();
+        work.cwd = Some("/Users/me/work-hub".into());
+        assert_eq!(
+            work.clone_folder(|_| true).as_deref(),
+            Some("/Users/me/work-hub")
+        );
+        assert_eq!(work.clone_folder(|_| false), None);
+        // A demo folder, its root, or none at all is never shared.
+        for cwd in [
+            "/tmp/crew-demo/grok",
+            "/tmp/crew-demo",
+            "/tmp/crew-demo/other/",
+            "",
+        ] {
+            let mut demo = src.clone();
+            demo.cwd = Some(cwd.into());
+            assert_eq!(demo.clone_folder(|_| true), None, "{cwd}");
+        }
+        let mut bare = src.clone();
+        bare.cwd = None;
+        assert_eq!(bare.clone_folder(|_| true), None);
         let named = src.duplicate(Some("Grok"), ["grok", dup.id.as_str()]);
         assert_ne!(named.id, "grok");
         assert_ne!(named.id, dup.id);

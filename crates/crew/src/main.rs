@@ -673,6 +673,9 @@ fn run() -> anyhow::Result<()> {
                     .ok_or_else(|| anyhow::anyhow!("unknown agent {id}"))?;
                 let ids: Vec<String> = cfg.agents.iter().map(|a| a.id.clone()).collect();
                 let mut agent = src.duplicate(name.as_deref(), ids.iter().map(|s| s.as_str()));
+                if let Some(dir) = src.clone_folder(crate::worktree::isolates) {
+                    agent.cwd = Some(dir);
+                }
                 agent.avatar = crate::avatar::copy_for(src.avatar.as_deref(), &agent.id);
                 crate::memory::copy(&id, &agent.id)?;
                 let new_id = agent.id.clone();
