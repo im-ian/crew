@@ -5,7 +5,7 @@ import { cliFromCmd, headerModelLine, pinnedDefault } from "../options";
 import { isOnline, remoteLabel } from "../remote";
 import type { AgentInfo, CliKind, Group } from "../types";
 import { WhoButton } from "./WhoButton";
-import { Info } from "../icons";
+import { Info, X } from "../icons";
 import { showsWatch, watchLabel } from "../watchView";
 
 type Props = {
@@ -13,6 +13,8 @@ type Props = {
   groups: readonly Group[];
   onOpenInfo: () => void;
   onRenameAgent: (id: string, name: string) => void;
+  /** Set on a split half: closes it, and the other half takes the room. */
+  onClose?: () => void;
 };
 
 export function ChatHeader({
@@ -20,6 +22,7 @@ export function ChatHeader({
   groups,
   onOpenInfo,
   onRenameAgent,
+  onClose,
 }: Props) {
   const t = useT();
   const cli = currentAgent ? cliFromCmd(currentAgent.cmd, currentAgent.headless) : null;
@@ -135,6 +138,17 @@ export function ChatHeader({
           onClick={onOpenInfo}
         >
           <Info />
+        </button>
+      ) : null}
+      {onClose ? (
+        <button
+          type="button"
+          className="head-action"
+          title={t("split.close")}
+          aria-label={t("split.close")}
+          onClick={onClose}
+        >
+          <X />
         </button>
       ) : null}
     </header>

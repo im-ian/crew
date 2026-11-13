@@ -52,7 +52,7 @@ import { BotLabelProvider, useLabelGroups } from "../BotLabelContext";
 import { botLabel, botSearchText } from "../botLabel";
 import { listedHits, matchRuns } from "../searchView";
 import { PlanUsageButton } from "./PlanUsageBar";
-import { ChevronDown, Ellipsis, Layers, Plus, Search, Settings, Star } from "../icons";
+import { ChevronDown, Columns2, Ellipsis, Layers, Plus, Rows2, Search, Settings, Star } from "../icons";
 
 const RAIL_DEFAULT = 232;
 const RAIL_MIN = 176;
@@ -384,6 +384,15 @@ type Props = {
   onSearchHit?: (hit: SearchHit) => void;
   onSelectAgent: (id: string) => void;
   onCreateMenu: (e: MouseEvent) => void;
+  /** The split button beside the add button. */
+  onSplitMenu?: (e: MouseEvent) => void;
+  /** The way the chat is split, which the split button shows. */
+  splitDir?: "row" | "col" | null;
+  /**
+   * A bot dragged over the chat: its id while there, null when it leaves.
+   * `drop` is the release, which splits the chat with it.
+   */
+  onChatDrag?: (id: string | null, x: number, y: number, drop: boolean) => void;
   onAgentCtx: (e: MouseEvent, id: string) => void;
   onGroupCtx: (e: MouseEvent, id: string) => void;
   onGroupMenu: (e: MouseEvent, id: string) => void;
@@ -457,6 +466,9 @@ export function Sidebar({
   onSearchHit,
   onSelectAgent,
   onCreateMenu,
+  onSplitMenu,
+  splitDir,
+  onChatDrag,
   onAgentCtx,
   onGroupCtx,
   onGroupMenu,
@@ -709,6 +721,8 @@ export function Sidebar({
   const onMoveRef = useRef(onMove);
   const onReorderGroupRef = useRef(onReorderGroup);
   const onToggleGroupRef = useRef(onToggleGroup);
+  const onChatDragRef = useRef(onChatDrag);
+  onChatDragRef.current = onChatDrag;
   onMoveRef.current = onMove;
   onReorderGroupRef.current = onReorderGroup;
   onToggleGroupRef.current = onToggleGroup;
@@ -834,6 +848,9 @@ export function Sidebar({
     dragRef.current = pending;
     didDrag.current = false;
 
+    // A bot carried past the rail goes to the chat, not between the rows.
+    const bot = onChatDragRef.current ? dragBotId(pending) : null;
+    let overChat = false;
     const onMovePtr = (ev: PointerEvent) => {
       const cur = dragRef.current;
       if (!cur || ev.pointerId !== e.pointerId) return;
@@ -859,8 +876,13 @@ export function Sidebar({
       };
       dragRef.current = next;
       setDrag(next);
-      autoScrollLists(ev.clientY);
-      const target = locate(ev.clientX, ev.clientY);
+      const wasOver = overChat;
+      overChat = !!bot && chatAt(ev.clientX, ev.clientY);
+      if (overChat || wasOver) {
+        onChatDragRef.current?.(overChat ? bot : null, ev.clientX, ev.clientY, false);
+      }
+      if (!overChat) autoScrollLists(ev.clientY);
+      const target = overChat ? null : locate(ev.clientX, ev.clientY);
       dropRef.current = target;
       setDrop(target);
       if (target?.kind === "item") {
@@ -872,7 +894,9 @@ export function Sidebar({
     const onUp = (ev: PointerEvent) => {
       if (ev.pointerId !== e.pointerId) return;
       const armed = !!dragRef.current?.armed;
+      const dropped = armed && overChat ? bot : null;
       endDrag(armed);
+      if (overChat) onChatDragRef.current?.(dropped, ev.clientX, ev.clientY, true);
       if (armed) window.setTimeout(() => {
         didDrag.current = false;
       }, 0);
@@ -880,6 +904,7 @@ export function Sidebar({
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === "Escape") {
         ev.preventDefault();
+        if (overChat) onChatDragRef.current?.(null, 0, 0, true);
         endDrag(false);
       }
     };
@@ -1265,6 +1290,21 @@ export function Sidebar({
             }
           >
             <Search />
+          </button>
+        ) : null}
+        {onSplitMenu ? (
+          <button
+            type="button"
+            className={"icon-btn" + (splitDir ? " is-on" : "")}
+            title={t("split.menu")}
+            aria-label={t("split.menu")}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onSplitMenu(e);
+            }}
+          >
+            {splitDir === "col" ? <Rows2 /> : <Columns2 />}
           </button>
         ) : null}
         <button
@@ -1862,4 +1902,15 @@ function ItemRow({
       {inner}
     </button>
   );
+}
+
+/** The bot a rail drag carries, if it is one: a folder carries none. */
+function dragBotId(d: RailDrag): string | null {
+  if (d.kind === "item") return d.item.kind === "agent" ? d.item.id : null;
+  return parseItemKey(d.key)?.id ?? null;
+}
+
+function chatAt(x: number, y: number): boolean {
+  const r = document.querySelector("main")?.getBoundingClientRect();
+  return !!r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
 }

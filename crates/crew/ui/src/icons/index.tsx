@@ -402,3 +402,21 @@ export function FileText(props: Props) {
     </Icon>
   );
 }
+
+export function Columns2(props: Props) {
+  return (
+    <Icon {...props}>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M12 3v18" />
+    </Icon>
+  );
+}
+
+export function Rows2(props: Props) {
+  return (
+    <Icon {...props}>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M3 12h18" />
+    </Icon>
+  );
+}
