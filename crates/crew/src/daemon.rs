@@ -6286,6 +6286,109 @@ esac; done ;; esac"#
         });
     }
 
+    /// Claude turns the turn away for its limit. The same turn runs on the next
+    /// AI on the list, which says so above its answer, and the bot keeps its
+    /// own command. The next turn goes straight to that AI until the reset.
+    #[test]
+    fn a_turn_past_the_limit_runs_on_the_next_ai() {
+        use std::os::unix::fs::PermissionsExt;
+        paths::testing::with_home("fallback-limit", || {
+            let bot = test_id("limited");
+            let reset = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                + 3600;
+            fake_bot(
+                &bot,
+                &format!(
+                    r#"{{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Claude AI usage limit reached|{reset}"}}"#
+                ),
+            );
+            let own_cmd = crate::config::Config::load()
+                .unwrap()
+                .agents
+                .into_iter()
+                .find(|a| a.id == bot)
+                .unwrap()
+                .cmd;
+            let gemini = paths::home_dir().join("gemini");
+            fs::write(&gemini, "#!/bin/sh\necho 'answered by gemini'\n").unwrap();
+            fs::set_permissions(&gemini, fs::Permissions::from_mode(0o755)).unwrap();
+            crate::fallback::save(&[
+                crate::fallback::Candidate {
+                    cli: "claude".into(),
+                    model: String::new(),
+                    effort: String::new(),
+                    cmd: String::new(),
+                },
+                crate::fallback::Candidate {
+                    cli: "gemini".into(),
+                    model: String::new(),
+                    effort: String::new(),
+                    cmd: gemini.display().to_string(),
+                },
+            ])
+            .unwrap();
+
+            send_agent(&bot, "go").unwrap();
+            wait_idle(&bot);
+            let rows = crate::transcript::messages(&bot);
+            let note = rows
+                .iter()
+                .position(|m| m.from == "crew" && m.text.starts_with("Claude 한도에 걸려 이 턴은 Gemini로 대신 돌렸어요"))
+                .expect("no note that Gemini answered");
+            let answer = rows
+                .iter()
+                .position(|m| m.text.contains("answered by gemini"))
+                .expect("Gemini's answer is missing");
+            assert!(note < answer, "the note sits under the answer");
+            assert!(
+                !rows.iter().any(|m| m.text.contains("usage limit reached")),
+                "Claude's limit error was shown as the answer"
+            );
+            let info = list_agents().into_iter().find(|a| a.id == bot).unwrap();
+            assert!(!info.failed, "the turn Gemini answered was marked failed");
+            let cfg = crate::config::Config::load()
+                .unwrap()
+                .agents
+                .into_iter()
+                .find(|a| a.id == bot)
+                .unwrap();
+            assert_eq!(cfg.cmd, own_cmd, "the bot's own command changed");
+            assert!(crate::fallback::since(&bot).is_some());
+
+            // Still before the reset: Claude is not asked again.
+            let asked = paths::home_dir().join("prompt");
+            let _ = fs::remove_file(&asked);
+            send_agent(&bot, "again").unwrap();
+            wait_idle(&bot);
+            assert!(!asked.exists(), "Claude was asked before its reset");
+            let answers = crate::transcript::messages(&bot)
+                .iter()
+                .filter(|m| m.text.contains("answered by gemini"))
+                .count();
+            assert_eq!(answers, 2);
+
+            // The limit is over: Claude answers again, and is told what it missed.
+            crate::fallback::clear_limited("claude");
+            fake_claude(
+                r#"cat <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"text","text":"claude is back"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"claude is back"}
+EOF"#,
+            );
+            send_agent(&bot, "back").unwrap();
+            wait_idle(&bot);
+            let prompt = fs::read_to_string(&asked).expect("Claude was not asked");
+            assert!(prompt.contains("another AI answered"), "{prompt}");
+            assert!(prompt.contains("answered by gemini"), "{prompt}");
+            assert!(crate::fallback::since(&bot).is_none(), "the missed turns were kept");
+            assert!(crate::fallback::limited("claude").is_none());
+            remove_agent(&bot).unwrap();
+        });
+    }
+
     #[test]
     fn a_turn_that_answers_is_not_marked_failed_and_clears_an_old_failure() {
         paths::testing::with_home("turn-ok", || {

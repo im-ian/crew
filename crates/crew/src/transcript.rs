@@ -517,6 +517,16 @@ pub fn prior_recap_excluding(agent: &str, skip: &[String]) -> Option<String> {
     excluding(&messages(agent), skip)
 }
 
+/// The chat from `since_ms` on, without the rows in `skip`: what another AI
+/// answered while the bot's own CLI was out of its limit.
+pub fn recap_since(agent: &str, since_ms: i64, skip: &[String]) -> Option<String> {
+    let kept: Vec<ChatMessage> = messages(agent)
+        .into_iter()
+        .filter(|m| (m.ts as i64) >= since_ms && !skip.iter().any(|id| id == &m.id))
+        .collect();
+    recap_of(&kept)
+}
+
 fn excluding(msgs: &[ChatMessage], skip: &[String]) -> Option<String> {
     if skip.is_empty() {
         return prior_of(msgs);

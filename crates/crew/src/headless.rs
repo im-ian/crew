@@ -877,10 +877,41 @@ fn run_turn(
         }
     }
     let mut turn = crate::transcript::begin_turn(&session.id);
+    let original_prompt = prompt.clone();
 
     let program = cfg.binary_name();
     let place = crate::worktree::place_for(&cfg.id, &crate::config::Config::default_cwd(&cfg));
     let cwd = place.cwd.clone();
+    // A slash command means something only to the bot's own CLI.
+    let own_only = crate::daemon::is_slash_command(&prompt);
+    // Its CLI is still out of its limit: the turn goes straight to the next
+    // AI on the list. With none free it tries its own CLI after all.
+    if !own_only {
+        if let Some(limit) = crate::fallback::limited(&program) {
+            let fell = run_on_fallback(
+                &session,
+                &cfg,
+                &roster,
+                &prompt,
+                generation,
+                &skip_rows,
+                &mut turn,
+                &cwd,
+                place.isolated.as_ref(),
+                limit,
+                false,
+            );
+            if let Some(result) = fell {
+                if is_stale(&session, generation) {
+                    crate::transcript::end_turn_gen(&session.id, Some(turn));
+                    return;
+                }
+                let (failed, hold) = show_result(&session, result);
+                close_turn(&session, generation, turn, failed, hold);
+                return;
+            }
+        }
+    }
     // The bot moved to another folder, or worktrees were turned on or off since
     // its session was opened. claude and grok keep a session under its folder,
     // so resumed from here they find nothing and the message is lost. A new
@@ -946,6 +977,17 @@ fn run_turn(
         }
     } else {
         prompt
+    };
+    // Another AI answered while this CLI was out. Prompt mode reads the
+    // whole chat anyway.
+    let missed_since = (!cfg.prompt_mode() && !own_only)
+        .then(|| crate::fallback::since(&session.id))
+        .flatten();
+    let prompt = match missed_since
+        .and_then(|since| crate::transcript::recap_since(&session.id, since, &skip_rows))
+    {
+        Some(missed) => crate::fallback::with_missed(&missed, &prompt),
+        None => prompt,
     };
     mark_resumed(&session, resume);
     let memory_now = crate::memory::read(&session.id);
@@ -1020,6 +1062,60 @@ fn run_turn(
         return;
     }
 
+    // The CLI turned the turn away for its limit before saying anything. The
+    // same turn runs on the next AI on the list; the bot's session, which
+    // never got the message, is left as it was.
+    let limit_hit = !own_only
+        && matches!(&result, Ok(o) if !o.got_text
+            && o.error.as_deref().is_some_and(crate::fallback::is_limit_error));
+    let mut on_fallback = false;
+    let result = if limit_hit {
+        let now = unix_now();
+        let reset = result
+            .as_ref()
+            .ok()
+            .and_then(|o| o.error.as_deref())
+            .and_then(|err| crate::fallback::reset_in_error(err, now))
+            .or_else(|| crate::usage::full_until(&program, now));
+        let limit = crate::fallback::note_limited(&program, reset);
+        match run_on_fallback(
+            &session,
+            &cfg,
+            &roster,
+            &original_prompt,
+            generation,
+            &skip_rows,
+            &mut turn,
+            &cwd,
+            place.isolated.as_ref(),
+            limit,
+            true,
+        ) {
+            Some(fell) => {
+                on_fallback = true;
+                // A session made for this turn never heard it.
+                if created_id.is_some() {
+                    if let Ok(mut inner) = session.inner.lock() {
+                        inner.session_id = None;
+                    }
+                }
+                if is_stale(&session, generation) {
+                    crate::transcript::end_turn_gen(&session.id, Some(turn));
+                    return;
+                }
+                fell
+            }
+            None => result,
+        }
+    } else {
+        result
+    };
+    if on_fallback {
+        let (failed, hold) = show_result(&session, result);
+        close_turn(&session, generation, turn, failed, hold);
+        return;
+    }
+
     // A turn that errored and said nothing is the one the user should see failed.
     // A stop never gets here: it went stale above. The first-output watch goes
     // stale too, and marks its own failure.
@@ -1060,6 +1156,13 @@ fn run_turn(
             if recap.is_some() && outcome.got_text {
                 clear_recap(&session.id);
             }
+            // Its own CLI answered: the limit is over, and what it missed is told.
+            if outcome.got_text && !dead {
+                crate::fallback::clear_limited(&program);
+                if missed_since.is_some() {
+                    crate::fallback::clear_since(&session.id);
+                }
+            }
             // Like the recap: a turn that failed leaves the news for the next.
             if outcome.got_text && !dead {
                 let _ = save_memory_seen(&session.id, &memory_seen);
@@ -1092,23 +1195,7 @@ fn run_turn(
                     }
                 }
             }
-            let error = outcome
-                .error
-                .as_deref()
-                .map(strip_tui_noise)
-                .filter(|err| !err.is_empty());
-            if let Some(err) = error {
-                if outcome.got_text {
-                    // After the answer, such as grok stopping the CI watch it
-                    // said it would report on. Silence read as still watching.
-                    let row = crate::transcript::push_system(&session.id, "crew", &err, None);
-                    if watch_ran_out(&err) {
-                        crate::daemon::wake_after_watch(&session.id, &outcome.watched, row.id);
-                    }
-                } else {
-                    crate::transcript::on_assistant_delta(&session.id, &err);
-                }
-            }
+            show_outcome_error(&session, &outcome);
         }
         Err(err) => {
             failed = true;
@@ -1117,18 +1204,177 @@ fn run_turn(
                     inner.session_id = None;
                 }
             }
-            let msg = format!("{err:#}");
-            let cleaned = strip_tui_noise(&msg);
-            if !cleaned.is_empty() {
-                crate::transcript::on_assistant_delta(&session.id, &cleaned);
-            }
+            show_spawn_error(&session, &err);
         }
     }
 
+    close_turn(&session, generation, turn, failed, hold_subagent);
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// The error a turn ended on: after its answer as a note of its own, or as
+/// the answer when it said nothing.
+fn show_outcome_error(session: &Arc<HeadlessSession>, outcome: &TurnOutcome) {
+    let error = outcome
+        .error
+        .as_deref()
+        .map(strip_tui_noise)
+        .filter(|err| !err.is_empty());
+    if let Some(err) = error {
+        if outcome.got_text {
+            // After the answer, such as grok stopping the CI watch it
+            // said it would report on. Silence read as still watching.
+            let row = crate::transcript::push_system(&session.id, "crew", &err, None);
+            if watch_ran_out(&err) {
+                crate::daemon::wake_after_watch(&session.id, &outcome.watched, row.id);
+            }
+        } else {
+            crate::transcript::on_assistant_delta(&session.id, &err);
+        }
+    }
+}
+
+fn show_spawn_error(session: &Arc<HeadlessSession>, err: &anyhow::Error) {
+    let msg = format!("{err:#}");
+    let cleaned = strip_tui_noise(&msg);
+    if !cleaned.is_empty() {
+        crate::transcript::on_assistant_delta(&session.id, &cleaned);
+    }
+}
+
+/// A turn another AI ran: its error shown, and whether it failed and waits on
+/// a subagent. Nothing of the bot's own session is touched.
+fn show_result(session: &Arc<HeadlessSession>, result: anyhow::Result<TurnOutcome>) -> (bool, bool) {
+    match result {
+        Ok(outcome) => {
+            show_outcome_error(session, &outcome);
+            (outcome.error.is_some() && !outcome.got_text, outcome.subagents)
+        }
+        Err(err) => {
+            show_spawn_error(session, &err);
+            (true, false)
+        }
+    }
+}
+
+/// Runs the turn on the AIs after the bot's own, in the list's order, until
+/// one is not out of its limit. Each says so above its answer. None when the
+/// list has no other AI to try; `say_none` notes that when the bot's own CLI
+/// has already failed.
+#[allow(clippy::too_many_arguments)]
+fn run_on_fallback(
+    session: &Arc<HeadlessSession>,
+    cfg: &AgentConfig,
+    roster: &[AgentConfig],
+    prompt: &str,
+    generation: u64,
+    skip_rows: &[String],
+    turn: &mut u64,
+    cwd: &std::path::Path,
+    isolated: Option<&crate::worktree::Isolated>,
+    limit: crate::fallback::Limit,
+    say_none: bool,
+) -> Option<anyhow::Result<TurnOutcome>> {
+    let candidates = crate::fallback::candidates_for(cfg);
+    if candidates.is_empty() {
+        return None;
+    }
+    let locale = crate::paths::locale();
+    let mut from = cfg.binary_name();
+    let mut from_limit = limit;
+    let mut last = None;
+    for (_, fb) in candidates {
+        let program = fb.binary_name();
+        if crate::fallback::limited(&program).is_some() {
+            continue;
+        }
+        let note = crate::fallback::ran_on_note(&locale, &from, &program, from_limit);
+        let row = crate::transcript::push_system(&session.id, "crew", &note, None);
+        // The bot's own session is told what it missed when it answers again,
+        // from the message this turn answers on.
+        let since = crate::transcript::messages(&session.id)
+            .iter()
+            .filter(|m| skip_rows.iter().any(|id| id == &m.id))
+            .map(|m| m.ts as i64)
+            .min()
+            .unwrap_or(row.ts as i64);
+        crate::fallback::mark_since(&session.id, since);
+        let result = run_as(session, &fb, roster, prompt, generation, skip_rows, turn, cwd, isolated);
+        if is_stale(session, generation) {
+            return Some(result);
+        }
+        let hit = matches!(&result, Ok(o) if !o.got_text
+            && o.error.as_deref().is_some_and(crate::fallback::is_limit_error));
+        if !hit {
+            if matches!(&result, Ok(o) if o.got_text) {
+                crate::fallback::clear_limited(&program);
+            }
+            return Some(result);
+        }
+        let now = unix_now();
+        let reset = result
+            .as_ref()
+            .ok()
+            .and_then(|o| o.error.as_deref())
+            .and_then(|err| crate::fallback::reset_in_error(err, now))
+            .or_else(|| crate::usage::full_until(&program, now));
+        from_limit = crate::fallback::note_limited(&program, reset);
+        from = program;
+        last = Some(result);
+    }
+    if last.is_none() && say_none {
+        let note = crate::fallback::none_free_note(&locale, &from);
+        crate::transcript::push_system(&session.id, "crew", &note, None);
+    }
+    last
+}
+
+/// One turn on `fb`, a copy of the bot with another AI's command: a fresh
+/// process with the chat so far, and no session kept.
+#[allow(clippy::too_many_arguments)]
+fn run_as(
+    session: &Arc<HeadlessSession>,
+    fb: &AgentConfig,
+    roster: &[AgentConfig],
+    prompt: &str,
+    generation: u64,
+    skip_rows: &[String],
+    turn: &mut u64,
+    cwd: &std::path::Path,
+    isolated: Option<&crate::worktree::Isolated>,
+) -> anyhow::Result<TurnOutcome> {
+    let memory_now = crate::memory::read(&session.id);
+    let (memory, _) = memory_for_turn(false, None, memory_now.trim(), prompt);
+    let mut text = prompt.to_string();
+    if let Some(note) = shared_note_for_turn(prompt, fb, roster) {
+        text = format!("{note}\n\n{text}");
+    }
+    if let Some(prior) = crate::transcript::prior_recap_excluding(&session.id, skip_rows) {
+        text = with_prior(&prior, &text);
+    }
+    let argv = fb.turn_cmd_in(&text, None, roster, &memory.start, isolated);
+    spawn_and_stream(session, &argv, generation, turn, cwd)
+}
+
+/// The end every turn shares: its rows closed, the prompt let go, the bot
+/// idle again and the next message started.
+fn close_turn(
+    session: &Arc<HeadlessSession>,
+    generation: u64,
+    turn: u64,
+    failed: bool,
+    hold_subagent: bool,
+) {
     crate::transcript::end_turn_gen(&session.id, Some(turn));
     // A stop or the silence watch claimed this turn while the outcome was
     // being recorded. Pumping here would start the prompt just put back.
-    if is_stale(&session, generation) {
+    if is_stale(session, generation) {
         return;
     }
     crate::daemon::forget_prompt(&session.id);

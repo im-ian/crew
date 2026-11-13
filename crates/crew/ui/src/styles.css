@@ -5416,6 +5416,49 @@ button.mention-chip:active {
 }
 /* Sits at the foot of its dialog, so the card opens upward over the fields:
    downward it would spill past the scrolling dialog's edge. */
+/* The default AI list: a handle, the picker, and the row's own buttons. */
+.ai-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.ai-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+.ai-row.dragging { opacity: 0.55; }
+.ai-pick {
+  flex: 1;
+  min-width: 0;
+}
+.ai-row-btn {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.ai-row-btn svg { display: block; }
+.ai-row-btn:hover:not(:disabled) {
+  background: var(--active);
+  color: var(--ink);
+}
+.ai-row-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.ai-grip {
+  cursor: grab;
+  touch-action: none;
+}
+.ai-row.dragging .ai-grip { cursor: grabbing; }
 .model-pick { position: relative; }
 .model-pick-hit {
   display: flex;

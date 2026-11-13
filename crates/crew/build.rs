@@ -39,6 +39,8 @@ fn main() {
             "set_groups",
             "plan_usage",
             "list_models",
+            "get_fallback_ais",
+            "set_fallback_ais",
             "search_crew",
             "list_skills",
             "lookup_skill",

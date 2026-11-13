@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { api } from "../api";
-import { loadBotDefault, saveBotDefault, type BotDefault } from "../botDefault";
+import { loadBotDefault } from "../botDefault";
+import type { AiChoice } from "../aiList";
+import { loadAiList, saveAiList } from "../aiListSync";
 import { useLocale, useT } from "../LocaleContext";
 import type { Locale } from "../i18n";
 import type { ChatWidth } from "../chatWidth";
@@ -16,7 +18,7 @@ import type { AgentInfo, RemoteInfo } from "../types";
 import { Globe, Info, Keyboard, MessageSquare, Monitor, SlidersHorizontal } from "../icons";
 import { Field } from "./Field";
 import { Modal } from "./Modal";
-import { ModelPicker } from "./ModelPicker";
+import { AiList } from "./AiList";
 import { RemoteSettings, type RemoteChange } from "./RemoteSettings";
 import { Seg } from "./Seg";
 import { ShortcutList } from "./ShortcutHelp";
@@ -80,14 +82,25 @@ export function SettingsPane({
   const [font, setFont] = useState(loadFont);
   const measure = useMemo(pageMeasure, []);
   const missing = useMemo(() => missingFonts(font, measure), [font, measure]);
-  const [botDefault, setBotDefault] = useState(loadBotDefault);
+  // The plain default until the daemon's list is read: it is that list's top.
+  const [aiList, setAiList] = useState<AiChoice[]>(() => [loadBotDefault()]);
 
-  function changeBotDefault(next: Partial<BotDefault>) {
-    setBotDefault((prev) => {
-      const merged = { ...prev, ...next };
-      saveBotDefault(merged);
-      return merged;
-    });
+  useEffect(() => {
+    if (!open) return;
+    let gone = false;
+    void loadAiList()
+      .then((list) => {
+        if (!gone) setAiList(list);
+      })
+      .catch(() => {});
+    return () => {
+      gone = true;
+    };
+  }, [open]);
+
+  function changeAiList(next: AiChoice[]) {
+    setAiList(next);
+    void saveAiList(next).catch(() => {});
   }
   // Stays on the last page while the app runs, like the window it came from.
   const [section, setSection] = useState<Section>("general");
@@ -235,18 +248,10 @@ export function SettingsPane({
                   : t("settings.worktree.note.off")}
               </p>
               <Field label={t("settings.botDefault")}>
-                <ModelPicker
-                  cli={botDefault.cli}
-                  model={botDefault.model}
-                  effort={botDefault.effort}
+                <AiList
+                  list={aiList}
                   active={open && section === "general"}
-                  command={botDefault.cmd}
-                  onCli={(cli) =>
-                    changeBotDefault({ cli, model: "", effort: "", cmd: "" })
-                  }
-                  onModel={(model) => changeBotDefault({ model })}
-                  onEffort={(effort) => changeBotDefault({ effort })}
-                  onCommand={(cmd) => changeBotDefault({ cmd })}
+                  onChange={changeAiList}
                 />
               </Field>
               <p className="apply-note">{t("settings.botDefault.note")}</p>
