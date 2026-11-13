@@ -163,6 +163,7 @@ export const KO = {
   "sidebar.remoteConnected": "연결됨",
   "sidebar.remoteDisconnected": "연결 끊김",
   "sidebar.represents": "{alias} 대표 봇",
+  "sidebar.groupLead": "그룹 대표",
   "sidebar.online": "접속 중",
   "sidebar.offline": "접속 안 함",
 
@@ -292,6 +293,8 @@ export const KO = {
   "menu.deleteGroup": "그룹 삭제",
   "menu.groupSettings": "그룹 설정",
   "menu.leaveGroup": "그룹에서 빼기",
+  "menu.makeLead": "그룹 대표로 지정",
+  "menu.clearLead": "그룹 대표 해제",
   "menu.clearChat": "대화 지우기",
   "menu.cloneBot": "봇 복제",
   "menu.moveToGroup": "그룹으로 이동",
@@ -638,6 +641,7 @@ export const EN: { [K in MessageKey]: string } = {
   "sidebar.remoteConnected": "Connected",
   "sidebar.remoteDisconnected": "Disconnected",
   "sidebar.represents": "Represents you on {alias}",
+  "sidebar.groupLead": "Group lead",
   "sidebar.online": "Online",
   "sidebar.offline": "Offline",
 
@@ -767,6 +771,8 @@ export const EN: { [K in MessageKey]: string } = {
   "menu.deleteGroup": "Delete group",
   "menu.groupSettings": "Group settings",
   "menu.leaveGroup": "Remove from group",
+  "menu.makeLead": "Make group lead",
+  "menu.clearLead": "Remove as group lead",
   "menu.clearChat": "Clear chat",
   "menu.cloneBot": "Duplicate bot",
   "menu.moveToGroup": "Move to group",

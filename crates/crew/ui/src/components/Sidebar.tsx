@@ -11,7 +11,14 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useLocale, useT } from "../LocaleContext";
-import { groupOrderChanges, itemKey, parseItemKey, railSlots, UNGROUPED_ID } from "../groups";
+import {
+  groupLead,
+  groupOrderChanges,
+  itemKey,
+  parseItemKey,
+  railSlots,
+  UNGROUPED_ID,
+} from "../groups";
 import type { AgentInfo, Group, Kind, RemoteInfo, SearchHit } from "../types";
 import { listStamp } from "../clock";
 import { NAME_CLICK_MS } from "../rename";
@@ -46,7 +53,7 @@ import { BotLabelProvider, useLabelGroups } from "../BotLabelContext";
 import { botLabel, botSearchText } from "../botLabel";
 import { listedHits, matchRuns } from "../searchView";
 import { PlanUsageButton } from "./PlanUsageBar";
-import { ChevronDown, Ellipsis, Layers, Plus, Search, Settings } from "../icons";
+import { ChevronDown, Ellipsis, Layers, Plus, Search, Settings, Star } from "../icons";
 
 const RAIL_DEFAULT = 232;
 const RAIL_MIN = 176;
@@ -998,6 +1005,27 @@ export function Sidebar({
     if (searching && !items.length) return null;
     const hidden = !searching && group.collapsed;
     const showEmpty = !hidden && !items.length && !searching;
+    const lead = groupLead(group);
+    const row = (item: RailItem) => (
+      <ItemRow
+        key={item.key}
+        item={item}
+        compact={folded}
+        agents={agents}
+        represents={representing(item.id, remotes)}
+        lead={item.id === lead}
+        active={selectedKind === item.kind && selected === item.id}
+        unread={unread.includes(item.key)}
+        drafting={drafting.includes(item.id)}
+        dragging={drag?.kind === "item" && drag.key === item.key && drag.armed}
+        onSelect={() => {
+          if (didDrag.current) return;
+          select(item);
+        }}
+        onContextMenu={(e) => ctx(e, item)}
+        {...renameProps(item)}
+      />
+    );
     return (
       <section
         key={group.id}
@@ -1043,30 +1071,15 @@ export function Sidebar({
           onMenu={(e) => onGroupMenu(e, group.id)}
           onNewBot={() => onGroupNewBot(group.id)}
         />
-        {hidden ? null : showEmpty ? (
+        {hidden ? (
+          // A collapsed group still shows its lead; picking it opens the chat only.
+          items.filter((item) => item.id === lead).map(row)
+        ) : showEmpty ? (
           <div className="empty-rail" data-rail-empty="1">
             {t("sidebar.dropHere")}
           </div>
         ) : (
-          items.map((item) => (
-            <ItemRow
-              key={item.key}
-              item={item}
-              compact={folded}
-              agents={agents}
-              represents={representing(item.id, remotes)}
-              active={selectedKind === item.kind && selected === item.id}
-              unread={unread.includes(item.key)}
-              drafting={drafting.includes(item.id)}
-              dragging={drag?.kind === "item" && drag.key === item.key && drag.armed}
-              onSelect={() => {
-                if (didDrag.current) return;
-                select(item);
-              }}
-              onContextMenu={(e) => ctx(e, item)}
-              {...renameProps(item)}
-            />
-          ))
+          items.map(row)
         )}
       </section>
     );
@@ -1367,6 +1380,10 @@ export function Sidebar({
                     item={drag.kind === "item" ? drag.item : looseByKey.get(drag.key)!}
                     agents={agents}
                     compact={folded}
+                    lead={
+                      drag.kind === "item" &&
+                      groups.some((g) => groupLead(g) === drag.item.id)
+                    }
                     ghost
                   />
                 )}
@@ -1651,6 +1668,7 @@ function ItemRow({
   ghost,
   renaming,
   represents = [],
+  lead = false,
   onSelect,
   onContextMenu,
   onPointerDown,
@@ -1662,6 +1680,8 @@ function ItemRow({
   agents: AgentInfo[];
   /** Routers this local bot stands in for. */
   represents?: string[];
+  /** Leads its sidebar group: a star on the face. */
+  lead?: boolean;
   /** The folded rail: the face alone, the name on hover. */
   compact?: boolean;
   active?: boolean;
@@ -1692,6 +1712,8 @@ function ItemRow({
   const remote = !!a?.remote;
   const online = isOnline(a);
   const watches = watchCount(a);
+  // The star takes the corner the exited dot uses, and greys out for it.
+  const exited = a?.status === "exited";
   const face = (
     <Avatar
       id={item.id}
@@ -1699,10 +1721,19 @@ function ItemRow({
       src={a?.avatar}
       shape={a?.avatar_shape}
       color={a?.avatar_color}
-      badge={a?.status || undefined}
+      badge={(lead && exited ? undefined : a?.status) || undefined}
       status={a?.status}
       overlay={
-        remote ? <span className={"badge remote-dot" + (online ? " is-on" : "")} /> : null
+        remote ? (
+          <span className={"badge remote-dot" + (online ? " is-on" : "")} />
+        ) : lead ? (
+          <span
+            className={"lead-star" + (exited ? " is-exited" : "")}
+            title={t("sidebar.groupLead")}
+          >
+            <Star size={9} strokeWidth={2.5} />
+          </span>
+        ) : null
       }
     />
   );
@@ -1780,6 +1811,7 @@ function ItemRow({
   const label =
     (item.ordinal ? `${item.name} #${item.ordinal}` : item.name) +
     (remote ? ` · ${online ? t("sidebar.online") : t("sidebar.offline")}` : "") +
+    (lead ? ` · ${t("sidebar.groupLead")}` : "") +
     (repLabel ? ` · ${repLabel}` : "") +
     (watches ? ` · ${t("sidebar.watchCount", { count: watches })}` : "") +
     (drafting ? ` · ${t("sidebar.draft")}` : "");

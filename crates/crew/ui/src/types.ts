@@ -15,6 +15,9 @@ export type Group = {
   items: string[];
   /** Working folder for the group's bots. A group need not have one. */
   path?: string;
+  /** The bot id that leads the group: still shown while it is collapsed.
+      Not a router representative. */
+  lead?: string;
 };
 export type CliKind =
   | "grok"
