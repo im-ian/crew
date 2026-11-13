@@ -7,6 +7,21 @@ export function isWatching(agent: AgentInfo | null | undefined): boolean {
 }
 
 /**
+ * The face and the header say "watching". A remote bot's list is not ours to
+ * show, and blocked or exited keep their own word: those are what the user
+ * has to act on.
+ */
+export function showsWatch(agent: AgentInfo | null | undefined): boolean {
+  if (!agent || agent.remote || !isWatching(agent)) return false;
+  return agent.status !== "blocked" && agent.status !== "exited";
+}
+
+/** How many background tasks the name shows, 0 when the face shows none. */
+export function watchCount(agent: AgentInfo | null | undefined): number {
+  return showsWatch(agent) ? (agent?.watch?.length ?? 0) : 0;
+}
+
+/**
  * The turn that owns this watch is still running, so a send waits for it.
  * An idle bot with a watch is a resident CLI: the next message goes now.
  */
