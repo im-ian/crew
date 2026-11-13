@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { translate, type TFn } from "./i18n";
-import { cliFromCmd, formatCmd, modelLine, modelRows, pinnedDefault } from "./options";
+import { cliFromCmd, formatCmd, headerModelLine, modelLine, modelRows, pinnedDefault } from "./options";
+import type { Group } from "./types";
 
 const t: TFn = (key, vars) => translate("ko", key, vars);
 
@@ -64,6 +65,53 @@ describe("modelLine", () => {
     expect(
       modelLine({ cmd: ["my-ai", "--print"], headless: true, model: "", effort: "" }, null, t),
     ).toBe("명령 · my-ai");
+  });
+
+  it("puts a group mark on the model, and leaves the line alone when the mark is blank", () => {
+    expect(modelLine({ cmd: ["gemini"], model: "flash", effort: "" }, null, t, "#Crew")).toBe(
+      "Gemini · flash #Crew",
+    );
+    expect(modelLine({ cmd: ["claude"], model: "opus", effort: "high" }, null, t, "  ")).toBe(
+      "Claude · opus · 생각 꼼꼼하게",
+    );
+  });
+});
+
+describe("headerModelLine", () => {
+  const agent = { id: "dev", cmd: ["claude"], model: "opus", effort: "high" };
+  const crew: Group[] = [
+    { id: "g1", name: "Crew", collapsed: false, items: ["agent:dev"] },
+  ];
+
+  it("puts #group right after the model name", () => {
+    expect(headerModelLine(agent, crew, null, t)).toBe("Claude · opus #Crew · 생각 꼼꼼하게");
+  });
+
+  it("follows a rename and a move, and adds nothing for a loose bot", () => {
+    expect(headerModelLine(agent, [{ ...crew[0], name: "디자인" }], null, t)).toBe(
+      "Claude · opus #디자인 · 생각 꼼꼼하게",
+    );
+    const moved: Group[] = [
+      { ...crew[0], items: [] },
+      { id: "g2", name: "서버", collapsed: false, items: ["agent:dev"] },
+    ];
+    expect(headerModelLine(agent, moved, null, t)).toBe("Claude · opus #서버 · 생각 꼼꼼하게");
+    expect(headerModelLine(agent, [], null, t)).toBe("Claude · opus · 생각 꼼꼼하게");
+    expect(headerModelLine({ ...agent, id: "solo" }, crew, null, t)).toBe(
+      "Claude · opus · 생각 꼼꼼하게",
+    );
+  });
+
+  it("shows only the group when the bot has no model line", () => {
+    expect(
+      headerModelLine({ id: "dev", cmd: ["python"], model: null, effort: null }, crew, null, t),
+    ).toBe("#Crew");
+  });
+
+  it("ignores a blank group name", () => {
+    expect(headerModelLine(agent, [{ ...crew[0], name: "  " }], null, t)).toBe(
+      "Claude · opus · 생각 꼼꼼하게",
+    );
   });
 });
 

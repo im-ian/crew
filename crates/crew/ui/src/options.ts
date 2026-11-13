@@ -1,6 +1,7 @@
+import { headerGroupMark } from "./botLabel";
 import type { TFn } from "./i18n";
 import type { MessageKey } from "./locales";
-import type { CliKind, ModelList } from "./types";
+import type { CliKind, Group, ModelList } from "./types";
 
 export const CLIS: { value: CliKind; label: string; effort: boolean }[] = [
   { value: "grok", label: "Grok", effort: true },
@@ -92,29 +93,45 @@ const EFFORT_LABEL: Record<string, MessageKey> = {
   high: "effort.high",
 };
 
+type ModelAgent = {
+  cmd?: string[] | null;
+  model?: string | null;
+  effort?: string | null;
+  headless?: boolean;
+};
+
 // An empty model is the CLI default; pass that id when the list has reported it.
+// `groupMark` (`#name`) sits against the model. Blank means the bot is in no group.
 export function modelLine(
-  agent: {
-    cmd?: string[] | null;
-    model?: string | null;
-    effort?: string | null;
-    headless?: boolean;
-  },
+  agent: ModelAgent,
+  defaultModel: string | null | undefined,
+  t: TFn,
+  groupMark?: string | null,
+): string | null {
+  const cli = cliFromCmd(agent.cmd, agent.headless);
+  const mark = groupMark?.trim() ?? "";
+  if (!cli) return mark || null;
+  const spec = CLIS.find((c) => c.value === cli);
+  const name = cliLabel(cli, t);
+  const tagged = (model: string) => (mark ? `${model} ${mark}` : model);
+  if (cli === "custom") {
+    const bin = agent.cmd?.[0]?.split(/[\\/]/).pop() || name;
+    return `${name} · ${tagged(bin)}`;
+  }
+  const model = agent.model?.trim() || defaultModel?.trim() || t("model.default");
+  if (!spec?.effort) return `${name} · ${tagged(model)}`;
+  const effort = t(EFFORT_LABEL[agent.effort?.trim() || ""] ?? "effort.default");
+  return `${name} · ${tagged(model)} · ${t("field.effort")} ${effort}`;
+}
+
+/** Model line for the open chat. The mark comes from the folders passed in, so a rename or a move changes it. */
+export function headerModelLine(
+  agent: ModelAgent & { id: string },
+  groups: readonly Group[],
   defaultModel: string | null | undefined,
   t: TFn,
 ): string | null {
-  const cli = cliFromCmd(agent.cmd, agent.headless);
-  if (!cli) return null;
-  const spec = CLIS.find((c) => c.value === cli);
-  const name = cliLabel(cli, t);
-  if (cli === "custom") {
-    const bin = agent.cmd?.[0]?.split(/[\\/]/).pop() || name;
-    return `${name} · ${bin}`;
-  }
-  const model = agent.model?.trim() || defaultModel?.trim() || t("model.default");
-  if (!spec?.effort) return `${name} · ${model}`;
-  const effort = t(EFFORT_LABEL[agent.effort?.trim() || ""] ?? "effort.default");
-  return `${name} · ${model} · ${t("field.effort")} ${effort}`;
+  return modelLine(agent, defaultModel, t, headerGroupMark(groups, agent.id));
 }
 
 // Undefined: the CLI is missing, so ask again later. Null: it is installed and

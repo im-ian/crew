@@ -478,6 +478,7 @@ export function App() {
         />
         <ChatHeader
           currentAgent={crew.currentAgent}
+          groups={crew.groups}
           onOpenInfo={() => {
             if (crew.selected) crew.openInfo(crew.selected);
           }}
