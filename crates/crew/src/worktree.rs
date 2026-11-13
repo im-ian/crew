@@ -13,6 +13,13 @@ use crate::paths;
 /// Held across prepare so two bots cannot `git worktree add` the same repo at once.
 static PREPARE: Mutex<()> = Mutex::new(());
 
+/// A bot in `dir` edits a worktree of its own: worktrees are on and `dir` is
+/// in a git repository with a commit to branch from.
+pub fn isolates(dir: &Path) -> bool {
+    // Fails outside a repository too, so one call answers both.
+    paths::worktrees_enabled() && run_git(dir, &["rev-parse", "--verify", "-q", "HEAD"]).status
+}
+
 /// Where this turn actually runs, and the shared checkout when that place is a worktree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Isolated {
@@ -252,6 +259,31 @@ mod tests {
             dir.display(),
             String::from_utf8_lossy(&out.stderr)
         );
+    }
+
+    /// A clone shares its source's folder only where it gets a worktree.
+    #[test]
+    fn only_a_repository_with_worktrees_on_isolates() {
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        paths::testing::with_home("wt-isolates", || {
+            let repo = paths::home_dir().join("repo");
+            let plain = paths::home_dir().join("plain");
+            std::fs::create_dir_all(&repo).unwrap();
+            std::fs::create_dir_all(&plain).unwrap();
+            git(&repo, &["init", "-b", "main"]);
+            paths::write_worktrees_enabled(true);
+            // No commit yet: `git worktree add` has nothing to branch from.
+            assert!(!isolates(&repo));
+            std::fs::write(repo.join("readme.txt"), "hello\n").unwrap();
+            git(&repo, &["add", "readme.txt"]);
+            git(&repo, &["commit", "-m", "init"]);
+            assert!(isolates(&repo));
+            assert!(!isolates(&plain));
+            paths::write_worktrees_enabled(false);
+            assert!(!isolates(&repo));
+        });
     }
 
     #[test]

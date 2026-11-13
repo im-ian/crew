@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use clap::ValueEnum;
@@ -517,8 +517,11 @@ pub fn find_routine_index(routines: &[Routine], key: &str) -> Option<usize> {
         })
 }
 
+/// Where a bot with no folder of its own runs.
+const DEMO_ROOT: &str = "/tmp/crew-demo";
+
 pub fn default_add_cwd(id: &str) -> String {
-    format!("/tmp/crew-demo/{id}")
+    format!("{DEMO_ROOT}/{id}")
 }
 
 /// Display name for a cloned bot. `--name` wins; otherwise append " 복사본".
@@ -718,7 +721,7 @@ impl Config {
     pub fn default_cwd(agent: &AgentConfig) -> PathBuf {
         match &agent.cwd {
             Some(cwd) if !cwd.is_empty() => paths::expand_tilde(cwd),
-            _ => PathBuf::from("/tmp/crew-demo"),
+            _ => PathBuf::from(DEMO_ROOT),
         }
     }
 }
@@ -753,16 +756,22 @@ impl AgentConfig {
 
     /// Same bot, new session: fresh id / cwd / routine ids. Avatar path is
     /// left empty — caller copies bytes via `avatar::copy_for`. Shape and
-    /// color copy with the rest of the identity.
+    /// color copy with the rest of the identity. The clone opens in this
+    /// bot's folder when `isolates` says each bot there edits a worktree of
+    /// its own (see `clone_folder`), and in a demo folder of its own otherwise.
     pub fn duplicate<S: AsRef<str>>(
         &self,
         given_name: Option<&str>,
         existing_ids: impl IntoIterator<Item = S>,
+        isolates: impl Fn(&Path) -> bool,
     ) -> Self {
         let name = clone_agent_name(&self.name, given_name);
         let id = unique_agent_id(&name, existing_ids);
+        let cwd = self
+            .clone_folder(isolates)
+            .unwrap_or_else(|| default_add_cwd(&id));
         Self {
-            cwd: Some(default_add_cwd(&id)),
+            cwd: Some(cwd),
             id,
             name,
             cmd: self.cmd.clone(),
@@ -786,6 +795,19 @@ impl AgentConfig {
                 })
                 .collect(),
         }
+    }
+
+    /// This bot's folder, for a clone to share: only where `isolates` says
+    /// each bot there edits a worktree of its own, so the two never edit one
+    /// checkout. A demo folder is nobody's to share, however it is written.
+    fn clone_folder(&self, isolates: impl Fn(&Path) -> bool) -> Option<String> {
+        let dir = Config::default_cwd(self);
+        // macOS keeps /tmp at /private/tmp, so a resolved path reads that way.
+        let under = |root: &str| dir.starts_with(root);
+        if under(DEMO_ROOT) || under(&format!("/private{DEMO_ROOT}")) || !isolates(&dir) {
+            return None;
+        }
+        self.cwd.clone()
     }
 
     pub fn binary_name(&self) -> String {
@@ -3159,7 +3181,7 @@ mod tests {
         src.routines
             .push(Routine::new("ping".into(), "0 9 * * *".into(), "hi".into()).unwrap());
         let rid = src.routines[0].id.clone();
-        let dup = src.duplicate(None, ["grok"]);
+        let dup = src.duplicate(None, ["grok"], |_| false);
         // The clone is a new bot, so it gets a minted id, not the next suffix.
         assert!(dup.id.starts_with("grok-"), "{}", dup.id);
         assert_ne!(dup.id, "grok");
@@ -3186,10 +3208,40 @@ mod tests {
         assert_eq!(dup.avatar_color.as_deref(), Some("#ff6a00"));
         // Same display name as the source is allowed; the id is still its own.
         // `clone_agent` passes the live roster, so the first clone is in it.
-        let named = src.duplicate(Some("Grok"), ["grok", dup.id.as_str()]);
+        let named = src.duplicate(Some("Grok"), ["grok", dup.id.as_str()], |_| false);
         assert_ne!(named.id, "grok");
         assert_ne!(named.id, dup.id);
         assert_eq!(named.name, "Grok");
+    }
+
+    /// A clone shares its source's folder only where it gets a worktree there.
+    /// A demo folder is never shared, however it is written.
+    #[test]
+    fn a_clone_shares_a_folder_only_with_a_worktree() {
+        let mut src = AgentConfig::new(
+            "grok".into(),
+            "Grok".into(),
+            vec!["grok".into()],
+            Some("/Users/me/work-hub".into()),
+        );
+        let shared = src.duplicate(None, ["grok"], |_| true);
+        assert_eq!(shared.cwd.as_deref(), Some("/Users/me/work-hub"));
+        let apart = src.duplicate(None, ["grok"], |_| false);
+        assert!(apart.cwd.as_deref().unwrap().ends_with(&apart.id));
+        for cwd in [
+            "/tmp/crew-demo/grok",
+            "/tmp/crew-demo",
+            "/tmp/crew-demo/other/",
+            "/private/tmp/crew-demo/grok",
+            "",
+        ] {
+            src.cwd = Some(cwd.into());
+            let dup = src.duplicate(None, ["grok"], |_| true);
+            assert!(dup.cwd.as_deref().unwrap().ends_with(&dup.id), "{cwd}");
+        }
+        src.cwd = None;
+        let dup = src.duplicate(None, ["grok"], |_| true);
+        assert!(dup.cwd.as_deref().unwrap().ends_with(&dup.id));
     }
 
     #[test]
