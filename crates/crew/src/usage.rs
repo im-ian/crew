@@ -133,10 +133,42 @@ fn claude_store() -> PathBuf {
     crate::paths::home_dir().join("plan-usage-claude.json")
 }
 
-/// A Claude stream line. A `rate_limit_event` replaces what was kept.
+/// When a plan reading shows a window used up that has not started over yet:
+/// the latest such reset. Only what is cheap to read before a turn: Claude's
+/// last event, Grok's kept reading, Codex's session files. Antigravity keeps
+/// a pool per model family, so one full pool says nothing of this bot's.
+pub fn full_until(cli: &str, now: i64) -> Option<i64> {
+    let usage = match cli {
+        "claude" => claude_usage(),
+        "grok" => read_grok_kept().map(|k| k.usage),
+        "codex" => codex_usage(),
+        _ => None,
+    }?;
+    used_up_until(&usage, now)
+}
+
+fn used_up_until(usage: &PlanUsage, now: i64) -> Option<i64> {
+    usage
+        .windows
+        .iter()
+        .filter(|w| w.used_percent >= 100.0)
+        .filter_map(|w| w.resets_at)
+        .filter(|&t| t > now)
+        .max()
+}
+
+/// A Claude stream line. A `rate_limit_event` replaces what was kept, and
+/// one that turned the request away puts Claude aside until it resets.
 pub fn note_claude_event(v: &Value) {
     if v.get("type").and_then(Value::as_str) != Some("rate_limit_event") {
         return;
+    }
+    if v.pointer("/rate_limit_info/status").and_then(Value::as_str) == Some("rejected") {
+        let reset = v
+            .pointer("/rate_limit_info/resetsAt")
+            .and_then(Value::as_i64)
+            .or_else(|| parse_claude_event(v, now()).and_then(|u| used_up_until(&u, now())));
+        crate::fallback::note_limited("claude", reset);
     }
     let Some(usage) = parse_claude_event(v, now()) else {
         return;
@@ -842,5 +874,15 @@ mod tests {
             std::env::remove_var("GROK_HOME");
             assert!(out.is_empty(), "{out:?}");
         });
+    }
+
+    #[test]
+    fn a_used_up_window_holds_until_its_reset() {
+        let v = json!({"type": "rate_limit_event", "rate_limit_info": {"unifiedWindows": {
+            "five_hour": {"utilization": 1.0, "resetsAt": 5000},
+            "seven_day": {"utilization": 0.5, "resetsAt": 9000}}}});
+        let u = parse_claude_event(&v, 100).unwrap();
+        assert_eq!(used_up_until(&u, 100), Some(5000));
+        assert_eq!(used_up_until(&u, 6000), None);
     }
 }

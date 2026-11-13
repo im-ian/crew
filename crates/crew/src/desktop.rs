@@ -50,6 +50,18 @@ fn list_models(cli: String) -> Result<crate::models::ModelList, String> {
     crate::models::list_models(cli).map_err(|e| e.to_string())
 }
 
+/// The default AI and the ones a turn falls back to, in order. None until
+/// the window first saves it, so the old single default can move in.
+#[tauri::command]
+fn get_fallback_ais() -> Option<Vec<crate::fallback::Candidate>> {
+    crate::fallback::load()
+}
+
+#[tauri::command]
+fn set_fallback_ais(list: Vec<crate::fallback::Candidate>) -> Result<(), String> {
+    crate::fallback::save(&list).map_err(|e| e.to_string())
+}
+
 #[tauri::command(async)]
 fn list_agents() -> Result<Vec<AgentInfo>, String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
@@ -1087,6 +1099,8 @@ pub fn run() -> anyhow::Result<()> {
             set_groups,
             plan_usage,
             list_models,
+            get_fallback_ais,
+            set_fallback_ais,
             search_crew,
             list_skills,
             lookup_skill,

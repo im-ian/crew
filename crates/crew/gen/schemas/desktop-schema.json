@@ -237,6 +237,12 @@
           "markdownDescription": "Enables the edit_routine command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_fallback_ais command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-fallback-ais",
+          "markdownDescription": "Enables the get_fallback_ais command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_group_memory command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-group-memory",
@@ -453,6 +459,12 @@
           "markdownDescription": "Enables the set_escape_layer command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_fallback_ais command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-fallback-ais",
+          "markdownDescription": "Enables the set_fallback_ais command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_group_memory command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-group-memory",
@@ -577,6 +589,12 @@
           "type": "string",
           "const": "deny-edit-routine",
           "markdownDescription": "Denies the edit_routine command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_fallback_ais command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-fallback-ais",
+          "markdownDescription": "Denies the get_fallback_ais command without any pre-configured scope."
         },
         {
           "description": "Denies the get_group_memory command without any pre-configured scope.",
@@ -793,6 +811,12 @@
           "type": "string",
           "const": "deny-set-escape-layer",
           "markdownDescription": "Denies the set_escape_layer command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_fallback_ais command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-fallback-ais",
+          "markdownDescription": "Denies the set_fallback_ais command without any pre-configured scope."
         },
         {
           "description": "Denies the set_group_memory command without any pre-configured scope.",

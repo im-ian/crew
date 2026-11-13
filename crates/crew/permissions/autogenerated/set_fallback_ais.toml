@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-fallback-ais"
+description = "Enables the set_fallback_ais command without any pre-configured scope."
+commands.allow = ["set_fallback_ais"]
+
+[[permission]]
+identifier = "deny-set-fallback-ais"
+description = "Denies the set_fallback_ais command without any pre-configured scope."
+commands.deny = ["set_fallback_ais"]

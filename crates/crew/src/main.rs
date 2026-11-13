@@ -9,6 +9,7 @@ mod cron;
 mod daemon;
 mod desktop;
 mod escape_layer;
+mod fallback;
 mod files;
 mod groups;
 mod headless;

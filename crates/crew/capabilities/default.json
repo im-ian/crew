@@ -46,6 +46,8 @@
     "allow-set-groups",
     "allow-plan-usage",
     "allow-list-models",
+    "allow-get-fallback-ais",
+    "allow-set-fallback-ais",
     "allow-search-crew",
     "allow-list-skills",
     "allow-lookup-skill",

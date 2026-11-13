@@ -62,7 +62,7 @@ pub fn next_after(expr: &str, after: libc::time_t) -> anyhow::Result<Option<Loca
     Ok(None)
 }
 
-fn local_at(t: libc::time_t) -> anyhow::Result<LocalTime> {
+pub(crate) fn local_at(t: libc::time_t) -> anyhow::Result<LocalTime> {
     unsafe {
         let mut tm: libc::tm = std::mem::zeroed();
         if libc::localtime_r(&t, &mut tm).is_null() {
