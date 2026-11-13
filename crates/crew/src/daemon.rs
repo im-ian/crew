@@ -4020,10 +4020,11 @@ fn clone_agent(src_id: &str, name: Option<String>) -> anyhow::Result<String> {
     let src = clone_agent_cfg(src_id)?;
     let source_name = src.display_name().to_string();
     let existing: Vec<String> = roster_vec().into_iter().map(|a| a.id).collect();
-    let mut cfg = src.duplicate(name.as_deref(), existing.iter().map(|s| s.as_str()));
-    if let Some(dir) = src.clone_folder(crate::worktree::isolates) {
-        cfg.cwd = Some(dir);
-    }
+    let mut cfg = src.duplicate(
+        name.as_deref(),
+        existing.iter().map(|s| s.as_str()),
+        crate::worktree::isolates,
+    );
     cfg.avatar = crate::avatar::copy_for(src.avatar.as_deref(), &cfg.id);
     crate::memory::copy(src_id, &cfg.id)?;
     let new_id = cfg.id.clone();

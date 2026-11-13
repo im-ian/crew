@@ -14,9 +14,11 @@ use crate::paths;
 static PREPARE: Mutex<()> = Mutex::new(());
 
 /// A bot in `dir` edits a worktree of its own: worktrees are on and `dir` is
-/// in a git repository.
+/// in a git repository with a commit to branch from.
 pub fn isolates(dir: &Path) -> bool {
-    paths::worktrees_enabled() && git_toplevel(dir).ok().flatten().is_some()
+    paths::worktrees_enabled()
+        && git_toplevel(dir).ok().flatten().is_some()
+        && run_git(dir, &["rev-parse", "--verify", "-q", "HEAD"]).status
 }
 
 /// Where this turn actually runs, and the shared checkout when that place is a worktree.
@@ -272,11 +274,16 @@ mod tests {
             std::fs::create_dir_all(&repo).unwrap();
             std::fs::create_dir_all(&plain).unwrap();
             git(&repo, &["init", "-b", "main"]);
-            paths::write_worktrees_enabled(false);
-            assert!(!isolates(&repo));
             paths::write_worktrees_enabled(true);
+            // No commit yet: `git worktree add` has nothing to branch from.
+            assert!(!isolates(&repo));
+            std::fs::write(repo.join("readme.txt"), "hello\n").unwrap();
+            git(&repo, &["add", "readme.txt"]);
+            git(&repo, &["commit", "-m", "init"]);
             assert!(isolates(&repo));
             assert!(!isolates(&plain));
+            paths::write_worktrees_enabled(false);
+            assert!(!isolates(&repo));
         });
     }
 
