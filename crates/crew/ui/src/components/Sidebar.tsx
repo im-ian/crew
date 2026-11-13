@@ -1731,7 +1731,7 @@ function ItemRow({
             className={"lead-star" + (exited ? " is-exited" : "")}
             title={t("sidebar.groupLead")}
           >
-            <Star size={9} strokeWidth={2.5} />
+            <Star size={14} strokeWidth={5} />
           </span>
         ) : null
       }

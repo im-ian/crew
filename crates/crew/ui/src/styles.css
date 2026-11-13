@@ -25,7 +25,6 @@
   --blocked: #ff453a;
   --exited: #636366;
   --lead: #ffd60a;
-  --lead-ink: #3a2e00;
   --on-ink: #fff;
   --link: #8bb8ff;
   --link-me: #c5d8f5;
@@ -146,8 +145,7 @@ html[data-theme="light"] {
   --working: #0071e3;
   --blocked: #d70015;
   --exited: #8e8e93;
-  --lead: #e0a800;
-  --lead-ink: #fff;
+  --lead: #f0b400;
   --on-ink: #fff;
   --link: #0066cc;
   --link-me: #0b4aa2;
@@ -1670,24 +1668,26 @@ button.avatar {
    .rep-mark, the router representative's tag beside the name. */
 .lead-star {
   position: absolute;
-  right: -2px;
-  bottom: -2px;
+  right: -3px;
+  bottom: -3px;
   /* Over the working props (4): the lead is still the lead at work. */
   z-index: 5;
-  display: grid;
-  place-items: center;
+  display: block;
   width: 14px;
   height: 14px;
-  border-radius: 50%;
-  background: var(--lead);
-  color: var(--lead-ink);
-  border: 2px solid var(--rail);
-  box-sizing: border-box;
+  color: var(--lead);
+  line-height: 0;
 }
-.lead-star svg { fill: currentColor; }
-.lead-star.is-exited { background: var(--exited); }
-.rail-row.active .lead-star { border-color: var(--active); }
-.rail-row:hover .lead-star { border-color: var(--hover); }
+/* No disc behind it: a ring in the rail's colour sets the star off the face,
+   the way the status dot's border does. */
+.lead-star svg {
+  fill: currentColor;
+  stroke: var(--rail);
+  paint-order: stroke;
+}
+.lead-star.is-exited { color: var(--exited); }
+.rail-row.active .lead-star svg { stroke: var(--active); }
+.rail-row:hover .lead-star svg { stroke: var(--hover); }
 /* A teammate's PC: green while it is on the router, grey while it is away. */
 .badge.remote-dot { background: var(--exited); }
 .badge.remote-dot.is-on { background: var(--idle); }
