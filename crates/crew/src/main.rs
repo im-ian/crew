@@ -1020,6 +1020,9 @@ fn ask_questions(m: &ArgMatches) -> anyhow::Result<Vec<AskQuestion>> {
         .cloned()
         .collect();
     let multi = take_late_multi(&mut rest);
+    if let Some(flag) = rest.iter().find(|a| looks_like_flag(a)) {
+        anyhow::bail!("{}", stray_ask_flag(flag));
+    }
     if !rest.is_empty() || multi {
         if asks.is_empty() {
             asks.push(AskQuestion::default());
@@ -1047,6 +1050,32 @@ fn take_late_multi(rest: &mut Vec<String>) -> bool {
     let before = rest.len();
     rest.retain(|a| a != "--multi");
     rest.len() != before
+}
+
+/// clap hands `crew ask` any flag it does not know as one more plain
+/// argument, and the older form would have shown it as an option on the card
+/// (`--timeout 600` became options "--timeout" and "600"). A negative number
+/// such as `-1` is still a plain option.
+fn looks_like_flag(arg: &str) -> bool {
+    match arg.strip_prefix('-') {
+        Some(after) => after
+            .trim_start_matches('-')
+            .starts_with(|c: char| c.is_ascii_alphabetic()),
+        None => false,
+    }
+}
+
+fn stray_ask_flag(arg: &str) -> String {
+    let flag = arg.split('=').next().unwrap_or(arg);
+    match flag {
+        "-q" | "--question" | "-o" | "--option" | "-i" | "--input" | "--hint" => format!(
+            "crew ask: {flag} came after a plain argument; pass the question with --question too"
+        ),
+        _ if flag.contains("timeout") || flag.contains("time-limit") => {
+            format!("crew ask has no {flag} flag; set the time limit on your shell tool instead")
+        }
+        _ => format!("crew ask has no {flag} flag"),
+    }
 }
 
 fn run_tell(to: String, from: Option<String>, message: Vec<String>) -> anyhow::Result<()> {
@@ -1455,6 +1484,55 @@ mod tests {
 
         assert!(asks(&["crew", "ask"]).is_err());
         assert!(asks(&["crew", "ask", "-o", "A", "-o", "B"]).is_err());
+    }
+
+    #[test]
+    fn ask_refuses_a_flag_it_does_not_know() {
+        let err = asks(&[
+            "crew",
+            "ask",
+            "-q",
+            "어느 쪽?",
+            "-o",
+            "A",
+            "-o",
+            "B",
+            "-o",
+            "C",
+            "--timeout",
+            "600",
+        ])
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            err,
+            "crew ask has no --timeout flag; set the time limit on your shell tool instead"
+        );
+
+        let err = asks(&["crew", "ask", "어느 쪽?", "A", "B", "--timeout=600"])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no --timeout flag"), "{err}");
+
+        let err = asks(&["crew", "ask", "-q", "어느 쪽?", "-o", "A", "--verbose"])
+            .unwrap_err()
+            .to_string();
+        assert_eq!(err, "crew ask has no --verbose flag");
+
+        let err = asks(&["crew", "ask", "어느 쪽?", "A", "-o", "B"])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("-o came after a plain argument"), "{err}");
+
+        // The older form keeps working, and a negative number is still an option.
+        let got = asks(&["crew", "ask", "얼마나 바꿀까?", "-1", "+1", "--multi"]).unwrap();
+        assert_eq!(
+            got,
+            vec![AskQuestion {
+                multi: true,
+                ..ask("얼마나 바꿀까?", &["-1", "+1"])
+            }]
+        );
     }
 
     #[test]
