@@ -864,9 +864,61 @@ fn set_dock_badge(app: tauri::AppHandle, count: i32) -> Result<(), String> {
 
 /// Mirror the UI language so daemon-side strings (notifications, CLI) match it.
 #[tauri::command]
-fn set_locale(locale: String) -> Result<(), String> {
+fn set_locale(app: tauri::AppHandle, locale: String) -> Result<(), String> {
     crate::paths::write_locale(&locale);
+    relabel_split_menu(&app);
     Ok(())
+}
+
+/// Window menu entries that split the chat. The window hears the id as a
+/// `split` event; the same keys work there without the menu.
+const SPLIT_MENU: [(&str, &str); 3] = [
+    ("split-row", "CmdOrCtrl+D"),
+    ("split-col", "CmdOrCtrl+Shift+D"),
+    ("split-close", ""),
+];
+
+fn split_menu_label(id: &str, en: bool) -> &'static str {
+    match (id, en) {
+        ("split-row", false) => "좌우로 나누기",
+        ("split-row", true) => "Split Left and Right",
+        ("split-col", false) => "위아래로 나누기",
+        ("split-col", true) => "Split Top and Bottom",
+        (_, false) => "분할 닫기",
+        (_, true) => "Close Split",
+    }
+}
+
+fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, WINDOW_SUBMENU_ID};
+    let menu = Menu::default(app)?;
+    let Some(window) = menu.get(WINDOW_SUBMENU_ID).and_then(|m| m.as_submenu().cloned()) else {
+        return Ok(menu);
+    };
+    let en = crate::paths::locale() == "en";
+    window.append(&PredefinedMenuItem::separator(app)?)?;
+    for (id, keys) in SPLIT_MENU {
+        let accel = (!keys.is_empty()).then_some(keys);
+        window.append(&MenuItem::with_id(app, id, split_menu_label(id, en), true, accel)?)?;
+    }
+    Ok(menu)
+}
+
+fn relabel_split_menu(app: &tauri::AppHandle) {
+    use tauri::menu::WINDOW_SUBMENU_ID;
+    let Some(window) = app
+        .menu()
+        .and_then(|m| m.get(WINDOW_SUBMENU_ID))
+        .and_then(|m| m.as_submenu().cloned())
+    else {
+        return;
+    };
+    let en = crate::paths::locale() == "en";
+    for (id, _) in SPLIT_MENU {
+        if let Some(item) = window.get(id).and_then(|m| m.as_menuitem().cloned()) {
+            let _ = item.set_text(split_menu_label(id, en));
+        }
+    }
 }
 
 /// Mirror the settings switch so alerts still respect it after the window closes.
@@ -1059,6 +1111,14 @@ pub fn run() -> anyhow::Result<()> {
             crate::ui_dev::attach(app)?;
             let _ = app;
             Ok(())
+        })
+        .menu(app_menu)
+        .on_menu_event(|app, event| {
+            use tauri::Emitter;
+            let id = event.id().as_ref();
+            if let Some(dir) = id.strip_prefix("split-") {
+                let _ = app.emit("split", dir);
+            }
         })
         .on_window_event(|_window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
