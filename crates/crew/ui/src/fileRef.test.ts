@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   codePathRef,
+  fileTarget,
+  workDir,
   fileRun,
   freshFileRow,
   opensInPanel,
@@ -10,7 +12,7 @@ import {
 } from "./fileRef";
 import { fileErrorKey, fileLines, splitFilePath } from "./components/FileView";
 import { threadRows } from "./tools";
-import type { ChatMessage } from "./types";
+import type { AgentInfo, ChatMessage } from "./types";
 
 const row = (id: string, kind?: ChatMessage["kind"], peer?: string): ChatMessage =>
   ({ id, role: "system", from: "dev", text: "/a/b.ts:3", ts: 0, kind, peer }) as ChatMessage;
@@ -111,5 +113,24 @@ describe("the file panel", () => {
     expect(fileErrorKey("folder: /x")).toBe("file.folder");
     expect(fileErrorKey("binary: /x")).toBe("file.binary");
     expect(fileErrorKey(new Error("boom"))).toBe("file.failed");
+  });
+});
+
+describe("a path the bot wrote", () => {
+  it("is read from the folder the bot works in, its worktree when it has one", () => {
+    const bot = { cwd: "/Users/me/crew", work_dir: "/wt/bot-a" } as AgentInfo;
+    expect(workDir(bot)).toBe("/wt/bot-a");
+    expect(workDir({ cwd: "/Users/me/crew" } as AgentInfo)).toBe("/Users/me/crew");
+  });
+
+  it("keeps how it was written, so the file can be looked for under that folder", () => {
+    expect(fileTarget({ path: "./watch-preview.html", line: 3 }, "/wt/bot-a")).toEqual({
+      path: "/wt/bot-a/watch-preview.html",
+      line: 3,
+      base: "/wt/bot-a",
+      rel: "watch-preview.html",
+    });
+    expect(fileTarget({ path: "/abs/a.ts" }, "/wt/bot-a")).toEqual({ path: "/abs/a.ts" });
+    expect(fileTarget({ path: "a.ts" })).toBeNull();
   });
 });

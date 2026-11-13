@@ -1,8 +1,12 @@
 import { createContext, useContext } from "react";
-import type { ChatMessage } from "./types";
+import type { AgentInfo, ChatMessage } from "./types";
 
-/** A file to show beside the chat, at a line when one was given. */
-export type FileTarget = { path: string; line?: number };
+/**
+ * A file to show beside the chat, at a line when one was given. A path the
+ * bot wrote relative keeps how it wrote it (`rel`) and the folder it works in
+ * (`base`), so the file can be looked for there when `path` is a wrong guess.
+ */
+export type FileTarget = { path: string; line?: number; base?: string; rel?: string };
 
 /** The panel beside the chat, as the thread sees it. */
 export type FileOpen = {
@@ -73,6 +77,19 @@ export function codePathRef(code: string): FileTarget | null {
   const pathy = path.includes("/") || line !== undefined;
   if (!pathy && !(ext && CODE_EXT.has(ext))) return null;
   return line === undefined ? { path } : { path, line };
+}
+
+/** The folder a bot works in, which its relative paths are read from. */
+export function workDir(agent: AgentInfo | null | undefined): string | undefined {
+  return agent?.work_dir || agent?.cwd || undefined;
+}
+
+/** `ref` as a file to open, a relative path read from the bot's folder. */
+export function fileTarget(ref: FileTarget, baseDir?: string): FileTarget | null {
+  const path = resolveFilePath(ref.path, baseDir);
+  if (!path) return null;
+  const relative = !ref.path.startsWith("/") && !ref.path.startsWith("~");
+  return relative && baseDir ? { ...ref, path, base: baseDir, rel: ref.path.replace(/^\.\//, "") } : { ...ref, path };
 }
 
 /** `path` against the bot's folder, or null when it is relative and there is none. */

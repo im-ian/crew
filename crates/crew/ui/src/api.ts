@@ -201,7 +201,8 @@ export const api = {
   peekPendingFocus: () => invoke<FocusTarget | null>("peek_pending_focus"),
   takePendingFocus: () => invoke<FocusTarget | null>("take_pending_focus"),
   openPath: (path: string) => invoke<void>("open_path", { path }),
-  readTextFile: (path: string) => invoke<TextFile>("read_text_file", { path }),
+  readTextFile: (path: string, near?: { base: string; rel: string }) =>
+    invoke<TextFile>("read_text_file", { path, base: near?.base ?? null, rel: near?.rel ?? null }),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
   setDockBadge: (count: number) => invoke<void>("set_dock_badge", { count }),
   setLocale: (locale: string) => invoke<void>("set_locale", { locale }),

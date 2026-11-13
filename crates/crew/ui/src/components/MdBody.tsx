@@ -29,7 +29,7 @@ import {
   codePathRef,
   opensInPanel,
   parseFileRef,
-  resolveFilePath,
+  fileTarget,
   useFileOpen,
   type FileTarget,
 } from "../fileRef";
@@ -363,7 +363,7 @@ function nodeToReact(
     }
     if (isLocalHref(href, baseDir)) {
       return (
-        <LocalLink key={key} href={href} title={title} path={resolveLocalPath(href, baseDir)}>
+        <LocalLink key={key} href={href} title={title} path={resolveLocalPath(href, baseDir)} baseDir={baseDir}>
           {kids}
         </LocalLink>
       );
@@ -398,8 +398,8 @@ function nodeToReact(
   if (tag === "CODE" && el.parentElement?.tagName !== "PRE") {
     const text = el.textContent || "";
     const ref = codePathRef(text);
-    const path = ref ? resolveFilePath(ref.path, baseDir) : null;
-    if (ref && path) return <PathCode key={key} text={text} target={{ ...ref, path }} />;
+    const target = ref ? fileTarget(ref, baseDir) : null;
+    if (target) return <PathCode key={key} text={text} target={target} />;
   }
   const cls = el.getAttribute("class");
   if (cls === "md-cmd") {
@@ -952,11 +952,13 @@ function LocalLink({
   href,
   title,
   path,
+  baseDir,
   children,
 }: {
   href: string;
   title?: string;
   path: string | null;
+  baseDir?: string;
   children: ReactNode;
 }) {
   const openFile = useFileOpen();
@@ -967,7 +969,9 @@ function LocalLink({
       onClick={(e) => {
         e.preventDefault();
         if (!path) return;
-        const target = parseFileRef(path);
+        // A relative link keeps how it was written, for the search under the bot's folder.
+        const written = parseFileRef(href.replace(/^file:\/\//, ""));
+        const target = fileTarget(written, baseDir) ?? parseFileRef(path);
         if (openFile && opensInPanel(target.path)) openFile.open(target);
         else void api.openPath(path);
       }}

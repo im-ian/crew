@@ -398,6 +398,10 @@ pub struct AgentInfo {
     /// as a CI watch. A message waits for it instead of stopping it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub watch: Vec<Watch>,
+    /// The folder the bot's CLI runs in: its own worktree when worktrees are
+    /// on, so not `cwd` then. A path the bot writes is read from here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_dir: Option<String>,
 }
 
 /// One task a bot left running after it answered.
