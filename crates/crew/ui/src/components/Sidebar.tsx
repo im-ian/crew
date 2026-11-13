@@ -21,7 +21,6 @@ import {
 } from "../groups";
 import type { AgentInfo, Group, Kind, RemoteInfo, SearchHit } from "../types";
 import { listStamp } from "../clock";
-import { NAME_CLICK_MS } from "../rename";
 import { mentionRuns, mentionText } from "../mentions";
 import { foldsAt, numberDuplicateNames, RAIL_FOLDED } from "../rail";
 import {
@@ -390,6 +389,9 @@ type Props = {
   onGroupMenu: (e: MouseEvent, id: string) => void;
   onGroupNewBot: (id: string) => void;
   onToggleGroup: (id: string) => void;
+  /** The group new bots go to with ⌘⇧N; a click anywhere in it but the chevron. */
+  focusedGroup?: string | null;
+  onFocusGroup?: (id: string) => void;
   onRenameGroup: (id: string, name: string) => void;
   onStartRenameGroup: (id: string) => void;
   onRenameAgent: (id: string, name: string) => void;
@@ -460,6 +462,8 @@ export function Sidebar({
   onGroupMenu,
   onGroupNewBot,
   onToggleGroup,
+  focusedGroup = null,
+  onFocusGroup,
   onRenameGroup,
   onStartRenameGroup,
   onRenameAgent,
@@ -1040,9 +1044,16 @@ export function Sidebar({
         }
         data-rail-group={group.id}
         data-rail-section={group.id}
+        onClickCapture={(e) => {
+          // The chevron only folds; anything else in the group focuses it.
+          if (didDrag.current) return;
+          if (e.target instanceof Element && e.target.closest(".group-toggle")) return;
+          onFocusGroup?.(group.id);
+        }}
       >
         <GroupHead
           group={group}
+          focused={focusedGroup === group.id}
           compact={folded}
           renaming={renamingId === group.id}
           searching={searching}
@@ -1398,6 +1409,7 @@ export function Sidebar({
 
 function GroupHead({
   group,
+  focused,
   compact,
   renaming,
   searching,
@@ -1412,6 +1424,7 @@ function GroupHead({
   onPointerDown,
 }: {
   group: Group;
+  focused?: boolean;
   /** The folded rail: the chevron alone, the name on hover. */
   compact?: boolean;
   renaming: boolean;
@@ -1427,44 +1440,13 @@ function GroupHead({
   onPointerDown?: (e: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
   const t = useT();
-  const clickTimer = useRef<number | null>(null);
-
-  useEffect(
-    () => () => {
-      if (clickTimer.current) window.clearTimeout(clickTimer.current);
-    },
-    [],
-  );
-
-  function onNameClick(e: MouseEvent) {
-    if (e.detail > 1) {
-      if (clickTimer.current) {
-        window.clearTimeout(clickTimer.current);
-        clickTimer.current = null;
-      }
-      return;
-    }
-    if (clickTimer.current) window.clearTimeout(clickTimer.current);
-    clickTimer.current = window.setTimeout(() => {
-      clickTimer.current = null;
-      onToggle();
-    }, NAME_CLICK_MS);
-  }
-
-  function onNameDoubleClick(e: MouseEvent) {
-    e.preventDefault();
-    if (clickTimer.current) {
-      window.clearTimeout(clickTimer.current);
-      clickTimer.current = null;
-    }
-    onStartRename();
-  }
 
   return (
     <div
       className={
         "group-head" +
         (!searching && group.collapsed ? " collapsed" : "") +
+        (focused ? " focused" : "") +
         (dropInto ? " drop-into" : "") +
         (compact ? " compact" : "")
       }
@@ -1505,8 +1487,10 @@ function GroupHead({
           <button
             type="button"
             className="group-name"
-            onClick={onNameClick}
-            onDoubleClick={onNameDoubleClick}
+            onDoubleClick={(e) => {
+              e.preventDefault();
+              onStartRename();
+            }}
           >
             <span className="group-name-text">{group.name}</span>
           </button>

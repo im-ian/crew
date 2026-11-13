@@ -233,6 +233,20 @@ export function groupIdOf(groups: Group[], kind: Kind, id: string): string | nul
   return found ? found.id : null;
 }
 
+/**
+ * The focused group: where ⌘⇧N puts a new bot. A click on a group's head pins
+ * it; otherwise it is the group of the open chat, and none for a loose bot.
+ */
+export function focusedGroupId(
+  groups: Group[],
+  pinned: string | null,
+  kind: Kind,
+  id: string | null,
+): string | null {
+  if (pinned && groups.some((g) => g.id === pinned)) return pinned;
+  return id ? groupIdOf(groups, kind, id) : null;
+}
+
 export function pruneLayout(layout: RailLayout, agents: AgentInfo[]): RailLayout {
   const valid = validKeys(agents);
   const groups = layout.groups
