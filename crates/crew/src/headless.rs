@@ -578,9 +578,45 @@ fn give_back_if_unheard(session: Arc<HeadlessSession>, generation: u64) {
     }
 }
 
-/// Forget a session opened in another folder, like a hung one. A recap still
-/// waiting (a CLI switch whose first turn failed) is kept: it was written for
-/// this bot's move and holds more than the chat here would.
+/// The CLI could not open the session this turn resumed. The turn gives its
+/// prompt back the way a hung resume does: the session is dropped and the
+/// prompt goes again, once, on a new one that reads the chat so far. The CLI's
+/// only output was its error, so the prompt counts as unheard. False when a
+/// stop or the silence watch took the turn first.
+fn give_back_lost(session: &Arc<HeadlessSession>, generation: u64) -> bool {
+    {
+        let Ok(mut inner) = session.inner.lock() else {
+            return false;
+        };
+        if inner.generation != generation {
+            return false;
+        }
+        match inner.in_flight.as_mut() {
+            Some(flight) => flight.got_output = false,
+            None => return false,
+        }
+    }
+    let Some(pulled) = pull_turn(session, Some(generation), false) else {
+        return false;
+    };
+    if let Some(flight) = pulled.unheard {
+        drop_moved_session(session, &flight.msg_ids);
+        crate::daemon::retry_lost_session(&session.id, flight);
+    }
+    if let Some(mut child) = pulled.child {
+        kill_all(&mut child);
+    }
+    if pulled.live.is_some() {
+        live::close(session);
+    }
+    crate::daemon::resend_unheard(&session.id);
+    true
+}
+
+/// Forget a session the next turn cannot use: it was opened in another
+/// folder, or the CLI could not open it. A recap still waiting (a CLI switch
+/// whose first turn failed) is kept: it was written for this bot's move and
+/// holds more than the chat here would.
 fn drop_moved_session(session: &HeadlessSession, msg_ids: &[String]) {
     if load_recap(&session.id).is_some() {
         if let Ok(mut inner) = session.inner.lock() {
@@ -589,14 +625,6 @@ fn drop_moved_session(session: &HeadlessSession, msg_ids: &[String]) {
         clear_session(&session.id);
     } else {
         drop_stuck_session(session, msg_ids);
-    }
-}
-
-fn lost_session_line() -> &'static str {
-    if paths::locale() == "en" {
-        "The CLI could not open its last session. Sending again in a new one."
-    } else {
-        "CLI가 이전 세션을 열지 못해 새 세션으로 다시 보냅니다"
     }
 }
 
@@ -832,41 +860,6 @@ fn run_turn(
             return;
         }
     }
-    let again = turn_once(
-        session.clone(),
-        cfg.clone(),
-        roster.clone(),
-        prompt.clone(),
-        generation,
-        skip_rows.clone(),
-        true,
-    );
-    if again {
-        turn_once(
-            session.clone(),
-            cfg,
-            roster,
-            prompt,
-            generation,
-            skip_rows,
-            false,
-        );
-    }
-}
-
-/// One go at the turn. True when the CLI could not open the session it was
-/// asked to resume and `may_retry` let it ask for one more go: that session
-/// is dropped, so the next go opens a new one that reads the chat so far.
-/// The message is the same turn, so what waits on it keeps waiting.
-fn turn_once(
-    session: Arc<HeadlessSession>,
-    cfg: AgentConfig,
-    roster: Vec<AgentConfig>,
-    prompt: String,
-    generation: u64,
-    skip_rows: Vec<String>,
-    may_retry: bool,
-) -> bool {
     let mut turn = crate::transcript::begin_turn(&session.id);
 
     let program = cfg.binary_name();
@@ -1008,7 +1001,7 @@ fn turn_once(
 
     if is_stale(&session, generation) {
         crate::transcript::end_turn_gen(&session.id, Some(turn));
-        return false;
+        return;
     }
 
     // A turn that errored and said nothing is the one the user should see failed.
@@ -1029,17 +1022,17 @@ fn turn_once(
                     .filter(|s| s.resume)
                     .map(|s| s.id.as_str()),
             );
-            // The CLI could not open the session it resumed: it lost it, or the
-            // bot ran somewhere that session was not. The message would be lost
-            // with it, so it goes once more on a new session.
-            if may_retry && dead && resume && created_id.is_none() && !outcome.got_text {
-                drop_stuck_session(&session, &skip_rows);
-                crate::transcript::end_turn_gen(&session.id, Some(turn));
-                if is_stale(&session, generation) {
-                    return false;
+            // The CLI could not open the session it resumed, so the message
+            // goes again on a new one, as after a hung resume. A slash command
+            // would reach a new session as plain text, so it fails instead.
+            if dead && resume && !slash {
+                if let Some(err) = outcome.error.as_deref() {
+                    eprintln!("[crew] {}: lost session: {}", session.id, err.trim());
                 }
-                crate::transcript::push_system(&session.id, "crew", lost_session_line(), None);
-                return true;
+                if give_back_lost(&session, generation) {
+                    crate::transcript::end_turn_gen(&session.id, Some(turn));
+                    return;
+                }
             }
             // Used up by a turn that answered; one that failed leaves it for the
             // next. Codex may never name a thread, so a saved session is not the test.
@@ -1115,7 +1108,7 @@ fn turn_once(
     // A stop or the silence watch claimed this turn while the outcome was
     // being recorded. Pumping here would start the prompt just put back.
     if is_stale(&session, generation) {
-        return false;
+        return;
     }
     crate::daemon::forget_prompt(&session.id);
     // Before the idle frame goes out, so the window sees both in one look.
@@ -1145,7 +1138,6 @@ fn turn_once(
     // Before the inbox: the next turn replaces this origin.
     crate::daemon::turn_ended(&session.id);
     crate::daemon::pump_inbox(&session.id);
-    false
 }
 
 /// How a turn of a bot whose CLI stays up between turns reaches it. None
