@@ -27,6 +27,11 @@ type Props = {
   signal?: BotSignal | null;
   /** Client point the idle face follows. Pointer aim wins while the cursor is on the face. */
   lookAt?: { x: number; y: number } | null;
+  /**
+   * Resting while bots it asked work on its request: it taps and glances
+   * aside instead of looking around, and does not follow the caret.
+   */
+  waiting?: boolean;
 };
 
 function eyesAt(shape: AvatarShape): { x: number; y: number; dx?: number } {
@@ -196,7 +201,7 @@ function SleepMarks({ color }: { color: string }) {
   );
 }
 
-type Mood = "idle" | "working" | "blocked" | "exited" | FaceMood;
+type Mood = "idle" | "working" | "blocked" | "exited" | "waiting" | FaceMood;
 
 function liveMood(status?: AgentStatus | null): Mood | null {
   if (
@@ -382,13 +387,17 @@ export function BotFace({
   look = null,
   signal = null,
   lookAt = null,
+  waiting = false,
 }: Props) {
   const eyes = eyesAt(shape);
   const glow = useAfterglow(status, signal);
   const asking = !!signal?.asking && status !== "exited";
-  const live: Mood | null = mood ?? (asking ? "question" : (glow ?? liveMood(status)));
+  const resting = liveMood(status);
+  const live: Mood | null =
+    mood ?? (asking ? "question" : (glow ?? (waiting && resting === "idle" ? "waiting" : resting)));
   // A held face has its own eyes, so the caret does not steer them.
-  const held = !!mood || asking || glow === "success" || glow === "failure";
+  const held =
+    !!mood || asking || glow === "success" || glow === "failure" || live === "waiting";
   const svgRef = useRef<SVGSVGElement>(null);
   const gazeRef = useRef<{ x: number; y: number } | null>(null);
   const settledRef = useRef(false);

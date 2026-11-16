@@ -108,15 +108,17 @@ export function ChatHeader({
             {line}
           </span>
         ) : null}
-        {status?.tone === "waiting" ? (
-          <WaitStatus ids={waitingOn(currentAgent)} agents={agents} />
-        ) : status ? (
+        {status && status.tone !== "waiting" ? (
           <span
             className={"head-status is-" + status.tone}
             title={status.tone === "watching" ? status.text : undefined}
           >
             <span className="head-status-text">{status.text}</span>
           </span>
+        ) : currentAgent ? (
+          // Mounted while the bot rests too, so the last chip can fold out
+          // once the wait is over.
+          <WaitStatus key={currentAgent.id} ids={waitingOn(currentAgent)} agents={agents} />
         ) : null}
       </div>
       {currentAgent && onOpenGroup ? (

@@ -7237,8 +7237,7 @@ html[data-theme="light"] .island-ghost-2 {
 }
 
 /* Waiting on other bots. The bot rests while the bots it asked work, so
-   the status is muted. Motion (the face, chips coming and going) comes with
-   the final waiting animation; these rules are layout only. */
+   the status is muted. */
 /* Header: every bot waited on, a chip each, on one line. Past the width the
    chips scroll sideways and the count stays put, so the header never wraps. */
 .head-status.is-waiting {
@@ -7339,3 +7338,113 @@ html[data-theme="light"] .island-ghost-2 {
 }
 .wait-tag.is-single { padding-right: 6px; }
 .wait-tag:not(.is-single) { min-width: 58px; }
+
+/* Waiting, acted by the face (6.8s): it taps twice, leaning, rests with
+   half-shut eyes looking down and aside, glances the other way, looks ahead
+   once, glances again, then taps twice more. `--avatar-phase` staggers the
+   bots so they do not tap together. The blink is the usual one. A pointer
+   on the face still steers its eyes. */
+.avatar-face.is-waiting {
+  transform-origin: 50% 88%;
+  animation: avatar-wait-body 6.8s ease-in-out infinite;
+  animation-delay: calc(var(--avatar-phase, 0) * -3s);
+}
+.avatar-face.is-waiting:not(.is-tracking):not(.is-gaze-return) .avatar-gaze {
+  animation: avatar-wait-gaze 6.8s ease-in-out infinite;
+  animation-delay: calc(var(--avatar-phase, 0) * -3s);
+}
+.avatar-face.is-waiting .avatar-pill {
+  animation: avatar-wait-lid 6.8s ease-in-out infinite;
+  animation-delay: calc(var(--avatar-phase, 0) * -3s);
+}
+.avatar-face.is-waiting .avatar-blink {
+  animation: avatar-blink 5.6s ease-in-out infinite;
+  animation-delay: calc(var(--avatar-phase, 0) * -1.3s);
+}
+@keyframes avatar-wait-body {
+  0%, 1% { transform: translate(0, 0) rotate(0deg) scale(1, 1); }
+  2.5%  { transform: translate(-1%, -7%) rotate(-3.4deg) scale(0.98, 1.03); }
+  5%    { transform: translate(-1%, 1%) rotate(-1.6deg) scale(1.05, 0.93); }
+  7.5%  { transform: translate(-0.5%, -0.5%) rotate(-0.6deg) scale(1, 1); }
+  10.5% { transform: translate(-1%, -6%) rotate(-3.4deg) scale(0.98, 1.03); }
+  13%   { transform: translate(-1%, 1%) rotate(-1.6deg) scale(1.05, 0.93); }
+  16%   { transform: translate(-0.5%, -0.5%) rotate(-0.6deg) scale(1, 1); }
+  20%, 36% { transform: translate(0, 0) rotate(0deg) scale(1, 1); }
+  40%, 54% { transform: translate(1.2%, 0.6%) rotate(2.6deg) scale(1, 1); }
+  58%, 59% { transform: translate(0, 0) rotate(0deg) scale(1, 1); }
+  60.5% { transform: translate(-1%, -7%) rotate(-3.4deg) scale(0.98, 1.03); }
+  63%   { transform: translate(-1%, 1%) rotate(-1.6deg) scale(1.05, 0.93); }
+  65.5% { transform: translate(-0.5%, -0.5%) rotate(-0.6deg) scale(1, 1); }
+  68.5% { transform: translate(-1%, -6%) rotate(-3.4deg) scale(0.98, 1.03); }
+  71%   { transform: translate(-1%, 1%) rotate(-1.6deg) scale(1.05, 0.93); }
+  74%   { transform: translate(-0.5%, -0.5%) rotate(-0.6deg) scale(1, 1); }
+  78%, 100% { transform: translate(0, 0) rotate(0deg) scale(1, 1); }
+}
+@keyframes avatar-wait-gaze {
+  0%, 36% { transform: translate(-2.2px, 1.6px); }
+  40%, 45% { transform: translate(5px, 1.6px); }
+  47.5% { transform: translate(0, 0); }
+  50.5%, 54% { transform: translate(5px, 1.6px); }
+  58%, 100% { transform: translate(-2.2px, 1.6px); }
+}
+@keyframes avatar-wait-lid {
+  0%, 36% { transform: scaleY(0.8); }
+  40%, 54% { transform: scaleY(1); }
+  58%, 100% { transform: scaleY(0.8); }
+}
+
+/* A bot waited on answers: its chip glows once in that bot's colour (`--c`),
+   folds from its width (`--w`) and goes; the rest close up. The last one
+   fades the whole line. A chip that arrives grows in. */
+.wait-chip.is-entering { animation: wait-chip-in 0.26s var(--ease-out) both; }
+.wait-chip.is-leaving { animation: wait-chip-leave 0.62s ease forwards; pointer-events: none; }
+@keyframes wait-chip-in {
+  from { opacity: 0; transform: scale(0.82); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes wait-chip-leave {
+  0%, 38% {
+    max-width: var(--w);
+    opacity: 1;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 95%, transparent);
+    background: color-mix(in srgb, var(--c) 28%, transparent);
+  }
+  38% { transform: scale(1.07); }
+  100% {
+    max-width: 0;
+    margin-right: 0;
+    padding-left: 0;
+    padding-right: 0;
+    opacity: 0;
+    transform: scale(0.7);
+    box-shadow: inset 0 0 0 1px transparent;
+  }
+}
+.head-status.is-waiting.is-ending { opacity: 0; transition: opacity 0.26s ease; }
+/* Chips past the edge fade out on the side there is more to scroll to. */
+.wait-scroll.fade-r {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 30px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 30px), transparent);
+}
+.wait-scroll.fade-l {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 30px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 30px), transparent);
+}
+.wait-scroll.fade-l.fade-r {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 30px, #000 calc(100% - 30px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 30px, #000 calc(100% - 30px), transparent);
+}
+/* Still, the face keeps the pose that says it: leaning a little, eyes half
+   shut and looking down and aside. Chips come and go at once. */
+@media (prefers-reduced-motion: reduce) {
+  .avatar-face.is-waiting,
+  .avatar-face.is-waiting .avatar-gaze,
+  .avatar-face.is-waiting .avatar-pill,
+  .avatar-face.is-waiting .avatar-blink,
+  .wait-chip.is-entering { animation: none !important; }
+  .avatar-face.is-waiting { transform: translate(-0.5%, 0) rotate(-1.6deg); }
+  .avatar-face.is-waiting:not(.is-tracking):not(.is-gaze-return) .avatar-gaze { transform: translate(-2.2px, 1.6px); }
+  .avatar-face.is-waiting .avatar-pill { transform: scaleY(0.8); }
+  .wait-chip.is-leaving { display: none; }
+  .head-status.is-waiting.is-ending { transition: none; }
+}
