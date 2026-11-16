@@ -815,8 +815,37 @@ fn is_work(msg: &ChatMessage) -> bool {
 
 /// A file the bot showed with `crew show`, in the turn it ran in: above the
 /// reply still being written. `text` is the path, with `:<line>` when there is one.
+///
+/// The same file again on the same card (file rows with only tool calls
+/// between them, as the window draws them) adds no row: the one there gets a
+/// new time, and the window opens it again. A bot that retries `crew show`
+/// after a failed answer left the file on the card twice.
 pub fn push_file(agent: &str, text: &str) -> ChatMessage {
-    push_in_turn(agent, None, agent, text, MessageKind::File)
+    reshow_file(agent, text)
+        .unwrap_or_else(|| push_in_turn(agent, None, agent, text, MessageKind::File))
+}
+
+/// `text` already on the card a new file row would join: that row, touched.
+fn reshow_file(agent: &str, text: &str) -> Option<ChatMessage> {
+    let mut map = chats().lock().ok()?;
+    let chat = map.get_mut(agent)?;
+    let end = chat
+        .pending_idx
+        .unwrap_or(chat.messages.len())
+        .min(chat.messages.len());
+    let idx = chat.messages[..end]
+        .iter()
+        .rev()
+        .take_while(|m| matches!(m.kind, Some(MessageKind::File | MessageKind::Tool)))
+        .position(|m| m.kind == Some(MessageKind::File) && m.text == text)
+        .map(|back| end - 1 - back)?;
+    let row = &mut chat.messages[idx];
+    row.ts = now_ms().max(row.ts + 1);
+    let msg = row.clone();
+    persist(agent, chat);
+    drop(map);
+    emit(agent, msg.clone());
+    Some(msg)
 }
 
 /// A bot's talk with its own subagent. Like a tool call, it is how the bot
@@ -2096,6 +2125,71 @@ fn consume_echo(pending: &mut String, incoming: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn unique(prefix: &str) -> String {
+        format!(
+            "{prefix}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        )
+    }
+
+    fn file_rows(agent: &str) -> Vec<ChatMessage> {
+        messages(agent)
+            .into_iter()
+            .filter(|m| m.kind == Some(MessageKind::File))
+            .collect()
+    }
+
+    /// `crew show` retried after a failed answer: each try is a tool call
+    /// and then the file. The card keeps one row, touched each time.
+    #[test]
+    fn showing_the_same_file_again_on_its_card_adds_no_row() {
+        crate::paths::testing::with_home("transcript-reshow", || {
+            let agent = &unique("reshow");
+            push_user(agent, "user", "show me the preview");
+            let show = |call: &str| {
+                let cmd = r#"{"command":"crew show /tmp/a.html"}"#;
+                push_tool(agent, Some(call), "Bash", cmd);
+                push_file(agent, "/tmp/a.html")
+            };
+            let first = show("c1");
+            let again = show("c2");
+            let third = show("c3");
+            let rows = file_rows(agent);
+            assert_eq!(rows.len(), 1, "{rows:?}");
+            assert_eq!(again.id, first.id);
+            assert_eq!(third.id, first.id);
+            assert!(again.ts > first.ts && third.ts > again.ts, "touched");
+            assert_eq!(rows[0].ts, third.ts);
+            // Kept on disk the same way.
+            let saved = std::fs::read_to_string(paths::transcript_path(agent)).expect("saved");
+            assert_eq!(saved.matches("\"kind\":\"file\"").count(), 1, "{saved}");
+            drop_agent(agent);
+        });
+    }
+
+    #[test]
+    fn another_file_or_a_later_card_still_gets_its_own_row() {
+        crate::paths::testing::with_home("transcript-reshow-new", || {
+            let agent = &unique("reshow-new");
+            push_user(agent, "user", "show both");
+            push_file(agent, "/tmp/a.html");
+            push_file(agent, "/tmp/b.html");
+            // Another line of the same file is another place to open.
+            push_file(agent, "/tmp/a.html:12");
+            assert_eq!(file_rows(agent).len(), 3);
+            // A new card, after the user spoke: the file is shown anew.
+            push_user(agent, "user", "and again");
+            push_file(agent, "/tmp/a.html");
+            let rows = file_rows(agent);
+            assert_eq!(rows.len(), 4);
+            assert_eq!(rows[3].text, "/tmp/a.html");
+            drop_agent(agent);
+        });
+    }
 
     #[test]
     fn strip_csi_and_cr() {

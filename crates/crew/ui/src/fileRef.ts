@@ -126,9 +126,19 @@ export function resolveFilePath(path: string, baseDir?: string): string | null {
 }
 
 /**
+ * What `seen` remembers a file row by. The daemon gives a row a new time,
+ * not a twin, when the same file is shown again on its card, so a row with a
+ * new time is a new request to open it.
+ */
+export function fileSeenKey(m: ChatMessage): string {
+  return `${m.id}@${m.ts}`;
+}
+
+/**
  * The file row that arrived since `seen` was taken, newest last: a bot ran
- * `crew show` while this chat was open. Rows that were there when the chat
- * opened are history, not a request to open them.
+ * `crew show` while this chat was open, or showed a file on the card again.
+ * Rows that were there when the chat opened are history, not a request to
+ * open them.
  */
 export function freshFileRow(
   seen: ReadonlySet<string> | undefined,
@@ -137,7 +147,7 @@ export function freshFileRow(
   if (!seen) return null;
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
-    if (m.kind === "file" && !seen.has(m.id)) return m;
+    if (m.kind === "file" && !seen.has(fileSeenKey(m))) return m;
   }
   return null;
 }

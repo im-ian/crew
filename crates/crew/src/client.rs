@@ -184,52 +184,67 @@ fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
             continue;
         }
         let ev = Event::from_line(buf.trim_end())?;
-        match (&req, &ev) {
-            (Request::Ping, Event::Pong)
-            | (Request::List, Event::Agents { .. })
-            | (Request::Send { .. }, Event::Ok)
-            | (Request::Tell { .. }, Event::Told { .. } | Event::Ok)
-            | (Request::Input { .. }, Event::Ok)
-            | (Request::Resize { .. }, Event::Ok)
-            | (Request::Snapshot { .. }, Event::Snapshot { .. })
-            | (Request::Messages { .. }, Event::Messages { .. })
-            | (Request::AddAgent { .. }, Event::Ok | Event::Agents { .. })
-            | (
-                Request::CloneAgent { .. },
-                Event::Cloned { .. } | Event::Ok | Event::Agents { .. },
-            )
-            | (Request::RemoveAgent { .. }, Event::Ok | Event::Agents { .. })
-            | (Request::SetAgent { .. }, Event::Ok | Event::Agents { .. })
-            | (Request::SetCli { .. }, Event::Ok | Event::Agents { .. })
-            | (Request::Reset { .. }, Event::Reset { .. } | Event::Ok)
-            | (Request::AddRoutine { .. }, Event::Ok | Event::Agents { .. })
-            | (Request::RemoveRoutine { .. }, Event::Ok | Event::Agents { .. })
-            | (Request::SetRoutineEnabled { .. }, Event::Ok | Event::Agents { .. })
-            | (Request::RunRoutine { .. }, Event::Ok | Event::Agents { .. })
-            | (Request::EditRoutine { .. }, Event::Ok | Event::Agents { .. })
-            | (Request::RoutineRuns { .. }, Event::RoutineRuns { .. })
-            | (Request::Interrupt { .. }, Event::Ok)
-            | (Request::CancelQueued { .. }, Event::Ok)
-            | (Request::EditQueued { .. }, Event::Ok)
-            | (Request::SendQueued { .. }, Event::Ok)
-            | (Request::Approve { .. }, Event::Ok)
-            | (Request::Ask { .. }, Event::Answered { .. } | Event::Error { .. })
-            | (Request::AnswerChoice { .. }, Event::Ok)
-            | (Request::Search { .. }, Event::Search { .. })
-            | (Request::RemoteProbe { .. }, Event::RemoteServer { .. })
-            | (Request::RemoteJoin { .. }, Event::Ok)
-            | (Request::RemoteList, Event::Remotes { .. })
-            | (Request::RemoteSet { .. }, Event::Ok)
-            | (Request::RemoteLeave { .. }, Event::Ok)
-            | (Request::TeamMemory { .. }, Event::TeamMemory { .. })
-            | (
-                Request::TeamMemoryAppend { .. } | Request::TeamMemorySet { .. },
-                Event::Ok | Event::TeamMemoryConflict,
-            )
-            | (Request::Shutdown, Event::Shutdown | Event::Ok)
-            | (_, Event::Error { .. }) => return Ok(ev),
-            _ => continue,
+        if answers(&req, &ev) {
+            return Ok(ev);
         }
+    }
+}
+
+/// Whether `ev` is the daemon's answer to `req`, rather than a broadcast
+/// that happened to arrive on the same socket. An error answers anything.
+///
+/// Matched on the request exhaustively, like `answer_timeout`: a catch-all
+/// here once left `ShowFile` with no answer at all, so `crew show` put its
+/// row in the chat, waited out the deadline on the `Ok` it skipped, and
+/// failed; the bot tried again and the file showed twice.
+fn answers(req: &Request, ev: &Event) -> bool {
+    if matches!(ev, Event::Error { .. }) {
+        return true;
+    }
+    match req {
+        Request::Ping => matches!(ev, Event::Pong),
+        Request::List => matches!(ev, Event::Agents { .. }),
+        // A stream: nothing on it ends the call.
+        Request::Subscribe => false,
+        Request::Tell { .. } => matches!(ev, Event::Told { .. } | Event::Ok),
+        Request::Snapshot { .. } => matches!(ev, Event::Snapshot { .. }),
+        Request::Messages { .. } => matches!(ev, Event::Messages { .. }),
+        Request::CloneAgent { .. } => {
+            matches!(ev, Event::Cloned { .. } | Event::Ok | Event::Agents { .. })
+        }
+        Request::AddAgent { .. }
+        | Request::RemoveAgent { .. }
+        | Request::SetAgent { .. }
+        | Request::SetCli { .. }
+        | Request::AddRoutine { .. }
+        | Request::RemoveRoutine { .. }
+        | Request::SetRoutineEnabled { .. }
+        | Request::RunRoutine { .. }
+        | Request::EditRoutine { .. } => matches!(ev, Event::Ok | Event::Agents { .. }),
+        Request::Reset { .. } => matches!(ev, Event::Reset { .. } | Event::Ok),
+        Request::RoutineRuns { .. } => matches!(ev, Event::RoutineRuns { .. }),
+        Request::Ask { .. } => matches!(ev, Event::Answered { .. }),
+        Request::Search { .. } => matches!(ev, Event::Search { .. }),
+        Request::RemoteProbe { .. } => matches!(ev, Event::RemoteServer { .. }),
+        Request::RemoteList => matches!(ev, Event::Remotes { .. }),
+        Request::TeamMemory { .. } => matches!(ev, Event::TeamMemory { .. }),
+        Request::TeamMemoryAppend { .. } | Request::TeamMemorySet { .. } => {
+            matches!(ev, Event::Ok | Event::TeamMemoryConflict)
+        }
+        Request::Shutdown => matches!(ev, Event::Shutdown | Event::Ok),
+        Request::Send { .. }
+        | Request::Input { .. }
+        | Request::Resize { .. }
+        | Request::Interrupt { .. }
+        | Request::CancelQueued { .. }
+        | Request::EditQueued { .. }
+        | Request::SendQueued { .. }
+        | Request::Approve { .. }
+        | Request::ShowFile { .. }
+        | Request::AnswerChoice { .. }
+        | Request::RemoteJoin { .. }
+        | Request::RemoteSet { .. }
+        | Request::RemoteLeave { .. } => matches!(ev, Event::Ok),
     }
 }
 
@@ -907,6 +922,65 @@ mod tests {
             PING_TIMEOUT < Duration::from_secs(1),
             "the window polls it every second"
         );
+    }
+
+    /// `crew show` put the file in the chat and the daemon said `Ok`, but the
+    /// CLI skipped that `Ok` and failed fifteen seconds later; the bot tried
+    /// again and the file showed twice.
+    #[test]
+    fn crew_show_takes_the_daemons_ok() {
+        paths::testing::with_home("show-ok", || {
+            paths::ensure_home().expect("home");
+            let listener =
+                std::os::unix::net::UnixListener::bind(paths::socket_path()).expect("bind");
+            let daemon = thread::spawn(move || {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let mut line = String::new();
+                let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+                reader.read_line(&mut line).expect("read");
+                assert!(line.contains("show_file"), "{line}");
+                writeln!(stream, "{}", Event::Ok.to_line().expect("ok")).expect("write");
+                // Kept open, as the daemon keeps it, until the test is done.
+                stream
+            });
+            let started = Instant::now();
+            let ev = rpc_within(
+                Request::ShowFile {
+                    agent: "a".into(),
+                    path: "/tmp/a.html".into(),
+                },
+                Some(Duration::from_secs(3)),
+            )
+            .expect("the Ok answers it");
+            assert!(matches!(ev, Event::Ok), "{ev:?}");
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "{:?}",
+                started.elapsed()
+            );
+            daemon.join().expect("daemon");
+        });
+    }
+
+    /// Every request but the stream has an answer the CLI takes.
+    #[test]
+    fn each_request_takes_its_answer() {
+        assert!(answers(
+            &Request::ShowFile {
+                agent: "a".into(),
+                path: "p".into()
+            },
+            &Event::Ok
+        ));
+        assert!(answers(&Request::Ping, &Event::Pong));
+        assert!(!answers(&Request::Ping, &Event::Ok));
+        assert!(answers(
+            &Request::List,
+            &Event::Error {
+                message: "x".into()
+            }
+        ));
+        assert!(!answers(&Request::Subscribe, &Event::Ok));
     }
 
     fn answer_pong(listener: std::os::unix::net::UnixListener) {
