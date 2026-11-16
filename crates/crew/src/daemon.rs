@@ -1972,8 +1972,9 @@ fn answers_a_bot(id: &str) -> bool {
     let Some(asker) = asked_by(&origin, id) else {
         return false;
     };
+    // The reply keeps the turn's hops. Only a further tell would pass the limit.
     let wake = TurnOrigin {
-        hops: origin.hops + 1,
+        hops: origin.hops,
         ..TurnOrigin::default()
     };
     known_agent(&asker) && !targeting::relay_exhausted(&wake)
@@ -1987,7 +1988,8 @@ fn asked_by(origin: &TurnOrigin, agent: &str) -> Option<String> {
 }
 
 /// The wake `id`'s turn still owes: the bot that ran `crew tell` and is
-/// waiting, and the origin the reply reaches it with. The wake is a hop.
+/// waiting, and the origin the reply reaches it with. Waking is not a hop.
+/// The asker's next `crew tell` is what counts.
 fn owed_wake(origin: &TurnOrigin, id: &str) -> Option<(String, TurnOrigin)> {
     if origin.wake_spent {
         return None;
@@ -1995,7 +1997,7 @@ fn owed_wake(origin: &TurnOrigin, id: &str) -> Option<(String, TurnOrigin)> {
     let asker = targeting::waiting_asker(origin, id)?;
     let wake = TurnOrigin {
         from: id.to_string(),
-        hops: origin.hops + 1,
+        hops: origin.hops,
         ..TurnOrigin::default()
     };
     Some((asker, wake))
@@ -3819,13 +3821,14 @@ pub(crate) fn remote_reply(asker: &str, from: &str, text: &str) {
 }
 
 /// The remote bot is done: wake the bot that asked, as `wake_asker` does.
+/// `hops` is the tell that started the remote turn. The wake does not add one.
 pub(crate) fn remote_wake(asker: &str, from: &str, hops: u32) {
     if !known_agent(asker) {
         return;
     }
     let wake = TurnOrigin {
         from: from.to_string(),
-        hops: hops + 1,
+        hops,
         ..TurnOrigin::default()
     };
     if targeting::relay_exhausted(&wake) {
@@ -4619,9 +4622,10 @@ pub(crate) fn turn_ended(id: &str) {
 
 /// A bot that asked `id` with `crew tell` is waiting on the answer, so the
 /// reply becomes that bot's next turn instead of sitting until the user talks
-/// to it again. A user's @mention leaves the reply for the next prompt. Each
-/// wake is a hop, so two bots cannot go on forever, and a turn wakes once, so
-/// output it leaves behind cannot wake the asker again.
+/// to it again. A user's @mention leaves the reply for the next prompt. The
+/// wake is not a hop; the next tell is, so two bots that keep telling each
+/// other still stop. A turn wakes once, so output it leaves behind cannot
+/// wake the asker again.
 fn wake_asker(id: &str) {
     let Some((asker, wake)) = take_wake(id) else {
         return;
@@ -4946,6 +4950,11 @@ mod daemon_tests {
         assert!(answers_a_bot(&speaker), "the wake is spent, the turn still answered a bot");
 
         set_origin(&speaker, told(targeting::MAX_RELAY_HOPS));
+        assert!(
+            answers_a_bot(&speaker),
+            "a reply at the limit still wakes the asker"
+        );
+        set_origin(&speaker, told(targeting::MAX_RELAY_HOPS + 1));
         assert!(!answers_a_bot(&speaker), "relayed too far: nobody is woken");
 
         configs().lock().unwrap().remove(&asker);
@@ -5331,7 +5340,8 @@ mod daemon_tests {
             assert_eq!(item.text, format!("[crew handoff from:{speaker}]\n보"));
             assert_eq!(item.origin.from, speaker);
             assert_eq!(item.origin.reply_agent, None);
-            assert_eq!(item.origin.hops, 2);
+            // The tell off the user message was the hop. Waking keeps it.
+            assert_eq!(item.origin.hops, 1);
             assert!(
                 take_handoffs(&asker).is_empty(),
                 "not again on the next prompt"
@@ -5345,6 +5355,155 @@ mod daemon_tests {
             take_origin(&speaker);
             session.inner.lock().unwrap().status = AgentStatus::Idle;
             remove_agent(&asker).unwrap();
+        });
+    }
+
+    /// A lead tells three workers, hears each report, and tells the next stage.
+    /// The report wakes the lead without a hop, so four stages stay inside the
+    /// limit. The fifth tell is what stops, and it stays quiet.
+    #[test]
+    fn a_lead_assigns_past_two_stages_without_the_relay_limit() {
+        paths::testing::with_home("relay-stages", || {
+            paths::write_notifications_enabled(false);
+            let lead = test_id("lead");
+            let workers: Vec<String> = (0..3).map(|n| test_id(&format!("w{n}"))).collect();
+            claude_bot(&lead);
+            headless_status(&lead, AgentStatus::Working);
+            for id in &workers {
+                claude_bot(id);
+                headless_status(id, AgentStatus::Working);
+            }
+
+            let mut parent = TurnOrigin::user();
+            for stage in 1..=targeting::MAX_RELAY_HOPS {
+                // One stage tells every worker from the same turn, then hears
+                // the reports. The next stage is what adds a hop.
+                let mut reports = Vec::new();
+                for worker in &workers {
+                    tell_agent_origin(
+                        &lead,
+                        worker,
+                        &format!("stage {stage}"),
+                        Some(parent.clone()),
+                        false,
+                        &mut VecDeque::new(),
+                    )
+                    .unwrap_or_else(|err| {
+                        panic!("stage {stage} tell to {worker} hit the limit: {err}")
+                    });
+                    let item = inbox()
+                        .lock()
+                        .unwrap()
+                        .get_mut(worker)
+                        .and_then(|q| q.pop_front())
+                        .unwrap_or_else(|| panic!("stage {stage} did not reach {worker}"));
+                    assert_eq!(item.origin.hops, stage, "a tell is one hop");
+                    assert!(!targeting::relay_exhausted(&item.origin));
+                    assert_eq!(item.origin.reply_agent.as_deref(), Some(lead.as_str()));
+                    set_origin(worker, item.origin);
+                    enqueue_handoff(&lead, worker, &format!("done {stage}"), None);
+                    wake_asker(worker);
+                    let wake = inbox()
+                        .lock()
+                        .unwrap()
+                        .get_mut(&lead)
+                        .and_then(|q| q.pop_front())
+                        .unwrap_or_else(|| panic!("stage {stage} report did not wake the lead"));
+                    assert_eq!(
+                        wake.origin.hops, stage,
+                        "the report wakes the lead without a hop"
+                    );
+                    assert!(!targeting::relay_exhausted(&wake.origin));
+                    reports.push(wake.origin);
+                }
+                parent = reports.pop().expect("a report");
+                assert!(reports.iter().all(|origin| origin.hops == stage));
+            }
+
+            let err = tell_agent_origin(
+                &lead,
+                &workers[0],
+                "one more",
+                Some(parent),
+                false,
+                &mut VecDeque::new(),
+            )
+            .expect_err("the tell past the limit must not start");
+            assert!(err.to_string().contains("relay limit"), "{err}");
+            assert!(
+                inbox_is_empty(&workers[0]),
+                "a refused tell does not reach the worker"
+            );
+
+            headless_status(&lead, AgentStatus::Idle);
+            clear_inbox(&lead);
+            take_origin(&lead);
+            remove_agent(&lead).unwrap();
+            for id in &workers {
+                headless_status(id, AgentStatus::Idle);
+                clear_inbox(id);
+                take_origin(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// Two bots tell each other. Each tell is a hop, so they still stop once
+    /// the chain is past the limit. The stop is the tell, not a wake.
+    #[test]
+    fn two_bots_telling_each_other_still_hit_the_relay_limit() {
+        paths::testing::with_home("relay-pingpong", || {
+            paths::write_notifications_enabled(false);
+            let a = test_id("ping");
+            let b = test_id("pong");
+            for id in [&a, &b] {
+                claude_bot(id);
+                headless_status(id, AgentStatus::Working);
+            }
+
+            let mut from = a.clone();
+            let mut to = b.clone();
+            let mut parent = TurnOrigin::user();
+            for hop in 1..=targeting::MAX_RELAY_HOPS {
+                tell_agent_origin(
+                    &from,
+                    &to,
+                    &format!("ping {hop}"),
+                    Some(parent),
+                    false,
+                    &mut VecDeque::new(),
+                )
+                .unwrap_or_else(|err| panic!("tell {hop} hit the limit early: {err}"));
+                let item = inbox()
+                    .lock()
+                    .unwrap()
+                    .get_mut(&to)
+                    .and_then(|q| q.pop_front())
+                    .unwrap_or_else(|| panic!("tell {hop} did not queue"));
+                assert_eq!(item.origin.hops, hop, "tell {hop}");
+                assert!(!targeting::relay_exhausted(&item.origin));
+                parent = item.origin;
+                std::mem::swap(&mut from, &mut to);
+            }
+
+            let err = tell_agent_origin(
+                &from,
+                &to,
+                "one more",
+                Some(parent),
+                false,
+                &mut VecDeque::new(),
+            )
+            .expect_err("another tell must stop");
+            assert!(err.to_string().contains("relay limit"), "{err}");
+            assert!(inbox_is_empty(&to), "the tell past the limit does not start");
+
+            for id in [&a, &b] {
+                headless_status(id, AgentStatus::Idle);
+                clear_inbox(id);
+                take_origin(id);
+                remove_agent(id).unwrap();
+            }
         });
     }
 
