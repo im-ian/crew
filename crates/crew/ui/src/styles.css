@@ -4737,6 +4737,9 @@ html[data-theme="light"] .file-src span {
 .file-card {
   display: flex;
   flex-direction: column;
+  /* Two open rows are both filled: 4px apart they still read as two, and
+     match the card's own 4px inset. */
+  gap: var(--space-4);
   min-width: 0;
   width: min(100%, 440px);
   margin: var(--space-2) 0;
