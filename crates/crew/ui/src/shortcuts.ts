@@ -10,6 +10,7 @@ export type Shortcut = {
 export const SHORTCUTS: Shortcut[] = [
   { id: "help", combo: "Meta+/", group: "general" },
   { id: "settings", combo: "Meta+,", group: "general" },
+  { id: "quick-switch", combo: "Meta+K", group: "nav" },
   { id: "search", combo: "Meta+F", group: "nav" },
   { id: "composer", combo: "Meta+J", group: "nav" },
   { id: "prev-chat", combo: "Meta+Alt+ArrowUp", group: "nav" },
@@ -29,8 +30,6 @@ export const SHORTCUTS: Shortcut[] = [
 ];
 
 const ALIAS: Record<string, string> = {
-  // The old search key, still in hands that learned it.
-  "Meta+K": "search",
   "Meta+/": "help",
   "Meta+?": "help",
   "Meta+Shift+?": "help",
@@ -135,7 +134,8 @@ function selfCheck() {
   const cases: Array<[KeyEventLike, boolean, string | null]> = [
     [{ key: "f", metaKey: true }, false, "search"],
     [{ key: "f", metaKey: true }, true, "search"],
-    [{ key: "k", metaKey: true }, false, "search"],
+    [{ key: "k", metaKey: true }, false, "quick-switch"],
+    [{ key: "k", metaKey: true }, true, "quick-switch"],
     [{ key: "n", metaKey: true }, true, "new-bot"],
     [{ key: "N", metaKey: true, shiftKey: true }, false, "quick-bot"],
     [{ key: "N", metaKey: true, shiftKey: true }, true, "quick-bot"],
