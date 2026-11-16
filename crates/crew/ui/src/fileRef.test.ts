@@ -6,6 +6,7 @@ import {
   fileTarget,
   workDir,
   fileRun,
+  fileSeenKey,
   freshFileRow,
   opensInPanel,
   parseFileRef,
@@ -67,8 +68,16 @@ describe("freshFileRow", () => {
   it("opens only a file row that came after the chat was loaded", () => {
     const list = [row("1", "file"), row("2"), row("3", "file")];
     expect(freshFileRow(undefined, list)).toBeNull();
-    expect(freshFileRow(new Set(["1", "3"]), list)).toBeNull();
-    expect(freshFileRow(new Set(["1"]), list)?.id).toBe("3");
+    expect(freshFileRow(new Set(["1@0", "3@0"]), list)).toBeNull();
+    expect(freshFileRow(new Set(["1@0"]), list)?.id).toBe("3");
+  });
+
+  it("opens a row again when the same file was shown again on its card", () => {
+    const shown = row("1", "file");
+    const seen = new Set([fileSeenKey(shown)]);
+    expect(freshFileRow(seen, [shown])).toBeNull();
+    // The daemon touched the row instead of adding a twin.
+    expect(freshFileRow(seen, [{ ...shown, ts: 5 }])?.id).toBe("1");
   });
 });
 

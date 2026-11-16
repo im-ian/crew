@@ -25,6 +25,7 @@ import {
   closeFileTab,
   FileOpenContext,
   fileRun,
+  fileSeenKey,
   fileTabs,
   freshFileRow,
   parseFileRef,
@@ -303,7 +304,7 @@ export function App() {
   useEffect(() => {
     const chat = crew.messagesFor;
     if (!chat) return;
-    const files = crew.messages.filter((m) => m.kind === "file").map((m) => m.id);
+    const files = crew.messages.filter((m) => m.kind === "file").map(fileSeenKey);
     const seen = seenFiles.current.get(chat);
     const fresh = freshFileRow(seen, crew.messages);
     seenFiles.current.set(chat, new Set([...(seen ?? []), ...files]));
