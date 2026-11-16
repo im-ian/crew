@@ -2079,6 +2079,11 @@ header .who-name {
   transform: scale(0.94);
 }
 .head-action svg { display: block; }
+/* A header button whose panel is open now. */
+.head-action.is-on {
+  background: var(--active);
+  color: var(--ink);
+}
 .app:has(.overlay.open) header .head-action {
   visibility: hidden;
 }
@@ -4646,6 +4651,32 @@ html.peek-resizing .peek-resize::after {
   min-height: 0;
   overflow: auto;
   border-top: 1px solid var(--line);
+}
+/* The bots of the group the open chat leads (`LeadGroupPane`): rail rows
+   beside the chat, each with a status word before its last line. */
+.lead-pane-body {
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  padding: var(--space-8);
+}
+.lead-pane .rail-row { --in-split-under: var(--bg); }
+.lead-pane .badge { border-color: var(--bg); }
+.lead-row-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+  margin-top: var(--space-2);
+}
+.lead-row-line .head-status { font-size: var(--text-xs); gap: 5px; }
+.lead-row-line .head-status::before { width: 5px; height: 5px; }
+.lead-row-line .head-status.is-idle::before { background: var(--idle); }
+.lead-row-line .head-status.is-watching { flex: none; }
+.lead-row-preview {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
 }
 .file-state {
   margin: 0;
