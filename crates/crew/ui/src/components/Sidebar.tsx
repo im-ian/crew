@@ -52,6 +52,8 @@ import { BotLabelProvider, useLabelGroups } from "../BotLabelContext";
 import { botLabel, botSearchText } from "../botLabel";
 import { listedHits, matchRuns } from "../searchView";
 import { PlanUsageButton } from "./PlanUsageBar";
+import { WaitTag } from "./WaitingOn";
+import { waitingOn } from "../statusView";
 import { ChevronDown, Columns2, Ellipsis, Layers, Plus, Rows2, Search, Settings, Star } from "../icons";
 
 const RAIL_DEFAULT = 232;
@@ -1749,6 +1751,7 @@ function ItemRow({
   // On the folded rail the star takes the corner the exited dot uses, and
   // greys out for it.
   const exited = a?.status === "exited";
+  const waits = waitingOn(a);
   const face = (
     <Avatar
       id={item.id}
@@ -1758,6 +1761,7 @@ function ItemRow({
       color={a?.avatar_color}
       badge={(lead && compact && exited ? undefined : a?.status) || undefined}
       status={a?.status}
+      waiting={waits.length > 0}
       overlay={
         remote ? (
           <span className={"badge remote-dot" + (online ? " is-on" : "")} />
@@ -1830,6 +1834,7 @@ function ItemRow({
                 {represents.join(" · ")}
               </span>
             ) : null}
+            {!compact && waits.length ? <WaitTag ids={waits} agents={agents} /> : null}
           </span>
           {stamp ? (
             <time className="rail-stamp" dateTime={new Date(ts).toISOString()}>

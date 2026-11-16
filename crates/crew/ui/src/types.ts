@@ -126,6 +126,11 @@ export type AgentInfo = {
   watch?: Watch[];
   /** The folder its CLI runs in: its own worktree when worktrees are on. Paths it writes are read from here. */
   work_dir?: string | null;
+  /**
+   * Bots it ran `crew tell` to and still waits on, in the order it asked.
+   * A teammate's bot on another PC counts too. Absent when it waits on none.
+   */
+  waiting_on?: string[];
 };
 
 /** One task a bot left running after it answered. */

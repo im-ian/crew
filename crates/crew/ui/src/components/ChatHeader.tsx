@@ -6,10 +6,13 @@ import { isOnline, remoteLabel } from "../remote";
 import type { AgentInfo, CliKind, Group } from "../types";
 import { WhoButton } from "./WhoButton";
 import { Info, Users, X } from "../icons";
-import { statusView } from "../statusView";
+import { statusView, waitingOn } from "../statusView";
+import { WaitStatus } from "./WaitingOn";
 
 type Props = {
   currentAgent: AgentInfo | null;
+  /** Every bot, to name the ones this bot waits on. */
+  agents?: readonly AgentInfo[];
   groups: readonly Group[];
   onOpenInfo: () => void;
   /** Set when this bot leads its sidebar group: opens the group's bots beside the chat. */
@@ -23,6 +26,7 @@ type Props = {
 
 export function ChatHeader({
   currentAgent,
+  agents = [],
   groups,
   onOpenInfo,
   onOpenGroup,
@@ -104,7 +108,9 @@ export function ChatHeader({
             {line}
           </span>
         ) : null}
-        {status ? (
+        {status?.tone === "waiting" ? (
+          <WaitStatus ids={waitingOn(currentAgent)} agents={agents} />
+        ) : status ? (
           <span
             className={"head-status is-" + status.tone}
             title={status.tone === "watching" ? status.text : undefined}

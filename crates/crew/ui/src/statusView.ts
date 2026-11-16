@@ -3,7 +3,7 @@ import type { AgentInfo } from "./types";
 import { showsWatch, watchLabel } from "./watchView";
 
 /** Which colour a status word takes: `.head-status.is-<tone>`. */
-export type StatusTone = "working" | "watching" | "blocked" | "exited" | "idle";
+export type StatusTone = "working" | "watching" | "blocked" | "exited" | "waiting" | "idle";
 
 export type StatusView = { tone: StatusTone; text: string };
 
@@ -27,10 +27,20 @@ export function briefStatus(agent: AgentInfo, t: TFn): StatusView {
   return wordFor(agent, t) ?? { tone: "idle", text: t("header.statusIdle") };
 }
 
+/**
+ * The bots `agent` waits on, as the screen shows it: only while it rests.
+ * Needs review and working say more about it, and an exited bot says nothing.
+ */
+export function waitingOn(agent: AgentInfo | null | undefined): string[] {
+  if (!agent || agent.status !== "idle") return [];
+  return agent.waiting_on ?? [];
+}
+
 function wordFor(agent: AgentInfo, t: TFn): StatusView | null {
   if (agent.remote && agent.asking) return { tone: "blocked", text: t("header.statusOwner") };
   if (agent.status === "working") return { tone: "working", text: t("header.statusWorking") };
   if (agent.status === "blocked") return { tone: "blocked", text: t("header.statusBlocked") };
   if (agent.status === "exited") return { tone: "exited", text: t("header.statusExited") };
+  if (waitingOn(agent).length) return { tone: "waiting", text: t("header.statusWaiting") };
   return null;
 }

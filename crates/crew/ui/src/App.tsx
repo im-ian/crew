@@ -700,6 +700,7 @@ export function App() {
         <section className={cls} data-slot={slot} onPointerDownCapture={onPointerDownCapture}>
           <ChatHeader
             currentAgent={agent}
+            agents={crew.agents}
             groups={crew.groups}
             onOpenInfo={() => {
               if (id) crew.openInfo(id);
@@ -737,6 +738,7 @@ export function App() {
       <section className={cls} data-slot={slot} onPointerDownCapture={onPointerDownCapture}>
         <ChatHeader
           currentAgent={crew.currentAgent}
+          agents={crew.agents}
           groups={crew.groups}
           onOpenInfo={() => {
             if (crew.selected) crew.openInfo(crew.selected);

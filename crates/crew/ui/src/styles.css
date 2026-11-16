@@ -7235,3 +7235,107 @@ html[data-theme="light"] .island-ghost-2 {
   color: var(--muted);
   font: 600 11px/1.6 var(--sans);
 }
+
+/* Waiting on other bots. The bot rests while the bots it asked work, so
+   the status is muted. Motion (the face, chips coming and going) comes with
+   the final waiting animation; these rules are layout only. */
+/* Header: every bot waited on, a chip each, on one line. Past the width the
+   chips scroll sideways and the count stays put, so the header never wraps. */
+.head-status.is-waiting {
+  flex: 1 1 0;
+  min-width: 0;
+  gap: var(--space-6);
+  color: var(--muted);
+}
+.head-status.is-waiting::before { flex: 0 0 auto; }
+.head-status.is-waiting .head-status-text { flex: 0 0 auto; }
+.head-status.is-waiting .head-status-text b {
+  margin-left: 4px;
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.wait-scroll {
+  min-width: 0;
+  flex: 0 1 auto;
+  margin-left: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+.wait-scroll::-webkit-scrollbar { display: none; }
+.wait-chips {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+.wait-chip {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 4px;
+  height: 20px;
+  max-width: 140px;
+  margin-right: 4px;
+  padding: 0 8px 0 3px;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+.wait-chip .avatar {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  font-size: 7px;
+}
+.wait-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Sidebar name line: the first bot waited on and "+N". It gives way before
+   the bot's own name does; the face and the count keep their room. */
+.wait-tag {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  flex: 0 5 auto;
+  gap: 3px;
+  min-width: 28px;
+  max-width: 96px;
+  height: 15px;
+  margin-left: 6px;
+  padding: 0 5px 0 2px;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+.wait-tag .avatar {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  font-size: 6px;
+}
+.wait-tag-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wait-tag-more {
+  flex: 0 0 auto;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.wait-tag.is-single { padding-right: 6px; }
+.wait-tag:not(.is-single) { min-width: 58px; }

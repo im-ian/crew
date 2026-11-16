@@ -24,6 +24,11 @@ type Props = {
   onClick?: (e: MouseEvent) => void;
   /** An idle face follows the composer caret. */
   lookAtCaret?: boolean;
+  /**
+   * Resting while bots it asked work on its request (`waitingOn`). Only a
+   * hook for now: `is-waiting` and `data-status="waiting"` on the avatar.
+   */
+  waiting?: boolean;
   /** Holds one working look. Only the catalog pages set it, the app draws one itself. */
   workLook?: WorkLook | null;
 };
@@ -87,6 +92,7 @@ export function Avatar({
   onClick,
   lookAtCaret = false,
   workLook = null,
+  waiting = false,
 }: Props) {
   const [broken, setBroken] = useState(false);
   useEffect(() => {
@@ -114,6 +120,7 @@ export function Avatar({
     showFace ? "has-face" : "",
     live === "working" ? "is-working" : "",
     live === "blocked" ? "is-blocked" : "",
+    waiting ? "is-waiting" : "",
     className,
   ]
     .filter(Boolean)
@@ -162,6 +169,7 @@ export function Avatar({
         style={style}
         title={title}
         onClick={onClick}
+        data-status={waiting ? "waiting" : undefined}
       >
         {body}
       </button>
@@ -175,6 +183,7 @@ export function Avatar({
       style={style}
       title={title}
       onClick={onClick}
+      data-status={waiting ? "waiting" : undefined}
     >
       {body}
     </Tag>

@@ -4,7 +4,7 @@ import { listStamp } from "../clock";
 import { Star, Users, X } from "../icons";
 import { useLocale, useT } from "../LocaleContext";
 import { mentionRuns } from "../mentions";
-import { briefStatus } from "../statusView";
+import { briefStatus, waitingOn } from "../statusView";
 import type { AgentInfo, Group } from "../types";
 import { Avatar } from "./Avatar";
 import { MentionRunsView } from "./MentionChip";
@@ -110,6 +110,7 @@ function GroupBotRow({
         color={bot.avatar_color}
         badge={bot.status}
         status={bot.status}
+        waiting={waitingOn(bot).length > 0}
       />
       <div className="rail-row-text">
         <div className="agent-name">
