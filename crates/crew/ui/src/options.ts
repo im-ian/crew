@@ -101,7 +101,7 @@ type ModelAgent = {
 };
 
 // An empty model is the CLI default; pass that id when the list has reported it.
-// `groupMark` (`#name`) is the last item on the line. Blank means the bot is in no group.
+// `groupMark` (`#name`) is the first item on the line. Blank means the bot is in no group.
 export function modelLine(
   agent: ModelAgent,
   defaultModel: string | null | undefined,
@@ -113,7 +113,7 @@ export function modelLine(
   if (!cli) return mark || null;
   const spec = CLIS.find((c) => c.value === cli);
   const name = cliLabel(cli, t);
-  const line = (...items: string[]) => [...items, mark].filter(Boolean).join(" · ");
+  const line = (...items: string[]) => [mark, ...items].filter(Boolean).join(" · ");
   if (cli === "custom") {
     const bin = agent.cmd?.[0]?.split(/[\\/]/).pop() || name;
     return line(name, bin);

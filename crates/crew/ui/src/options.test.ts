@@ -67,16 +67,16 @@ describe("modelLine", () => {
     ).toBe("명령 · my-ai");
   });
 
-  it("ends the line with a group mark, and leaves the line alone when the mark is blank", () => {
+  it("starts the line with a group mark, and leaves the line alone when the mark is blank", () => {
     expect(modelLine({ cmd: ["gemini"], model: "flash", effort: "" }, null, t, "#Crew")).toBe(
-      "Gemini · flash · #Crew",
+      "#Crew · Gemini · flash",
     );
     expect(modelLine({ cmd: ["claude"], model: "opus", effort: "high" }, null, t, "#Crew")).toBe(
-      "Claude · opus · 생각 꼼꼼하게 · #Crew",
+      "#Crew · Claude · opus · 생각 꼼꼼하게",
     );
     expect(
       modelLine({ cmd: ["my-ai", "--print"], headless: true, model: "", effort: "" }, null, t, "#Crew"),
-    ).toBe("명령 · my-ai · #Crew");
+    ).toBe("#Crew · 명령 · my-ai");
     expect(modelLine({ cmd: ["claude"], model: "opus", effort: "high" }, null, t, "  ")).toBe(
       "Claude · opus · 생각 꼼꼼하게",
     );
@@ -89,19 +89,19 @@ describe("headerModelLine", () => {
     { id: "g1", name: "Crew", collapsed: false, items: ["agent:dev"] },
   ];
 
-  it("puts #group at the end of the line", () => {
-    expect(headerModelLine(agent, crew, null, t)).toBe("Claude · opus · 생각 꼼꼼하게 · #Crew");
+  it("puts #group at the start of the line", () => {
+    expect(headerModelLine(agent, crew, null, t)).toBe("#Crew · Claude · opus · 생각 꼼꼼하게");
   });
 
   it("follows a rename and a move, and adds nothing for a loose bot", () => {
     expect(headerModelLine(agent, [{ ...crew[0], name: "디자인" }], null, t)).toBe(
-      "Claude · opus · 생각 꼼꼼하게 · #디자인",
+      "#디자인 · Claude · opus · 생각 꼼꼼하게",
     );
     const moved: Group[] = [
       { ...crew[0], items: [] },
       { id: "g2", name: "서버", collapsed: false, items: ["agent:dev"] },
     ];
-    expect(headerModelLine(agent, moved, null, t)).toBe("Claude · opus · 생각 꼼꼼하게 · #서버");
+    expect(headerModelLine(agent, moved, null, t)).toBe("#서버 · Claude · opus · 생각 꼼꼼하게");
     expect(headerModelLine(agent, [], null, t)).toBe("Claude · opus · 생각 꼼꼼하게");
     expect(headerModelLine({ ...agent, id: "solo" }, crew, null, t)).toBe(
       "Claude · opus · 생각 꼼꼼하게",
