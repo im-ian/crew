@@ -4,11 +4,12 @@ import { useT } from "../LocaleContext";
 import type { AgentInfo } from "../types";
 import {
   CHIP_LEAVE_MS,
-  chipCount,
+  chipRhythm,
   initialChips,
+  liveIds,
   nextChips,
+  SIDE_CHIPS,
   settleChips,
-  splitFaces,
   type WaitChip,
 } from "../waitChips";
 import { Avatar } from "./Avatar";
@@ -66,15 +67,60 @@ function useWaitChips(ids: readonly string[]) {
   return { chips, refFor };
 }
 
-function chipClass(base: string, chip: WaitChip): string {
-  return base + (chip.entering ? " is-entering" : "") + (chip.leaving ? " is-leaving" : "");
+/**
+ * The chips of one line, header or sidebar: each with its bot's colour
+ * (`--c`), the width it folds from (`--w`), and its place in the breathing
+ * wave (`--d`). `withName` puts the name beside the face.
+ */
+function ChipList({
+  chips,
+  agents,
+  refFor,
+  withName,
+}: {
+  chips: readonly WaitChip[];
+  agents: readonly AgentInfo[];
+  refFor: (id: string) => (el: HTMLElement | null) => void;
+  withName: boolean;
+}) {
+  const t = useT();
+  const live = liveIds(chips);
+  const { delay } = chipRhythm(live.length);
+  return (
+    <span className="wait-chips">
+      {chips.map((chip) => {
+        const name = nameOf(agents, chip.id);
+        const at = live.indexOf(chip.id);
+        const style = {
+          ["--c" as string]: colorOf(agents, chip.id),
+          ...(chip.width ? { ["--w" as string]: `${chip.width}px` } : null),
+          ...(at >= 0 ? { ["--d" as string]: `${delay(at)}s` } : null),
+        };
+        return (
+          <span
+            key={chip.id}
+            ref={refFor(chip.id)}
+            className={
+              "wait-chip" + (chip.entering ? " is-entering" : "") + (chip.leaving ? " is-leaving" : "")
+            }
+            data-id={chip.id}
+            style={style}
+            role="img"
+            title={name}
+            aria-label={t("header.waitingOn", { name })}
+          >
+            <ChipFace agents={agents} id={chip.id} />
+            {withName ? <span className="wait-chip-name">{name}</span> : null}
+          </span>
+        );
+      })}
+    </span>
+  );
 }
 
-function chipStyle(agents: readonly AgentInfo[], chip: WaitChip) {
-  return {
-    ["--c" as string]: colorOf(agents, chip.id),
-    ...(chip.width ? { ["--w" as string]: `${chip.width}px` } : null),
-  };
+/** The breathing cycle for a line of these chips, as a style. */
+function cycleStyle(chips: readonly WaitChip[]) {
+  return { ["--cycle" as string]: `${chipRhythm(liveIds(chips).length).cycle}s` };
 }
 
 /** A still face for a chip: the face, without its status motion. */
@@ -141,77 +187,50 @@ export function WaitStatus({ ids, agents }: Props) {
   });
 
   if (!chips.length) return null;
-  const count = chipCount(chips);
+  const count = liveIds(chips).length;
   return (
-    <span className={"head-status is-waiting" + (ids.length ? "" : " is-ending")}>
+    <span
+      className={"head-status is-waiting" + (ids.length ? "" : " is-ending")}
+      style={cycleStyle(chips)}
+    >
       <span className="head-status-text">
         {t("header.statusWaiting")}
         {count > 1 ? <b>{count}</b> : null}
       </span>
       <span className="wait-scroll" ref={scroll}>
-        <span className="wait-chips">
-          {chips.map((chip) => {
-            const name = nameOf(agents, chip.id);
-            return (
-              <span
-                key={chip.id}
-                ref={refFor(chip.id)}
-                className={chipClass("wait-chip", chip)}
-                data-id={chip.id}
-                style={chipStyle(agents, chip)}
-                title={name}
-                aria-label={t("header.waitingOn", { name })}
-              >
-                <ChipFace agents={agents} id={chip.id} />
-                <span className="wait-chip-name">{name}</span>
-              </span>
-            );
-          })}
-        </span>
+        <ChipList chips={chips} agents={agents} refFor={refFor} withName />
       </span>
     </span>
   );
 }
 
 /**
- * The sidebar's mark beside a bot's name: the faces of the bots it waits
- * on, two at most, then "+N" for the rest. Each face names its bot on
- * hover, and "+N" names the rest. A face whose bot answers glows and folds
- * out like a header chip. The last-message line under it stays as it was.
+ * The sidebar's mark beside a bot's name: the bots it waits on as face
+ * chips, two at most, then "+N" for the rest. Each face names its bot on
+ * hover, and "+N" names the rest. A chip whose bot answers glows and folds
+ * out as in the header. The last-message line under it stays as it was.
  */
 export function WaitTag({ ids, agents }: Props) {
   const t = useT();
-  const { faces, rest } = splitFaces(ids);
-  const { chips, refFor } = useWaitChips(faces);
-  if (!chips.length && !rest.length) return null;
-  const restNames = rest.map((id) => nameOf(agents, id)).join(", ");
+  const { chips, refFor } = useWaitChips(ids);
+  if (!chips.length) return null;
+  const live = liveIds(chips);
+  const rest = live.slice(SIDE_CHIPS).map((id) => nameOf(agents, id)).join(", ");
+  const more = live.length > SIDE_CHIPS;
   return (
-    <span className="wait-faces">
-      {chips.map((chip) => {
-        const name = nameOf(agents, chip.id);
-        return (
-          <span
-            key={chip.id}
-            ref={refFor(chip.id)}
-            className={chipClass("wait-face", chip)}
-            data-id={chip.id}
-            style={chipStyle(agents, chip)}
-            role="img"
-            title={name}
-            aria-label={t("header.waitingOn", { name })}
-          >
-            <ChipFace agents={agents} id={chip.id} />
-          </span>
-        );
-      })}
-      {rest.length ? (
+    <span
+      className={"wait-cluster is-side" + (more ? " has-more" : "")}
+      style={cycleStyle(chips)}
+    >
+      <ChipList chips={chips} agents={agents} refFor={refFor} withName={false} />
+      {more ? (
         <span
           className="wait-more"
           role="img"
-          title={restNames}
-          aria-label={t("header.waitingOn", { name: restNames })}
+          title={rest}
+          aria-label={t("header.waitingOn", { name: rest })}
         >
-          +{rest.length}
+          +{live.length - SIDE_CHIPS}
         </span>
       ) : null}
     </span>

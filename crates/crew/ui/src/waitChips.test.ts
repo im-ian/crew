@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chipCount, initialChips, nextChips, settleChips, splitFaces } from "./waitChips";
+import { chipCount, chipRhythm, initialChips, liveIds, nextChips, settleChips } from "./waitChips";
 
 const width = (id: string) => ({ a: 80, b: 64, c: 72 })[id];
 
@@ -51,21 +51,21 @@ describe("waiting chips", () => {
   });
 });
 
-describe("sidebar faces", () => {
-  it("shows two faces at most, the rest as +N", () => {
-    expect(splitFaces(["a"])).toEqual({ faces: ["a"], rest: [] });
-    expect(splitFaces(["a", "b"])).toEqual({ faces: ["a", "b"], rest: [] });
-    expect(splitFaces(["a", "b", "c", "d"])).toEqual({ faces: ["a", "b"], rest: ["c", "d"] });
-    expect(splitFaces([])).toEqual({ faces: [], rest: [] });
+describe("chip rhythm", () => {
+  it("breathes every 1.8s up to three bots, slower from four", () => {
+    expect(chipRhythm(1).cycle).toBe(1.8);
+    expect(chipRhythm(3).cycle).toBe(1.8);
+    expect(chipRhythm(4).cycle).toBe(3.2);
   });
 
-  it("a face that answers folds out and the next one steps in", () => {
-    const before = initialChips(splitFaces(["a", "b", "c"]).faces);
-    const next = nextChips(before, splitFaces(["b", "c"]).faces, false, () => 14);
-    expect(next.map((c) => [c.id, c.leaving, c.entering])).toEqual([
-      ["a", true, false],
-      ["b", false, false],
-      ["c", false, true],
-    ]);
+  it("passes left to right, 12% of a cycle apart, at most 0.6s", () => {
+    const { delay } = chipRhythm(3);
+    expect([0, 1, 2].map(delay)).toEqual([0, 0.22, 0.43]);
+    expect(chipRhythm(6).delay(5)).toBe(0.6);
+  });
+
+  it("counts only the chips that are staying", () => {
+    const going = nextChips(initialChips(["a", "b", "c"]), ["b", "c"], false, () => 15);
+    expect(liveIds(going)).toEqual(["b", "c"]);
   });
 });

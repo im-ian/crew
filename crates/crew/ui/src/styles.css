@@ -7241,6 +7241,7 @@ html[data-theme="light"] .island-ghost-2 {
 /* Header: every bot waited on, a chip each, on one line. Past the width the
    chips scroll sideways and the count stays put, so the header never wraps. */
 .head-status.is-waiting {
+  --cycle: 1.8s;
   flex: 1 1 0;
   min-width: 0;
   gap: var(--space-6);
@@ -7298,55 +7299,37 @@ html[data-theme="light"] .island-ghost-2 {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* Sidebar name line: the faces of the bots waited on, two at most, then
-   "+N". They keep their room; the bot's own name gives way first. */
-.wait-faces {
+/* Sidebar name line: the bots waited on as face chips, two at most, then
+   "+N". The cluster keeps its width; the bot's own name gives way. */
+.wait-cluster.is-side {
+  --cycle: 1.8s;
   display: inline-flex;
   align-items: center;
   align-self: center;
   flex: 0 0 auto;
-  gap: 2px;
   margin-left: 6px;
 }
-.wait-face {
-  display: inline-flex;
-  flex: 0 0 auto;
-  max-width: 18px;
-  border-radius: 50%;
+.wait-cluster.is-side .wait-chips { display: inline-flex; align-items: center; }
+.wait-cluster.is-side .wait-chip {
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-right: 2px;
+  padding: 0;
 }
-.wait-face .avatar {
-  width: 14px;
-  height: 14px;
-  font-size: 7px;
+.wait-cluster.is-side .wait-chip .avatar {
+  width: 11px;
+  height: 11px;
+  font-size: 6px;
 }
+.wait-cluster.has-more .wait-chip:nth-child(n + 3) { display: none; }
 .wait-more {
   flex: 0 0 auto;
-  margin-left: 1px;
-  color: var(--faint);
+  padding: 0 2px;
+  color: var(--muted);
   font-size: 10.5px;
-  font-weight: 600;
-  line-height: 1;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
-}
-/* A face whose bot answered glows in that bot's colour and folds, like a
-   header chip. */
-.wait-face.is-entering { animation: wait-chip-in 0.26s var(--ease-out) both; }
-.wait-face.is-leaving { animation: wait-face-leave 0.62s ease forwards; pointer-events: none; }
-@keyframes wait-face-leave {
-  0%, 38% {
-    max-width: 18px;
-    opacity: 1;
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 95%, transparent);
-    background: color-mix(in srgb, var(--c) 28%, transparent);
-  }
-  38% { transform: scale(1.15); }
-  100% {
-    max-width: 0;
-    margin-right: -2px;
-    opacity: 0;
-    transform: scale(0.6);
-    box-shadow: 0 0 0 2px transparent;
-  }
 }
 
 /* Waiting, acted by the face (6.8s): it taps twice, leaning, rests with
@@ -7403,10 +7386,31 @@ html[data-theme="light"] .island-ghost-2 {
   58%, 100% { transform: scaleY(0.8); }
 }
 
+/* Breathing: once a cycle each chip takes a faint ring and tint of its
+   bot's colour, passing left to right (`--d`). `--cycle` is 1.8s, slower
+   from four bots (`chipRhythm`). Weak, so the face keeps the attention. */
+.wait-chip {
+  animation: wait-chip-catch var(--cycle, 1.8s) ease-in-out infinite;
+  animation-delay: var(--d, 0s);
+}
+@keyframes wait-chip-catch {
+  0%, 52%, 100% {
+    box-shadow: inset 0 0 0 1px transparent;
+    background: color-mix(in srgb, var(--ink) 12%, transparent);
+  }
+  70% {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 72%, transparent);
+    background: color-mix(in srgb, var(--c) 20%, color-mix(in srgb, var(--ink) 12%, transparent));
+  }
+}
 /* A bot waited on answers: its chip glows once in that bot's colour (`--c`),
    folds from its width (`--w`) and goes; the rest close up. The last one
    fades the whole line. A chip that arrives grows in. */
-.wait-chip.is-entering { animation: wait-chip-in 0.26s var(--ease-out) both; }
+.wait-chip.is-entering {
+  animation:
+    wait-chip-in 0.26s var(--ease-out) both,
+    wait-chip-catch var(--cycle, 1.8s) ease-in-out var(--d, 0s) infinite;
+}
 .wait-chip.is-leaving { animation: wait-chip-leave 0.62s ease forwards; pointer-events: none; }
 @keyframes wait-chip-in {
   from { opacity: 0; transform: scale(0.82); }
@@ -7451,12 +7455,11 @@ html[data-theme="light"] .island-ghost-2 {
   .avatar-face.is-waiting .avatar-gaze,
   .avatar-face.is-waiting .avatar-pill,
   .avatar-face.is-waiting .avatar-blink,
-  .wait-chip.is-entering,
-  .wait-face.is-entering { animation: none !important; }
+  .wait-chip,
+  .wait-chip.is-entering { animation: none !important; }
   .avatar-face.is-waiting { transform: translate(-0.5%, 0) rotate(-1.6deg); }
   .avatar-face.is-waiting:not(.is-tracking):not(.is-gaze-return) .avatar-gaze { transform: translate(-2.2px, 1.6px); }
   .avatar-face.is-waiting .avatar-pill { transform: scaleY(0.8); }
-  .wait-chip.is-leaving,
-  .wait-face.is-leaving { display: none; }
+  .wait-chip.is-leaving { display: none; }
   .head-status.is-waiting.is-ending { transition: none; }
 }

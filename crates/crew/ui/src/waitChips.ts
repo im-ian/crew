@@ -52,10 +52,20 @@ export function chipCount(cur: readonly WaitChip[]): number {
   return cur.filter((chip) => !chip.leaving).length;
 }
 
-/** How many faces the sidebar shows before the rest become "+N". */
-export const WAIT_FACES = 2;
+/** How many chips the sidebar shows before the rest become "+N". */
+export const SIDE_CHIPS = 2;
 
-/** The sidebar's faces, two at most, and the bots left for "+N". */
-export function splitFaces(ids: readonly string[]): { faces: string[]; rest: string[] } {
-  return { faces: ids.slice(0, WAIT_FACES), rest: ids.slice(WAIT_FACES) };
+/** The bots on chips that are not on their way out, in order. */
+export function liveIds(cur: readonly WaitChip[]): string[] {
+  return cur.filter((chip) => !chip.leaving).map((chip) => chip.id);
+}
+
+/**
+ * The chips' breathing: each glows faintly in its bot's colour once a
+ * cycle, left to right like a wave. Four bots or more breathe slower, so a
+ * long line stays calm. `delay(i)` is the i-th live chip's offset, seconds.
+ */
+export function chipRhythm(live: number): { cycle: number; delay: (i: number) => number } {
+  const cycle = live > 3 ? 3.2 : 1.8;
+  return { cycle, delay: (i) => Math.min(0.6, Math.round(i * 0.12 * cycle * 100) / 100) };
 }
