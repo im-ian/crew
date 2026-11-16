@@ -655,6 +655,7 @@ export function App() {
             ready={!!rows}
             showTools={showTools}
             lookAtCaret={false}
+            split
           />
         </section>
       );
@@ -714,6 +715,7 @@ export function App() {
                   if (crew.selected) crew.openRoutines(crew.selected);
                 }
           }
+          split={!!view}
           lookAtCaret={
             crew.currentAgent?.status !== "working" &&
             crew.currentAgent?.status !== "blocked" &&
