@@ -570,6 +570,8 @@ function MediaPreview({
         return;
       }
       if (!shot || shot.kind !== "image") return;
+      // appZoom.ts listens first and leaves these keys alone while this
+      // picture is mounted, so + − 0 stay on the picture, with or without ⌘.
       const z = zoomKey(e);
       if (z) {
         e.preventDefault();
