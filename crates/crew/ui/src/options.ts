@@ -101,7 +101,7 @@ type ModelAgent = {
 };
 
 // An empty model is the CLI default; pass that id when the list has reported it.
-// `groupMark` (`#name`) sits against the model. Blank means the bot is in no group.
+// `groupMark` (`#name`) is the first item on the line. Blank means the bot is in no group.
 export function modelLine(
   agent: ModelAgent,
   defaultModel: string | null | undefined,
@@ -113,15 +113,15 @@ export function modelLine(
   if (!cli) return mark || null;
   const spec = CLIS.find((c) => c.value === cli);
   const name = cliLabel(cli, t);
-  const tagged = (model: string) => (mark ? `${model} ${mark}` : model);
+  const line = (...items: string[]) => [mark, ...items].filter(Boolean).join(" · ");
   if (cli === "custom") {
     const bin = agent.cmd?.[0]?.split(/[\\/]/).pop() || name;
-    return `${name} · ${tagged(bin)}`;
+    return line(name, bin);
   }
   const model = agent.model?.trim() || defaultModel?.trim() || t("model.default");
-  if (!spec?.effort) return `${name} · ${tagged(model)}`;
+  if (!spec?.effort) return line(name, model);
   const effort = t(EFFORT_LABEL[agent.effort?.trim() || ""] ?? "effort.default");
-  return `${name} · ${tagged(model)} · ${t("field.effort")} ${effort}`;
+  return line(name, model, `${t("field.effort")} ${effort}`);
 }
 
 /** Model line for the open chat. The mark comes from the folders passed in, so a rename or a move changes it. */
