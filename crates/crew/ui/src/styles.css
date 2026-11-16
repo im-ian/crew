@@ -4710,20 +4710,15 @@ html[data-theme="light"] .file-src span {
   overflow-x: auto;
   scrollbar-width: none;
 }
+/* A tab is its name and a close button side by side, so the close never
+   picks the tab. The X keeps its room while hidden: no tab moves on hover. */
 .file-tab {
   flex: none;
+  display: inline-flex;
+  align-items: center;
   max-width: 220px;
-  padding: var(--space-4) var(--space-10);
-  border: 0;
   border-radius: var(--radius-sm);
-  background: transparent;
   color: var(--muted);
-  font-family: var(--mono);
-  font-size: var(--text-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
 }
 .file-tab:hover {
   background: var(--hover);
@@ -4731,6 +4726,43 @@ html[data-theme="light"] .file-src span {
 }
 .file-tab.active {
   background: var(--field);
+  color: var(--ink);
+}
+.file-tab-pick {
+  min-width: 0;
+  padding: var(--space-4) var(--space-2) var(--space-4) var(--space-10);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.file-tab-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-right: var(--space-4);
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+}
+.file-tab.active .file-tab-close,
+.file-tab:hover .file-tab-close,
+.file-tab-close:focus-visible {
+  opacity: 1;
+}
+.file-tab-close:hover {
+  background: var(--active);
   color: var(--ink);
 }
 /* `crew show` in the thread: the files a bot opened beside the chat, a line each. */
