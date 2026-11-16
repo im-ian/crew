@@ -15,6 +15,8 @@ import { GroupSettingsModal } from "./components/GroupSettingsModal";
 import { SettingsPane } from "./components/SettingsPane";
 import { SkillsPane } from "./components/SkillsPane";
 import { ShortcutHelp } from "./components/ShortcutHelp";
+import { QuickSwitcher } from "./components/QuickSwitcher";
+import { loadRecent, pushRecent, saveRecent } from "./quickSwitch";
 import { Sidebar } from "./components/Sidebar";
 import { Island } from "./components/Island";
 import { chatOrder, loadRemoteFolds, loadRemoteLayout, representing } from "./remote";
@@ -82,6 +84,8 @@ export function App() {
   const [renameId, setRenameId] = useState<string | null>(null);
   const [drafting, setDrafting] = useState<string[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
+  // ⌘K: the bot switcher.
+  const [switchOpen, setSwitchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   // Asked from settings, so it is drawn over them and Escape shuts it first.
@@ -167,6 +171,31 @@ export function App() {
   }, [crew.agents]);
   const active = view ? openSlot(view, openId) : null;
   const splitShown = useMemo(() => alsoShown(view, openId), [view, openId]);
+  // Bot ids top to bottom as the sidebar stacks them, for the ⌘K list.
+  const switchOrderIds = useMemo(
+    () =>
+      switchOpen
+        ? chatOrder(
+            { groups: crew.groups, ungrouped: crew.ungrouped, order: crew.order },
+            crew.agents,
+            crew.remotes,
+            loadRemoteFolds(),
+            loadRemoteLayout(),
+          ).map((row) => row.id)
+        : [],
+    [switchOpen, crew.groups, crew.ungrouped, crew.order, crew.agents, crew.remotes],
+  );
+  // Chats opened, newest first, for the ⌘K list.
+  const [recent, setRecent] = useState<string[]>(loadRecent);
+  useEffect(() => {
+    if (!openId) return;
+    setRecent((cur) => {
+      if (cur[0] === openId) return cur;
+      const next = pushRecent(cur, openId);
+      saveRecent(next);
+      return next;
+    });
+  }, [openId]);
   const slotIds: [string | null, string | null] = view ? view.panes : [openId, null];
   const slotAgents = slotIds.map((id) =>
     id ? crew.agents.find((a) => a.id === id) ?? null : null,
@@ -480,6 +509,14 @@ export function App() {
       // The skills window handles its own Escape, and no shortcut should act
       // on the app hidden behind it. The question dialog takes its own keys too.
       if (skillsOpen || askHoldRef.current) return;
+      // The switcher takes its own keys. ⌘K again shuts it.
+      if (switchOpen) {
+        if (shortcutId(e, true) === "quick-switch") {
+          e.preventDefault();
+          setSwitchOpen(false);
+        }
+        return;
+      }
       if (leaveOpen) {
         if (e.key === "Escape") {
           e.preventDefault();
@@ -523,6 +560,10 @@ export function App() {
         return;
       }
       if (settingsOpen) setSettingsOpen(false);
+      if (id === "quick-switch") {
+        setSwitchOpen(true);
+        return;
+      }
       if (id === "search") {
         searchRef.current?.focus();
         searchRef.current?.select();
@@ -596,7 +637,7 @@ export function App() {
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [helpOpen, settingsOpen, skillsOpen, peek, file, leadPane, leaveOpen]);
+  }, [helpOpen, settingsOpen, skillsOpen, switchOpen, peek, file, leadPane, leaveOpen]);
 
   function toggleLeadPane(id: string) {
     setPeek(null);
@@ -1056,6 +1097,26 @@ export function App() {
       />
       <SkillsPane open={skillsOpen} onClose={() => setSkillsOpen(false)} />
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
+      {switchOpen ? (
+        <QuickSwitcher
+          agents={crew.agents}
+          groups={crew.groups}
+          order={switchOrderIds}
+          recent={recent}
+          current={openId}
+          onPick={(id) => {
+            setSwitchOpen(false);
+            // As a click in the sidebar: split, the bot fills the half
+            // that takes the next pick, or takes the keys where it already is.
+            if (id === crew.selected && crew.selectedKind === "agent") {
+              composerRef.current?.focus();
+              return;
+            }
+            crew.selectAgent(id);
+          }}
+          onClose={() => setSwitchOpen(false)}
+        />
+      ) : null}
       <Island
         notices={crew.islands}
         agents={crew.agents}
