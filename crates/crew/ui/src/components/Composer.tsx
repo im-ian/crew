@@ -12,6 +12,7 @@ import { oneLine, wrapReply, type ReplyTarget } from "../reply";
 import { caretClientPoint, type CaretPoint } from "../caretPoint";
 import { dropPathsText } from "../dropPaths";
 import type { AskPick } from "./AskHoldDialog";
+import { enterAction } from "../composerEnter";
 import { GroupChip, MentionChip } from "./MentionChip";
 import { MentionMenu } from "./MentionMenu";
 import {
@@ -66,8 +67,11 @@ type Props = {
   onDrafts?: (ids: string[]) => void;
   /** Caret while a prompt is being typed. Null when the field is idle. */
   onCaret?: (point: CaretPoint | null) => void;
-  /** Set while the bot waits on a question: a send asks first what to do. */
-  askHold?: () => Promise<AskPick>;
+  /**
+   * Set while the bot waits on a question: a send asks first what to do.
+   * `skip` (⌘Enter) sends anyway without asking.
+   */
+  askHold?: (skip?: boolean) => Promise<AskPick>;
 };
 
 type Mention = { start: number; query: string };
@@ -128,6 +132,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   const fileRef = useRef<HTMLInputElement>(null);
   const plusRef = useRef<HTMLDivElement>(null);
   const pendingSteer = useRef(false);
+  // ⌘Enter: over an open question, send without the dialog.
+  const pendingSkipAsk = useRef(false);
   // A send waiting on the question dialog. Another Enter does not ask again.
   const holding = useRef(false);
   const onDraftsRef = useRef(onDrafts);
@@ -566,6 +572,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         if (!el) return;
         const steer = sendSteers(pendingSteer.current, delivery, canSteer, watching);
         pendingSteer.current = false;
+        const skipAsk = pendingSkipAsk.current;
+        pendingSkipAsk.current = false;
         const text = mentionIds(serializeEditor(el).trim(), agents, groups);
         const files = attaches.map(attachMarkdown).filter(Boolean);
         let raw = [text, files.join("\n")].filter(Boolean).join("\n\n");
@@ -600,12 +608,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         let steerNow = steer;
         if (askHold) {
           if (holding.current) return;
-          // The dialog takes the keys. Typing must not go on behind it.
+          // The dialog takes the keys, and ⌘Enter waits on the questions
+          // closing. Typing must not go on behind either.
           el.blur();
           holding.current = true;
           let pick: AskPick;
           try {
-            pick = await askHold();
+            pick = await askHold(skipAsk);
           } finally {
             holding.current = false;
           }
@@ -990,21 +999,23 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
               setReply(null);
               return;
             }
-            if (e.key === "Enter" && e.shiftKey && (e.metaKey || e.ctrlKey)) {
+            const enter = enterAction(e);
+            if (enter === "steer") {
               e.preventDefault();
               if (canSteer) pendingSteer.current = true;
               (e.currentTarget.closest("form") as HTMLFormElement | null)?.requestSubmit();
               return;
             }
-            if (e.key === "Enter" && e.shiftKey) {
+            if (enter === "line") {
               e.preventDefault();
               document.execCommand("insertLineBreak");
               refreshEmpty();
               fit();
               return;
             }
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (enter === "send" || enter === "send-anyway") {
               e.preventDefault();
+              if (enter === "send-anyway") pendingSkipAsk.current = true;
               (e.currentTarget.closest("form") as HTMLFormElement | null)?.requestSubmit();
             }
             if (e.key === " " && !composing.current) {

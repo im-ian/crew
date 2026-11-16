@@ -338,7 +338,31 @@ export function App() {
     crew.highlightId,
   ]);
 
-  function holdForQuestion(agent: string): Promise<AskPick> {
+  /** The questions still open in `agent`'s chat, when that chat is on screen. */
+  function asksIn(agent: string): string[] {
+    const c = crewRef.current;
+    const here = c.selectedKind === "agent" && c.selected === agent;
+    return here && c.messagesFor === agent ? openQuestionIds(c.messages) : [];
+  }
+
+  /**
+   * "Send anyway" closes the questions before the send goes, so a bot that
+   * cannot be cut into is not left asking. A bot that can is stopped by the
+   * send, which closes them too.
+   */
+  async function closeAsks(agent: string, asks: string[]) {
+    const c = crewRef.current;
+    await Promise.all(
+      asks.map((id) => c.answerChoice(agent, id, [], [], [], true).catch(() => undefined)),
+    );
+  }
+
+  /** `skip` is ⌘Enter: send anyway, without the dialog. */
+  async function holdForQuestion(agent: string, skip = false): Promise<AskPick> {
+    if (skip) {
+      await closeAsks(agent, asksIn(agent));
+      return "send";
+    }
     return new Promise((resolve) => setAskHold({ agent, resolve }));
   }
 
@@ -367,20 +391,12 @@ export function App() {
     const hold = askHoldRef.current;
     // The first pick decides; one already under way takes no other.
     if (!hold || hold.busy) return;
-    const c = crewRef.current;
-    const here = c.selectedKind === "agent" && c.selected === hold.agent;
-    const asks = here && c.messagesFor === hold.agent ? openQuestionIds(c.messages) : [];
+    const asks = asksIn(hold.agent);
     if (pick === "send") {
       const busy = { ...hold, busy: true };
       askHoldRef.current = busy;
       setAskHold(busy);
-      // Closed first, so a bot that cannot be cut into is not left asking.
-      // A bot that can is stopped by the send, which closes them too.
-      await Promise.all(
-        asks.map((id) =>
-          c.answerChoice(hold.agent, id, [], [], [], true).catch(() => undefined),
-        ),
-      );
+      await closeAsks(hold.agent, asks);
     }
     askHoldRef.current = null;
     setAskHold(null);
