@@ -96,7 +96,7 @@ import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
 import { MdBody } from "./MdBody";
 import { WhoButton, WhoLabel, whoColor } from "./WhoButton";
-import { STICK_PX, stickMove, type StickMove } from "../stick";
+import { STICK_PX, rebuiltTop, stickMove, type StickMove } from "../stick";
 
 /** How far below the thread's top edge a jumped question sits, clear of the fade. */
 const ASK_INSET = 16;
@@ -236,6 +236,8 @@ type Props = {
   onOpenRoutines?: () => void;
   /** The bot's face follows the composer caret: it is idle. */
   lookAtCaret?: boolean;
+  /** The chat is split in two. Turning it on or off rebuilds the box around the thread. */
+  split?: boolean;
 };
 
 export function ChatThread({
@@ -266,6 +268,7 @@ export function ChatThread({
   showTools = false,
   onOpenRoutines,
   lookAtCaret = false,
+  split = false,
 }: Props) {
   const { locale } = useLocale();
   const ref = useRef<HTMLDivElement>(null);
@@ -278,7 +281,7 @@ export function ChatThread({
   } | null>(null);
   const holdRef = useRef(false);
   holdRef.current = !!resume?.hold;
-  const { away, sync: syncStick, jump: jumpBottom, pin } = useStick(ref, (at) => {
+  const { away, sync: syncStick, jump: jumpBottom, pin, restore } = useStick(ref, (at) => {
     if (at && holdRef.current && settledRef.current) {
       holdRef.current = false;
       setResume((r) => (r && r.hold ? { ...r, hold: false } : r));
@@ -549,6 +552,16 @@ export function ChatThread({
   // Following the end, a row that grows or a thread that narrows pulls the
   // thread back down before paint, so a reflow never leaves it short.
   useResized(ref, resizedRef, [selected, selectedKind]);
+
+  // Splitting or joining the chat rebuilds the box around the thread, and
+  // WebKit drops its scroll to the top. Put it back before paint, before the
+  // scroll event that drop fires can read it as the reader moving up.
+  const splitRef = useRef(split);
+  useLayoutEffect(() => {
+    if (splitRef.current === split) return;
+    splitRef.current = split;
+    restore(stickRef.current && !unpinnedRef.current && !highlightId && !holdRef.current);
+  }, [split]);
 
   // The question row may mount only after this jump asks for it. Line the
   // card up once it is on the page, then let the reader scroll again.
@@ -1041,7 +1054,16 @@ export function useStick(
     sync();
   }
 
-  return { away, sync, jump, pin };
+  /** Back to where the thread was after the box around it was rebuilt. */
+  function restore(follow: boolean) {
+    const el = ref.current;
+    if (!el) return;
+    const top = rebuiltTop(follow, lastTop.current, el.scrollHeight);
+    if (top !== null && Math.abs(el.scrollTop - top) > 1) el.scrollTop = top;
+    sync();
+  }
+
+  return { away, sync, jump, pin, restore };
 }
 
 /**

@@ -16,3 +16,15 @@ export function stickMove(lastTop: number | null, top: number, gap: number): Sti
   if (lastTop !== null && top < lastTop - 1) return "up";
   return null;
 }
+
+/**
+ * Where a thread goes after the box around it was rebuilt. Splitting the chat
+ * turns the halves from display: contents into grids, and WebKit drops the
+ * thread's scroll to the top then. Read as a move up, that drop stopped the
+ * thread following and left it at its first line. A thread that followed the
+ * end goes back to it; any other goes back to where the last check found it.
+ */
+export function rebuiltTop(follow: boolean, lastTop: number | null, end: number): number | null {
+  if (follow) return end;
+  return lastTop;
+}
