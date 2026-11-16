@@ -5,9 +5,10 @@ pub fn one_on_one_tell_targets(text: &str, self_id: &str, roster: &[AgentConfig]
     crate::config::mentioned_teammate_ids(text, self_id, roster)
 }
 
-/// How many bot-to-bot relays a single user message may set off. A bot can call
+/// How many `crew tell`s a single user message may set off. A bot can call
 /// `crew tell` on its way through a turn, so two bots can hand the same thread
-/// back and forth forever, each hop costing a real CLI turn.
+/// back and forth forever, each tell costing a real CLI turn. The reply that
+/// wakes the bot waiting on a tell is not a hop.
 pub const MAX_RELAY_HOPS: u32 = 4;
 
 /// Where a turn's reply should land after the speaker finishes.
@@ -16,7 +17,8 @@ pub struct TurnOrigin {
     pub from: String,
     pub reply_agent: Option<String>,
     pub routine: Option<String>,
-    /// Relays between this turn and the user message that started the chain.
+    /// `crew tell`s between this turn and the user message that started the chain.
+    /// A reply that wakes the asker keeps this count.
     pub hops: u32,
     /// The turn's one wake of the bot waiting on it is used up, by the wake or
     /// by a stop. Output the turn leaves behind cannot wake that bot again.
@@ -92,7 +94,7 @@ fn envelope_from(raw: &str) -> String {
 }
 
 /// Fold a sender's in-flight origin into a newly parsed envelope origin so a
-/// bot-to-bot tell still posts back to the bot who asked.
+/// bot-to-bot tell still posts back to the bot who asked. The tell is one hop.
 pub fn inherit_origin(parent: Option<&TurnOrigin>, mut child: TurnOrigin) -> TurnOrigin {
     child.hops = parent.map(|p| p.hops + 1).unwrap_or(0);
     if child.reply_agent.is_none() {
