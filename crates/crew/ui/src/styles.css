@@ -2319,10 +2319,11 @@ html[data-theme="light"] .jump-question:hover {
 button.msg-avatar {
   cursor: pointer;
 }
+/* Chat text follows the size picked in Settings (`fontSize.ts`). */
 .bubble {
   line-height: 1.5;
   word-break: break-word;
-  font-size: var(--text-xl);
+  font-size: calc(var(--text-xl) * var(--chat-scale, 1));
 }
 .row.me .bubble {
   max-width: 72%;
@@ -2377,7 +2378,7 @@ button.msg-avatar {
 .bubble.md pre code {
   background: none;
   padding: 0;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--chat-scale, 1));
   line-height: 1.45;
 }
 /* A command and the block under it read as a terminal exchange. */
@@ -5285,10 +5286,11 @@ button.mention-chip:active {
   border: 0;
   color: var(--ink);
   padding: 5px var(--space-4);
-  font-size: var(--text-xl);
+  font-size: calc(var(--text-xl) * var(--chat-scale, 1));
   line-height: 1.4;
   outline: none;
-  max-height: 120px;
+  /* The same number of lines at any text size. */
+  max-height: calc(120px * var(--chat-scale, 1));
   min-height: var(--control-h);
   overflow: auto;
   white-space: pre-wrap;
