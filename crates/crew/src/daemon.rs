@@ -1758,7 +1758,9 @@ fn drop_mention_followers(agent: &str) {
 }
 
 /// A tell from a bot that is still answering. If `to` is already in that bot's
-/// chain, keep the single slot (and use this text). Otherwise append it.
+/// chain, keep the single slot (and use this text). A named slot it takes over
+/// is a tell the bot ran, so it leaves the mention order and starts with the
+/// other tells the bot ran. Otherwise append it.
 /// Returns false when `epoch` is stale, so a stop that already cleared the
 /// chain does not put the tell back.
 fn defer_tell_if_epoch(
@@ -1790,6 +1792,7 @@ fn defer_tell_if_epoch(
                 *slot_text = text.to_string();
                 *slot_origin = origin;
             }
+            job.own = true;
             return true;
         }
     }
@@ -7158,6 +7161,64 @@ exec sleep 5"#,
         });
     }
 
+    /// The user named A, then B, then C. During the turn the bot tells B.
+    /// B gets that tell when the turn ends, without waiting for A. A and C,
+    /// which the bot did not tell, still go one at a time, and B is not told twice.
+    #[test]
+    fn a_bots_tell_to_a_named_teammate_does_not_wait_for_the_ones_ahead() {
+        paths::testing::with_home("own-over-named", || {
+            paths::write_notifications_enabled(false);
+            let [bot, a, b, c] = ["order-bot", "order-a", "order-b", "order-c"].map(test_id);
+            for id in [&bot, &a, &b, &c] {
+                claude_bot(id);
+            }
+            for id in [&a, &b, &c] {
+                headless_status(id, AgentStatus::Working);
+            }
+            let text = format!("@{a} 가 왜 멈췄는지 @{b} 에게 리포트하고 @{c} 마저 작업해줘");
+            let named = named_tells(&text, &bot, &roster_vec());
+            assert_eq!(
+                named.iter().map(|job| job.to.as_str()).collect::<Vec<_>>(),
+                [a.as_str(), b.as_str(), c.as_str()]
+            );
+            assert!(named.iter().all(|job| !job.own));
+            queue_serial_after(&bot, named);
+            defer_tell(&bot, &b, &bot, "리포트", None);
+
+            advance_serial(&bot);
+
+            let b_item = inbox()
+                .lock()
+                .unwrap()
+                .get_mut(&b)
+                .and_then(|q| q.pop_front())
+                .expect("B got the bot's tell");
+            assert!(inbox_is_empty(&b), "one slot: B is not told twice");
+            assert!(b_item.text.contains("리포트"), "{}", b_item.text);
+            assert!(b_item.then.is_empty(), "B does not carry the mention order");
+
+            let a_item = inbox()
+                .lock()
+                .unwrap()
+                .get_mut(&a)
+                .and_then(|q| q.pop_front())
+                .expect("A still leads the teammates the bot did not tell");
+            assert!(a_item.text.contains(&text), "{}", a_item.text);
+            assert_eq!(a_item.then.len(), 1);
+            assert_eq!(a_item.then[0].to, c);
+            assert!(!a_item.then[0].own);
+            assert!(inbox_is_empty(&c), "C waits for A's turn");
+
+            for id in [&a, &b, &c] {
+                headless_status(id, AgentStatus::Idle);
+                clear_inbox(id);
+            }
+            for id in [&bot, &a, &b, &c] {
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
     fn headless_status(id: &str, to: AgentStatus) {
         match agents().lock().unwrap().get(id) {
             Some(LiveAgent::Headless(s)) => s.inner.lock().unwrap().status = to,
@@ -9538,19 +9599,19 @@ sleep 1"#,
             ]),
         );
         defer_tell(&anchor, &b, &anchor, "from the bot", None);
-        let chain: Vec<(String, String)> = take_followers(&anchor)
+        let chain: Vec<(String, String, bool)> = take_followers(&anchor)
             .into_iter()
             .map(|job| {
                 let SerialKind::Tell { text, .. } = job.kind;
-                (job.to, text)
+                (job.to, text, job.own)
             })
             .collect();
         assert_eq!(
             chain,
             [
-                (a, "user text".to_string()),
-                (b, "from the bot".to_string()),
-                (c, "c".to_string()),
+                (a, "user text".to_string(), false),
+                (b, "from the bot".to_string(), true),
+                (c, "c".to_string(), false),
             ]
         );
     }
