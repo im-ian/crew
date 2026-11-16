@@ -48,11 +48,14 @@ export function FileView({
   files,
   at,
   onPick,
+  onCloseTab,
   onClose,
 }: {
   files: FileTarget[];
   at: number;
   onPick: (at: number) => void;
+  /** Drops tab `at` from the panel. The file row in the thread stays. */
+  onCloseTab: (at: number) => void;
   onClose: () => void;
 }) {
   const t = useT();
@@ -148,20 +151,44 @@ export function FileView({
       </header>
       {files.length > 1 ? (
         <div className="file-tabs" role="tablist" aria-label={t("file.tabs")}>
-          {files.map((f, i) => (
-            <button
-              key={`${f.path}:${f.line ?? ""}`}
-              type="button"
-              role="tab"
-              aria-selected={i === at}
-              className={"file-tab" + (i === at ? " active" : "")}
-              title={f.path}
-              onClick={() => onPick(i)}
-            >
-              {splitFilePath(f.path).name}
-              {f.line ? <span className="file-line">:{f.line}</span> : null}
-            </button>
-          ))}
+          {/* `fileTabs` keeps one tab per path and line, so the key is unique. */}
+          {files.map((f, i) => {
+            const name = splitFilePath(f.path).name;
+            return (
+              <div
+                key={`${f.path}:${f.line ?? ""}`}
+                className={"file-tab" + (i === at ? " active" : "")}
+                // A middle click closes a tab, as in a browser.
+                onAuxClick={(e) => {
+                  if (e.button !== 1) return;
+                  e.preventDefault();
+                  onCloseTab(i);
+                }}
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={i === at}
+                  className="file-tab-pick"
+                  title={f.path}
+                  onClick={() => onPick(i)}
+                >
+                  {name}
+                  {f.line ? <span className="file-line">:{f.line}</span> : null}
+                </button>
+                {/* A sibling of the tab button, so closing never picks it. */}
+                <button
+                  type="button"
+                  className="file-tab-close"
+                  title={t("file.closeTab")}
+                  aria-label={t("file.closeTabNamed", { name })}
+                  onClick={() => onCloseTab(i)}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div />

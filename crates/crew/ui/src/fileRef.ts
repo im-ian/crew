@@ -27,6 +27,32 @@ export function sameFile(a: FileTarget | null | undefined, b: FileTarget | null 
   return !!a && !!b && a.path === b.path && (a.line ?? 0) === (b.line ?? 0);
 }
 
+/** The files open beside the chat, a tab each, and the one shown. */
+export type FileTabs = { list: FileTarget[]; at: number };
+
+/**
+ * Tabs for `group` with `target` shown. A file listed twice, same path and
+ * line, is one tab; `target` joins the end when the group lacks it.
+ */
+export function fileTabs(group: readonly FileTarget[], target: FileTarget): FileTabs {
+  const list: FileTarget[] = [];
+  for (const f of group) if (!list.some((g) => sameFile(g, f))) list.push(f);
+  const at = list.findIndex((f) => sameFile(f, target));
+  return at < 0 ? { list: [...list, target], at: list.length } : { list, at };
+}
+
+/**
+ * The tabs left once tab `i` closes, null when it was the last. Closing the
+ * shown tab shows the one after it, or the one before at the end.
+ */
+export function closeFileTab(tabs: FileTabs, i: number): FileTabs | null {
+  if (i < 0 || i >= tabs.list.length) return tabs;
+  const list = tabs.list.filter((_, j) => j !== i);
+  if (!list.length) return null;
+  const at = i < tabs.at ? tabs.at - 1 : i === tabs.at ? Math.min(i, list.length - 1) : tabs.at;
+  return { list, at };
+}
+
 /**
  * The files shown one after another with the row `id`: file rows with only
  * tool calls between them, since each `crew show` is a tool call of its own.

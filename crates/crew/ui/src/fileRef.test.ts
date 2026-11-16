@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  closeFileTab,
   codePathRef,
+  fileTabs,
   fileTarget,
   workDir,
   fileRun,
@@ -113,6 +115,42 @@ describe("the file panel", () => {
     expect(fileErrorKey("folder: /x")).toBe("file.folder");
     expect(fileErrorKey("binary: /x")).toBe("file.binary");
     expect(fileErrorKey(new Error("boom"))).toBe("file.failed");
+  });
+});
+
+describe("file tabs", () => {
+  const a = { path: "/w/a.ts" };
+  const a3 = { path: "/w/a.ts", line: 3 };
+  const b = { path: "/w/b.ts" };
+  const c = { path: "/w/c.ts" };
+
+  it("folds the same path and line into one tab", () => {
+    expect(fileTabs([a, b, a, a3, b], b)).toEqual({ list: [a, b, a3], at: 1 });
+  });
+
+  it("adds the file shown when its group lacks it", () => {
+    expect(fileTabs([a, b], c)).toEqual({ list: [a, b, c], at: 2 });
+    expect(fileTabs([c, c], c)).toEqual({ list: [c], at: 0 });
+  });
+
+  it("closing the shown tab shows the next, or the one before at the end", () => {
+    const tabs = { list: [a, b, c], at: 1 };
+    expect(closeFileTab(tabs, 1)).toEqual({ list: [a, c], at: 1 });
+    expect(closeFileTab({ list: [a, b, c], at: 2 }, 2)).toEqual({ list: [a, b], at: 1 });
+  });
+
+  it("closing another tab keeps the shown file", () => {
+    expect(closeFileTab({ list: [a, b, c], at: 1 }, 0)).toEqual({ list: [b, c], at: 0 });
+    expect(closeFileTab({ list: [a, b, c], at: 1 }, 2)).toEqual({ list: [a, b], at: 1 });
+  });
+
+  it("closing the last tab closes the panel", () => {
+    expect(closeFileTab({ list: [a], at: 0 }, 0)).toBeNull();
+  });
+
+  it("ignores a tab that is not there", () => {
+    const tabs = { list: [a, b], at: 0 };
+    expect(closeFileTab(tabs, 5)).toBe(tabs);
   });
 });
 

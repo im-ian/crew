@@ -22,11 +22,12 @@ import { copyText } from "./components/CopyButton";
 import { useT } from "./LocaleContext";
 import { BotLabelProvider } from "./BotLabelContext";
 import {
+  closeFileTab,
   FileOpenContext,
   fileRun,
+  fileTabs,
   freshFileRow,
   parseFileRef,
-  sameFile,
   type FileTarget,
 } from "./fileRef";
 import { FileView } from "./components/FileView";
@@ -131,9 +132,7 @@ export function App() {
   const seenFiles = useRef(new Map<string, Set<string>>());
   const openFile = useCallback((target: FileTarget, group?: FileTarget[]) => {
     setPeek(null);
-    const list = group?.length ? group : [target];
-    const at = list.findIndex((f) => sameFile(f, target));
-    setFile(at < 0 ? { list: [...list, target], at: list.length } : { list, at });
+    setFile(fileTabs(group?.length ? group : [target], target));
   }, []);
   const fileCtx = useMemo(() => ({ open: openFile, current }), [openFile, current]);
   const autoFor = useRef<string | null>(null);
@@ -887,6 +886,7 @@ export function App() {
             files={file.list}
             at={file.at}
             onPick={(at) => setFile((cur) => (cur ? { ...cur, at } : cur))}
+            onCloseTab={(at) => setFile((cur) => (cur ? closeFileTab(cur, at) : cur))}
             onClose={() => setFile(null)}
           />
         ) : null}
