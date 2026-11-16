@@ -55,6 +55,7 @@ import { AskHoldDialog, type AskPick } from "./components/AskHoldDialog";
 import { openQuestionIds, questionFocusTarget } from "./questionJump";
 import { loadAiList } from "./aiListSync";
 import {
+  alsoShown,
   closeSlot,
   dropInto,
   dropSide,
@@ -155,6 +156,7 @@ export function App() {
     setSplit((cur) => prunePanes(cur, live));
   }, [crew.agents]);
   const active = view ? openSlot(view, openId) : null;
+  const splitShown = useMemo(() => alsoShown(view, openId), [view, openId]);
   const slotIds: [string | null, string | null] = view ? view.panes : [openId, null];
   const slotAgents = slotIds.map((id) =>
     id ? crew.agents.find((a) => a.id === id) ?? null : null,
@@ -729,6 +731,7 @@ export function App() {
         onCreateMenu={crew.showCreateMenu}
         onSplitMenu={crew.showSplitMenu}
         splitDir={view?.dir ?? null}
+        splitShown={splitShown}
         onChatDrag={onChatDrag}
         onAgentCtx={(e, id) => crew.showCtx(e, id, "agent")}
         onGroupCtx={(e, id) => crew.showCtx(e, id, "group")}

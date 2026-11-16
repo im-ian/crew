@@ -388,6 +388,8 @@ type Props = {
   onSplitMenu?: (e: MouseEvent) => void;
   /** The way the chat is split, which the split button shows. */
   splitDir?: "row" | "col" | null;
+  /** Bots in a split half besides the open chat: marked more lightly than it. */
+  splitShown?: readonly string[];
   /**
    * A bot dragged over the chat: its id while there, null when it leaves.
    * `drop` is the release, which splits the chat with it.
@@ -468,6 +470,7 @@ export function Sidebar({
   onCreateMenu,
   onSplitMenu,
   splitDir,
+  splitShown = [],
   onChatDrag,
   onAgentCtx,
   onGroupCtx,
@@ -1044,6 +1047,7 @@ export function Sidebar({
         represents={representing(item.id, remotes)}
         lead={item.id === lead}
         active={selectedKind === item.kind && selected === item.id}
+        shown={item.kind === "agent" && splitShown.includes(item.id)}
         unread={unread.includes(item.key)}
         drafting={drafting.includes(item.id)}
         dragging={drag?.kind === "item" && drag.key === item.key && drag.armed}
@@ -1138,6 +1142,7 @@ export function Sidebar({
           agents={agents}
           represents={representing(item.id, remotes)}
           active={selectedKind === item.kind && selected === item.id}
+          shown={item.kind === "agent" && splitShown.includes(item.id)}
           unread={unread.includes(item.key)}
           drafting={drafting.includes(item.id)}
           dragging={false}
@@ -1174,6 +1179,7 @@ export function Sidebar({
             agents={agents}
             represents={representing(item.id, remotes)}
             active={selectedKind === item.kind && selected === item.id}
+            shown={item.kind === "agent" && splitShown.includes(item.id)}
             unread={unread.includes(item.key)}
             drafting={drafting.includes(item.id)}
             dragging={drag?.kind === "item" && drag.key === item.key && drag.armed}
@@ -1231,6 +1237,7 @@ export function Sidebar({
               agents={agents}
               represents={item.agent?.remote ? undefined : representing(item.id, remotes)}
               active={selectedKind === item.kind && selected === item.id}
+              shown={item.kind === "agent" && splitShown.includes(item.id)}
               unread={unread.includes(item.key)}
               drafting={drafting.includes(item.id)}
               dragging={drag?.kind === "item" && drag.key === item.key && drag.armed}
@@ -1686,6 +1693,7 @@ function ItemRow({
   agents,
   compact,
   active,
+  shown,
   unread,
   drafting,
   dragging,
@@ -1709,6 +1717,8 @@ function ItemRow({
   /** The folded rail: the face alone, the name on hover. */
   compact?: boolean;
   active?: boolean;
+  /** On screen in the other split half: a lighter mark than `active`. */
+  shown?: boolean;
   unread?: boolean;
   drafting?: boolean;
   dragging?: boolean;
@@ -1856,7 +1866,7 @@ function ItemRow({
   const rowClass =
     "rail-row" +
     (compact ? " compact" : "") +
-    (active ? " active" : "") +
+    (active ? " active" : shown ? " in-split" : "") +
     (unread ? " unread" : "") +
     (dragging ? " dragging" : "") +
     (online ? "" : " is-offline");

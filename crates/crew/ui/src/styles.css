@@ -809,6 +809,17 @@ html.rail-dragging {
   pointer-events: none;
 }
 .rail-row:hover { background: var(--hover); }
+/* A bot in the other split half: the open row's colour, about half as strong.
+   Mixed into the rail it is opaque, so the badge ring can match it; glass has
+   no rail fill, so there it fades to transparent instead. */
+.rail-row {
+  --in-split-under: var(--rail);
+  --in-split: color-mix(in srgb, var(--active) 55%, var(--in-split-under));
+  --in-split-hover: color-mix(in srgb, var(--active) 80%, var(--in-split-under));
+}
+html[data-glass] .rail-row { --in-split-under: transparent; }
+.rail-row.in-split { background: var(--in-split); }
+.rail-row.in-split:hover { background: var(--in-split-hover); }
 .rail-row.active { background: var(--active); }
 .rail-row-text { min-width: 0; }
 .rail-row.has-avatar-action .avatar { cursor: pointer; }
@@ -1571,6 +1582,8 @@ button.avatar {
 }
 .rail-row.active .badge { border-color: var(--active); }
 .rail-row:hover .badge { border-color: var(--hover); }
+.rail-row.in-split .badge { border-color: var(--in-split); }
+.rail-row.in-split:hover .badge { border-color: var(--in-split-hover); }
 .badge.idle { background: var(--idle); }
 .badge.working { background: var(--working); }
 .badge.blocked { background: var(--blocked); }
@@ -1818,6 +1831,8 @@ aside.folded .empty-rail {
 }
 .rail-row.compact.active .unread-dot { box-shadow: 0 0 0 2px var(--active); }
 .rail-row.compact:hover .unread-dot { box-shadow: 0 0 0 2px var(--hover); }
+.rail-row.compact.in-split .unread-dot { box-shadow: 0 0 0 2px var(--in-split); }
+.rail-row.compact.in-split:hover .unread-dot { box-shadow: 0 0 0 2px var(--in-split-hover); }
 main {
   --peek-w: clamp(320px, 42%, 480px);
   display: grid;
