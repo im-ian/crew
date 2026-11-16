@@ -5,13 +5,17 @@ import { cliFromCmd, headerModelLine, pinnedDefault } from "../options";
 import { isOnline, remoteLabel } from "../remote";
 import type { AgentInfo, CliKind, Group } from "../types";
 import { WhoButton } from "./WhoButton";
-import { Info, X } from "../icons";
-import { showsWatch, watchLabel } from "../watchView";
+import { Info, Users, X } from "../icons";
+import { statusView } from "../statusView";
 
 type Props = {
   currentAgent: AgentInfo | null;
   groups: readonly Group[];
   onOpenInfo: () => void;
+  /** Set when this bot leads its sidebar group: opens the group's bots beside the chat. */
+  onOpenGroup?: () => void;
+  /** That panel is open now. */
+  groupOpen?: boolean;
   onRenameAgent: (id: string, name: string) => void;
   /** Set on a split half: closes it, and the other half takes the room. */
   onClose?: () => void;
@@ -21,6 +25,8 @@ export function ChatHeader({
   currentAgent,
   groups,
   onOpenInfo,
+  onOpenGroup,
+  groupOpen = false,
   onRenameAgent,
   onClose,
 }: Props) {
@@ -67,29 +73,7 @@ export function ChatHeader({
         ? t("header.remoteOnline")
         : t("header.remoteOffline")
       : headerModelLine(currentAgent, groups, cli ? defaults[cli] : null, t);
-  const status = currentAgent?.status;
-  const watching = showsWatch(currentAgent);
-  const statusKey =
-    remote && currentAgent?.asking
-      ? "header.statusOwner"
-      : status === "working"
-        ? "header.statusWorking"
-        : status === "blocked"
-          ? "header.statusBlocked"
-          : status === "exited"
-            ? "header.statusExited"
-            : null;
-  const statusClass = watching
-    ? "watching"
-    : remote && currentAgent?.asking
-      ? "blocked"
-      : status;
-  const statusText =
-    watching && currentAgent
-      ? watchLabel(currentAgent, Date.now(), t)
-      : statusKey
-        ? t(statusKey)
-        : null;
+  const status = statusView(currentAgent, Date.now(), t);
 
   const identity = currentAgent ? (
     <WhoButton
@@ -120,15 +104,27 @@ export function ChatHeader({
             {line}
           </span>
         ) : null}
-        {statusText ? (
+        {status ? (
           <span
-            className={"head-status is-" + statusClass}
-            title={watching ? statusText : undefined}
+            className={"head-status is-" + status.tone}
+            title={status.tone === "watching" ? status.text : undefined}
           >
-            <span className="head-status-text">{statusText}</span>
+            <span className="head-status-text">{status.text}</span>
           </span>
         ) : null}
       </div>
+      {currentAgent && onOpenGroup ? (
+        <button
+          type="button"
+          className={"head-action" + (groupOpen ? " is-on" : "")}
+          title={t("header.groupBots")}
+          aria-label={t("header.groupBots")}
+          aria-pressed={groupOpen}
+          onClick={onOpenGroup}
+        >
+          <Users />
+        </button>
+      ) : null}
       {currentAgent && !remote ? (
         <button
           type="button"

@@ -31,6 +31,8 @@ import {
   type FileTarget,
 } from "./fileRef";
 import { FileView } from "./components/FileView";
+import { LeadGroupPane } from "./components/LeadGroupPane";
+import { groupBots, ledGroup } from "./leadGroup";
 import { X } from "./icons";
 import type { TFn } from "./i18n";
 import { isTypingTarget, shortcutId } from "./shortcuts";
@@ -126,12 +128,21 @@ export function App() {
   // `list` is the files shown together, one tab each; `at` is the one shown.
   const [file, setFile] = useState<{ list: FileTarget[]; at: number } | null>(null);
   const fileOpen = !!(file && crew.currentAgent);
+  // A group's bots beside its lead's chat, the third thing that panel holds.
+  // Holds the lead's id, and counts only while that chat is the open one.
+  const [leadPane, setLeadPane] = useState<string | null>(null);
+  const paneGroup =
+    leadPane && crew.selectedKind === "agent" && leadPane === crew.selected
+      ? ledGroup(crew.groups, leadPane)
+      : null;
+  const leadOpen = !!(paneGroup && crew.currentAgent);
   const current = file ? file.list[file.at] ?? null : null;
   // The file rows each chat had when it was first loaded. One that arrives
   // after is a bot running `crew show` now, and opens.
   const seenFiles = useRef(new Map<string, Set<string>>());
   const openFile = useCallback((target: FileTarget, group?: FileTarget[]) => {
     setPeek(null);
+    setLeadPane(null);
     setFile(fileTabs(group?.length ? group : [target], target));
   }, []);
   const fileCtx = useMemo(() => ({ open: openFile, current }), [openFile, current]);
@@ -297,6 +308,8 @@ export function App() {
   useLayoutEffect(() => {
     setPeek(null);
     setFile(null);
+    // A split half's button picks its bot first, so this one can stay.
+    setLeadPane((cur) => (cur === crew.selected ? cur : null));
     autoFor.current = null;
   }, [crew.selected, crew.selectedKind]);
 
@@ -327,6 +340,7 @@ export function App() {
     const peer = sideOnlyPeer(crew.messages, crew.agents, hit, crew.selected);
     if (peer) {
       setFile(null);
+      setLeadPane(null);
       setPeek({ peer, focus: hit ? [hit] : [], openAtFocus: !!hit });
     }
   }, [
@@ -413,6 +427,7 @@ export function App() {
 
   function togglePeek(peer: string, focus: string[] = []) {
     setFile(null);
+    setLeadPane(null);
     setPeek((cur) =>
       cur && cur.peer === peer && cur.focus[0] === focus[0]
         ? null
@@ -486,11 +501,12 @@ export function App() {
       const c = crewRef.current;
       if (c.confirmOpen) return;
       const typing = isTypingTarget(e.target);
-      if ((peek || file) && e.key === "Escape") {
+      if ((peek || file || leadPane) && e.key === "Escape") {
         if (typing) return;
         e.preventDefault();
         setPeek(null);
         setFile(null);
+        setLeadPane(null);
         return;
       }
       const id = shortcutId(e, typing);
@@ -580,7 +596,22 @@ export function App() {
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [helpOpen, settingsOpen, skillsOpen, peek, file, leaveOpen]);
+  }, [helpOpen, settingsOpen, skillsOpen, peek, file, leadPane, leaveOpen]);
+
+  function toggleLeadPane(id: string) {
+    setPeek(null);
+    setFile(null);
+    setLeadPane((cur) => (cur === id ? null : id));
+  }
+
+  /** The header's group button, for a bot that leads its sidebar group. */
+  function groupButton(id: string | null) {
+    if (!id || !ledGroup(crew.groups, id)) return {};
+    return {
+      onOpenGroup: () => toggleLeadPane(id),
+      groupOpen: leadOpen && leadPane === id,
+    };
+  }
 
   function renderSlot(slot: Slot) {
     const id = slotIds[slot];
@@ -631,6 +662,7 @@ export function App() {
             onOpenInfo={() => {
               if (id) crew.openInfo(id);
             }}
+            {...groupButton(id)}
             onRenameAgent={(bot, name) => void crew.renameAgent(bot, name)}
             onClose={onClose}
           />
@@ -667,6 +699,7 @@ export function App() {
           onOpenInfo={() => {
             if (crew.selected) crew.openInfo(crew.selected);
           }}
+          {...groupButton(crew.selectedKind === "agent" ? crew.selected : null)}
           onRenameAgent={(id, name) => void crew.renameAgent(id, name)}
           onClose={onClose}
         />
@@ -774,7 +807,7 @@ export function App() {
       <main
         ref={mainRef}
         className={
-          [(peekOpen || fileOpen) && "has-peek", chatWidth === "narrow" && "narrow-chat"]
+          [(peekOpen || fileOpen || leadOpen) && "has-peek", chatWidth === "narrow" && "narrow-chat"]
             .filter(Boolean)
             .join(" ") || undefined
         }
@@ -881,6 +914,16 @@ export function App() {
           onDeleteRoutine={crew.deleteRoutine}
           onRunRoutine={crew.runRoutine}
         />
+        {leadOpen && paneGroup && leadPane ? (
+          <LeadGroupPane
+            group={paneGroup}
+            bots={groupBots(paneGroup, crew.agents)}
+            agents={crew.agents}
+            leadId={leadPane}
+            onPick={(id) => crew.selectAgent(id)}
+            onClose={() => setLeadPane(null)}
+          />
+        ) : null}
         {file && crew.currentAgent ? (
           <FileView
             files={file.list}
