@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chipCount, initialChips, nextChips, settleChips } from "./waitChips";
+import { chipCount, initialChips, nextChips, settleChips, splitFaces } from "./waitChips";
 
 const width = (id: string) => ({ a: 80, b: 64, c: 72 })[id];
 
@@ -47,6 +47,25 @@ describe("waiting chips", () => {
     expect(next).toEqual([
       { id: "b", entering: false, leaving: false },
       { id: "c", entering: false, leaving: false },
+    ]);
+  });
+});
+
+describe("sidebar faces", () => {
+  it("shows two faces at most, the rest as +N", () => {
+    expect(splitFaces(["a"])).toEqual({ faces: ["a"], rest: [] });
+    expect(splitFaces(["a", "b"])).toEqual({ faces: ["a", "b"], rest: [] });
+    expect(splitFaces(["a", "b", "c", "d"])).toEqual({ faces: ["a", "b"], rest: ["c", "d"] });
+    expect(splitFaces([])).toEqual({ faces: [], rest: [] });
+  });
+
+  it("a face that answers folds out and the next one steps in", () => {
+    const before = initialChips(splitFaces(["a", "b", "c"]).faces);
+    const next = nextChips(before, splitFaces(["b", "c"]).faces, false, () => 14);
+    expect(next.map((c) => [c.id, c.leaving, c.entering])).toEqual([
+      ["a", true, false],
+      ["b", false, false],
+      ["c", false, true],
     ]);
   });
 });

@@ -115,9 +115,10 @@ export function ChatHeader({
           >
             <span className="head-status-text">{status.text}</span>
           </span>
-        ) : currentAgent ? (
-          // Mounted while the bot rests too, so the last chip can fold out
-          // once the wait is over.
+        ) : null}
+        {currentAgent ? (
+          // Mounted whatever the status, so the chip of the bot that answered
+          // still glows and folds out once that answer has this bot at work.
           <WaitStatus key={currentAgent.id} ids={waitingOn(currentAgent)} agents={agents} />
         ) : null}
       </div>

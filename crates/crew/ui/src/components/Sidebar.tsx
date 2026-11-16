@@ -1834,7 +1834,8 @@ function ItemRow({
                 {represents.join(" · ")}
               </span>
             ) : null}
-            {!compact && waits.length ? <WaitTag ids={waits} agents={agents} /> : null}
+            {/* Mounted whatever the status, so a face folds out as its bot answers. */}
+            {!compact && a ? <WaitTag ids={waits} agents={agents} /> : null}
           </span>
           {stamp ? (
             <time className="rail-stamp" dateTime={new Date(ts).toISOString()}>

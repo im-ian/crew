@@ -8,6 +8,7 @@ import {
   initialChips,
   nextChips,
   settleChips,
+  splitFaces,
   type WaitChip,
 } from "../waitChips";
 import { Avatar } from "./Avatar";
@@ -27,8 +28,53 @@ function nameOf(agents: readonly AgentInfo[], id: string): string {
   return a?.name || a?.id || id;
 }
 
+/** The colour a chip glows in as its bot answers: that bot's face colour. */
+function colorOf(agents: readonly AgentInfo[], id: string): string {
+  const a = find(agents, id);
+  return resolveFace(id, a?.avatar_shape, a?.avatar_color).color;
+}
+
 function reducedMotion(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/**
+ * The chips for `ids` as they come and go (`nextChips`). A chip whose bot
+ * answered stays, leaving, until its fold is over. `refFor` measures a chip
+ * so it folds from the width it had.
+ */
+function useWaitChips(ids: readonly string[]) {
+  const els = useRef(new Map<string, HTMLElement>());
+  const [chips, setChips] = useState<WaitChip[]>(() => initialChips(ids));
+  const key = ids.join("\n");
+  useEffect(() => {
+    setChips((cur) =>
+      nextChips(cur, ids, reducedMotion(), (id) => els.current.get(id)?.getBoundingClientRect().width),
+    );
+    // `key` stands for `ids`.
+  }, [key]);
+  const leaving = chips.filter((c) => c.leaving).map((c) => c.id).join("\n");
+  useEffect(() => {
+    if (!leaving) return;
+    const timer = window.setTimeout(() => setChips(settleChips), CHIP_LEAVE_MS);
+    return () => window.clearTimeout(timer);
+  }, [leaving]);
+  const refFor = (id: string) => (el: HTMLElement | null) => {
+    if (el) els.current.set(id, el);
+    else els.current.delete(id);
+  };
+  return { chips, refFor };
+}
+
+function chipClass(base: string, chip: WaitChip): string {
+  return base + (chip.entering ? " is-entering" : "") + (chip.leaving ? " is-leaving" : "");
+}
+
+function chipStyle(agents: readonly AgentInfo[], chip: WaitChip) {
+  return {
+    ["--c" as string]: colorOf(agents, chip.id),
+    ...(chip.width ? { ["--w" as string]: `${chip.width}px` } : null),
+  };
 }
 
 /** A still face for a chip: the face, without its status motion. */
@@ -59,29 +105,14 @@ function syncFade(el: HTMLElement | null) {
  * name each, none folded away. One line whatever their number: past the
  * header's width the chips scroll sideways, the edge with more fades, and
  * the count stays put. A bot that answers glows in its colour and folds
- * out; the last one fades the line. Keyed by the bot whose header it is, so
- * opening another chat draws its line at once.
+ * out; the last one fades the line, even once the answer has the bot at
+ * work again. Keyed by the bot whose header it is, so opening another chat
+ * draws its line at once.
  */
 export function WaitStatus({ ids, agents }: Props) {
   const t = useT();
   const scroll = useRef<HTMLSpanElement>(null);
-  const chipEls = useRef(new Map<string, HTMLSpanElement>());
-  const [chips, setChips] = useState<WaitChip[]>(() => initialChips(ids));
-  const key = ids.join("\n");
-
-  useEffect(() => {
-    setChips((cur) =>
-      nextChips(cur, ids, reducedMotion(), (id) => chipEls.current.get(id)?.getBoundingClientRect().width),
-    );
-    // `key` stands for `ids`.
-  }, [key]);
-
-  const leaving = chips.filter((c) => c.leaving).map((c) => c.id).join("\n");
-  useEffect(() => {
-    if (!leaving) return;
-    const timer = window.setTimeout(() => setChips(settleChips), CHIP_LEAVE_MS);
-    return () => window.clearTimeout(timer);
-  }, [leaving]);
+  const { chips, refFor } = useWaitChips(ids);
 
   // A wheel or trackpad moves down; the chips run sideways.
   useEffect(() => {
@@ -120,32 +151,19 @@ export function WaitStatus({ ids, agents }: Props) {
       <span className="wait-scroll" ref={scroll}>
         <span className="wait-chips">
           {chips.map((chip) => {
-            const a = find(agents, chip.id);
-            const color = resolveFace(chip.id, a?.avatar_shape, a?.avatar_color).color;
-            const label = t("header.waitingOn", { name: nameOf(agents, chip.id) });
-            const style = {
-              ["--c" as string]: color,
-              ...(chip.width ? { ["--w" as string]: `${chip.width}px` } : null),
-            };
+            const name = nameOf(agents, chip.id);
             return (
               <span
                 key={chip.id}
-                ref={(el) => {
-                  if (el) chipEls.current.set(chip.id, el);
-                  else chipEls.current.delete(chip.id);
-                }}
-                className={
-                  "wait-chip" +
-                  (chip.entering ? " is-entering" : "") +
-                  (chip.leaving ? " is-leaving" : "")
-                }
+                ref={refFor(chip.id)}
+                className={chipClass("wait-chip", chip)}
                 data-id={chip.id}
-                style={style}
-                title={label}
-                aria-label={label}
+                style={chipStyle(agents, chip)}
+                title={name}
+                aria-label={t("header.waitingOn", { name })}
               >
                 <ChipFace agents={agents} id={chip.id} />
-                <span className="wait-chip-name">{nameOf(agents, chip.id)}</span>
+                <span className="wait-chip-name">{name}</span>
               </span>
             );
           })}
@@ -156,25 +174,46 @@ export function WaitStatus({ ids, agents }: Props) {
 }
 
 /**
- * The sidebar's small mark beside a bot's name: the first bot it waits on,
- * and how many more. The last-message line under it stays as it was.
+ * The sidebar's mark beside a bot's name: the faces of the bots it waits
+ * on, two at most, then "+N" for the rest. Each face names its bot on
+ * hover, and "+N" names the rest. A face whose bot answers glows and folds
+ * out like a header chip. The last-message line under it stays as it was.
  */
 export function WaitTag({ ids, agents }: Props) {
   const t = useT();
-  if (!ids.length) return null;
-  const first = nameOf(agents, ids[0]);
-  const label = t("header.waitingOn", {
-    name: ids.length > 1 ? `${first} +${ids.length - 1}` : first,
-  });
+  const { faces, rest } = splitFaces(ids);
+  const { chips, refFor } = useWaitChips(faces);
+  if (!chips.length && !rest.length) return null;
+  const restNames = rest.map((id) => nameOf(agents, id)).join(", ");
   return (
-    <span
-      className={"wait-tag" + (ids.length === 1 ? " is-single" : "")}
-      title={label}
-      aria-label={label}
-    >
-      <ChipFace agents={agents} id={ids[0]} />
-      <span className="wait-tag-name">{first}</span>
-      {ids.length > 1 ? <span className="wait-tag-more">+{ids.length - 1}</span> : null}
+    <span className="wait-faces">
+      {chips.map((chip) => {
+        const name = nameOf(agents, chip.id);
+        return (
+          <span
+            key={chip.id}
+            ref={refFor(chip.id)}
+            className={chipClass("wait-face", chip)}
+            data-id={chip.id}
+            style={chipStyle(agents, chip)}
+            role="img"
+            title={name}
+            aria-label={t("header.waitingOn", { name })}
+          >
+            <ChipFace agents={agents} id={chip.id} />
+          </span>
+        );
+      })}
+      {rest.length ? (
+        <span
+          className="wait-more"
+          role="img"
+          title={restNames}
+          aria-label={t("header.waitingOn", { name: restNames })}
+        >
+          +{rest.length}
+        </span>
+      ) : null}
     </span>
   );
 }

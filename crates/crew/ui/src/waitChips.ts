@@ -51,3 +51,11 @@ export function settleChips(cur: readonly WaitChip[]): WaitChip[] {
 export function chipCount(cur: readonly WaitChip[]): number {
   return cur.filter((chip) => !chip.leaving).length;
 }
+
+/** How many faces the sidebar shows before the rest become "+N". */
+export const WAIT_FACES = 2;
+
+/** The sidebar's faces, two at most, and the bots left for "+N". */
+export function splitFaces(ids: readonly string[]): { faces: string[]; rest: string[] } {
+  return { faces: ids.slice(0, WAIT_FACES), rest: ids.slice(WAIT_FACES) };
+}
