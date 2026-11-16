@@ -8,6 +8,7 @@ import type { Locale } from "../i18n";
 import type { ChatWidth } from "../chatWidth";
 import type { Delivery } from "../deliveryPref";
 import { applyFont, pageMeasure, loadFont, missingFonts, saveFont } from "../fontPref";
+import { applyFontSize, FONT_SIZES, loadFontSize, saveFontSize, type FontSize } from "../fontSize";
 import { loadNotify, saveNotify } from "../notifyPref";
 import { loadNoticeKeep, saveNoticeKeep } from "../noticeKeepPref";
 import type { NoticeKeep } from "../island";
@@ -80,6 +81,13 @@ export function SettingsPane({
   }
   const [worktree, setWorktree] = useState(loadWorktree);
   const [font, setFont] = useState(loadFont);
+  const [fontSize, setFontSize] = useState(loadFontSize);
+
+  function changeFontSize(next: FontSize) {
+    setFontSize(next);
+    applyFontSize(next);
+    saveFontSize(next);
+  }
   const measure = useMemo(pageMeasure, []);
   const missing = useMemo(() => missingFonts(font, measure), [font, measure]);
   // The plain default until the daemon's list is read: it is that list's top.
@@ -297,6 +305,17 @@ export function SettingsPane({
                   ? t("settings.font.missing", { names: missing.join(", ") })
                   : t("settings.font.note")}
               </p>
+              <Field label={t("settings.fontSize")}>
+                <Seg
+                  value={fontSize}
+                  options={FONT_SIZES.map((size) => ({
+                    value: size,
+                    label: t(`settings.fontSize.${size}`),
+                  }))}
+                  onChange={changeFontSize}
+                />
+              </Field>
+              <p className="apply-note">{t("settings.fontSize.note")}</p>
             </div>
           ) : section === "chat" ? (
             <div className="form-stack">
