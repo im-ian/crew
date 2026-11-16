@@ -1244,7 +1244,7 @@ pub fn team_rules_for(
         "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew system]` / `[crew handoff from:…]` / `[crew reply:…]` are real messages. A `[crew reply:…]` line is the user answering an earlier message; the next line is the quote, then their new text. A handoff is a teammate's finished reply; do not crew tell them that same text back.\n",
     );
     s.push_str(&format!(
-        "To ask the human user in this chat to pick, actually run `crew ask --question \"어느 쪽을 고를래?\" --option A --option B --option C`; add `--multi` when they may pick more than one. A yes/no question to the user (머지할까요? 푸시할까요?) is a pick too: when your reply would end with one, run `crew ask --question \"머지할까요?\" --option 네 --option 아니요` instead of writing it in the reply; only a card tells Crew you are waiting for an answer. To ask them to type a value, run `crew ask --question \"로그인\" --input 아이디 --input 비밀번호`. When you need the user to decide more than one thing, do not list the questions in your reply for them to answer one by one: repeat `--question` in one `crew ask`, and each `--option`, `--input`, `--hint`, and `--multi` belongs to the `--question` before it (`crew ask -q \"머지할까요?\" -o 네 -o 아니요 -q \"#125는?\" -o \"이대로 머지\" -o \"규칙 추정\"`). They answer them all on one card. Crew shows a card and prints their answer. `crew ask` waits up to {ask_minutes} minutes; if your shell tool lets you set a time limit on the command, give it more than that; `crew ask` itself has no timeout flag. If it ends without an answer, or your CLI stops it, the card is still open: the answer comes to you later as a message, so do not ask again and do not tell the user the card closed. Never send this to a teammate. Do not crew tell the options. Do not ask the user to type the letter. This is not a substitute for `crew tell`, `crew agent set`, or `crew routine add`.\n",
+        "To ask the human user in this chat to pick, actually run `crew ask --question \"어느 쪽을 고를래?\" --option A --option B --option C`; add `--multi` when they may pick more than one. A yes/no question to the user (머지할까요? 푸시할까요?) is a pick too: when your reply would end with one, run `crew ask --question \"머지할까요?\" --option 네 --option 아니요` instead of writing it in the reply; only a card tells Crew you are waiting for an answer. To ask them to type a value, run `crew ask --question \"로그인\" --input 아이디 --input 비밀번호`. The card must make sense on its own. Before you run `crew ask`, say in your reply, in one or two sentences, what is being decided and why. If you were asked to do something and are asking instead, first say what stopped you: what you found, what blocks you, or a cost or risk bigger than expected. If you add an option the user did not ask for, such as leaving it as it is or not doing it, say why it is there. Say this in your reply, and keep the gist in `--hint` so the card alone shows why you ask. Put the background in `--hint` (what the problem is, what the pick changes), and write each option as `\"label: what it leads to\"` (`crew ask -q \"입력칸의 AI 멘션 표시는?\" --hint \"요청대로 칩으로 바꾸려면 입력칸 편집기를 갈아야 해서 하루쯤 걸려요. 색만 바꾸는 방법이 있고, 지금도 멘션은 잘 보내져서 그대로 두기도 넣었어요.\" -o \"그대로 두기: 손댈 것 없음, 계속 놓칠 수 있음\" -o \"가볍게: 색만 바꿈, 금방 끝남\" -o \"제대로: 칩으로 바꿈, 하루쯤 걸림\"`). A plain yes/no question can skip the hint and the option notes. When you need the user to decide more than one thing, do not list the questions in your reply for them to answer one by one: repeat `--question` in one `crew ask`, and each `--option`, `--input`, `--hint`, and `--multi` belongs to the `--question` before it (`crew ask -q \"머지할까요?\" -o 네 -o 아니요 -q \"#125는?\" -o \"이대로 머지\" -o \"규칙 추정\"`). They answer them all on one card. Crew shows a card and prints their answer. `crew ask` waits up to {ask_minutes} minutes; if your shell tool lets you set a time limit on the command, give it more than that; `crew ask` itself has no timeout flag. If it ends without an answer, or your CLI stops it, the card is still open: the answer comes to you later as a message, so do not ask again and do not tell the user the card closed. Never send this to a teammate. Do not crew tell the options. Do not ask the user to type the letter. This is not a substitute for `crew tell`, `crew agent set`, or `crew routine add`.\n",
         ask_minutes = crate::client::ASK_WAIT.as_secs() / 60
     ));
     s.push_str(
@@ -2185,7 +2185,7 @@ pub fn format_roster(agents: &[AgentConfig]) -> String {
         "Schedule work with `crew routine add --name \"...\" --schedule \"0 8 * * 1-5\" --prompt \"...\"` (numeric 5-field cron); see yours with `crew routine list`, change one with `crew routine edit|remove|pause|resume <name>`.\n",
     );
     out.push_str(
-        "Ask the human user to pick with `crew ask --question \"...\" --option A --option B` (`--multi` for more than one), or to type with `--input 아이디`. A yes/no question (머지할까요?) is a pick too: ask it with `--option 네 --option 아니요`, not in your reply. Repeat `--question` to ask several things on one card; each flag belongs to the question before it. If it ends without an answer, or your CLI stops it, the card stays open and the answer comes later as a message: do not ask again. Do not use this to ask a teammate.\n\n",
+        "Ask the human user to pick with `crew ask --question \"...\" --option A --option B` (`--multi` for more than one), or to type with `--input 아이디`. The card must make sense on its own: say in your reply what is being decided and why, and if you stop to ask instead of doing the task, what stopped you and why any option the user did not ask for (such as leaving it as it is) is there; put the background and that reason in `--hint`, and write each option as `\"label: what it leads to\"`; a plain yes/no can skip this. A yes/no question (머지할까요?) is a pick too: ask it with `--option 네 --option 아니요`, not in your reply. Repeat `--question` to ask several things on one card; each flag belongs to the question before it. If it ends without an answer, or your CLI stops it, the card stays open and the answer comes later as a message: do not ask again. Do not use this to ask a teammate.\n\n",
     );
     out.push_str("## Agents\n\n");
     if agents.is_empty() {
@@ -3032,6 +3032,11 @@ mod tests {
         assert!(md.contains("crew routine add"));
         assert!(md.contains("crew ask --question"));
         assert!(md.contains("A yes/no question"));
+        assert!(md.contains("The card must make sense on its own"));
+        assert!(md.contains("what stopped you"));
+        assert!(md.contains("any option the user did not ask for"));
+        assert!(md.contains("that reason in `--hint`"));
+        assert!(md.contains("`\"label: what it leads to\"`"));
         assert!(md.contains("--input"));
         assert!(!md.contains("channel"));
     }
@@ -3640,6 +3645,17 @@ mod tests {
         assert!(rules.contains("--input"));
         assert!(rules.contains("repeat `--question` in one `crew ask`"));
         assert!(rules.contains("A yes/no question to the user"));
+        // A card the user can answer without reading back through the chat.
+        assert!(rules.contains("The card must make sense on its own"));
+        assert!(rules.contains("what is being decided and why"));
+        assert!(rules.contains("Put the background in `--hint`"));
+        assert!(rules.contains("write each option as `\"label: what it leads to\"`"));
+        assert!(rules.contains("-o \"그대로 두기: "));
+        assert!(rules.contains("A plain yes/no question can skip"));
+        // Why the bot asks instead of doing what it was asked.
+        assert!(rules.contains("are asking instead, first say what stopped you"));
+        assert!(rules.contains("an option the user did not ask for"));
+        assert!(rules.contains("so the card alone shows why you ask"));
         assert!(rules.contains("not a substitute for `crew tell`"));
         assert!(!rules.contains("roster.md"));
         assert!(rules.contains("crew memory append <<'EOF'"));
