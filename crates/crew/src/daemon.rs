@@ -678,6 +678,7 @@ fn halt_turn(id: &str) -> anyhow::Result<()> {
         LiveAgent::Pty(_) => {}
     }
     finish_halted_turn(id);
+    sync_waiting();
     Ok(())
 }
 
@@ -2004,6 +2005,103 @@ fn owed_wake(origin: &TurnOrigin, id: &str) -> Option<(String, TurnOrigin)> {
         ..TurnOrigin::default()
     };
     Some((asker, wake))
+}
+
+/// When each bot handed work to each other bot, `(asker, bot)` → a count, so
+/// `waiting_on` lists them in that order.
+fn asked_order() -> &'static Mutex<(u64, HashMap<(String, String), u64>)> {
+    static ASKED: OnceLock<Mutex<(u64, HashMap<(String, String), u64>)>> = OnceLock::new();
+    ASKED.get_or_init(|| Mutex::new((0, HashMap::new())))
+}
+
+fn note_asked(asker: &str, bot: &str) {
+    if let Ok(mut order) = asked_order().lock() {
+        order.0 += 1;
+        let at = order.0;
+        order.1.insert((asker.to_string(), bot.to_string()), at);
+    }
+}
+
+/// For each bot that ran `crew tell` and waits on the answer, the bots it
+/// waits on, in the order it asked them. A wait is the wake a turn still
+/// owes (`owed_wake`): a turn under way or waiting on the user's approval,
+/// a delivery not started yet, or a tell to a teammate's bot on another PC.
+/// A wake that went out, or a stop that took it, ends the wait.
+fn waiting_map() -> HashMap<String, Vec<String>> {
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    if let Ok(map) = origins().lock() {
+        for (bot, origin) in map.iter() {
+            if let Some((asker, _)) = owed_wake(origin, bot) {
+                pairs.push((asker, bot.clone()));
+            }
+        }
+    }
+    let queued = |map: &HashMap<String, VecDeque<PendingDelivery>>, pairs: &mut Vec<_>| {
+        for (bot, q) in map {
+            for item in q {
+                if item.origin.wake_spent {
+                    continue;
+                }
+                if let Some(asker) = targeting::waiting_asker(&item.origin, bot) {
+                    pairs.push((asker, bot.clone()));
+                }
+            }
+        }
+    };
+    if let Ok(map) = inbox().lock() {
+        queued(&map, &mut pairs);
+    }
+    if let Ok(map) = recovered_tells().lock() {
+        queued(&map, &mut pairs);
+    }
+    pairs.extend(crate::remote::asked_out());
+    pairs.retain(|(asker, bot)| {
+        asker != bot
+            && known_agent(asker)
+            && (crate::remote::split_id(bot).is_some() && !known_agent(bot)
+                || known_agent(bot) && !matches!(live_status(bot), Ok(AgentStatus::Exited)))
+    });
+    let order = asked_order().lock().ok();
+    let at = |pair: &(String, String)| {
+        order
+            .as_ref()
+            .and_then(|o| o.1.get(pair).copied())
+            .unwrap_or(u64::MAX)
+    };
+    pairs.sort_by(|a, b| at(a).cmp(&at(b)).then_with(|| a.1.cmp(&b.1)));
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    for (asker, bot) in pairs {
+        let list = out.entry(asker).or_default();
+        if !list.contains(&bot) {
+            list.push(bot);
+        }
+    }
+    out
+}
+
+/// Tell a subscriber when a bot starts or stops waiting on another. The
+/// window reads `waiting_on` with the list it polls.
+pub(crate) fn sync_waiting() {
+    static LAST: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+    let now = waiting_map();
+    let live: HashSet<(String, String)> = now
+        .iter()
+        .flat_map(|(asker, bots)| bots.iter().map(move |b| (asker.clone(), b.clone())))
+        .collect();
+    {
+        let Ok(mut last) = LAST.get_or_init(|| Mutex::new(HashMap::new())).lock() else {
+            return;
+        };
+        if *last == now {
+            return;
+        }
+        *last = now;
+    }
+    // Forget the order of pairs nobody waits on any more.
+    if let Ok(mut order) = asked_order().lock() {
+        order.1.retain(|pair, _| live.contains(pair));
+    }
+    let _ = events().send(snapshot_event());
 }
 
 /// Use up the wake `id`'s turn owes, and say what it was.
@@ -3345,6 +3443,7 @@ fn list_agents() -> Vec<AgentInfo> {
                 remote_online: false,
                 watch: s.watch(),
                 work_dir: Some(s.cwd().display().to_string()),
+                waiting_on: Vec::new(),
             }
         })
         .collect();
@@ -3352,7 +3451,9 @@ fn list_agents() -> Vec<AgentInfo> {
     drop(cfgs);
     drop(map);
     list.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut waiting = waiting_map();
     for a in &mut list {
+        a.waiting_on = waiting.remove(&a.id).unwrap_or_default();
         a.preview = crate::transcript::preview(&a.id);
         a.last_ts = crate::transcript::last_ts(&a.id);
         a.failed = turn_failed(&a.id);
@@ -3697,6 +3798,7 @@ fn tell_agent_origin(
         return Err(err);
     }
     if from != "user" && from != to {
+        note_asked(&from, to);
         let known = agents()
             .lock()
             .ok()
@@ -3723,6 +3825,7 @@ fn tell_agent_origin(
         from: from.clone(),
         to: to.to_string(),
     });
+    sync_waiting();
     Ok(())
 }
 
@@ -3759,6 +3862,7 @@ fn tell_remote(
     let asker = (from != "user" && known_agent(&from)).then_some(from.as_str());
     let rid = crate::remote::tell(asker, mention_owner.as_deref(), to, text, origin.hops)?;
     if let Some(asker) = asker {
+        note_asked(asker, &rid);
         crate::transcript::push_remote_tell(&rid, asker, text, Some(asker.to_string()));
         let peer = parent.as_ref().and_then(|p| asked_by(p, asker));
         crate::transcript::push_notice(asker, &format!("to:{rid}"), text, peer);
@@ -3774,6 +3878,7 @@ fn tell_remote(
         from,
         to: rid,
     });
+    sync_waiting();
     if !then.is_empty() {
         run_chain(std::mem::take(then));
     }
@@ -4630,6 +4735,11 @@ pub(crate) fn turn_ended(id: &str) {
 /// other still stop. A turn wakes once, so output it leaves behind cannot
 /// wake the asker again.
 fn wake_asker(id: &str) {
+    wake_asker_inner(id);
+    sync_waiting();
+}
+
+fn wake_asker_inner(id: &str) {
     let Some((asker, wake)) = take_wake(id) else {
         return;
     };
@@ -4964,6 +5074,75 @@ mod daemon_tests {
         set_origin(&speaker, told(0));
         assert!(!answers_a_bot(&speaker), "the asker is gone");
         take_origin(&speaker);
+    }
+
+    /// A bot waits on each bot it ran `crew tell` to, in the order it asked:
+    /// a turn under way and a delivery still in line both count. The wake
+    /// that goes out with the answer, or a stop that takes it, ends the wait,
+    /// and a user's @mention is not the bot waiting.
+    #[test]
+    fn a_bot_waits_on_the_bots_it_told_until_the_wake_is_used() {
+        let asker = test_id("waiter");
+        let first = format!("first-{asker}");
+        let second = format!("second-{asker}");
+        let mentioned = format!("named-{asker}");
+        for id in [&asker, &first, &second, &mentioned] {
+            configs().lock().unwrap().insert(
+                id.clone(),
+                crate::config::AgentConfig::new(id.clone(), id.clone(), vec!["cat".into()], None),
+            );
+        }
+        let told = TurnOrigin {
+            from: asker.clone(),
+            reply_agent: Some(asker.clone()),
+            ..TurnOrigin::default()
+        };
+        let mut events = events().subscribe();
+        note_asked(&asker, &first);
+        note_asked(&asker, &second);
+        // The second one's turn is under way; the first one's tell still waits.
+        set_origin(&second, told.clone());
+        inbox()
+            .lock()
+            .unwrap()
+            .entry(first.clone())
+            .or_default()
+            .push_back(PendingDelivery {
+                text: "해 줘".into(),
+                newline: true,
+                msg_id: None,
+                joins: false,
+                origin: told.clone(),
+                then: VecDeque::new(),
+                parked: false,
+            });
+        set_origin(&mentioned, TurnOrigin::mention_tell(&asker));
+        let waits = || waiting_map().remove(&asker).unwrap_or_default();
+        assert_eq!(waits(), [first.clone(), second.clone()], "as asked");
+
+        sync_waiting();
+        let mut told_ui = false;
+        while let Ok(ev) = events.try_recv() {
+            told_ui |= matches!(ev, Event::Agents { .. });
+        }
+        assert!(told_ui, "a change goes out to subscribers");
+
+        // The second one answered: its wake went out.
+        take_wake(&second);
+        assert_eq!(waits(), [first.clone()]);
+        // The first one's tell starts, and the user stops that turn.
+        let item = inbox().lock().unwrap().get_mut(&first).unwrap().pop_front();
+        set_origin(&first, item.unwrap().origin);
+        assert_eq!(waits(), [first.clone()], "still waiting once it starts");
+        take_wake(&first);
+        assert!(waits().is_empty(), "a stop ends the wait");
+
+        for id in [&asker, &first, &second, &mentioned] {
+            take_origin(id);
+            clear_inbox(id);
+            configs().lock().unwrap().remove(id);
+        }
+        sync_waiting();
     }
 
     #[test]

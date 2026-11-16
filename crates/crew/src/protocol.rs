@@ -402,6 +402,11 @@ pub struct AgentInfo {
     /// on, so not `cwd` then. A path the bot writes is read from here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub work_dir: Option<String>,
+    /// Bots this one ran `crew tell` to and still waits on for the answer,
+    /// in the order it handed the work out. A teammate's bot on another PC
+    /// counts too. Empty for a bot waiting on nobody.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waiting_on: Vec<String>,
 }
 
 /// One task a bot left running after it answered.
