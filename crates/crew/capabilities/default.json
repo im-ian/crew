@@ -13,6 +13,7 @@
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
+    "core:webview:allow-set-webview-zoom",
     "allow-list-agents",
     "allow-send-message",
     "allow-stop-agent",
