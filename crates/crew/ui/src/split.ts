@@ -48,6 +48,15 @@ export function openSlot(cur: Split | null, open: string | null): Slot | null {
   return at < 0 ? null : (at as Slot);
 }
 
+/**
+ * The bots on screen in a half besides the open chat, which the sidebar marks
+ * more lightly than the open one. No split: none.
+ */
+export function alsoShown(cur: Split | null, open: string | null): string[] {
+  if (!cur) return [];
+  return cur.panes.filter((id): id is string => !!id && id !== open);
+}
+
 /** Closing a half leaves the other one as the whole chat. */
 export function closeSlot(cur: Split, slot: Slot): { keep: string | null } {
   return { keep: cur.panes[slot === 0 ? 1 : 0] };

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  alsoShown,
   closeSlot,
   dropInto,
   dropSide,
@@ -126,5 +127,29 @@ describe("dropInto", () => {
       panes: ["b", "a"],
       target: 1,
     });
+  });
+});
+
+describe("alsoShown", () => {
+  const split: Split = { dir: "row", panes: ["a", "b"], target: 1 };
+
+  it("names the other half's bot, not the open one", () => {
+    expect(alsoShown(split, "a")).toEqual(["b"]);
+    expect(alsoShown(split, "b")).toEqual(["a"]);
+  });
+
+  it("names both halves when the open chat is not a bot in them", () => {
+    expect(alsoShown(split, null)).toEqual(["a", "b"]);
+  });
+
+  it("skips an empty half, and names none without a split", () => {
+    expect(alsoShown({ ...split, panes: ["a", null] }, "a")).toEqual([]);
+    expect(alsoShown({ ...split, panes: [null, "b"] }, "a")).toEqual(["b"]);
+    expect(alsoShown(null, "a")).toEqual([]);
+  });
+
+  it("follows the open chat as placeOpen moves it into the target half", () => {
+    const waiting: Split = { dir: "row", panes: ["a", null], target: 1 };
+    expect(alsoShown(placeOpen(waiting, "c"), "c")).toEqual(["a"]);
   });
 });
