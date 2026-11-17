@@ -9672,7 +9672,7 @@ while IFS= read -r line; do
       say "CI 끝나면 알려줄게요"
       note '"sessionUpdate":"turn_completed","prompt_id":"p1","stop_reason":"end_turn"'
       answer "$id" '{"stopReason":"end_turn"}'
-      ( sleep 2
+      ( sleep 6
         note '"sessionUpdate":"background_tasks","tasks":[{"task_id":"t1","description":"Watch PR 12 CI","kind":"monitor","status":"completed"}]'
         say "CI 통과했어요"
         note '"sessionUpdate":"turn_completed","prompt_id":"task-completed-t1","stop_reason":"end_turn"' ) & ;;
@@ -9820,7 +9820,9 @@ done
             send_agent(&bot, "다음 거").unwrap();
             assert!(queued_text(&bot).is_empty(), "a send waited on the watch");
             let pid = started_pids(&starts)[0].clone();
-            eventually(Duration::from_secs(3), "the send was not answered", || {
+            // The watch ends six seconds after it starts. The answer has
+            // to come before that, even on a loaded machine.
+            eventually(Duration::from_secs(5), "the send was not answered", || {
                 told(&bot, &format!("answer 2 from {pid}"))
             });
             assert_eq!(
@@ -9829,7 +9831,7 @@ done
                 "the send stopped the watch"
             );
             eventually(
-                Duration::from_secs(5),
+                Duration::from_secs(10),
                 "the later answer was dropped",
                 || told(&bot, "CI 통과했어요"),
             );
@@ -10243,7 +10245,7 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","method":"item/started","params":{"item":{"command":"Watch PR 12 CI","id":"c1","status":"inProgress","type":"commandExecution"},"threadId":"%s","turnId":"%s"}}\n' "$sid" "$tid"
       say "CI 끝나면 알려줄게요"
       finish completed
-      ( sleep 2
+      ( sleep 6
         printf '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"command":"Watch PR 12 CI","id":"c1","status":"completed","type":"commandExecution"},"threadId":"%s"}}\n' "$sid"
         printf '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"%s","turn":{"id":"later","status":"inProgress"}}}\n' "$sid"
         printf '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"delta":"CI 통과했어요","itemId":"mlater","threadId":"%s","turnId":"later"}}\n' "$sid"
@@ -10388,7 +10390,9 @@ done
             send_agent(&bot, "다음 거").unwrap();
             assert!(queued_text(&bot).is_empty(), "a send waited on the watch");
             let pid = started_pids(&starts)[0].clone();
-            eventually(Duration::from_secs(3), "the send was not answered", || {
+            // The watch ends six seconds after it starts. The answer has
+            // to come before that, even on a loaded machine.
+            eventually(Duration::from_secs(5), "the send was not answered", || {
                 told(&bot, &format!("answer 2 from {pid}"))
             });
             assert_eq!(
@@ -10397,7 +10401,7 @@ done
                 "the send stopped the watch"
             );
             eventually(
-                Duration::from_secs(5),
+                Duration::from_secs(10),
                 "the later answer was dropped",
                 || told(&bot, "CI 통과했어요"),
             );
