@@ -620,11 +620,16 @@ pub fn print_event(ev: Event) -> anyhow::Result<()> {
                 println!();
             }
         }
-        Event::Told { from, to } => {
+        Event::Told { from, to, now, note } => {
             println!("ok {from} → {to}");
-            // A bot reads this mid-turn, and its tell starts only once that turn ends.
-            if from != "user" {
+            if now {
+                println!("{to} stopped what it was doing and has your tell now. Its answer comes to you later; do not wait or check for it.");
+            } else if from != "user" {
+                // A bot reads this mid-turn, and its tell starts only once that turn ends.
                 println!("{to} starts only after your turn ends. End your turn now. Do not wait or check for the answer.");
+            }
+            if let Some(note) = note {
+                println!("{note}");
             }
         }
         Event::Cloned { id } => println!("ok {id}"),

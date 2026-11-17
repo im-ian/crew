@@ -24,6 +24,10 @@ pub enum Request {
         #[serde(default)]
         to: String,
         text: String,
+        /// `crew tell --now`: cut into the teammate's turn, as a user's steer
+        /// does, instead of waiting for it to end.
+        #[serde(default, skip_serializing_if = "is_false")]
+        now: bool,
     },
     Input {
         agent: String,
@@ -316,6 +320,12 @@ pub enum Event {
     Told {
         from: String,
         to: String,
+        /// The tell cut into the teammate's turn (`crew tell --now`).
+        #[serde(default, skip_serializing_if = "is_false")]
+        now: bool,
+        /// Said to the sender: how long the tell waits, and why.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
     },
     RoutineRuns {
         agent: String,
@@ -751,12 +761,13 @@ mod tests {
             from: "alpha".into(),
             to: "beta".into(),
             text: "hi".into(),
+            now: false,
         };
         let line = req.to_line().unwrap();
         assert!(line.contains("\"type\":\"tell\""));
         let back: Request = serde_json::from_str(&line).unwrap();
         match back {
-            Request::Tell { from, to, text } => {
+            Request::Tell { from, to, text, .. } => {
                 assert_eq!(
                     (from, to, text),
                     ("alpha".into(), "beta".into(), "hi".into())
