@@ -41,6 +41,30 @@ describe("botNotices", () => {
     ]);
   });
 
+  it("keeps quiet about a finish the group lead speaks for, but not a question or a look", () => {
+    const start = step(new Map(), [bot("a"), bot("b"), bot("c"), bot("d")], 0);
+    const working = step(
+      start.snaps,
+      ["a", "b", "c", "d"].map((id) => bot(id, { status: "working" })),
+      1000,
+    );
+    const later = 1000 + LONG_RUN_MS;
+    const { notices } = step(
+      working.snaps,
+      [
+        bot("a", { finish_quiet: true }),
+        bot("b", { finish_quiet: true, failed: true }),
+        bot("c", { status: "blocked", finish_quiet: true }),
+        bot("d", { finish_quiet: true, asking: true }),
+      ],
+      later,
+    );
+    expect(notices).toEqual([
+      { botId: "c", kind: "blocked" },
+      { botId: "d", kind: "question" },
+    ]);
+  });
+
   it("does not repeat a question that is still open", () => {
     const first = step(new Map(), [bot("a")], 0);
     const asked = step(first.snaps, [bot("a", { asking: true })], 1);

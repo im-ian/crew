@@ -3732,6 +3732,7 @@ fn list_agents() -> Vec<AgentInfo> {
                 failed: false,
                 asking: false,
                 for_bot: false,
+                finish_quiet: false,
                 remote: None,
                 remote_online: false,
                 watch: s.watch(),
@@ -3765,6 +3766,13 @@ fn list_agents() -> Vec<AgentInfo> {
         }
     }
     list.extend(crate::remote::agent_infos());
+    // Read only when the setting is on: the window asks for this list often.
+    if paths::lead_only_notify() {
+        let groups = crate::groups::load().unwrap_or_default();
+        for a in &mut list {
+            a.finish_quiet = crate::notify::finish_quiet(&a.id, &groups, a.asking);
+        }
+    }
     list
 }
 
@@ -5431,6 +5439,48 @@ mod daemon_tests {
             wait_idle(&bot);
             assert!(load_waits(&bot).turn.is_none());
             remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// With lead-only notifications on, the list marks a bot another one
+    /// leads, so the window's titlebar notice keeps as quiet as the OS one.
+    /// The lead itself, and every bot with the setting off, are not marked.
+    #[test]
+    fn the_list_marks_a_finish_the_lead_speaks_for() {
+        paths::testing::with_home("lead-quiet", || {
+            let lead = test_id("lead");
+            let member = test_id("member");
+            for id in [&lead, &member] {
+                insert_spawned_agent(AgentConfig::new(
+                    id.clone(),
+                    id.clone(),
+                    vec!["cat".into()],
+                    None,
+                ))
+                .unwrap();
+            }
+            crate::groups::save(&[crate::groups::SidebarGroup {
+                id: "g1".into(),
+                name: "JtheFloor".into(),
+                collapsed: false,
+                items: vec![format!("agent:{lead}"), format!("agent:{member}")],
+                path: None,
+                lead: Some(lead.clone()),
+            }])
+            .unwrap();
+            let quiet = |id: &str| {
+                list_agents()
+                    .into_iter()
+                    .find(|a| a.id == id)
+                    .map(|a| a.finish_quiet)
+                    .expect("listed")
+            };
+            assert!(!quiet(&member), "off by default");
+            paths::write_lead_only_notify(true);
+            assert!(quiet(&member));
+            assert!(!quiet(&lead), "the lead still speaks");
+            remove_agent(&member).unwrap();
+            remove_agent(&lead).unwrap();
         });
     }
 

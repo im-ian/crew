@@ -42,6 +42,18 @@ pub fn quiet_for_lead(next: AgentStatus, lead_only: bool, led_by_another: bool, 
     lead_only && led_by_another && next != AgentStatus::Blocked && !asking
 }
 
+/// Whether a finish of `agent_id` stays quiet right now, with lead-only
+/// notifications on. The one rule for both the OS notification and the
+/// window's titlebar notice, which reads it as `AgentInfo::finish_quiet`.
+pub fn finish_quiet(agent_id: &str, groups: &[crate::groups::SidebarGroup], asking: bool) -> bool {
+    quiet_for_lead(
+        AgentStatus::Idle,
+        true,
+        crate::groups::led_by_another(groups, agent_id),
+        asking,
+    )
+}
+
 pub fn notify_body(name: &str, next: AgentStatus, lang: &str) -> String {
     match (next == AgentStatus::Blocked, lang == "en") {
         (true, true) => format!("{name} needs a look"),
@@ -87,13 +99,11 @@ pub fn maybe_status_notify(
         return;
     }
     // Read only when the setting is on: a frame comes with every status change.
-    if paths::lead_only_notify()
-        && quiet_for_lead(
-            next,
-            true,
-            crate::groups::load()
-                .map(|groups| crate::groups::led_by_another(&groups, agent_id))
-                .unwrap_or(false),
+    if next != AgentStatus::Blocked
+        && paths::lead_only_notify()
+        && finish_quiet(
+            agent_id,
+            &crate::groups::load().unwrap_or_default(),
             crate::transcript::has_pending_choice(agent_id),
         )
     {

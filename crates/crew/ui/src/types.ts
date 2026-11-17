@@ -118,6 +118,12 @@ export type AgentInfo = {
    * bot finishes in its own chat, so this one's end is no news for the user.
    */
   for_bot?: boolean;
+  /**
+   * Lead-only notifications are on and another bot leads its group: its
+   * finish, failed or not, says nothing. The daemon decides, so the OS
+   * notification and the island follow one rule.
+   */
+  finish_quiet?: boolean;
   /** Alias of the router a teammate's bot is on. Set only for remote bots. */
   remote?: string;
   /** The teammate's PC is connected to the router. */
