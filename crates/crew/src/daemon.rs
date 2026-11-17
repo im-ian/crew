@@ -777,6 +777,22 @@ pub(crate) fn retry_lost_session(id: &str, flight: headless::InFlight) {
     send_again_on_new_session(id, flight, line);
 }
 
+/// The turn failed on a transient error with nothing said, and gave its
+/// prompt back with the retry claimed. It goes again from the front, on the
+/// same session. What waits on this turn keeps waiting: it is the same turn.
+pub(crate) fn retry_failed_turn(id: &str, flight: headless::InFlight, error: &str) {
+    let error = error_line(error);
+    let line = if crate::paths::locale() == "en" {
+        format!("The CLI hit an error that may pass. Sending once more: {error}")
+    } else {
+        format!("CLI가 일시 오류를 냈어요. 한 번 다시 보내요: {error}")
+    };
+    requeue_unanswered(id, flight);
+    unpark_prefix(id);
+    finish_halted_turn(id);
+    crate::transcript::push_system(id, "crew", &line, None);
+}
+
 /// The one retry was used. Leave the prompt parked and say so once.
 fn park_unheard_again(id: &str, flight: headless::InFlight) {
     let remote = unheard_remote_job(id);
@@ -2131,6 +2147,7 @@ fn asked_order() -> &'static Mutex<(u64, HashMap<(String, String), u64>)> {
 }
 
 fn note_asked(asker: &str, bot: &str) {
+    unshow_failed_wait(asker, bot);
     if let Ok(mut order) = asked_order().lock() {
         order.0 += 1;
         let at = order.0;
@@ -2171,6 +2188,7 @@ fn waiting_map() -> HashMap<String, Vec<String>> {
         queued(&map, &mut pairs);
     }
     pairs.extend(crate::remote::asked_out());
+    pairs.extend(failed_wait_pairs());
     pairs.retain(|(asker, bot)| {
         asker != bot
             && known_agent(asker)
@@ -2198,20 +2216,23 @@ fn waiting_map() -> HashMap<String, Vec<String>> {
 /// Tell a subscriber when a bot starts or stops waiting on another. The
 /// window reads `waiting_on` with the list it polls.
 pub(crate) fn sync_waiting() {
-    static LAST: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+    type Seen = (HashMap<String, Vec<String>>, Vec<(String, String)>);
+    static LAST: OnceLock<Mutex<Seen>> = OnceLock::new();
     let now = waiting_map();
     let live: HashSet<(String, String)> = now
         .iter()
         .flat_map(|(asker, bots)| bots.iter().map(move |b| (asker.clone(), b.clone())))
         .collect();
+    let mut failed = failed_wait_pairs();
+    failed.sort();
     {
-        let Ok(mut last) = LAST.get_or_init(|| Mutex::new(HashMap::new())).lock() else {
+        let Ok(mut last) = LAST.get_or_init(|| Mutex::new(Default::default())).lock() else {
             return;
         };
-        if *last == now {
+        if last.0 == now && last.1 == failed {
             return;
         }
-        *last = now;
+        *last = (now, failed);
     }
     // Forget the order of pairs nobody waits on any more.
     if let Ok(mut order) = asked_order().lock() {
@@ -2247,7 +2268,9 @@ fn failed_turns() -> &'static Mutex<HashSet<String>> {
     FAILED.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
-/// Record how `id`'s turn ended, or `false` when a new one starts.
+/// Record how `id`'s turn ended, or `false` when a new one starts. A turn
+/// of `id`'s own that starts or goes well also ends its failed waits: it
+/// was told of them in that prompt.
 pub fn note_turn_failed(id: &str, failed: bool) {
     if let Ok(mut set) = failed_turns().lock() {
         if failed {
@@ -2256,6 +2279,151 @@ pub fn note_turn_failed(id: &str, failed: bool) {
             set.remove(id);
         }
     }
+    if !failed {
+        let cleared = failed_waits().lock().is_ok_and(|mut map| {
+            map.get_mut(id).is_some_and(|list| {
+                let shown = list.iter().any(|w| w.shown);
+                list.iter_mut().for_each(|w| w.shown = false);
+                shown
+            })
+        });
+        if cleared {
+            sync_waiting();
+        }
+    }
+}
+
+/// A bot whose turn for the asker failed with nothing said: what it failed
+/// on, how many times in a row, and the asker's row that says so. `shown`
+/// while the asker has not run a turn or asked that bot again since: it is
+/// listed failed among the bots the asker waits on. The count goes on until
+/// the bot answers the asker.
+struct FailedWait {
+    bot: String,
+    error: String,
+    count: u32,
+    row: Option<String>,
+    shown: bool,
+}
+
+/// Asker → the bots whose turns for it failed, in the order they failed.
+fn failed_waits() -> &'static Mutex<HashMap<String, Vec<FailedWait>>> {
+    static FAILED: OnceLock<Mutex<HashMap<String, Vec<FailedWait>>>> = OnceLock::new();
+    FAILED.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn failed_waits_of(asker: &str) -> Vec<String> {
+    failed_waits()
+        .lock()
+        .ok()
+        .and_then(|map| {
+            map.get(asker)
+                .map(|list| list.iter().filter(|w| w.shown).map(|w| w.bot.clone()).collect())
+        })
+        .unwrap_or_default()
+}
+
+fn failed_wait_pairs() -> Vec<(String, String)> {
+    failed_waits()
+        .lock()
+        .map(|map| {
+            map.iter()
+                .flat_map(|(asker, list)| {
+                    list.iter().filter(|w| w.shown).map(move |w| (asker.clone(), w.bot.clone()))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `asker` handed `bot` work again: it waits on it, not on the failure.
+fn unshow_failed_wait(asker: &str, bot: &str) {
+    if let Ok(mut map) = failed_waits().lock() {
+        if let Some(w) = map.get_mut(asker).and_then(|l| l.iter_mut().find(|w| w.bot == bot)) {
+            w.shown = false;
+        }
+    }
+}
+
+/// `bot` answered `asker`: its failures are over.
+fn forget_failed_wait(asker: &str, bot: &str) {
+    if let Ok(mut map) = failed_waits().lock() {
+        if let Some(list) = map.get_mut(asker) {
+            list.retain(|w| w.bot != bot);
+            if list.is_empty() {
+                map.remove(asker);
+            }
+        }
+    }
+}
+
+/// The first line of a CLI error, short enough for one line.
+fn error_line(error: &str) -> String {
+    let line = error.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let mut out: String = line.chars().take(200).collect();
+    if line.chars().count() > 200 {
+        out.push('…');
+    }
+    out
+}
+
+/// The line the asker gets for a turn that failed `count` times on `error`.
+fn failed_line(error: &str, count: u32) -> String {
+    let en = crate::paths::locale() == "en";
+    let times = match (count, en) {
+        (0 | 1, _) => String::new(),
+        (n, true) => format!(" (×{n})"),
+        (n, false) => format!(" ({n}번)"),
+    };
+    if en {
+        format!("Failed with nothing said{times}: {error}")
+    } else {
+        format!("답 없이 실패했어요{times}: {error}")
+    }
+}
+
+/// `bot`'s turn for `asker` failed with nothing said. The error is no
+/// answer, so it goes to `asker` as one line saying it failed, which rides
+/// in its next prompt and wakes nobody. The same error again from the same
+/// bot, with no answer between, makes that line count instead of adding
+/// another: the old row goes and the counted one takes the bottom. When
+/// `asker` was waiting (`waited`), it shows `bot` as failed among the bots
+/// it waits on.
+fn note_failed_wait(asker: &str, bot: &str, error: &str, waited: bool) {
+    let error = error_line(error);
+    let (count, old) = {
+        let Ok(mut map) = failed_waits().lock() else {
+            return;
+        };
+        let list = map.entry(asker.to_string()).or_default();
+        let at = list.iter().position(|w| w.bot == bot);
+        let prior = at.map(|i| list.remove(i));
+        let (count, old) = match prior {
+            Some(w) if w.error == error => (w.count + 1, w.row),
+            Some(w) => (1, w.row),
+            None => (1, None),
+        };
+        list.push(FailedWait {
+            bot: bot.to_string(),
+            error: error.clone(),
+            count,
+            row: None,
+            shown: waited,
+        });
+        (count, old)
+    };
+    if let Some(old) = old {
+        crate::transcript::remove_row(asker, &old);
+    }
+    let line = failed_line(&error, count);
+    let row = crate::transcript::push_handoff(asker, bot, &line).id;
+    if let Ok(mut map) = failed_waits().lock() {
+        if let Some(w) = map.get_mut(asker).and_then(|l| l.iter_mut().find(|w| w.bot == bot)) {
+            w.row = Some(row.clone());
+        }
+    }
+    enqueue_handoff(asker, bot, &line, Some(&row));
+    sync_waiting();
 }
 
 fn turn_failed(id: &str) -> bool {
@@ -3877,6 +4045,7 @@ fn list_agents() -> Vec<AgentInfo> {
                 watch: s.watch(),
                 work_dir: Some(s.cwd().display().to_string()),
                 waiting_on: Vec::new(),
+                waiting_failed: Vec::new(),
             }
         })
         .collect();
@@ -3887,6 +4056,10 @@ fn list_agents() -> Vec<AgentInfo> {
     let mut waiting = waiting_map();
     for a in &mut list {
         a.waiting_on = waiting.remove(&a.id).unwrap_or_default();
+        a.waiting_failed = failed_waits_of(&a.id)
+            .into_iter()
+            .filter(|bot| a.waiting_on.contains(bot))
+            .collect();
         a.preview = crate::transcript::preview(&a.id);
         a.last_ts = crate::transcript::last_ts(&a.id);
         a.failed = turn_failed(&a.id);
@@ -4835,6 +5008,11 @@ fn remove_agent(id: &str) -> anyhow::Result<()> {
     crate::memory::remove(id);
     forget_auto_approve(id);
     note_turn_failed(id, false);
+    if let Ok(mut map) = failed_waits().lock() {
+        map.remove(id);
+        map.values_mut().for_each(|list| list.retain(|w| w.bot != id));
+        map.retain(|_, list| !list.is_empty());
+    }
     save_state()?;
     inject_roster_update(None);
     Ok(())
@@ -5278,7 +5456,16 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
     };
     let targets = targeting::postback_targets(&origin, agent);
     if let Some(peer) = targets.agent {
+        // The turn failed and said only its error: that is no answer.
+        if known_agent(&peer) && !text.is_empty() && msg.choice.is_none() && turn_failed(agent) {
+            // Shown as a failed wait only where `peer` ran the tell and waits;
+            // a user's @mention from its chat leaves it waiting on nobody.
+            let waited = targeting::waiting_asker(&origin, agent).as_deref() == Some(peer.as_str());
+            note_failed_wait(&peer, agent, &text, waited);
+            return;
+        }
         if known_agent(&peer) && !text.is_empty() && msg.choice.is_none() {
+            forget_failed_wait(&peer, agent);
             let row = crate::transcript::push_handoff(&peer, agent, &text);
             // This turn already ran `crew tell` to that bot. The tell is its
             // report; the reply stays in the chat as a record, and goes into
@@ -5346,6 +5533,11 @@ fn wake_asker_inner(id: &str) {
         return;
     };
     if !known_agent(&asker) {
+        return;
+    }
+    // A failed turn left the asker a line, for its next prompt. It is not
+    // woken for it.
+    if turn_failed(id) {
         return;
     }
     // It also ran `crew tell` back. That tell drops this reply on arrival, so
@@ -6101,6 +6293,32 @@ mod daemon_tests {
         crate::transcript::drop_agent(&peer);
         configs().lock().unwrap().remove(&peer);
         clear_agent_context(&peer);
+    }
+
+    /// A user's @mention from another chat failed: that chat hears it
+    /// failed, but waits on nobody, so nobody shows as a failed wait.
+    #[test]
+    fn a_failed_mention_is_said_but_not_waited_on() {
+        let peer = test_id("chat");
+        let speaker = format!("named-{peer}");
+        configs().lock().unwrap().insert(
+            peer.clone(),
+            crate::config::AgentConfig::new(peer.clone(), peer.clone(), vec!["cat".into()], None),
+        );
+        crate::transcript::load_agent(&peer);
+        set_origin(&speaker, TurnOrigin::mention_tell(&peer));
+        note_turn_failed(&speaker, true);
+        on_assistant_sealed(&speaker, &sealed_reply(&speaker, "No space left on device (os error 28)"));
+        let last = crate::transcript::messages(&peer).pop().expect("a line");
+        assert_eq!(last.kind, Some(crate::protocol::MessageKind::Handoff));
+        assert_ne!(last.text, "No space left on device (os error 28)", "the error went as the answer");
+        assert!(last.text.contains("No space left on device"), "{}", last.text);
+        assert!(failed_waits_of(&peer).is_empty());
+        note_turn_failed(&speaker, false);
+        crate::transcript::drop_agent(&peer);
+        configs().lock().unwrap().remove(&peer);
+        clear_agent_context(&peer);
+        failed_waits().lock().unwrap().remove(&peer);
     }
 
     /// The bot that asked gets the result, not what was said while working.
@@ -7005,6 +7223,104 @@ fi
             assert!(!system_said(&bot, "a retry that worked"));
             remove_agent(&bot).unwrap();
         });
+    }
+
+    /// A teammate's CLI fails with an internal error and nothing said. The
+    /// tell goes once more; failing again, the bot that asked gets one line
+    /// saying so, is not woken, and shows that teammate as failed among the
+    /// bots it waits on. The same error again counts on that line.
+    #[test]
+    fn a_failed_turn_is_tried_once_more_and_then_said_to_the_asker() {
+        paths::testing::with_home("failed-turn", || {
+            crate::transcript::set_seal_hook(on_assistant_sealed);
+            let asker = test_id("asker");
+            let worker = test_id("worker");
+            fake_bot(&asker, "알았어");
+            let calls = paths::home_dir().join("calls");
+            fake_one_shot_bot(
+                &worker,
+                &format!(
+                    "echo x >> '{}'\necho 'API Error: 500 Internal server error' >&2\nexit 1",
+                    calls.display()
+                ),
+            );
+            wait_idle(&asker);
+            wait_idle(&worker);
+            let attempts = || fs::read_to_string(&calls).map(|s| s.lines().count()).unwrap_or(0);
+
+            tell_agent_origin(&asker, &worker, "빌드해 줘", None, false, &mut VecDeque::new()).unwrap();
+            eventually(Duration::from_secs(10), "the tell was not tried twice", || {
+                attempts() == 2 && !agent_busy(&worker).unwrap()
+            });
+            wait_idle(&worker);
+            assert!(
+                crate::transcript::messages(&worker)
+                    .iter()
+                    .any(|m| m.role == Role::System && m.text.contains("Internal server error")),
+                "the retry was not said"
+            );
+            let rows: Vec<_> = crate::transcript::messages(&asker)
+                .into_iter()
+                .filter(|m| m.kind == Some(crate::protocol::MessageKind::Handoff))
+                .collect();
+            assert_eq!(rows.len(), 1, "{rows:?}");
+            assert!(rows[0].text.contains("Internal server error"), "{}", rows[0].text);
+            assert_ne!(rows[0].text, "API Error: 500 Internal server error", "the error went as the answer");
+            std::thread::sleep(Duration::from_millis(300));
+            assert!(!agent_busy(&asker).unwrap(), "the asker was woken");
+            assert!(!told(&asker, "알았어"), "the asker was woken");
+            let info = list_agents().into_iter().find(|a| a.id == asker).unwrap();
+            assert_eq!(info.waiting_on, [worker.clone()]);
+            assert_eq!(info.waiting_failed, [worker.clone()]);
+
+            // Asked again, it fails the same way: one line, counted.
+            tell_agent_origin(&asker, &worker, "다시 빌드해 줘", None, false, &mut VecDeque::new()).unwrap();
+            eventually(Duration::from_secs(10), "the second tell was not tried twice", || {
+                attempts() == 4 && !agent_busy(&worker).unwrap()
+            });
+            wait_idle(&worker);
+            let rows: Vec<_> = crate::transcript::messages(&asker)
+                .into_iter()
+                .filter(|m| m.kind == Some(crate::protocol::MessageKind::Handoff))
+                .collect();
+            assert_eq!(rows.len(), 1, "{rows:?}");
+            assert!(rows[0].text.contains("(2번)") || rows[0].text.contains("(×2)"), "{}", rows[0].text);
+            let pending = take_handoffs(&asker);
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[0].text, rows[0].text);
+
+            // The asker's next turn hears it; the failure is old news then.
+            note_turn_failed(&asker, false);
+            assert!(failed_waits_of(&asker).is_empty());
+            let info = list_agents().into_iter().find(|a| a.id == asker).unwrap();
+            assert!(info.waiting_failed.is_empty());
+            assert!(info.waiting_on.is_empty());
+
+            remove_agent(&worker).unwrap();
+            remove_agent(&asker).unwrap();
+        });
+    }
+
+    #[test]
+    fn knows_an_error_that_may_pass() {
+        for text in [
+            "API Error: 500 {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"Internal server error\"}}",
+            "API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}",
+            "Internal error",
+            "HTTP 503 Service Unavailable",
+            "status 502",
+        ] {
+            assert!(crate::headless::is_transient_error(text), "{text}");
+        }
+        for text in [
+            "No space left on device (os error 28)",
+            "You've hit your 5-hour limit · resets 6:50pm (Asia/Seoul)",
+            "No conversation found with session ID: 5a1b",
+            "port 5000 in use",
+            "spawn grok: No such file or directory",
+        ] {
+            assert!(!crate::headless::is_transient_error(text), "{text}");
+        }
     }
 
     /// A bot on `fake_claude` that prints `lines` as its turn.

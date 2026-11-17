@@ -53,7 +53,7 @@ import { botLabel, botSearchText } from "../botLabel";
 import { listedHits, matchRuns } from "../searchView";
 import { PlanUsageButton } from "./PlanUsageBar";
 import { WaitTag } from "./WaitingOn";
-import { waitingOn } from "../statusView";
+import { waitingFailed, waitingOn } from "../statusView";
 import { ChevronDown, Columns2, Ellipsis, Layers, Plus, Rows2, Search, Settings, Star } from "../icons";
 
 const RAIL_DEFAULT = 232;
@@ -1835,7 +1835,7 @@ function ItemRow({
               </span>
             ) : null}
             {/* Mounted whatever the status, so a face folds out as its bot answers. */}
-            {!compact && a ? <WaitTag ids={waits} agents={agents} /> : null}
+            {!compact && a ? <WaitTag ids={waits} failed={waitingFailed(a)} agents={agents} /> : null}
           </span>
           {stamp ? (
             <time className="rail-stamp" dateTime={new Date(ts).toISOString()}>

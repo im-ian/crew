@@ -422,6 +422,11 @@ pub struct AgentInfo {
     /// counts too. Empty for a bot waiting on nobody.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub waiting_on: Vec<String>,
+    /// Of `waiting_on`, the bots whose turn for this one failed with nothing
+    /// said. No answer is coming; this bot was told so and not woken. They
+    /// stay until this bot's next turn, or until it asks them again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waiting_failed: Vec<String>,
 }
 
 /// One task a bot left running after it answered.
