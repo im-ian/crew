@@ -309,6 +309,12 @@
           "markdownDescription": "Enables the open_url command without any pre-configured scope."
         },
         {
+          "description": "Enables the path_kinds command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-path-kinds",
+          "markdownDescription": "Enables the path_kinds command without any pre-configured scope."
+        },
+        {
           "description": "Enables the peek_pending_focus command without any pre-configured scope.",
           "type": "string",
           "const": "allow-peek-pending-focus",
@@ -667,6 +673,12 @@
           "type": "string",
           "const": "deny-open-url",
           "markdownDescription": "Denies the open_url command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the path_kinds command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-path-kinds",
+          "markdownDescription": "Denies the path_kinds command without any pre-configured scope."
         },
         {
           "description": "Denies the peek_pending_focus command without any pre-configured scope.",

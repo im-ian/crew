@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-path-kinds"
+description = "Enables the path_kinds command without any pre-configured scope."
+commands.allow = ["path_kinds"]
+
+[[permission]]
+identifier = "deny-path-kinds"
+description = "Denies the path_kinds command without any pre-configured scope."
+commands.deny = ["path_kinds"]

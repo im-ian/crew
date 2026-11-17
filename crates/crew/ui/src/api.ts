@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { PathKind } from "./dropAttach";
 import type {
   AgentInfo,
   ChatMessage,
@@ -198,6 +199,7 @@ export const api = {
   removeSkill: (name: string) => invoke<void>("remove_skill", { name }),
   saveUpload: (name: string, data: string) =>
     invoke<string>("save_upload", { name, data }),
+  pathKinds: (paths: string[]) => invoke<PathKind[]>("path_kinds", { paths }),
   peekPendingFocus: () => invoke<FocusTarget | null>("peek_pending_focus"),
   takePendingFocus: () => invoke<FocusTarget | null>("take_pending_focus"),
   openPath: (path: string) => invoke<void>("open_path", { path }),

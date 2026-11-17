@@ -53,6 +53,7 @@ fn main() {
             "open_path",
             "open_url",
             "pick_folder",
+            "path_kinds",
             "set_dock_badge",
             "set_locale",
             "set_notifications",

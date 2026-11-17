@@ -61,6 +61,7 @@
     "allow-open-path",
     "allow-open-url",
     "allow-pick-folder",
+    "allow-path-kinds",
     "allow-set-dock-badge",
     "allow-set-locale",
     "allow-set-notifications",

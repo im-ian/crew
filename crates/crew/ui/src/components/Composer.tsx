@@ -3,14 +3,14 @@ import type { AgentInfo, EditResult, Group, Kind, Skill } from "../types";
 import { api } from "../api";
 import { useT } from "../LocaleContext";
 import { useBotLabel, useLabelGroups } from "../BotLabelContext";
-import { mediaKind } from "../markdown";
+import { mediaKind, mediaSrc } from "../markdown";
 import { groupCandidates, mentionIds } from "../mentions";
 import { sendSteers, type Delivery } from "../deliveryPref";
 import { composerAfterSend } from "../sendGate";
 import { stepQueuePick } from "../queuePick";
 import { oneLine, wrapReply, type ReplyTarget } from "../reply";
 import { caretClientPoint, type CaretPoint } from "../caretPoint";
-import { dropPathsText } from "../dropPaths";
+import { droppedAttaches, type PathKind } from "../dropAttach";
 import type { AskPick } from "./AskHoldDialog";
 import { enterAction } from "../composerEnter";
 import { GroupChip, MentionChip } from "./MentionChip";
@@ -26,7 +26,7 @@ import {
   typedHandle,
   type MentionQuery,
 } from "./mentionEditor";
-import { ArrowUp, CircleDot, Paperclip, Play, Plus, StopSquare, X } from "../icons";
+import { ArrowUp, CircleDot, Folder, Paperclip, Play, Plus, StopSquare, X } from "../icons";
 
 export type ComposerHandle = {
   focus: () => void;
@@ -88,6 +88,8 @@ type Attach = {
   image: boolean;
   media?: "video" | "audio";
   preview?: string;
+  /** A folder dropped from Finder, at its own path. */
+  dir?: boolean;
 };
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
@@ -517,18 +519,33 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     fit();
   }, [placeholder]);
 
+  // A dialog over the chat keeps its focus. A drop is not for the field under it.
+  const dialogOpen = () => !!document.querySelector(".modal.open, [aria-modal='true']");
+  const [dropHover, setDropHover] = useState(false);
   const dropRef = useRef<(paths: string[]) => void>(() => {});
   dropRef.current = (paths) => {
-    // A dialog over the chat keeps its focus. The drop is not for the field under it.
-    if (document.querySelector(".modal.open, [aria-modal='true']")) return;
-    if (!insertDroppedPaths(inputRef.current, paths)) return;
-    refreshEmpty();
-    fit();
+    if (dialogOpen() || !paths.length) return;
+    void (async () => {
+      const kinds: PathKind[] = await api.pathKinds(paths).catch(() => []);
+      const have = attachRef.current.map((a) => a.path);
+      const stamp = Date.now();
+      const next: Attach[] = droppedAttaches(paths, kinds, have).map((d, i) => ({
+        ...d,
+        id: `${stamp}-drop-${i}-${d.name}`,
+        preview: d.image || d.media === "video" ? mediaSrc(d.path) : undefined,
+      }));
+      if (!next.length) return;
+      setAttaches((prev) => [...prev, ...next]);
+      refreshEmpty();
+      fit();
+      inputRef.current?.focus();
+    })();
   };
 
   // The window takes a file dropped from Finder before the page sees it, and
-  // hands over where it is. That path is typed in, so the bot reads the file
-  // where it sits.
+  // hands over where it is. It is attached at that path, not copied, so the
+  // bot reads it where it sits. While one is dragged over the window the
+  // field shows it takes it.
   useEffect(() => {
     let off: (() => void) | undefined;
     let gone = false;
@@ -536,7 +553,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
       try {
         const { getCurrentWebview } = await import("@tauri-apps/api/webview");
         const unlisten = await getCurrentWebview().onDragDropEvent((e) => {
-          if (e.payload.type === "drop") dropRef.current(e.payload.paths);
+          const p = e.payload;
+          if (p.type === "enter") setDropHover(p.paths.length > 0 && !dialogOpen());
+          else if (p.type === "leave") setDropHover(false);
+          else if (p.type === "drop") {
+            setDropHover(false);
+            dropRef.current(p.paths);
+          }
         });
         if (gone) unlisten();
         else off = unlisten;
@@ -657,7 +680,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         className={
           "composer-box" +
           (attaches.length ? " has-attach" : "") +
-          (reply || editing ? " has-reply" : "")
+          (reply || editing ? " has-reply" : "") +
+          (dropHover ? " is-drop" : "")
         }
       >
         {slashOpen ? (
@@ -766,7 +790,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           <div className="attach-row">
             {files.map((a) => (
               <div key={a.id} className="attach-chip">
-                <span className="attach-file">{fileExt(a.name)}</span>
+                <span className="attach-file">
+                  {a.dir ? <Folder size={16} /> : fileExt(a.name)}
+                </span>
                 <span className="attach-name">{a.name}</span>
                 <button
                   type="button"
@@ -1090,43 +1116,6 @@ function insertSkillBody(editor: HTMLElement | null, body: string): boolean {
     after.collapse(false);
     sel.addRange(after);
   }
-  return true;
-}
-
-/** Types dropped paths at the caret, or at the end when the caret is elsewhere. */
-function insertDroppedPaths(editor: HTMLElement | null, paths: string[]): boolean {
-  if (!editor) return false;
-  const sel = window.getSelection();
-  const inside = !!sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode);
-  editor.focus();
-  if (sel && !inside) {
-    const end = document.createRange();
-    end.selectNodeContents(editor);
-    end.collapse(false);
-    sel.removeAllRanges();
-    sel.addRange(end);
-  }
-  const ctx = caretTextContext(editor);
-  const before = ctx
-    ? ctx.node.textContent?.slice(0, ctx.offset) ?? ""
-    : inside
-      ? ""
-      : editor.textContent ?? "";
-  const text = dropPathsText(paths, before);
-  if (!text) return false;
-  if (document.execCommand("insertText", false, text)) return true;
-  if (!sel || sel.rangeCount === 0) {
-    editor.append(document.createTextNode(text));
-    return true;
-  }
-  const range = sel.getRangeAt(0);
-  range.deleteContents();
-  const node = document.createTextNode(text);
-  range.insertNode(node);
-  range.setStartAfter(node);
-  range.collapse(true);
-  sel.removeAllRanges();
-  sel.addRange(range);
   return true;
 }
 
