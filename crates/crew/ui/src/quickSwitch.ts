@@ -1,4 +1,5 @@
 import { groupOfBot } from "./botLabel";
+import { parseItemKey, UNGROUPED_ID } from "./groups";
 import type { AgentInfo, Group } from "./types";
 
 /** One bot in the ⌘K list. */
@@ -146,6 +147,97 @@ export function switchRows(opts: {
     .filter((x): x is { row: SwitchRow; i: number; score: number } => x.score !== null)
     .sort((a, b) => b.score - a.score || a.i - b.i)
     .map((x) => x.row);
+}
+
+/** A heading in the ⌘K list and the bots under it. */
+export type SwitchSection = {
+  /** Unique among the sections: `recent`, `results`, `loose`, a folder id, `remote:<alias>`. */
+  key: string;
+  kind: "recent" | "results" | "group" | "loose" | "remote";
+  /** The folder's or router's name. Empty for the kinds the screen names itself. */
+  title: string;
+  rows: SwitchRow[];
+};
+
+/** How many chats "Recent" lists. The rest are under their folders. */
+export const RECENT_SHOWN = 5;
+
+/**
+ * The ⌘K list in sections. Typed nothing: "Recent" (the chats opened last,
+ * not the open one), then every bot under its folder, the bots in no folder,
+ * and each router's teammates, in the order the sidebar stacks them. A bot
+ * in "Recent" is under its folder too, so a folder counts what the sidebar
+ * holds. Typed something: one "Results" section, best match first, so Enter
+ * never skips past a better match in a lower section.
+ */
+export function switchSections(opts: {
+  agents: readonly AgentInfo[];
+  groups: readonly Group[];
+  order: readonly string[];
+  recent: readonly string[];
+  current: string | null;
+  query: string;
+}): SwitchSection[] {
+  if (opts.query.trim()) {
+    const rows = switchRows(opts);
+    return rows.length ? [{ key: "results", kind: "results", title: "", rows }] : [];
+  }
+  const byId = new Map(opts.agents.map((a) => [a.id, a]));
+  const folders = opts.groups.filter((g) => g.id !== UNGROUPED_ID && g.name.trim());
+  const folderOf = (id: string) => folders.find((g) => g.items.includes(`agent:${id}`)) ?? null;
+  const rowOf = (agent: AgentInfo): SwitchRow => ({
+    agent,
+    group: agent.remote ?? folderOf(agent.id)?.name.trim() ?? "",
+  });
+  const keyOf = (agent: AgentInfo) =>
+    agent.remote ? `remote:${agent.remote}` : (folderOf(agent.id)?.id ?? "loose");
+
+  const sections: SwitchSection[] = [];
+  const recent = opts.recent
+    .filter((id, i, all) => id !== opts.current && byId.has(id) && all.indexOf(id) === i)
+    .slice(0, RECENT_SHOWN)
+    .map((id) => rowOf(byId.get(id)!));
+  if (recent.length) sections.push({ key: "recent", kind: "recent", title: "", rows: recent });
+
+  // Sections in the sidebar's order; folded ones it leaves out come after.
+  const keys: string[] = [];
+  const addKey = (key: string) => {
+    if (!keys.includes(key)) keys.push(key);
+  };
+  for (const id of opts.order) {
+    const agent = byId.get(id);
+    if (agent) addKey(keyOf(agent));
+  }
+  folders.forEach((g) => addKey(g.id));
+  addKey("loose");
+  opts.agents.forEach((a) => addKey(keyOf(a)));
+
+  // Bots in the sidebar's order, then any it does not list.
+  const ranked = [...opts.order, ...opts.agents.map((a) => a.id)];
+  for (const key of keys) {
+    const folder = folders.find((g) => g.id === key);
+    let ids: string[];
+    if (folder) {
+      ids = folder.items.flatMap((item) => {
+        const parsed = parseItemKey(item);
+        return parsed && byId.has(parsed.id) ? [parsed.id] : [];
+      });
+    } else {
+      ids = ranked.filter((id, i) => {
+        const agent = byId.get(id);
+        return !!agent && ranked.indexOf(id) === i && keyOf(agent) === key;
+      });
+    }
+    if (!ids.length) continue;
+    const alias = key.startsWith("remote:") ? key.slice("remote:".length) : "";
+    sections.push({
+      key,
+      kind: folder ? "group" : alias ? "remote" : "loose",
+      title: folder ? folder.name.trim() : alias,
+      rows: ids.map((id) => rowOf(byId.get(id)!)),
+    });
+  }
+  return sections;
 }
 
 /** One step through the list, wrapping at either end. */
