@@ -1,174 +1,116 @@
-import { useT } from "../LocaleContext";
-import { clockLabel } from "../clock";
-import { formatAgo, stalledMinutes } from "../idleSummary";
-import type { IdleCard as IdleCardData, IdleState } from "../idleTypes";
-import type { TFn } from "../i18n";
-import { ChevronDown } from "../icons";
+import { useBotLabel } from "../BotLabelContext";
+import { useLocale, useT } from "../LocaleContext";
+import { resolveFace } from "../avatar";
+import { messageClockParts } from "../clock";
+import { workDir } from "../fileRef";
+import type { IdleCard as IdleCardData } from "../idleTypes";
+import { displayWho } from "../peek";
+import type { AgentInfo } from "../types";
+import { Avatar } from "./Avatar";
+import { MdBody } from "./MdBody";
+import { whoColor } from "./WhoButton";
 
 type Props = {
   card: IdleCardData;
-  locale: string;
-  now: number;
-  /** A folded pill opened back into the card. A live card is always open. */
-  expanded: boolean;
-  details: boolean;
-  onExpand: () => void;
-  onDetails: () => void;
+  agent: AgentInfo | null;
+  agents: AgentInfo[];
+  /** A 1:1 room draws the face on the latest line only. */
+  showFace: boolean;
+  /** A 1:1 room leaves the name off. */
+  showName: boolean;
+  lookAtCaret?: boolean;
+  onSelectAgent?: (id: string) => void;
 };
 
+/**
+ * The stall reads as that bot talking. The bubble matches an ordinary incoming
+ * line; the border is dashed and the fill is clear. It is not a transcript
+ * message, so it has no copy button and no reply.
+ */
 export function IdleCard({
   card,
-  locale,
-  now,
-  expanded,
-  details,
-  onExpand,
-  onDetails,
+  agent,
+  agents,
+  showFace,
+  showName,
+  lookAtCaret = false,
+  onSelectAgent,
 }: Props) {
   const t = useT();
-  const minutes = card.live ? stalledMinutes(card.activityTs, now) : card.minutes;
-  if (!card.live && !expanded) {
-    return (
-      <div className="idle-slot">
-        <button
-          type="button"
-          className={"idle-folded s-" + card.state}
-          aria-expanded={false}
-          onClick={onExpand}
-        >
-          <span className="dot" />
-          <b>{stateLabel(card.state, t)}</b>
-          <span className="sep">·</span>
-          <span>{formatAgo(minutes, false, t)}</span>
-          <span className="sep">·</span>
-          <span className="idle-hint">{card.hint}</span>
-          <ChevronDown size={14} />
-        </button>
-      </div>
-    );
-  }
-  const when = clockLabel(card.activityTs, locale);
+  const labelOf = useBotLabel();
+  const who = agent ? displayWho(agent.id, agent, t, labelOf) : "";
+  const color = agent
+    ? whoColor(resolveFace(agent.id, agent.avatar_shape, agent.avatar_color).color)
+    : undefined;
+  const open =
+    showName && onSelectAgent && agent ? () => onSelectAgent(agent.id) : undefined;
   return (
-    <div className="idle-slot">
-      <div className={"idle-card s-" + card.state + (details ? " open" : "")}>
-        <div className="idle-head">
-          <span className="state">
-            <span className="dot" />
-            {stateLabel(card.state, t)}
-          </span>
-          <span className="sep">·</span>
-          <span className="ago">{formatAgo(minutes, true, t)}</span>
-          {when ? (
-            <span className="when">{t("idle.when", { time: when })}</span>
-          ) : null}
-        </div>
-        {card.paragraphs.map((line, i) => (
-          <p className="idle-sum" key={i}>
-            {line.map((span, j) =>
-              span.code ? (
-                <code key={j}>{span.t}</code>
-              ) : span.strong ? (
-                <b key={j}>{span.t}</b>
-              ) : (
-                <span key={j}>{span.t}</span>
-              ),
-            )}
-          </p>
-        ))}
-        {card.detail ? (
+    <div
+      className={
+        "row them incoming" + (showFace && !showName ? " face-end" : "")
+      }
+      data-msg-id={card.id}
+    >
+      {agent && showFace ? (
+        <Avatar
+          as={open ? "button" : "div"}
+          className="msg-avatar"
+          id={agent.id}
+          name={agent.name || agent.id}
+          src={agent.avatar}
+          shape={agent.avatar_shape}
+          color={agent.avatar_color}
+          status={agent.status}
+          title={who}
+          onClick={open}
+          lookAtCaret={lookAtCaret}
+        />
+      ) : agent ? (
+        <div className="msg-avatar" aria-hidden="true" />
+      ) : null}
+      <div className="channel-msg">
+        {!showName ? null : open ? (
           <button
             type="button"
-            className="idle-more"
-            aria-expanded={details}
-            onClick={onDetails}
+            className="channel-who"
+            style={color ? { color } : undefined}
+            onClick={open}
           >
-            {t("idle.more")}
-            <ChevronDown size={14} />
+            {who}
           </button>
-        ) : null}
-        {card.detail && details ? (
-          <dl className="idle-detail">
-            {card.detail.task ? (
-              <>
-                <dt>{t("idle.task")}</dt>
-                <dd>
-                  {card.detail.task.who} · {card.detail.task.what}
-                </dd>
-              </>
-            ) : null}
-            {card.detail.steps.length ? (
-              <>
-                <dt>{t("idle.did")}</dt>
-                <dd>
-                  <ol>
-                    {card.detail.steps.map((step, i) => (
-                      <li key={i} className={step.stop ? "stop" : undefined}>
-                        {step.text}
-                      </li>
-                    ))}
-                  </ol>
-                </dd>
-              </>
-            ) : null}
-            {card.detail.files.length ? (
-              <>
-                <dt>{t("idle.files")}</dt>
-                <dd>
-                  <div className="files">
-                    {card.detail.files.map((file) => (
-                      <code key={file.path} title={file.path}>
-                        {file.name}
-                      </code>
-                    ))}
-                  </div>
-                </dd>
-              </>
-            ) : null}
-            {card.detail.prs.length ? (
-              <>
-                <dt>{t("idle.pr")}</dt>
-                <dd>
-                  {card.detail.prs.map((pr) =>
-                    pr.href ? (
-                      <a key={pr.label} href={pr.href} target="_blank" rel="noreferrer">
-                        {pr.label}
-                      </a>
-                    ) : (
-                      <span key={pr.label}>{pr.label}</span>
-                    ),
-                  )}
-                </dd>
-              </>
-            ) : card.detail.prEmpty ? (
-              <>
-                <dt>{t("idle.pr")}</dt>
-                <dd className="idle-empty">{t("idle.pr.none")}</dd>
-              </>
-            ) : null}
-            {card.detail.waiting.length ? (
-              <>
-                <dt>{t("idle.waiting")}</dt>
-                <dd>
-                  {card.detail.waiting.map((w) => (
-                    <div key={w.name}>
-                      {t("idle.waiting.line", {
-                        name: w.name,
-                        time: clockLabel(w.at, locale),
-                      })}
-                    </div>
-                  ))}
-                </dd>
-              </>
-            ) : null}
-          </dl>
-        ) : null}
+        ) : (
+          <div className="channel-who" style={color ? { color } : undefined}>
+            {who}
+          </div>
+        )}
+        <div className="bubble-stack">
+          <div className="bubble-row has-actions">
+            <MdBody
+              className="bubble md incoming idle"
+              text={card.body}
+              agents={agents}
+              onMention={onSelectAgent}
+              baseDir={workDir(agent)}
+            />
+            <IdleTime ts={card.activityTs} />
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-function stateLabel(state: IdleState, t: TFn): string {
-  if (state === "cut") return t("idle.state.cut");
-  if (state === "wait") return t("idle.state.wait");
-  return t("idle.state.quiet");
+/** The same hover clock as a message, without copy or reply. */
+function IdleTime({ ts }: { ts: number }) {
+  const { locale } = useLocale();
+  const { day, time } = messageClockParts(ts, locale);
+  if (!time) return null;
+  return (
+    <div className="msg-actions">
+      <time className="msg-time" dateTime={new Date(ts).toISOString()}>
+        {day ? <span className="msg-time-day">{day}</span> : null}
+        <span className="msg-time-clock">{time}</span>
+      </time>
+    </div>
+  );
 }
