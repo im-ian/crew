@@ -5182,6 +5182,14 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
     if text.is_empty() && msg.choice.is_none() {
         return;
     }
+    // What goes back to the bot that asked is the result: the words after
+    // the turn's last tool call. What it said while working ("Tests are
+    // running; I'll wait.") stays in this bot's chat. A reply with nothing
+    // after its work goes whole, as before.
+    let text = crate::transcript::sealed_result(agent, &msg.id)
+        .map(|tail| crate::rows::reply_body(&tail).trim().to_string())
+        .filter(|tail| !tail.is_empty())
+        .unwrap_or(text);
     let origin = get_origin(agent);
     if msg.choice.is_none() && crate::remote::is_rep(agent) {
         crate::remote::on_sealed(agent, &text, origin.as_ref());
@@ -5956,6 +5964,62 @@ mod daemon_tests {
         crate::transcript::drop_agent(&peer);
         configs().lock().unwrap().remove(&peer);
         clear_agent_context(&peer);
+    }
+
+    /// The bot that asked gets the result, not what was said while working.
+    /// A reply with nothing after its last tool call goes whole.
+    #[test]
+    fn a_handoff_carries_the_result_not_the_words_said_while_working() {
+        crate::transcript::set_seal_hook(on_assistant_sealed);
+        let peer = test_id("asker");
+        configs().lock().unwrap().insert(
+            peer.clone(),
+            crate::config::AgentConfig::new(peer.clone(), peer.clone(), vec!["cat".into()], None),
+        );
+        crate::transcript::load_agent(&peer);
+        let handoff = |speaker: &str| {
+            crate::transcript::messages(&peer)
+                .into_iter()
+                .filter(|m| m.kind == Some(crate::protocol::MessageKind::Handoff) && m.from == speaker)
+                .map(|m| m.text)
+                .last()
+        };
+
+        let worker = format!("worker-{peer}");
+        set_origin(&worker, TurnOrigin::mention_tell(&peer));
+        crate::transcript::begin_turn(&worker);
+        crate::transcript::on_assistant_delta(&worker, "Tests are running in the background; I'll wait for them.");
+        crate::transcript::push_tool(&worker, Some("t1"), "Bash", "{\"command\":\"cargo test\"}");
+        crate::transcript::on_assistant_delta(&worker, "\n\nAll 12 tests pass.\n\nPR #9 is open.");
+        crate::transcript::push_tool(&worker, Some("t1"), "", "{\"command\":\"cargo test\"}");
+        crate::transcript::seal_agent(&worker);
+        let own = crate::transcript::messages(&worker);
+        let reply = own.iter().rev().find(|m| m.role == Role::Assistant).expect("reply");
+        assert!(reply.text.starts_with("Tests are running"), "the chat keeps it all: {}", reply.text);
+        assert_eq!(handoff(&worker).as_deref(), Some("All 12 tests pass.\n\nPR #9 is open."));
+
+        // Nothing after the work: the reply goes whole.
+        let late = format!("late-{peer}");
+        set_origin(&late, TurnOrigin::mention_tell(&peer));
+        crate::transcript::begin_turn(&late);
+        crate::transcript::on_assistant_delta(&late, "Done: it was the cache.");
+        crate::transcript::push_tool(&late, Some("t2"), "Bash", "{\"command\":\"ls\"}");
+        crate::transcript::seal_agent(&late);
+        assert_eq!(handoff(&late).as_deref(), Some("Done: it was the cache."));
+
+        // No work at all: whole, as before.
+        let plain = format!("plain-{peer}");
+        set_origin(&plain, TurnOrigin::mention_tell(&peer));
+        crate::transcript::begin_turn(&plain);
+        crate::transcript::on_assistant_delta(&plain, "Looks fine.\n\nShip it.");
+        crate::transcript::seal_agent(&plain);
+        assert_eq!(handoff(&plain).as_deref(), Some("Looks fine.\n\nShip it."));
+
+        for id in [&worker, &late, &plain, &peer] {
+            crate::transcript::drop_agent(id);
+            clear_agent_context(id);
+        }
+        configs().lock().unwrap().remove(&peer);
     }
 
     /// The user @mentioned `named` while sitting in `chat`. `chat` did not ask,
