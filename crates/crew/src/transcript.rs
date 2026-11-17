@@ -46,6 +46,12 @@ struct AgentChat {
     /// Codex's earlier messages in the reply row being written, by that row's
     /// id. A row a card starts afresh does not carry them.
     codex_said: Option<(String, String)>,
+    /// Where, in the reply row being written, the text after the turn's last
+    /// tool call or subagent note starts: the result, after the words said
+    /// while working. 0 before any.
+    result_from: usize,
+    /// The last sealed reply's result, by that row's id, while it is handed on.
+    sealed_result: Option<(String, String)>,
 }
 
 impl AgentChat {
@@ -65,6 +71,8 @@ impl AgentChat {
             peer: None,
 
             codex_said: None,
+            result_from: 0,
+            sealed_result: None,
         }
     }
 }
@@ -119,6 +127,8 @@ fn load_key(key: &str, path: &Path) {
                 tool_ids: HashMap::new(),
                 peer: None,
                 codex_said: None,
+                result_from: 0,
+                sealed_result: None,
             },
         );
     }
@@ -900,6 +910,13 @@ fn push_in_turn(
             msg.peer = chat.peer.clone();
             if let Some(id) = call_id {
                 chat.tool_ids.insert(id.to_string(), msg.id.clone());
+            }
+            // Work started: what the reply said so far was said while working.
+            if matches!(kind, MessageKind::Tool | MessageKind::Sent | MessageKind::Received) {
+                chat.result_from = chat
+                    .pending_idx
+                    .and_then(|idx| chat.messages.get(idx))
+                    .map_or(0, |row| row.text.len());
             }
             insert_in_turn(chat, msg.clone());
         }
@@ -1923,6 +1940,8 @@ fn seal_now(agent: &str) {
 
 fn finish_pending(agent: &str, chat: &mut AgentChat) -> Option<ChatMessage> {
     chat.hold = false;
+    let result_from = std::mem::take(&mut chat.result_from);
+    chat.sealed_result = None;
     let Some(idx) = chat.pending_idx.take() else {
         chat.expecting = false;
         chat.dirty = false;
@@ -1931,6 +1950,12 @@ fn finish_pending(agent: &str, chat: &mut AgentChat) -> Option<ChatMessage> {
     };
     chat.dirty = false;
     chat.echo_skip.clear();
+    if result_from > 0 {
+        if let Some(tail) = chat.messages[idx].text.get(result_from..) {
+            let tail = strip_crew_markers(tail).trim().to_string();
+            chat.sealed_result = Some((chat.messages[idx].id.clone(), tail));
+        }
+    }
     chat.messages[idx].text = strip_crew_markers(&chat.messages[idx].text)
         .trim_end()
         .to_string();
@@ -1952,6 +1977,15 @@ fn finish_pending(agent: &str, chat: &mut AgentChat) -> Option<ChatMessage> {
     }
     persist(agent, chat);
     Some(chat.messages[idx].clone())
+}
+
+/// The result of the reply row `id` just sealed: its text after the turn's
+/// last tool call or subagent note. None when the turn did no such work
+/// after it began to speak, so the whole reply is the result.
+pub fn sealed_result(agent: &str, id: &str) -> Option<String> {
+    let map = chats().lock().ok()?;
+    let (row, tail) = map.get(agent)?.sealed_result.as_ref()?;
+    (row == id).then(|| tail.clone())
 }
 
 pub fn archive_and_clear(agent: &str, archive_dir: &Path) -> anyhow::Result<()> {
