@@ -9,7 +9,7 @@ import type { ChatWidth } from "../chatWidth";
 import type { Delivery } from "../deliveryPref";
 import { applyFont, pageMeasure, loadFont, missingFonts, saveFont } from "../fontPref";
 import { applyFontSize, FONT_SIZES, loadFontSize, saveFontSize, type FontSize } from "../fontSize";
-import { loadNotify, saveNotify } from "../notifyPref";
+import { loadLeadOnlyNotify, loadNotify, saveLeadOnlyNotify, saveNotify } from "../notifyPref";
 import { loadNoticeKeep, saveNoticeKeep } from "../noticeKeepPref";
 import type { NoticeKeep } from "../island";
 import { loadWorktree, saveWorktree } from "../worktreePref";
@@ -73,6 +73,7 @@ export function SettingsPane({
   const t = useT();
   const { locale, setLocale } = useLocale();
   const [notify, setNotify] = useState(loadNotify);
+  const [leadOnly, setLeadOnly] = useState(loadLeadOnlyNotify);
   const [noticeKeep, setNoticeKeep] = useState(loadNoticeKeep);
 
   function changeNoticeKeep(next: NoticeKeep) {
@@ -118,6 +119,12 @@ export function SettingsPane({
     // The daemon sends the same alerts while the window is closed.
     void api.setNotifications(notify).catch(() => {});
   }, [notify]);
+
+  useEffect(() => {
+    saveLeadOnlyNotify(leadOnly);
+    // The daemon decides which bot's finish notifies, window or not.
+    void api.setLeadOnlyNotify(leadOnly).catch(() => {});
+  }, [leadOnly]);
 
   useEffect(() => {
     saveWorktree(worktree);
@@ -220,6 +227,24 @@ export function SettingsPane({
                 {notify
                   ? t("settings.notifications.note.on")
                   : t("settings.notifications.note.off")}
+              </p>
+              <div className="settings-notify">
+                <label className="field" htmlFor="settings-lead-only">
+                  {t("settings.leadOnly")}
+                </label>
+                <input
+                  id="settings-lead-only"
+                  type="checkbox"
+                  role="switch"
+                  className="switch"
+                  checked={leadOnly}
+                  disabled={!notify}
+                  title={leadOnly ? t("common.on") : t("common.off")}
+                  onChange={(e) => setLeadOnly(e.target.checked)}
+                />
+              </div>
+              <p className="apply-note">
+                {leadOnly ? t("settings.leadOnly.note.on") : t("settings.leadOnly.note.off")}
               </p>
               <Field label={t("settings.noticeKeep")}>
                 <Seg

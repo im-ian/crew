@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-lead-only-notify"
+description = "Enables the set_lead_only_notify command without any pre-configured scope."
+commands.allow = ["set_lead_only_notify"]
+
+[[permission]]
+identifier = "deny-set-lead-only-notify"
+description = "Denies the set_lead_only_notify command without any pre-configured scope."
+commands.deny = ["set_lead_only_notify"]

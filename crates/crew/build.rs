@@ -56,6 +56,7 @@ fn main() {
             "set_dock_badge",
             "set_locale",
             "set_notifications",
+            "set_lead_only_notify",
             "set_worktree",
             "set_escape_layer",
             "remote_probe",
