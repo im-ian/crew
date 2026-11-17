@@ -69,12 +69,9 @@ describe("idleFrom", () => {
 
 describe("formatAgo", () => {
   it("counts hours once the stall reaches one", () => {
-    expect(formatAgo(14, true, ko)).toBe("14분째 활동 없음");
-    expect(formatAgo(60, true, ko)).toBe("1시간째 활동 없음");
-    expect(formatAgo(72, true, ko)).toBe("1시간 12분째 활동 없음");
-    expect(formatAgo(14, false, ko)).toBe("14분 멈춤");
-    expect(formatAgo(60, false, ko)).toBe("1시간 멈춤");
-    expect(formatAgo(72, false, ko)).toBe("1시간 12분 멈춤");
+    expect(formatAgo(14, ko)).toBe("14분째 활동 없음");
+    expect(formatAgo(60, ko)).toBe("1시간째 활동 없음");
+    expect(formatAgo(72, ko)).toBe("1시간 12분째 활동 없음");
   });
 });
 
@@ -100,14 +97,14 @@ describe("idleCards", () => {
       afterId: "t",
       live: true,
       state: "quiet",
-      short: true,
-      detail: null,
       minutes: 14,
     });
-    expect(cards[0].paragraphs[0][0].t).toContain("npm test");
+    expect(cards[0].body).toContain("npm test");
+    expect(cards[0].body).toContain("14분째 활동 없음");
+    expect(cards[0].body).not.toContain("**");
   });
 
-  it("keeps a read with no answer to one line and no details", () => {
+  it("keeps a read with no answer to one sentence", () => {
     const messages = [
       user("u", T0, "읽어 줘"),
       tool("t", T0 + 1000, "read_file", { file_path: "src/app.ts" }),
@@ -116,10 +113,10 @@ describe("idleCards", () => {
       facts({ messages, status: "idle", now: T0 + 1000 + 12 * MIN }),
     );
     expect(cards).toHaveLength(1);
-    expect(cards[0].short).toBe(true);
-    expect(cards[0].detail).toBeNull();
     expect(cards[0].state).toBe("quiet");
-    expect(cards[0].paragraphs[0].some((span) => span.code && span.t === "app.ts")).toBe(true);
+    expect(cards[0].body).toContain("`app.ts`");
+    expect(cards[0].body).toContain("12분째 활동 없음");
+    expect(cards[0].body).not.toContain("**");
   });
 
   it("does not card a finished answer the user has not come back to", () => {
@@ -139,7 +136,7 @@ describe("idleCards", () => {
     ).toEqual([]);
   });
 
-  it("folds the stall in place once the user speaks, and does not keep a live card", () => {
+  it("leaves the stall in place once the user speaks, and does not keep a live card", () => {
     const toolTs = T0 + 1000;
     const spoken = toolTs + 15 * MIN;
     const messages = [
@@ -152,6 +149,7 @@ describe("idleCards", () => {
     expect(cards[0].live).toBe(false);
     expect(cards[0].afterId).toBe("t");
     expect(cards[0].minutes).toBe(15);
+    expect(cards[0].body).toContain("15분째 활동 없음");
   });
 
   it("keeps the older stall and adds a new card when it stalls again", () => {
@@ -177,17 +175,16 @@ describe("idleCards", () => {
     const now = T0 + 1000 + 11 * MIN;
     const waiting = idleCards(facts({ messages, now, waitingOn: ["designer"] }));
     expect(waiting[0].state).toBe("wait");
-    expect(waiting[0].detail?.waiting.map((row) => row.name)).toEqual(["디자이너"]);
-    expect(waiting[0].paragraphs.flat().some((span) => span.strong && span.t === "디자이너")).toBe(
-      true,
-    );
+    expect(waiting[0].body).toContain("디자이너");
+    expect(waiting[0].body).toContain("기다리는 중");
+    expect(waiting[0].body).not.toContain("**기다리는");
 
     const cut = idleCards(
       facts({ messages, now, waitingOn: ["designer"], cutOff: true, status: "idle" }),
     );
     expect(cut[0].state).toBe("cut");
-    const last = cut[0].detail?.steps[cut[0].detail.steps.length - 1];
-    expect(last?.stop).toBe(true);
+    expect(cut[0].body).toContain("데몬 재시작으로 끊김");
+    expect(cut[0].body).toContain("끊겼어요");
   });
 
   it("treats an unresolved restart line as a cut, and work after it as recovered", () => {
@@ -216,16 +213,12 @@ describe("idleCards", () => {
       }),
     );
     expect(stillCut[0].state).toBe("cut");
-    expect(
-      stillCut[0].detail?.steps.some((step) => step.stop && step.text.includes("데몬 재시작으로 끊김")),
-    ).toBe(true);
+    expect(stillCut[0].body).toContain("데몬이 다시 켜지면서 끊겼어요");
 
     const gave = stalled(GAVE_UP);
     expect(gave[0].state).toBe("cut");
-    expect(
-      gave[0].detail?.steps.some((step) => step.stop && step.text.includes("더는 다시 보내지 않아요")),
-    ).toBe(true);
-    expect(gave[0].detail?.prEmpty).toBe(true);
+    expect(gave[0].body).toContain("더는 이어가지 않아요");
+    expect(gave[0].body).not.toContain("아직 없음");
 
     const recovered = idleCards(
       facts({
@@ -254,10 +247,10 @@ describe("idleCards", () => {
       tool("t", T0 + 2000, "Bash", { command: "git push" }),
     ];
     const cards = idleCards(facts({ messages, now: T0 + 2000 + 12 * MIN }));
-    const prs = cards[0].detail?.prs ?? [];
-    expect(prs.map((pr) => pr.label).sort()).toEqual(["#12", "#293"]);
-    expect(prs.find((pr) => pr.label === "#293")?.href).toContain("/pull/293");
-    expect(prs.find((pr) => pr.label === "#12")?.href).toBeUndefined();
+    const prs = cards[0].body.split("**PR**")[1] ?? "";
+    expect(prs).toContain("[#293](https://github.com/im-ian/crew/pull/293)");
+    expect(prs).toContain("- #12");
+    expect(prs).not.toContain("#289");
   });
 
   it("turns the worktree's dirty paths into file chips", () => {
@@ -273,16 +266,10 @@ describe("idleCards", () => {
         now: T0 + 2000 + 12 * MIN,
       }),
     );
-    expect(cards[0].detail?.files.map((file) => file.name)).toEqual([
-      "src/a.ts",
-      "lib/a.ts",
-      "b ts",
-    ]);
-    expect(cards[0].detail?.files.map((file) => file.path)).toEqual([
-      "src/a.ts",
-      "lib/a.ts",
-      "src/b ts",
-    ]);
+    expect(cards[0].body).toContain("`src/a.ts`");
+    expect(cards[0].body).toContain("`lib/a.ts`");
+    expect(cards[0].body).toContain("`b ts`");
+    expect(cards[0].body).not.toContain("`a.ts`");
   });
 
   it("skips a stall the user is holding with an approval, a question, or a blocked bot", () => {

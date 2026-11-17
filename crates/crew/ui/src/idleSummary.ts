@@ -1,9 +1,12 @@
 import type { Locale, TFn } from "./i18n";
 import { translate } from "./i18n";
-import type { IdleCard, IdleDetail, IdleFile, IdlePr, IdleSpan, IdleState, IdleStep } from "./idleTypes";
+import type { IdleCard, IdleState } from "./idleTypes";
 import { sentTarget } from "./peek";
 import { rowTs, toolSummary, type ThreadRow } from "./tools";
 import type { AgentInfo, ChatMessage } from "./types";
+
+type IdleFile = { name: string; path: string };
+type IdlePr = { label: string; href?: string };
 
 const MINUTE = 60_000;
 
@@ -33,9 +36,9 @@ export type IdleFacts = {
 };
 
 /**
- * One card per stall that lasted at least the threshold while a turn was
+ * One bubble per stall that lasted at least the threshold while a turn was
  * still open. The latest one is live until something happens again; earlier
- * ones stay where the silence was, folded.
+ * ones stay where the silence was, as the same bubble.
  */
 export function idleCards(facts: IdleFacts): IdleCard[] {
   const threshold = facts.thresholdMin * MINUTE;
@@ -70,18 +73,13 @@ export function stalledMinutes(activityTs: number, now: number): number {
   return Math.max(1, Math.floor((now - activityTs) / MINUTE));
 }
 
-/** "14분째 활동 없음", or from an hour "1시간 12분째". Folded pills say "멈춤". */
-export function formatAgo(minutes: number, live: boolean, t: TFn): string {
+/** "14분째 활동 없음", or from an hour "1시간 12분째". */
+export function formatAgo(minutes: number, t: TFn): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
-  if (live) {
-    if (h && m) return t("idle.ago.hm", { h, m });
-    if (h) return t("idle.ago.h", { h });
-    return t("idle.ago.m", { m: minutes });
-  }
-  if (h && m) return t("idle.held.hm", { h, m });
-  if (h) return t("idle.held.h", { h });
-  return t("idle.held.m", { m: minutes });
+  if (h && m) return t("idle.ago.hm", { h, m });
+  if (h) return t("idle.ago.h", { h });
+  return t("idle.ago.m", { m: minutes });
 }
 
 /**
@@ -183,7 +181,6 @@ function buildCard(
   const prs = pullRequests(slice);
   const task = taskOf(slice, facts.agents, lang);
   const stop = cut ? t(gave ? "idle.step.gaveup" : "idle.step.cut") : null;
-  const steps = stepsFor(tools, said, stop);
   const short =
     state === "quiet" &&
     tools.length <= 1 &&
@@ -191,38 +188,29 @@ function buildCard(
     files.length === 0 &&
     prs.length === 0;
   const names = waiting.map((w) => w.name);
-  const paragraphs = short
-    ? shortLines(tools, task?.what ?? "", lang)
-    : bodyLines(
-        state,
-        said,
-        names,
-        files.length,
-        gave,
-        lang,
-        tools.length ? stepLabel(tools[tools.length - 1]) : "",
-      );
-  const detail: IdleDetail | null = short
-    ? null
-    : {
-        task,
-        steps,
-        files,
-        prs,
-        prEmpty: state === "cut" && prs.length === 0,
-        waiting: state === "wait" ? waiting : [],
-      };
+  const minutes = Math.max(1, Math.floor(gapMs / MINUTE));
+  const body = spokenBody({
+    t,
+    state,
+    gave,
+    names,
+    said,
+    tools,
+    files,
+    prs,
+    task,
+    stop,
+    minutes,
+    short,
+  });
   return {
     id: `idle-${anchorMsg.id}`,
     afterId: anchorMsg.id,
     activityTs: anchorMsg.ts,
-    minutes: Math.max(1, Math.floor(gapMs / MINUTE)),
+    minutes,
     live,
     state,
-    short,
-    hint: hintOf(state, gave, names, paragraphs, t),
-    paragraphs,
-    detail,
+    body,
   };
 }
 
@@ -407,25 +395,101 @@ function lastSaid(slice: readonly ChatMessage[]): string {
   return "";
 }
 
-function stepsFor(tools: readonly ChatMessage[], said: string, stop: string | null): IdleStep[] {
-  const shown = tools.slice(0, 8);
-  let steps: IdleStep[] = shown.map((m) => ({ text: stepLabel(m), stop: false }));
-  if (tools.length > 8) {
-    steps = [
-      ...tools.slice(0, 7).map((m) => ({ text: stepLabel(m), stop: false })),
-      { text: "…", stop: false },
-    ];
+function spokenBody(input: {
+  t: TFn;
+  state: IdleState;
+  gave: boolean;
+  names: string[];
+  said: string;
+  tools: readonly ChatMessage[];
+  files: readonly IdleFile[];
+  prs: readonly IdlePr[];
+  task: { who: string; what: string } | null;
+  stop: string | null;
+  minutes: number;
+  short: boolean;
+}): string {
+  const { t, state, gave, names, said, tools, files, prs, task, stop, minutes, short } = input;
+  const ago = formatAgo(minutes, t);
+  if (short) return shortLine(tools, task?.what ?? "", ago, t);
+
+  const sentences: string[] = [];
+  if (said) sentences.push(t("idle.say.last", { said: mdPlain(said) }));
+  if (state === "wait") {
+    const name = names.join(", ");
+    sentences.push(
+      name ? t("idle.say.wait", { name: mdPlain(name), ago }) : t("idle.say.quiet", { ago }),
+    );
+    if (!files.length) sentences.push(t("idle.say.wait.untouched"));
+  } else if (state === "cut") {
+    sentences.push(t(gave ? "idle.say.gaveup" : "idle.say.cut", { ago }));
+    if (files.length) sentences.push(t("idle.say.files", { n: files.length }));
+  } else if (!said) {
+    const what = tools.length ? stepLabel(tools[tools.length - 1]) : (task?.what ?? "");
+    sentences.push(
+      what
+        ? t("idle.say.one", { what: mdPlain(clip(what, 80)), ago })
+        : t("idle.say.none", { ago }),
+    );
+    if (files.length) sentences.push(t("idle.say.files", { n: files.length }));
+  } else {
+    sentences.push(t("idle.say.quiet", { ago }));
+    if (files.length) sentences.push(t("idle.say.files", { n: files.length }));
   }
-  if (!steps.length && said) steps = [{ text: clip(said, 140), stop: false }];
-  if (stop) {
-    if (!steps.length) steps = [{ text: stop, stop: true }];
-    else {
-      const last = steps[steps.length - 1];
-      last.stop = true;
-      last.text = `${last.text} · ${stop}`;
-    }
+
+  const blocks = [sentences.slice(0, 3).join(" ")];
+  if (task) {
+    blocks.push(section(t("idle.task"), [`${mdPlain(task.who)} · ${mdPlain(task.what)}`]));
   }
+  const steps = stepLines(tools, stop);
+  if (steps.length) blocks.push(section(t("idle.did"), steps.map(mdPlain)));
+  if (files.length) {
+    blocks.push(section(t("idle.files"), files.map((file) => codeSpan(file.name))));
+  }
+  if (prs.length) blocks.push(section(t("idle.pr"), prs.map(prItem)));
+  return blocks.filter(Boolean).join("\n\n");
+}
+
+function shortLine(
+  tools: readonly ChatMessage[],
+  what: string,
+  ago: string,
+  t: TFn,
+): string {
+  const only = tools[0];
+  const file = only ? readFile(only) : null;
+  if (file) return t("idle.say.read", { file: file.replace(/`/g, ""), ago });
+  if (only) return t("idle.say.one", { what: mdPlain(clip(stepLabel(only), 80)), ago });
+  if (what) return t("idle.say.one", { what: mdPlain(clip(what, 80)), ago });
+  return t("idle.say.none", { ago });
+}
+
+/** Every tool, in order. A cut is named on the last line, in words. */
+function stepLines(tools: readonly ChatMessage[], stop: string | null): string[] {
+  const steps = tools.map(stepLabel);
+  if (!steps.length || !stop) return steps;
+  const last = steps.length - 1;
+  steps[last] = `${steps[last]} · ${stop}`;
   return steps;
+}
+
+function section(title: string, items: string[]): string {
+  return `**${title}**\n\n${items.map((item) => `- ${item}`).join("\n")}`;
+}
+
+function prItem(pr: IdlePr): string {
+  if (pr.href && /^https?:\/\//.test(pr.href) && !/[\s()]/.test(pr.href)) {
+    return `[${pr.label}](${pr.href})`;
+  }
+  return pr.label;
+}
+
+function mdPlain(text: string): string {
+  return text.replace(/[\\`*_[\]<>]/g, (ch) => `\\${ch}`);
+}
+
+function codeSpan(text: string): string {
+  return "`" + text.replace(/`/g, "'") + "`";
 }
 
 function stepLabel(m: ChatMessage): string {
@@ -441,83 +505,8 @@ function readFile(m: ChatMessage): string | null {
   return arg ? baseName(arg) : null;
 }
 
-function shortLines(tools: readonly ChatMessage[], what: string, lang: Locale): IdleSpan[][] {
-  const only = tools[0];
-  const file = only ? readFile(only) : null;
-  if (file) return [splitToken(translate(lang, "idle.sum.read", { file }), file, "code")];
-  if (only) return [[{ t: translate(lang, "idle.sum.one", { what: clip(stepLabel(only), 80) }) }]];
-  if (what) return [[{ t: translate(lang, "idle.sum.one", { what: clip(what, 80) }) }]];
-  return [[{ t: translate(lang, "idle.sum.none") }]];
-}
-
-function bodyLines(
-  state: IdleState,
-  said: string,
-  names: string[],
-  fileCount: number,
-  gave: boolean,
-  lang: Locale,
-  fallback: string,
-): IdleSpan[][] {
-  if (state === "wait") {
-    const paras: IdleSpan[][] = [];
-    if (said) paras.push(emphasize(said, names));
-    const name = names.join(", ");
-    if (name) paras.push(splitToken(translate(lang, "idle.sum.wait", { name }), name, "strong"));
-    if (!fileCount) paras.push([{ t: translate(lang, "idle.sum.wait.untouched") }]);
-    return paras.slice(0, 3);
-  }
-  if (state === "cut") {
-    const paras: IdleSpan[][] = [];
-    if (said) paras.push([{ t: said }]);
-    paras.push([
-      { t: translate(lang, gave ? "idle.sum.gaveup" : "idle.sum.cut"), strong: true },
-    ]);
-    if (fileCount) paras.push([{ t: translate(lang, "idle.sum.files", { n: fileCount }) }]);
-    return paras.slice(0, 3);
-  }
-  if (said) return [[{ t: said }]];
-  if (fallback) return [[{ t: fallback }]];
-  return [[{ t: translate(lang, "idle.sum.none") }]];
-}
-
-function hintOf(
-  state: IdleState,
-  gave: boolean,
-  names: string[],
-  paragraphs: IdleSpan[][],
-  t: TFn,
-): string {
-  if (state === "cut") return t(gave ? "idle.hint.gaveup" : "idle.hint.cut");
-  if (state === "wait") return names.join(", ") || t("idle.state.wait");
-  const plain = paragraphs
-    .flat()
-    .map((s) => s.t)
-    .join("")
-    .replace(/\s+/g, " ")
-    .trim();
-  return clip(plain, 24);
-}
-
-function emphasize(text: string, names: string[]): IdleSpan[] {
-  const name = names.find((n) => n && text.includes(n));
-  if (!name) return [{ t: text }];
-  return splitToken(text, name, "strong");
-}
-
-function splitToken(text: string, token: string, mark: "strong" | "code"): IdleSpan[] {
-  const at = text.indexOf(token);
-  if (at < 0) return [{ t: text }];
-  const out: IdleSpan[] = [];
-  if (at > 0) out.push({ t: text.slice(0, at) });
-  out.push(mark === "code" ? { t: token, code: true } : { t: token, strong: true });
-  const rest = text.slice(at + token.length);
-  if (rest) out.push({ t: rest });
-  return out;
-}
-
 function fileChips(paths: readonly string[]): IdleFile[] {
-  const shown = paths.slice(0, 12);
+  const shown = paths.slice();
   const names = shown.map(baseName);
   const dups = new Set(names.filter((n, i) => names.indexOf(n) !== i));
   return shown.map((path, i) => ({

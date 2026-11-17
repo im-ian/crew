@@ -125,13 +125,6 @@ function useIdleNow(on: boolean): number {
   return now;
 }
 
-function toggleId(set: ReadonlySet<string>, id: string): ReadonlySet<string> {
-  const next = new Set(set);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
-  return next;
-}
-
 function indexOfRow(list: readonly ThreadRow[], id: string | null | undefined): number {
   if (!id) return -1;
   return list.findIndex((row) => rowHas(row, id));
@@ -296,8 +289,6 @@ export function ChatThread({
 }: Props) {
   const { locale } = useLocale();
   const idleNow = useIdleNow(idleMinutes > 0);
-  const [idleOpen, setIdleOpen] = useState<ReadonlySet<string>>(() => new Set());
-  const [idleDetail, setIdleDetail] = useState<ReadonlySet<string>>(() => new Set());
   const ref = useRef<HTMLDivElement>(null);
   // Opening on the first unread line holds the thread there. Reaching the
   // bottom, or any scroll that ends there, lets it follow new lines again.
@@ -396,9 +387,12 @@ export function ChatThread({
   const empty = !direct && placeholders.length === 0;
   const typingId = placeholders[0] ? "working-" + placeholders[0].id : null;
   const typingFrom = new Set(placeholders.map((agent) => agent.id));
+  // A live stall hides the typing row, so the face moves onto that bubble.
+  const lastRow = rows[rows.length - 1];
+  const idleFace = !typingId && lastRow?.kind === "idle" ? lastRow.card.id : null;
   const faceId =
     selectedKind === "agent" && selected
-      ? threadFaceId(visible, selected, typingId)
+      ? idleFace ?? threadFaceId(visible, selected, typingId)
       : null;
   // Only what is written after the chat opens plays the entrance. The thread
   // is not remounted per chat, so the moment is kept per chat key.
@@ -758,15 +752,17 @@ export function ChatThread({
     } else if (row.kind === "files") {
       node = <FileGroup msgs={row.msgs} flashId={highlightId} />;
     } else if (row.kind === "idle") {
+      const agent = currentAgent;
+      const self = selectedKind === "agent" && !!agent && agent.id === selected;
       node = (
         <IdleCard
           card={row.card}
-          locale={locale}
-          now={idleNow}
-          expanded={idleOpen.has(row.card.id)}
-          details={idleDetail.has(row.card.id)}
-          onExpand={() => setIdleOpen((cur) => toggleId(cur, row.card.id))}
-          onDetails={() => setIdleDetail((cur) => toggleId(cur, row.card.id))}
+          agent={agent}
+          agents={agents}
+          showFace={!self || row.card.id === faceId}
+          showName={!self}
+          lookAtCaret={!!self && row.card.id === faceId && lookAtCaret}
+          onSelectAgent={openAgent || undefined}
         />
       );
     } else if (row.kind === "notes") {
