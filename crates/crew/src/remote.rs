@@ -691,8 +691,19 @@ fn halt_text(code: &str) -> String {
     }
 }
 
+/// What to write when a link's failure changes. The same error on every
+/// retry is not a new line.
+fn link_log_line(previous: &Option<String>, now: Option<&str>) -> Option<String> {
+    match now {
+        Some(err) if previous.as_deref() != Some(err) => Some(err.to_string()),
+        None if previous.is_some() => Some("connected".to_string()),
+        _ => None,
+    }
+}
+
 async fn run_link(alias: String) {
     let mut backoff = 1u64;
+    let mut logged: Option<String> = None;
     loop {
         let Some(cfg) = link_cfg(&alias) else {
             return;
@@ -700,10 +711,18 @@ async fn run_link(alias: String) {
         let halted = match session(&cfg).await {
             Ok(()) => {
                 backoff = 1;
+                if let Some(line) = link_log_line(&logged, None) {
+                    eprintln!("[crew] remote {alias}: {line}");
+                }
+                logged = None;
                 None
             }
             Err(err) => {
-                eprintln!("[crew] remote {alias}: {err:#}");
+                let text = format!("{err:#}");
+                if let Some(line) = link_log_line(&logged, Some(&text)) {
+                    eprintln!("[crew] remote {alias}: {line}");
+                    logged = Some(line);
+                }
                 err.downcast_ref::<Halt>().map(|h| halt_text(&h.0))
             }
         };
@@ -2836,6 +2855,19 @@ pub async fn handle(req: &Request) -> Option<Vec<Event>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_remote_link_logs_only_when_the_failure_changes() {
+        assert_eq!(link_log_line(&None, Some("reset")).as_deref(), Some("reset"));
+        let prev = Some("reset".into());
+        assert_eq!(link_log_line(&prev, Some("reset")), None);
+        assert_eq!(
+            link_log_line(&prev, Some("refused")).as_deref(),
+            Some("refused")
+        );
+        assert_eq!(link_log_line(&prev, None).as_deref(), Some("connected"));
+        assert_eq!(link_log_line(&None, None), None);
+    }
 
     #[test]
     fn a_bare_host_gets_a_secure_socket_on_ws() {

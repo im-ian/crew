@@ -45,13 +45,43 @@ pub fn place_for(agent_id: &str, base: &Path) -> Place {
     match prepare(agent_id, base) {
         Ok(place) => place,
         Err(err) => {
-            eprintln!("[crew] worktree {}: {err:#}", base.display());
+            // The shared checkout is what several bots edit at once. A failed
+            // worktree used to land there with only a log line.
+            show_worktree_failure(agent_id, &err);
             Place {
-                cwd,
+                cwd: unavailable_dir(agent_id),
                 isolated: None,
             }
         }
     }
+}
+
+fn unavailable_dir(agent_id: &str) -> PathBuf {
+    let dir = paths::home_dir()
+        .join("worktrees")
+        .join("unavailable")
+        .join(paths::safe_agent_id(agent_id));
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+fn show_worktree_failure(agent_id: &str, err: &anyhow::Error) {
+    eprintln!("[crew] worktree {agent_id}: {err:#}");
+    static SHOWN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let mut shown = SHOWN.lock().unwrap_or_else(|poison| poison.into_inner());
+    if shown.iter().any(|id| id == agent_id) {
+        return;
+    }
+    shown.push(agent_id.to_string());
+    drop(shown);
+    let text = if paths::locale() == "en" {
+        format!(
+            "Could not make a worktree for this bot ({err:#}). It is not using the shared checkout."
+        )
+    } else {
+        format!("이 봇의 워크트리를 만들지 못했어요 ({err:#}). 공유 체크아웃에서는 일하지 않아요.")
+    };
+    crate::transcript::push_system(agent_id, "crew", &text, None);
 }
 
 fn prepare(agent_id: &str, base: &Path) -> anyhow::Result<Place> {
@@ -63,18 +93,24 @@ fn prepare(agent_id: &str, base: &Path) -> anyhow::Result<Place> {
     };
     let dir = worktree_dir(agent_id, &shared);
     if listed(&shared, &dir)? {
-        if dir.is_dir() {
+        if dir.is_dir() && !dir_is_empty(&dir) {
             return Ok(place_at(dir, shared, base));
         }
-        // The directory was removed out from under the registration.
+        // An empty directory is still registered, so `git worktree add` would
+        // refuse it. Remove it first; prune only sees a missing path.
+        remove_empty_dir(&dir)?;
         let _ = run_git(&shared, &["worktree", "prune"]);
-    }
-    if dir.exists() {
-        anyhow::bail!(
-            "{} exists and is not a worktree of {}",
-            dir.display(),
-            shared.display()
-        );
+    } else if dir.exists() {
+        if dir_is_empty(&dir) {
+            remove_empty_dir(&dir)?;
+            let _ = run_git(&shared, &["worktree", "prune"]);
+        } else {
+            anyhow::bail!(
+                "{} exists and is not a worktree of {}",
+                dir.display(),
+                shared.display()
+            );
+        }
     }
     if let Some(parent) = dir.parent() {
         std::fs::create_dir_all(parent)?;
@@ -149,6 +185,19 @@ fn listed(shared: &Path, dir: &Path) -> anyhow::Result<bool> {
 
 fn norm(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn dir_is_empty(path: &Path) -> bool {
+    std::fs::read_dir(path)
+        .map(|mut entries| entries.next().is_none())
+        .unwrap_or(false)
+}
+
+fn remove_empty_dir(dir: &Path) -> anyhow::Result<()> {
+    if dir.is_dir() && dir_is_empty(dir) {
+        std::fs::remove_dir(dir)?;
+    }
+    Ok(())
 }
 
 fn add_worktree(shared: &Path, dir: &Path, branch: &str) -> anyhow::Result<()> {
@@ -366,6 +415,87 @@ mod tests {
 
             let _ = std::fs::remove_dir_all(&root);
             let _ = std::fs::remove_dir_all(&plain);
+        });
+    }
+
+    fn temp_repo(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "cw-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        git(&root, &["init", "-b", "main"]);
+        std::fs::write(root.join("readme.txt"), "hello\n").unwrap();
+        git(&root, &["add", "readme.txt"]);
+        git(&root, &["commit", "-m", "init"]);
+        root
+    }
+
+    fn wipe(dir: &Path) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                std::fs::remove_dir_all(&path).unwrap();
+            } else {
+                std::fs::remove_file(&path).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn an_empty_worktree_dir_is_created_again() {
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        paths::testing::with_home("wt-empty", || {
+            let root = temp_repo("empty");
+            paths::write_worktrees_enabled(true);
+            let first = place_for("bot-empty", &root);
+            let dir = first.cwd.clone();
+            assert!(first.isolated.is_some());
+            wipe(&dir);
+            assert!(dir_is_empty(&dir));
+
+            let again = place_for("bot-empty", &root);
+            assert_ne!(again.cwd, root);
+            assert!(again.isolated.is_some());
+            assert_eq!(
+                std::fs::read_to_string(again.cwd.join("readme.txt")).unwrap(),
+                "hello\n"
+            );
+            let _ = std::fs::remove_dir_all(&root);
+        });
+    }
+
+    #[test]
+    fn a_blocked_worktree_is_not_the_shared_checkout() {
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        paths::testing::with_home("wt-block", || {
+            let root = temp_repo("block");
+            paths::write_worktrees_enabled(true);
+            let dir = worktree_dir("bot-blocked", &root);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("keep.txt"), "mine\n").unwrap();
+
+            let place = place_for("bot-blocked", &root);
+            assert_ne!(place.cwd, root);
+            assert!(place.isolated.is_none());
+            assert_eq!(
+                std::fs::read_to_string(dir.join("keep.txt")).unwrap(),
+                "mine\n"
+            );
+            let said = crate::transcript::messages("bot-blocked")
+                .iter()
+                .any(|m| m.text.contains("공유 체크아웃"));
+            assert!(said, "the chat should say the worktree was not made");
+            let _ = std::fs::remove_dir_all(&root);
         });
     }
 }

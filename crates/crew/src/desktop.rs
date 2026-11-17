@@ -1112,16 +1112,11 @@ pub fn run() -> anyhow::Result<()> {
         Ok(_) => None,
         Err(err) => {
             // A bundled .app discards stderr, so the log is where this stays
-            // readable after the fact.
+            // readable after the fact. The error includes the log tail for the
+            // window; writing that tail back into the log duplicated every line.
             eprintln!("crew: {err}");
-            let _ = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(crate::paths::log_path())
-                .and_then(|mut f| {
-                    use std::io::Write;
-                    f.write_all(format!("crew: {err}\n").as_bytes())
-                });
+            let summary = err.lines().next().unwrap_or(err.as_str());
+            crate::log::append(&format!("crew: {summary}"));
             Some(err)
         }
     });

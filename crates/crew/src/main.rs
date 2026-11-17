@@ -14,6 +14,7 @@ mod files;
 mod groups;
 mod headless;
 mod interrupt;
+mod log;
 #[cfg(target_os = "macos")]
 mod macos_escape;
 mod memory;
@@ -901,15 +902,14 @@ fn args_or_stdin(text: Vec<String>, what: &str) -> anyhow::Result<String> {
 }
 
 fn connect_for_tell() -> anyhow::Result<()> {
-    // Agents already have a parent daemon; never spawn a second one.
-    if std::env::var("CREW_AGENT_ID")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .is_some()
-    {
-        if !paths::is_socket_live() {
-            anyhow::bail!("daemon is not running ({})", paths::socket_path().display());
+    // Agents already have a parent daemon; never spawn a second one. A restart
+    // leaves the socket down for a while, so wait before failing the tell.
+    if session_agent_id().is_some() {
+        if !paths::wait_for_socket(client::DAEMON_WAIT) {
+            anyhow::bail!(
+                "daemon is not running ({}); agent processes will not start one",
+                paths::socket_path().display()
+            );
         }
         Ok(())
     } else {

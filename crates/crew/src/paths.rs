@@ -1,6 +1,10 @@
-use std::fs;
+use std::fs::{self, File, OpenOptions};
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use anyhow::Context;
 
 pub fn home_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("CREW_HOME") {
@@ -250,6 +254,96 @@ pub fn read_pid() -> Option<u32> {
 
 pub fn remove_pid() {
     let _ = fs::remove_file(pid_path());
+}
+
+/// `pid` is still a process. `0` is not a daemon: `kill(0, 0)` asks about
+/// the whole group and would look alive.
+pub fn pid_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    let rc = unsafe { libc::kill(pid as i32, 0) };
+    rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+pub fn lock_path() -> PathBuf {
+    home_dir().join("crew.lock")
+}
+
+/// The exclusive lock `daemon::run` holds for its whole life. Dropping the
+/// file releases it. A second open of this path in the same process would
+/// drop the lock on close, so only another process may ask `daemon_lock_held`.
+pub struct DaemonLock {
+    _file: File,
+}
+
+/// Take the daemon lock without waiting. `None` means another process has it.
+pub fn try_daemon_lock() -> anyhow::Result<Option<DaemonLock>> {
+    ensure_home()?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(lock_path())
+        .with_context(|| format!("open {}", lock_path().display()))?;
+    match lock_exclusive(&file) {
+        Ok(true) => Ok(Some(DaemonLock { _file: file })),
+        Ok(false) => Ok(None),
+        Err(err) => Err(err).context("lock crew.lock"),
+    }
+}
+
+/// Whether some other process holds `crew.lock`. Does not take the lock.
+pub fn daemon_lock_held() -> bool {
+    let Ok(file) = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(lock_path())
+    else {
+        return false;
+    };
+    let mut fl: libc::flock = unsafe { std::mem::zeroed() };
+    fl.l_type = libc::F_WRLCK;
+    fl.l_whence = libc::SEEK_SET as i16;
+    let rc = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETLK, &mut fl) };
+    rc == 0 && fl.l_type != libc::F_UNLCK
+}
+
+/// A daemon has the lock, or the pid file names a live process, so a start
+/// should wait for the socket instead of spawning another one.
+pub fn daemon_coming_up() -> bool {
+    daemon_lock_held() || read_pid().is_some_and(pid_alive)
+}
+
+/// Poll until the socket accepts a connection, or `timeout` runs out.
+pub fn wait_for_socket(timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if is_socket_live() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return is_socket_live();
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn lock_exclusive(file: &File) -> std::io::Result<bool> {
+    let mut fl: libc::flock = unsafe { std::mem::zeroed() };
+    fl.l_type = libc::F_WRLCK;
+    fl.l_whence = libc::SEEK_SET as i16;
+    let rc = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETLK, &mut fl) };
+    if rc == 0 {
+        return Ok(true);
+    }
+    let err = std::io::Error::last_os_error();
+    if err.raw_os_error() == Some(libc::EAGAIN) || err.raw_os_error() == Some(libc::EACCES) {
+        Ok(false)
+    } else {
+        Err(err)
+    }
 }
 
 pub fn daemon_version_path() -> PathBuf {
@@ -665,6 +759,107 @@ mod tests {
             assert!(!daemon_version_matches("0.2.0"));
             remove_daemon_version();
             assert!(!daemon_version_matches("0.1.0"));
+        });
+    }
+
+    #[test]
+    fn a_dead_pid_is_not_a_daemon_coming_up() {
+        testing::with_home("pid-alive", || {
+            assert!(pid_alive(std::process::id()));
+            assert!(!pid_alive(0));
+            let mut child = std::process::Command::new("sleep")
+                .arg("30")
+                .spawn()
+                .expect("sleep");
+            let pid = child.id();
+            assert!(pid_alive(pid));
+            child.kill().expect("kill");
+            child.wait().expect("wait");
+            assert!(!pid_alive(pid));
+            write_pid(pid).unwrap();
+            assert!(!daemon_coming_up());
+        });
+    }
+
+    /// The lock is per process. Opening `crew.lock` again in the holder and
+    /// closing that fd releases every lock this process has, so the probe is
+    /// a child. The holder must not call `daemon_lock_held` while it holds it.
+    #[test]
+    fn a_second_process_cannot_take_the_daemon_lock() {
+        match std::env::var("CREW_LOCK_PROBE").ok().as_deref() {
+            Some("held") => {
+                let held = daemon_lock_held();
+                let got = try_daemon_lock().ok().flatten();
+                assert!(
+                    held && got.is_none(),
+                    "want held, held={held} got={}",
+                    got.is_some()
+                );
+                println!("held");
+                return;
+            }
+            Some("free") => {
+                let held = daemon_lock_held();
+                let got = try_daemon_lock().ok().flatten();
+                assert!(
+                    !held && got.is_some(),
+                    "want free, held={held} got={}",
+                    got.is_some()
+                );
+                println!("free");
+                return;
+            }
+            _ => {}
+        }
+        testing::with_home("daemon-lock", || {
+            let lock = try_daemon_lock().expect("lock").expect("first lock");
+            let home = home_dir();
+            let out = lock_probe(&home, "held");
+            assert!(
+                out.status.success(),
+                "held probe {}: {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&out.stdout).contains("held"),
+                "{}",
+                String::from_utf8_lossy(&out.stdout)
+            );
+            drop(lock);
+            let out = lock_probe(&home, "free");
+            assert!(
+                out.status.success(),
+                "free probe {}: {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&out.stdout).contains("free"),
+                "{}",
+                String::from_utf8_lossy(&out.stdout)
+            );
+        });
+    }
+
+    fn lock_probe(home: &std::path::Path, mode: &str) -> std::process::Output {
+        std::process::Command::new(std::env::current_exe().expect("exe"))
+            .arg("--exact")
+            .arg("paths::tests::a_second_process_cannot_take_the_daemon_lock")
+            .arg("--nocapture")
+            .env("CREW_LOCK_PROBE", mode)
+            .env("CREW_HOME", home)
+            .output()
+            .expect("child")
+    }
+
+    #[test]
+    fn wait_for_socket_sees_a_listener() {
+        testing::with_home("sock-wait", || {
+            assert!(!wait_for_socket(Duration::from_millis(80)));
+            let listener = std::os::unix::net::UnixListener::bind(socket_path()).expect("bind");
+            assert!(wait_for_socket(Duration::from_secs(2)));
+            drop(listener);
         });
     }
 }
