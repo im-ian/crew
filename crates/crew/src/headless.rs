@@ -1241,6 +1241,22 @@ fn run_turn(
                     return;
                 }
             }
+            // A transient error with nothing said goes once more before the
+            // turn counts as failed. A slash command is not sent twice.
+            if failed
+                && !dead
+                && !slash
+                && outcome.error.as_deref().is_some_and(is_transient_error)
+            {
+                let error = outcome.error.as_deref().unwrap_or_default();
+                if give_back_failed(&session, generation, error) {
+                    return;
+                }
+                if is_stale(&session, generation) {
+                    crate::transcript::end_turn_gen(&session.id, Some(turn));
+                    return;
+                }
+            }
             // Used up by a turn that answered; one that failed leaves it for the
             // next. Codex may never name a thread, so a saved session is not the test.
             if recap.is_some() && outcome.got_text {
@@ -1332,6 +1348,9 @@ fn show_outcome_error(session: &Arc<HeadlessSession>, outcome: &TurnOutcome) {
                 crate::daemon::wake_after_watch(&session.id, &outcome.watched, row.id);
             }
         } else {
+            // Marked before the row seals, so the bot that asked hears it
+            // failed rather than getting the error as its answer.
+            crate::daemon::note_turn_failed(&session.id, true);
             crate::transcript::on_assistant_delta(&session.id, &err);
         }
     }
@@ -1341,8 +1360,69 @@ fn show_spawn_error(session: &Arc<HeadlessSession>, err: &anyhow::Error) {
     let msg = format!("{err:#}");
     let cleaned = strip_tui_noise(&msg);
     if !cleaned.is_empty() {
+        crate::daemon::note_turn_failed(&session.id, true);
         crate::transcript::on_assistant_delta(&session.id, &cleaned);
     }
+}
+
+/// An error the API or the CLI may not hit again: a 5xx, 529 Overloaded, or
+/// an internal error. A full disk, a missing session, or a limit is not.
+pub(crate) fn is_transient_error(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    const PHRASES: &[&str] = &[
+        "internal error",
+        "internal server error",
+        "overloaded",
+        "service unavailable",
+        "bad gateway",
+        "gateway timeout",
+        "temporarily unavailable",
+    ];
+    if PHRASES.iter().any(|p| lower.contains(p)) {
+        return true;
+    }
+    if !(lower.contains("error") || lower.contains("status") || lower.contains("http")) {
+        return false;
+    }
+    let bytes = lower.as_bytes();
+    (0..bytes.len().saturating_sub(2)).any(|i| {
+        bytes[i] == b'5'
+            && bytes[i + 1].is_ascii_digit()
+            && bytes[i + 2].is_ascii_digit()
+            && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
+            && bytes.get(i + 3).is_none_or(|c| !c.is_ascii_alphanumeric())
+    })
+}
+
+/// The turn failed on a transient error with nothing said: the prompt goes
+/// once more, at the front, on the same session. What waits on the turn
+/// keeps waiting. `false` when that one retry is used up, or the turn is no
+/// longer this one.
+fn give_back_failed(session: &Arc<HeadlessSession>, generation: u64, error: &str) -> bool {
+    let pulled = {
+        let Ok(mut inner) = session.inner.lock() else {
+            return false;
+        };
+        let Some(flight) = inner.in_flight.as_ref() else {
+            return false;
+        };
+        if inner.generation != generation
+            || !crate::daemon::claim_lost_retry(&session.id, &flight.msg_ids, &flight.text)
+        {
+            return false;
+        }
+        claim_turn(&mut inner)
+    };
+    eprintln!("[crew] {}: transient error, sending again: {}", session.id, error.trim());
+    drop(pulled.child);
+    if let Some(flight) = pulled.unheard {
+        crate::daemon::retry_failed_turn(&session.id, flight, error);
+    }
+    if pulled.live.is_some() {
+        live::close(session);
+    }
+    crate::daemon::resend_unheard(&session.id);
+    true
 }
 
 /// A turn another AI ran: its error shown, and whether it failed and waits on

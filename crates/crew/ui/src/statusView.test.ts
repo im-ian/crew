@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { translate } from "./i18n";
-import { askingAmong, briefStatus, statusView, waitingOn, waitingUserPhrase } from "./statusView";
+import { askingAmong, briefStatus, statusView, waitingFailed, waitingOn, waitingUserPhrase } from "./statusView";
 import type { AgentInfo } from "./types";
 
 const ko = (
@@ -72,6 +72,14 @@ describe("waiting on other bots", () => {
     for (const status of ["blocked", "working", "exited"] as const) {
       expect(waitingOn(bot({ ...asked, status }))).toEqual([]);
     }
+  });
+
+  it("marks the bots whose turn failed, only among those waited on", () => {
+    const failed = { waiting_on: ["designer", "dev"], waiting_failed: ["dev", "gone"] };
+    expect(waitingFailed(bot(failed))).toEqual(["dev"]);
+    expect(waitingFailed(bot({ ...failed, status: "working" }))).toEqual([]);
+    expect(waitingFailed(bot(asked))).toEqual([]);
+    expect(waitingFailed(null)).toEqual([]);
   });
 
   it("is plain idle with nobody to wait on", () => {

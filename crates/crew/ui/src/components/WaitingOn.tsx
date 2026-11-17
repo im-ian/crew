@@ -19,6 +19,8 @@ type Props = {
   /** The bots waited on, in the order they were asked (`waitingOn`). */
   ids: readonly string[];
   agents: readonly AgentInfo[];
+  /** Of `ids`, the bots whose turn for this one failed (`waitingFailed`). */
+  failed?: readonly string[];
 };
 
 type StatusProps = Props & {
@@ -100,12 +102,14 @@ function ChipList({
   refFor,
   withName,
   onOpen,
+  failed = [],
 }: {
   chips: readonly WaitChip[];
   agents: readonly AgentInfo[];
   refFor: (id: string) => (el: HTMLElement | null) => void;
   withName: boolean;
   onOpen?: (id: string) => void;
+  failed?: readonly string[];
 }) {
   const t = useT();
   const live = liveIds(chips);
@@ -122,12 +126,15 @@ function ChipList({
           ...(chip.width ? { ["--w" as string]: `${chip.width}px` } : null),
           ...(at >= 0 ? { ["--d" as string]: `${delay(at)}s` } : null),
         };
+        const broke = failed.includes(chip.id) && !chip.leaving;
         const className =
           "wait-chip" +
           (chip.entering ? " is-entering" : "") +
           (chip.leaving ? " is-leaving" : "") +
-          (asking ? " is-asking" : "");
+          (asking ? " is-asking" : "") +
+          (broke ? " is-failed" : "");
         const userLine = asking ? t("header.waitingUser", { name }) : "";
+        const title = broke ? t("header.waitFailed", { name }) : asking ? userLine : name;
         const body = (
           <>
             <ChipFace agents={agents} id={chip.id} />
@@ -144,8 +151,14 @@ function ChipList({
               className={className}
               data-id={chip.id}
               style={style}
-              title={asking ? userLine : name}
-              aria-label={asking ? userLine : t("header.waitingOnOpen", { name })}
+              title={title}
+              aria-label={
+                broke
+                  ? t("header.waitFailedOpen", { name })
+                  : asking
+                    ? userLine
+                    : t("header.waitingOnOpen", { name })
+              }
               tabIndex={chip.leaving ? -1 : undefined}
               onClick={() => onOpen(chip.id)}
             >
@@ -161,8 +174,8 @@ function ChipList({
             data-id={chip.id}
             style={style}
             role="img"
-            title={asking ? userLine : name}
-            aria-label={asking ? userLine : t("header.waitingOn", { name })}
+            title={title}
+            aria-label={broke || asking ? title : t("header.waitingOn", { name })}
           >
             {body}
           </span>
@@ -210,7 +223,7 @@ function syncFade(el: HTMLElement | null) {
  * draws its line at once. Three dots between the count and the chips run
  * towards them. A chip opens its bot's chat (`onOpen`).
  */
-export function WaitStatus({ ids, agents, onOpen }: StatusProps) {
+export function WaitStatus({ ids, agents, onOpen, failed }: StatusProps) {
   const t = useT();
   const scroll = useRef<HTMLSpanElement>(null);
   const { chips, refFor } = useWaitChips(ids);
@@ -255,7 +268,7 @@ export function WaitStatus({ ids, agents, onOpen }: StatusProps) {
       </span>
       <Relay />
       <span className="wait-scroll" ref={scroll}>
-        <ChipList chips={chips} agents={agents} refFor={refFor} withName onOpen={onOpen} />
+        <ChipList chips={chips} agents={agents} refFor={refFor} withName onOpen={onOpen} failed={failed} />
       </span>
     </span>
   );
@@ -268,7 +281,7 @@ export function WaitStatus({ ids, agents, onOpen }: StatusProps) {
  * out as in the header, and with the last one the dots before the chips
  * fade. The last-message line under it stays as it was.
  */
-export function WaitTag({ ids, agents }: Props) {
+export function WaitTag({ ids, agents, failed }: Props) {
   const t = useT();
   const { chips, refFor } = useWaitChips(ids);
   if (!chips.length) return null;
@@ -283,7 +296,7 @@ export function WaitTag({ ids, agents }: Props) {
       style={cycleStyle(chips)}
     >
       <Relay />
-      <ChipList chips={chips} agents={agents} refFor={refFor} withName={false} />
+      <ChipList chips={chips} agents={agents} refFor={refFor} withName={false} failed={failed} />
       {more ? (
         <span
           className="wait-more"

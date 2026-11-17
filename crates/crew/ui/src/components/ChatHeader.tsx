@@ -6,7 +6,7 @@ import { isOnline, remoteLabel } from "../remote";
 import type { AgentInfo, CliKind, Group } from "../types";
 import { WhoButton } from "./WhoButton";
 import { Info, Users, X } from "../icons";
-import { statusView, waitingOn } from "../statusView";
+import { statusView, waitingFailed, waitingOn } from "../statusView";
 import { WaitStatus } from "./WaitingOn";
 
 type Props = {
@@ -125,6 +125,7 @@ export function ChatHeader({
           <WaitStatus
             key={currentAgent.id}
             ids={waitingOn(currentAgent)}
+            failed={waitingFailed(currentAgent)}
             agents={agents}
             onOpen={onSelectAgent}
           />

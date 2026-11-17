@@ -137,6 +137,11 @@ export type AgentInfo = {
    * A teammate's bot on another PC counts too. Absent when it waits on none.
    */
   waiting_on?: string[];
+  /**
+   * Of `waiting_on`, the bots whose turn for this one failed with nothing
+   * said. It was told so and not woken. Absent when none failed.
+   */
+  waiting_failed?: string[];
 };
 
 /** One task a bot left running after it answered. */

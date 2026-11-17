@@ -67,6 +67,12 @@ export function waitingUserPhrase(
   return t("header.waitingUserMore", { name, n: asking.length - 1 });
 }
 
+/** Of `waitingOn`, the bots whose turn for it failed. */
+export function waitingFailed(agent: AgentInfo | null | undefined): string[] {
+  const ids = waitingOn(agent);
+  return (agent?.waiting_failed ?? []).filter((id) => ids.includes(id));
+}
+
 function wordFor(agent: AgentInfo, t: TFn): StatusView | null {
   if (agent.remote && agent.asking) return { tone: "blocked", text: t("header.statusOwner") };
   if (agent.status === "working") return { tone: "working", text: t("header.statusWorking") };
