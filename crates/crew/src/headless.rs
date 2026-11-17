@@ -3640,6 +3640,15 @@ fn subagent_report(v: &Value) -> Option<String> {
     (!report.is_empty()).then_some(report)
 }
 
+/// What Claude Code writes in place of a reply when the model gave none.
+const CLAUDE_NO_RESPONSE: &str = "No response requested.";
+
+/// A message Claude Code made up itself rather than the model's: its model
+/// is `<synthetic>`.
+fn claude_synthetic(v: &Value) -> bool {
+    v.pointer("/message/model").and_then(Value::as_str) == Some("<synthetic>")
+}
+
 fn claude_text(v: &Value, state: &mut ParseState) -> Option<String> {
     // A subagent's words are its report's business, not the bot's reply.
     if from_subagent(v) {
@@ -3660,6 +3669,18 @@ fn claude_text(v: &Value, state: &mut ParseState) -> Option<String> {
     if let Some(out) = local_command_output(v) {
         state.got_text = true;
         return Some(out);
+    }
+    if v.get("type").and_then(Value::as_str) == Some("assistant") && claude_synthetic(v) {
+        // Claude Code, not the model, wrote it: an API error or a limit it
+        // says as a reply ("You've hit your 5-hour limit · ..."), or the
+        // stand-in for a turn it chose not to answer. Neither is the bot's
+        // answer. The error is the turn's, so a limit can hand the turn on.
+        let text = assistant_message_text(v.get("message").unwrap_or(v));
+        let text = text.trim();
+        if !text.is_empty() && text != CLAUDE_NO_RESPONSE && state.error.is_none() {
+            state.error = Some(text.to_string());
+        }
+        return None;
     }
     if state.used_deltas {
         return None;
@@ -5473,6 +5494,31 @@ mod tests {
         assert!(st.got_text, "the turn has its answer");
         let end = r#"{"type":"result","subtype":"success","is_error":false,"result":""}"#;
         assert!(ingest_line(CliKind::Claude, end, &mut st).is_none());
+    }
+
+    /// Claude Code's own words, as `claude -p --output-format stream-json`
+    /// prints them: a limit, and the stand-in for a turn not answered.
+    #[test]
+    fn a_reply_claude_code_made_up_is_not_the_bots_answer() {
+        let mut st = ParseState::default();
+        let limit = r#"{"type":"assistant","message":{"id":"x","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"You've hit your 5-hour limit · resets 6:50pm (Asia/Seoul)"}]},"error":"rate_limit","isApiErrorMessage":true}"#;
+        assert!(ingest_line(CliKind::Claude, limit, &mut st).is_none());
+        assert!(!st.got_text, "a limit is no answer");
+        let err = st.error.clone().expect("the limit is the turn's error");
+        assert!(crate::fallback::is_limit_error(&err), "{err}");
+        let end = r#"{"type":"result","subtype":"success","is_error":true,"result":"You've hit your 5-hour limit · resets 6:50pm (Asia/Seoul)"}"#;
+        ingest_line(CliKind::Claude, end, &mut st);
+        assert!(!st.got_text);
+
+        let mut st = ParseState::default();
+        let none = r#"{"type":"assistant","message":{"id":"y","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"No response requested."}]}}"#;
+        assert!(ingest_line(CliKind::Claude, none, &mut st).is_none());
+        assert!(!st.got_text, "the stand-in is not said");
+        assert!(st.error.is_none(), "and it is no error");
+
+        // The model's own words still are.
+        let real = r#"{"type":"assistant","message":{"id":"z","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"No response requested."}]}}"#;
+        assert_eq!(ingest_line(CliKind::Claude, real, &mut st).as_deref(), Some("No response requested."));
     }
 
     #[test]
