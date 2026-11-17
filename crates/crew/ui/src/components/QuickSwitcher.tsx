@@ -97,7 +97,7 @@ export function QuickSwitcher({ agents, groups, order, recent, current, onPick, 
     >
       <div className="dialog quick-switch-box" role="dialog" aria-label={t("switch.label")}>
         <div className="quick-switch-search">
-          <Search size={20} />
+          <Search size={16} />
           <input
             ref={inputRef}
             className="quick-switch-input"

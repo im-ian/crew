@@ -7120,14 +7120,15 @@ html[data-theme="light"] .island-ghost-2 {
   opacity: 0.8;
 }
 
-/* ⌘K: the bot switcher. The window dims hard behind it and a large panel
-   sits in the middle: a search row, then the bots in sections. The panel
-   grows with its list up to most of the window; past that only the list
-   scrolls. */
+/* ⌘K: the bot switcher. The window dims hard behind it and a panel sits a
+   little above the middle: a search row, then the bots in sections. The
+   panel grows with its list up to about 60% of the window; past that only
+   the list scrolls. */
 .modal.quick-switch {
   --switch-dim: rgba(6, 7, 10, 0.68);
   background: var(--switch-dim);
-  padding: 40px 48px;
+  align-items: flex-start;
+  padding: 16vh 5vw 24px;
   z-index: 26;
 }
 html[data-theme="light"] .modal.quick-switch { --switch-dim: rgba(28, 30, 38, 0.46); }
@@ -7137,9 +7138,9 @@ html[data-glass] .modal.quick-switch {
   backdrop-filter: blur(6px);
 }
 .dialog.quick-switch-box {
-  width: min(1040px, 100%);
+  width: min(640px, 100%);
   max-width: none;
-  max-height: 100%;
+  max-height: min(520px, 60vh);
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -7158,8 +7159,8 @@ html[data-glass] .dialog.quick-switch-box {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: var(--space-12);
-  padding: 0 var(--space-24);
+  gap: var(--space-10);
+  padding: 0 var(--space-16);
   border-bottom: 1px solid var(--line);
   color: var(--faint);
 }
@@ -7171,8 +7172,8 @@ html[data-glass] .dialog.quick-switch-box {
   background: transparent;
   color: var(--ink);
   font: inherit;
-  font-size: var(--text-2xl);
-  padding: var(--space-20) 0;
+  font-size: var(--text-lg);
+  padding: var(--space-14) 0;
   outline: none;
 }
 .quick-switch-input::placeholder { color: var(--faint); }
@@ -7180,32 +7181,32 @@ html[data-glass] .dialog.quick-switch-box {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: var(--space-6) var(--space-16) var(--space-16);
+  padding: var(--space-4) var(--space-8) var(--space-8);
   -webkit-user-select: none;
   user-select: none;
 }
 .quick-switch-heading {
   margin: 0;
-  padding: var(--space-16) var(--space-12) var(--space-8);
+  padding: var(--space-10) var(--space-8) var(--space-4);
   color: var(--muted);
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
   font-weight: 500;
 }
 .quick-switch-row {
   display: flex;
   align-items: center;
-  gap: var(--space-14);
-  min-height: 56px;
-  padding: var(--space-8) var(--space-12);
-  border-radius: var(--radius-lg);
+  gap: var(--space-10);
+  min-height: 40px;
+  padding: var(--space-6) var(--space-8);
+  border-radius: var(--radius-md);
   cursor: pointer;
 }
 .quick-switch-row.is-active { background: var(--active); }
 .quick-switch-row .avatar {
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
   flex-shrink: 0;
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
 }
 .quick-switch-row .badge { border-color: var(--elevated); }
 .quick-switch-row.is-active .badge { border-color: var(--active); }
@@ -7215,7 +7216,7 @@ html[data-glass] .dialog.quick-switch-box {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--ink);
-  font-size: var(--text-lg);
+  font-size: var(--text-md);
 }
 .quick-switch-group {
   min-width: 0;
@@ -7224,7 +7225,7 @@ html[data-glass] .dialog.quick-switch-box {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted);
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
 }
 .quick-switch-tail {
   margin-left: auto;
@@ -7232,23 +7233,23 @@ html[data-glass] .dialog.quick-switch-box {
   align-items: center;
   gap: var(--space-10);
   flex-shrink: 0;
-  padding-left: var(--space-12);
+  padding-left: var(--space-10);
   color: var(--muted);
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
 }
-.quick-switch-tail .head-status { font-size: var(--text-md); }
+.quick-switch-tail .head-status { font-size: var(--text-sm); }
 .quick-switch-here { color: var(--muted); }
 .quick-switch-empty {
   margin: 0;
-  padding: var(--space-24);
+  padding: var(--space-16);
   color: var(--muted);
-  font-size: var(--text-lg);
+  font-size: var(--text-md);
 }
 .quick-switch-foot {
   flex-shrink: 0;
   display: flex;
   gap: var(--space-16);
-  padding: var(--space-10) var(--space-24);
+  padding: var(--space-8) var(--space-16);
   border-top: 1px solid var(--line);
   color: var(--faint);
   font-size: var(--text-xs);
