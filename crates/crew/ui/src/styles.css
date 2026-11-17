@@ -7120,57 +7120,93 @@ html[data-theme="light"] .island-ghost-2 {
   opacity: 0.8;
 }
 
-/* ⌘K: the bot switcher. A field over the list, near the top of the window
-   so the list grows down into the room it has. */
+/* ⌘K: the bot switcher. The window dims hard behind it and a panel sits a
+   little above the middle: a search row, then the bots in sections. The
+   panel grows with its list up to about 60% of the window; past that only
+   the list scrolls. */
 .modal.quick-switch {
+  --switch-dim: rgba(6, 7, 10, 0.68);
+  background: var(--switch-dim);
   align-items: flex-start;
-  padding-top: 12vh;
+  padding: 16vh 5vw 24px;
+  z-index: 26;
+}
+html[data-theme="light"] .modal.quick-switch { --switch-dim: rgba(28, 30, 38, 0.46); }
+html[data-glass] .modal.quick-switch {
+  --switch-dim: rgba(6, 7, 10, 0.58);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
 }
 .dialog.quick-switch-box {
-  width: min(560px, calc(100% - 40px));
-  max-height: min(520px, 76vh);
+  width: min(640px, 100%);
+  max-width: none;
+  max-height: min(520px, 60vh);
   padding: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: var(--shadow);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
 }
-.quick-switch-input {
+html[data-theme="light"] .dialog.quick-switch-box { box-shadow: 0 24px 64px rgba(0, 0, 0, 0.18); }
+/* Glass: the window shows through the dimmed backdrop, not the panel, so
+   the list reads the same over any wallpaper. */
+html[data-glass] .dialog.quick-switch-box {
+  background: var(--elevated);
+  border-color: var(--glass-edge);
+}
+.quick-switch-search {
   flex-shrink: 0;
-  border: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  padding: 0 var(--space-16);
   border-bottom: 1px solid var(--line);
+  color: var(--faint);
+}
+.quick-switch-search svg { flex-shrink: 0; }
+.quick-switch-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
   background: transparent;
   color: var(--ink);
   font: inherit;
   font-size: var(--text-lg);
-  padding: var(--space-16) var(--space-18);
+  padding: var(--space-14) 0;
   outline: none;
 }
 .quick-switch-input::placeholder { color: var(--faint); }
 .quick-switch-list {
-  list-style: none;
-  margin: 0;
-  padding: var(--space-6);
-  overflow-y: auto;
   min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-4) var(--space-8) var(--space-8);
   -webkit-user-select: none;
   user-select: none;
+}
+.quick-switch-heading {
+  margin: 0;
+  padding: var(--space-10) var(--space-8) var(--space-4);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 .quick-switch-row {
   display: flex;
   align-items: center;
   gap: var(--space-10);
   min-height: 40px;
-  padding: var(--space-4) var(--space-10);
+  padding: var(--space-6) var(--space-8);
   border-radius: var(--radius-md);
   cursor: pointer;
 }
 .quick-switch-row.is-active { background: var(--active); }
 .quick-switch-row .avatar {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   flex-shrink: 0;
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
 }
 .quick-switch-row .badge { border-color: var(--elevated); }
 .quick-switch-row.is-active .badge { border-color: var(--active); }
@@ -7181,7 +7217,6 @@ html[data-theme="light"] .island-ghost-2 {
   white-space: nowrap;
   color: var(--ink);
   font-size: var(--text-md);
-  font-weight: 500;
 }
 .quick-switch-group {
   min-width: 0;
@@ -7196,17 +7231,17 @@ html[data-theme="light"] .island-ghost-2 {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: var(--space-8);
+  gap: var(--space-10);
   flex-shrink: 0;
-  padding-left: var(--space-8);
-}
-.quick-switch-here {
-  color: var(--faint);
+  padding-left: var(--space-10);
+  color: var(--muted);
   font-size: var(--text-sm);
 }
+.quick-switch-tail .head-status { font-size: var(--text-sm); }
+.quick-switch-here { color: var(--muted); }
 .quick-switch-empty {
   margin: 0;
-  padding: var(--space-20) var(--space-18);
+  padding: var(--space-16);
   color: var(--muted);
   font-size: var(--text-md);
 }
@@ -7214,7 +7249,7 @@ html[data-theme="light"] .island-ghost-2 {
   flex-shrink: 0;
   display: flex;
   gap: var(--space-16);
-  padding: var(--space-8) var(--space-18);
+  padding: var(--space-8) var(--space-16);
   border-top: 1px solid var(--line);
   color: var(--faint);
   font-size: var(--text-xs);

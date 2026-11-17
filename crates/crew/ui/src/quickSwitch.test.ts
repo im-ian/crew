@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fuzzyScore, imeKey, pushRecent, rowScore, stepIndex, switchRows } from "./quickSwitch";
+import { fuzzyScore, imeKey, pushRecent, RECENT_SHOWN, rowScore, stepIndex, switchRows, switchSections } from "./quickSwitch";
 import type { AgentInfo, Group } from "./types";
 
 const bot = (id: string, name: string, extra: Partial<AgentInfo> = {}): AgentInfo => ({
@@ -123,5 +123,47 @@ describe("imeKey", () => {
     expect(imeKey({ isComposing: true, keyCode: 13 })).toBe(true);
     expect(imeKey({ isComposing: false, keyCode: 229 })).toBe(true);
     expect(imeKey({ isComposing: false, keyCode: 13 })).toBe(false);
+  });
+});
+
+describe("switchSections", () => {
+  const sections = (opts: Partial<Parameters<typeof switchSections>[0]> = {}) =>
+    switchSections({ agents, groups, order, recent: [], current: null, query: "", ...opts }).map(
+      (s) => [s.kind, s.title, s.rows.map((r) => r.agent.id)],
+    );
+
+  it("typed nothing: recent, then folders, loose bots and routers in sidebar order", () => {
+    expect(sections({ recent: ["bot-infra", "crew-mw1", "gone"], current: "crew-mw1" })).toEqual([
+      ["recent", "", ["bot-infra"]],
+      ["group", "Crew", ["crew-mw1", "bot-plan"]],
+      ["loose", "", ["bot-design"]],
+      ["group", "Ops", ["bot-infra"]],
+      ["remote", "acme", ["acme/acc_1"]],
+    ]);
+  });
+
+  it("lists a folder the sidebar has folded, and counts every bot in a folder", () => {
+    const ops = sections().find(([, title]) => title === "Ops");
+    expect(ops).toEqual(["group", "Ops", ["bot-infra"]]);
+  });
+
+  it("keeps Recent short and leaves it out when nothing was opened", () => {
+    const many = Array.from({ length: 8 }, (_, i) => bot(`b${i}`, `봇${i}`));
+    const recent = many.map((b) => b.id);
+    const first = switchSections({ agents: many, groups: [], order: [], recent, current: null, query: "" })[0];
+    expect(first.kind).toBe("recent");
+    expect(first.rows).toHaveLength(RECENT_SHOWN);
+    expect(sections()[0][0]).toBe("group");
+  });
+
+  it("a folder with no name, the sidebar's loose list, is not a folder", () => {
+    const loose: Group = { id: "__ungrouped", name: "", collapsed: false, items: ["agent:bot-design"] };
+    const kinds = switchSections({ agents, groups: [...groups, loose], order, recent: [], current: null, query: "" });
+    expect(kinds.find((s) => s.rows.some((r) => r.agent.id === "bot-design"))?.kind).toBe("loose");
+  });
+
+  it("typed something: one results section, best first", () => {
+    expect(sections({ query: "디자" })).toEqual([["results", "", ["bot-design"]]]);
+    expect(sections({ query: "없는봇" })).toEqual([]);
   });
 });
