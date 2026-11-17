@@ -707,6 +707,7 @@ export function App() {
             }}
             {...groupButton(id)}
             onRenameAgent={(bot, name) => void crew.renameAgent(bot, name)}
+            onSelectAgent={(bot) => crew.selectAgent(bot)}
             onClose={onClose}
           />
           <ChatThread
@@ -745,6 +746,7 @@ export function App() {
           }}
           {...groupButton(crew.selectedKind === "agent" ? crew.selected : null)}
           onRenameAgent={(id, name) => void crew.renameAgent(id, name)}
+          onSelectAgent={(id) => crew.selectAgent(id)}
           onClose={onClose}
         />
         <ChatThread

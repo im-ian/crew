@@ -20,6 +20,8 @@ type Props = {
   /** That panel is open now. */
   groupOpen?: boolean;
   onRenameAgent: (id: string, name: string) => void;
+  /** Opens another bot's chat: a chip of a bot this one waits on. */
+  onSelectAgent?: (id: string) => void;
   /** Set on a split half: closes it, and the other half takes the room. */
   onClose?: () => void;
 };
@@ -32,6 +34,7 @@ export function ChatHeader({
   onOpenGroup,
   groupOpen = false,
   onRenameAgent,
+  onSelectAgent,
   onClose,
 }: Props) {
   const t = useT();
@@ -119,7 +122,12 @@ export function ChatHeader({
         {currentAgent ? (
           // Mounted whatever the status, so the chip of the bot that answered
           // still glows and folds out once that answer has this bot at work.
-          <WaitStatus key={currentAgent.id} ids={waitingOn(currentAgent)} agents={agents} />
+          <WaitStatus
+            key={currentAgent.id}
+            ids={waitingOn(currentAgent)}
+            agents={agents}
+            onOpen={onSelectAgent}
+          />
         ) : null}
       </div>
       {currentAgent && onOpenGroup ? (

@@ -7324,6 +7324,23 @@ html[data-glass] .dialog.quick-switch-box {
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* The header's chips open their bot's chat. The ring sits inside, as the
+   chip line clips what is outside it. */
+button.wait-chip {
+  appearance: none;
+  margin-top: 0;
+  margin-bottom: 0;
+  margin-left: 0;
+  border: 0;
+  font-family: inherit;
+  cursor: pointer;
+}
+button.wait-chip:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--working) 55%, transparent);
+  outline-offset: -2px;
 }
 .wait-chip .avatar {
   width: 14px;
@@ -7363,6 +7380,8 @@ html[data-glass] .dialog.quick-switch-box {
 .wait-more {
   flex: 0 0 auto;
   padding: 0 2px;
+  -webkit-user-select: none;
+  user-select: none;
   color: var(--muted);
   font-size: 10.5px;
   font-weight: 500;
@@ -7422,6 +7441,33 @@ html[data-glass] .dialog.quick-switch-box {
   40%, 54% { transform: scaleY(1); }
   58%, 100% { transform: scaleY(0.8); }
 }
+
+/* Three dots before the chips light one after another towards them, each
+   12.2% of `--cycle` after the last, so the third is lit as the first chip
+   starts to breathe. */
+.wait-relay {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+.wait-cluster.is-side .wait-relay { gap: 3px; margin-right: 4px; }
+.wait-relay i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--muted);
+  opacity: 0.22;
+  animation: wait-relay-dot var(--cycle, 1.8s) ease-in-out infinite;
+}
+.wait-relay i:nth-child(2) { animation-delay: calc(var(--cycle, 1.8s) * 0.122); }
+.wait-relay i:nth-child(3) { animation-delay: calc(var(--cycle, 1.8s) * 0.244); }
+@keyframes wait-relay-dot {
+  0%, 56%, 100% { opacity: 0.22; transform: scale(1); }
+  28% { opacity: 0.95; transform: scale(1.25); }
+}
+/* The sidebar has no line to fade: with its last chip the dots go. */
+.wait-cluster.is-side.is-ending .wait-relay { opacity: 0; transition: opacity 0.26s ease; }
 
 /* Breathing: once a cycle each chip takes a faint ring and tint of its
    bot's colour, passing left to right (`--d`). `--cycle` is 1.8s, slower
@@ -7492,11 +7538,16 @@ html[data-glass] .dialog.quick-switch-box {
   .avatar-face.is-waiting .avatar-gaze,
   .avatar-face.is-waiting .avatar-pill,
   .avatar-face.is-waiting .avatar-blink,
+  .wait-relay i,
   .wait-chip,
   .wait-chip.is-entering { animation: none !important; }
+  .wait-relay i:nth-child(1) { opacity: 0.3; }
+  .wait-relay i:nth-child(2) { opacity: 0.55; }
+  .wait-relay i:nth-child(3) { opacity: 0.9; }
   .avatar-face.is-waiting { transform: translate(-0.5%, 0) rotate(-1.6deg); }
   .avatar-face.is-waiting:not(.is-tracking):not(.is-gaze-return) .avatar-gaze { transform: translate(-2.2px, 1.6px); }
   .avatar-face.is-waiting .avatar-pill { transform: scaleY(0.8); }
   .wait-chip.is-leaving { display: none; }
-  .head-status.is-waiting.is-ending { transition: none; }
+  .head-status.is-waiting.is-ending,
+  .wait-cluster.is-side.is-ending .wait-relay { transition: none; }
 }

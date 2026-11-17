@@ -20,6 +20,11 @@ type Props = {
   agents: readonly AgentInfo[];
 };
 
+type StatusProps = Props & {
+  /** Opens a waited-on bot's chat: the header's chips are buttons. */
+  onOpen?: (id: string) => void;
+};
+
 function find(agents: readonly AgentInfo[], id: string): AgentInfo | undefined {
   return agents.find((a) => a.id === id);
 }
@@ -68,20 +73,38 @@ function useWaitChips(ids: readonly string[]) {
 }
 
 /**
+ * Three dots before the chips, lit one after another towards them, so the
+ * last lights as the first chip breathes. Same `--cycle` as the chips.
+ */
+function Relay() {
+  return (
+    <span className="wait-relay" aria-hidden="true">
+      <i />
+      <i />
+      <i />
+    </span>
+  );
+}
+
+/**
  * The chips of one line, header or sidebar: each with its bot's colour
  * (`--c`), the width it folds from (`--w`), and its place in the breathing
- * wave (`--d`). `withName` puts the name beside the face.
+ * wave (`--d`). `withName` puts the name beside the face. With `onOpen` a
+ * chip is a button that opens its bot's chat; the sidebar's stay marks,
+ * since the whole row there is the button.
  */
 function ChipList({
   chips,
   agents,
   refFor,
   withName,
+  onOpen,
 }: {
   chips: readonly WaitChip[];
   agents: readonly AgentInfo[];
   refFor: (id: string) => (el: HTMLElement | null) => void;
   withName: boolean;
+  onOpen?: (id: string) => void;
 }) {
   const t = useT();
   const live = liveIds(chips);
@@ -96,21 +119,45 @@ function ChipList({
           ...(chip.width ? { ["--w" as string]: `${chip.width}px` } : null),
           ...(at >= 0 ? { ["--d" as string]: `${delay(at)}s` } : null),
         };
+        const className =
+          "wait-chip" + (chip.entering ? " is-entering" : "") + (chip.leaving ? " is-leaving" : "");
+        const body = (
+          <>
+            <ChipFace agents={agents} id={chip.id} />
+            {withName ? <span className="wait-chip-name">{name}</span> : null}
+          </>
+        );
+        // A bot this window does not know has no chat to open.
+        if (onOpen && find(agents, chip.id)) {
+          return (
+            <button
+              key={chip.id}
+              ref={refFor(chip.id)}
+              type="button"
+              className={className}
+              data-id={chip.id}
+              style={style}
+              title={name}
+              aria-label={t("header.waitingOnOpen", { name })}
+              tabIndex={chip.leaving ? -1 : undefined}
+              onClick={() => onOpen(chip.id)}
+            >
+              {body}
+            </button>
+          );
+        }
         return (
           <span
             key={chip.id}
             ref={refFor(chip.id)}
-            className={
-              "wait-chip" + (chip.entering ? " is-entering" : "") + (chip.leaving ? " is-leaving" : "")
-            }
+            className={className}
             data-id={chip.id}
             style={style}
             role="img"
             title={name}
             aria-label={t("header.waitingOn", { name })}
           >
-            <ChipFace agents={agents} id={chip.id} />
-            {withName ? <span className="wait-chip-name">{name}</span> : null}
+            {body}
           </span>
         );
       })}
@@ -153,9 +200,10 @@ function syncFade(el: HTMLElement | null) {
  * the count stays put. A bot that answers glows in its colour and folds
  * out; the last one fades the line, even once the answer has the bot at
  * work again. Keyed by the bot whose header it is, so opening another chat
- * draws its line at once.
+ * draws its line at once. Three dots between the count and the chips run
+ * towards them. A chip opens its bot's chat (`onOpen`).
  */
-export function WaitStatus({ ids, agents }: Props) {
+export function WaitStatus({ ids, agents, onOpen }: StatusProps) {
   const t = useT();
   const scroll = useRef<HTMLSpanElement>(null);
   const { chips, refFor } = useWaitChips(ids);
@@ -197,8 +245,9 @@ export function WaitStatus({ ids, agents }: Props) {
         {t("header.statusWaiting")}
         {count > 1 ? <b>{count}</b> : null}
       </span>
+      <Relay />
       <span className="wait-scroll" ref={scroll}>
-        <ChipList chips={chips} agents={agents} refFor={refFor} withName />
+        <ChipList chips={chips} agents={agents} refFor={refFor} withName onOpen={onOpen} />
       </span>
     </span>
   );
@@ -208,7 +257,8 @@ export function WaitStatus({ ids, agents }: Props) {
  * The sidebar's mark beside a bot's name: the bots it waits on as face
  * chips, two at most, then "+N" for the rest. Each face names its bot on
  * hover, and "+N" names the rest. A chip whose bot answers glows and folds
- * out as in the header. The last-message line under it stays as it was.
+ * out as in the header, and with the last one the dots before the chips
+ * fade. The last-message line under it stays as it was.
  */
 export function WaitTag({ ids, agents }: Props) {
   const t = useT();
@@ -219,9 +269,10 @@ export function WaitTag({ ids, agents }: Props) {
   const more = live.length > SIDE_CHIPS;
   return (
     <span
-      className={"wait-cluster is-side" + (more ? " has-more" : "")}
+      className={"wait-cluster is-side" + (more ? " has-more" : "") + (ids.length ? "" : " is-ending")}
       style={cycleStyle(chips)}
     >
+      <Relay />
       <ChipList chips={chips} agents={agents} refFor={refFor} withName={false} />
       {more ? (
         <span
