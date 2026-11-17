@@ -1561,6 +1561,9 @@ fn close_turn(
     // and take this turn's origin before `turn_ended` reads it. After the
     // failure is noted, so a failed turn reaches the teammate as one.
     crate::daemon::remote_turn_over(&session.id);
+    // Also while the child is set: the next turn writes its own record when it
+    // starts, and clearing after that would drop it.
+    crate::daemon::headless_turn_over(&session.id);
     if let Ok(mut inner) = session.inner.lock() {
         inner.child = None;
         if inner.generation == generation {

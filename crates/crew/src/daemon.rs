@@ -5566,6 +5566,15 @@ pub(crate) fn turn_answered(id: &str) {
     release(take_followers(id));
 }
 
+/// A headless turn is closing, and the bot is not free yet. Its record goes
+/// now, unless the reply waits on the user's approval, which `turn_ended`
+/// does not count as the end either.
+pub(crate) fn headless_turn_over(id: &str) {
+    if !matches!(live_status(id), Ok(AgentStatus::Blocked)) {
+        note_turn_over(id);
+    }
+}
+
 /// The CLI started another reply on its own after the one it was asked for.
 /// Nobody asked for it, so it answers in the bot's own chat, not a side chat.
 pub(crate) fn turn_reopened(id: &str) {
@@ -5581,7 +5590,8 @@ pub(crate) fn turn_ended(id: &str) {
     if matches!(live_status(id), Ok(AgentStatus::Blocked)) {
         return;
     }
-    note_turn_over(id);
+    // Only a headless turn has a record, and `close_turn` dropped it already,
+    // before the bot was free: by now the next turn may have written its own.
     // A headless turn closed its remote job before it went idle.
     if !is_headless(id) {
         remote_turn_over(id);
