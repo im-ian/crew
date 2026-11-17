@@ -120,6 +120,9 @@ struct OutJob {
     #[serde(default)]
     owner: Option<String>,
     hops: u32,
+    /// The chain the tell went out in, which the wake with the answer keeps.
+    #[serde(default)]
+    chain: u64,
     /// The reply being written, in the remote bot's transcript here.
     #[serde(default)]
     row: Option<String>,
@@ -307,6 +310,11 @@ pub fn is_remote(id: &str) -> bool {
 }
 
 /// `team/acc_x`, or `team/이안` by name.
+/// The id a remote bot's chat has here, for any way of naming it.
+pub fn canonical_id(id: &str) -> Option<String> {
+    resolve(id).map(|(alias, account)| remote_id(&alias, &account))
+}
+
 fn resolve(id: &str) -> Option<(String, String)> {
     let (alias, who) = split_id(id)?;
     let st = state().lock().ok()?;
@@ -1105,6 +1113,7 @@ pub fn tell(
     to: &str,
     text: &str,
     hops: u32,
+    chain: u64,
 ) -> anyhow::Result<String> {
     let Some((alias, account)) = resolve(to) else {
         bail!("unknown agent {to}");
@@ -1132,6 +1141,7 @@ pub fn tell(
         asker: asker.map(str::to_string),
         owner: owner.map(str::to_string),
         hops,
+        chain,
         row: None,
         sealed: Vec::new(),
     };
@@ -1158,7 +1168,7 @@ pub fn send_from_user(to: &str, text: &str, row_id: Option<&str>) -> anyhow::Res
     ensure_transcript(&rid);
     let row = crate::transcript::push_user_as(&rid, "user", text, row_id);
     // Not sent, so not a line in the chat: the window puts the draft back.
-    if let Err(err) = tell(None, None, &rid, text, 0) {
+    if let Err(err) = tell(None, None, &rid, text, 0, 0) {
         crate::transcript::remove_row(&rid, &row.id);
         return Err(err);
     }
@@ -1330,8 +1340,8 @@ fn done_text(error: &str) -> String {
             "They did not come online in time, so the router dropped this request.",
         ),
         "relay_limit" => say(
-            "봇끼리 주고받은 횟수가 한도를 넘어 멈췄어요. 사람이 다시 보내 주세요.",
-            "Bots passed this along too many times. Send it again yourself.",
+            "봇끼리 같은 일을 되풀이하거나 너무 오래 주고받아서 멈췄어요. 사람이 다시 보내 주세요.",
+            "Bots went round on this without you, so it stopped. Send it again yourself.",
         ),
         "denied" => say(
             "상대가 이 요청을 받지 않았어요.",
@@ -1403,7 +1413,7 @@ fn finish_out(id: &str, ok: bool, error: &str) {
         }
     }
     if let Some(asker) = &job.asker {
-        crate::daemon::remote_wake(asker, &rid, job.hops);
+        crate::daemon::remote_wake(asker, &rid, job.hops, job.chain);
     }
     crate::daemon::sync_waiting();
 }
@@ -2865,6 +2875,7 @@ mod tests {
             asker: asker.map(str::to_string),
             owner: None,
             hops: 0,
+            chain: 0,
             row: None,
             sealed: Vec::new(),
         };

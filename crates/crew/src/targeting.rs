@@ -5,11 +5,12 @@ pub fn one_on_one_tell_targets(text: &str, self_id: &str, roster: &[AgentConfig]
     crate::config::mentioned_teammate_ids(text, self_id, roster)
 }
 
-/// How many `crew tell`s a single user message may set off. A bot can call
-/// `crew tell` on its way through a turn, so two bots can hand the same thread
-/// back and forth forever, each tell costing a real CLI turn. The reply that
-/// wakes the bot waiting on a tell is not a hop.
-pub const MAX_RELAY_HOPS: u32 = 4;
+/// How many `crew tell`s a single user message may set off, one after another.
+/// Each tell costs a real CLI turn, so this is the last stop on a chain that
+/// would run on forever. It is not what stops a loop: `relay` does that, from
+/// the tells themselves. The reply that wakes the bot waiting on a tell is not
+/// a hop.
+pub const MAX_RELAY_HOPS: u32 = 20;
 
 /// Where a turn's reply should land after the speaker finishes. Saved with a
 /// turn in flight, so a restart can run that turn on with the same asker.
@@ -31,6 +32,9 @@ pub struct TurnOrigin {
     /// Crew started this turn after grok stopped the watch the last one left.
     /// A watch this turn leaves gets no second such turn.
     pub watch_wake: bool,
+    /// The user message this turn goes back to (`relay::new_chain`). Every
+    /// tell and wake under it keeps it. 0 until the turn starts.
+    pub chain: u64,
 }
 
 impl TurnOrigin {
@@ -99,6 +103,7 @@ fn envelope_from(raw: &str) -> String {
 /// bot-to-bot tell still posts back to the bot who asked. The tell is one hop.
 pub fn inherit_origin(parent: Option<&TurnOrigin>, mut child: TurnOrigin) -> TurnOrigin {
     child.hops = parent.map(|p| p.hops + 1).unwrap_or(0);
+    child.chain = parent.map(|p| p.chain).unwrap_or(0);
     if child.reply_agent.is_none() {
         if let Some(agent) = parent.and_then(|p| p.reply_agent.clone()) {
             child.reply_agent = Some(agent);

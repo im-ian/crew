@@ -1,0 +1,294 @@
+//! When a bot's `crew tell` is stopped. Bots pass work along as long as they
+//! like; a tell stops only on a sign that they are going round without the
+//! user: two bots telling each other back and forth, a bot sending a teammate
+//! what it already sent, or a chain grown past a large cap.
+//!
+//! A chain is what one user message set off. Each turn the user started gets
+//! a new chain id, and every tell and wake under it keeps that id. The tells
+//! in each chain are kept here, in memory: a restart starts the count over,
+//! and the cap (hops, which the tells carry) still holds.
+
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+use crate::targeting::{self, TurnOrigin};
+
+/// Round trips two bots may make with new tells between them in one chain.
+/// A report that wakes the asker is not a tell, so it is not counted. A lead
+/// and a worker who report with `crew tell` reached four in real work before,
+/// under the old hop limit, so this leaves room above that.
+pub const MAX_ROUND_TRIPS: usize = 5;
+
+/// Chains kept at once. The oldest goes first.
+const MAX_CHAINS: usize = 512;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Stop {
+    /// The two bots already made `MAX_ROUND_TRIPS` round trips.
+    PingPong,
+    /// The sender already sent the receiver this in the chain.
+    Repeat,
+    /// `targeting::MAX_RELAY_HOPS` tells since the user last spoke.
+    Cap,
+}
+
+struct Sent {
+    from: String,
+    to: String,
+    text: String,
+}
+
+struct Chain {
+    touched: Instant,
+    sent: Vec<Sent>,
+}
+
+fn ledger() -> &'static Mutex<HashMap<u64, Chain>> {
+    static LEDGER: OnceLock<Mutex<HashMap<u64, Chain>>> = OnceLock::new();
+    LEDGER.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// A chain id not used before, here or by an earlier daemon.
+pub fn new_chain() -> u64 {
+    static NEXT: OnceLock<AtomicU64> = OnceLock::new();
+    let next = NEXT.get_or_init(|| {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(1);
+        AtomicU64::new(now.max(1))
+    });
+    next.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Two tells are the same when they differ only in spacing or case. Numbers
+/// count: "2단계 끝, 3단계 시작" and "3단계 끝, 4단계 시작" are new work.
+pub fn normalize(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+/// Why `from`'s tell to `to` must not go, in the chain `origin` carries.
+/// `origin` is the tell's own: its hops already count it.
+pub fn stop(origin: &TurnOrigin, from: &str, to: &str, text: &str) -> Option<Stop> {
+    if origin.chain != 0 {
+        if let Ok(map) = ledger().lock() {
+            if let Some(chain) = map.get(&origin.chain) {
+                let text = normalize(text);
+                if chain
+                    .sent
+                    .iter()
+                    .any(|s| s.from == from && s.to == to && s.text == text)
+                {
+                    return Some(Stop::Repeat);
+                }
+                let count = |a: &str, b: &str| {
+                    chain
+                        .sent
+                        .iter()
+                        .filter(|s| s.from == a && s.to == b)
+                        .count()
+                };
+                let trips = (count(from, to) + 1).min(count(to, from));
+                if trips > MAX_ROUND_TRIPS {
+                    return Some(Stop::PingPong);
+                }
+            }
+        }
+    }
+    targeting::relay_exhausted(origin).then_some(Stop::Cap)
+}
+
+/// `from`'s tell to `to` went out in `chain`.
+pub fn note(chain: u64, from: &str, to: &str, text: &str) {
+    if chain == 0 {
+        return;
+    }
+    let Ok(mut map) = ledger().lock() else {
+        return;
+    };
+    if !map.contains_key(&chain) && map.len() >= MAX_CHAINS {
+        if let Some(oldest) = map.iter().min_by_key(|(_, c)| c.touched).map(|(k, _)| *k) {
+            map.remove(&oldest);
+        }
+    }
+    let entry = map.entry(chain).or_insert_with(|| Chain {
+        touched: Instant::now(),
+        sent: Vec::new(),
+    });
+    entry.touched = Instant::now();
+    entry.sent.push(Sent {
+        from: from.to_string(),
+        to: to.to_string(),
+        text: normalize(text),
+    });
+}
+
+/// The chain `a` and `b` last told each other in. A tell from another PC does
+/// not carry the chain (the router passes hops only), so it joins the one
+/// its two bots are already in.
+pub fn latest_between(a: &str, b: &str) -> Option<u64> {
+    let map = ledger().lock().ok()?;
+    map.iter()
+        .filter(|(_, c)| {
+            c.sent
+                .iter()
+                .any(|s| (s.from == a && s.to == b) || (s.from == b && s.to == a))
+        })
+        .max_by_key(|(_, c)| c.touched)
+        .map(|(k, _)| *k)
+}
+
+/// The note in both chats: why, who, and what did not go.
+pub fn chat_line(locale: &str, stop: &Stop, from: &str, to: &str, text: &str) -> String {
+    let mut said: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if said.chars().count() > 80 {
+        said = said.chars().take(80).collect::<String>() + "…";
+    }
+    if locale == "en" {
+        let why = match stop {
+            Stop::PingPong => format!(
+                "the two bots told each other back and forth over {MAX_ROUND_TRIPS} times without you"
+            ),
+            Stop::Repeat => "it was the same as one already sent in this exchange".to_string(),
+            Stop::Cap => format!(
+                "bots passed this on over {} times since you last spoke",
+                targeting::MAX_RELAY_HOPS
+            ),
+        };
+        format!("{from} → {to}: not sent, because {why}. It said: “{said}”")
+    } else {
+        let why = match stop {
+            Stop::PingPong => {
+                format!("두 봇이 사람 없이 서로 {MAX_ROUND_TRIPS}번 넘게 주고받았어요(핑퐁)")
+            }
+            Stop::Repeat => "이 흐름에서 이미 보낸 글과 같아요(되풀이)".to_string(),
+            Stop::Cap => format!(
+                "사람이 마지막으로 말한 뒤 봇끼리 {}번 넘게 넘겼어요(상한)",
+                targeting::MAX_RELAY_HOPS
+            ),
+        };
+        format!("{from} → {to} 요청을 보내지 않았어요. {why}. 못 보낸 글: “{said}”")
+    }
+}
+
+/// What the sending bot's `crew tell` prints. It starts with "relay limit",
+/// which the router path reads as that error.
+pub fn error_text(stop: &Stop, to: &str) -> String {
+    let why = match stop {
+        Stop::PingPong => format!(
+            "you and {to} already told each other back and forth {MAX_ROUND_TRIPS} times without the user"
+        ),
+        Stop::Repeat => format!("you already told {to} the same thing since the user last spoke"),
+        Stop::Cap => format!(
+            "bots passed this on {} times since the user last spoke",
+            targeting::MAX_RELAY_HOPS
+        ),
+    };
+    format!(
+        "relay limit: {why}. {to} did not get this tell. Tell the user what you wanted to send; \
+         it can go once they ask again."
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn told(chain: u64, hops: u32) -> TurnOrigin {
+        TurnOrigin {
+            from: "x".into(),
+            chain,
+            hops,
+            ..TurnOrigin::default()
+        }
+    }
+
+    #[test]
+    fn same_text_but_for_spacing_and_case() {
+        assert_eq!(
+            normalize("  PR #160  머지했어요\n"),
+            normalize("pr #160 머지했어요")
+        );
+        assert_ne!(
+            normalize("2단계 끝, 3단계 시작"),
+            normalize("3단계 끝, 4단계 시작")
+        );
+    }
+
+    #[test]
+    fn a_lead_handing_out_new_work_is_not_a_loop() {
+        let chain = new_chain();
+        for n in 0..12 {
+            let text = format!("작업 {} 맡아 주세요: {}", n, "가나다".repeat(n + 1));
+            assert_eq!(
+                stop(&told(chain, 1), "lead", "worker", &text),
+                None,
+                "tell {n}"
+            );
+            note(chain, "lead", "worker", &text);
+        }
+    }
+
+    #[test]
+    fn two_bots_going_back_and_forth_stop() {
+        let chain = new_chain();
+        for n in 0..MAX_ROUND_TRIPS {
+            let ping = format!("ping {}", "a".repeat(n + 1));
+            let pong = format!("pong {}", "b".repeat(n + 1));
+            assert_eq!(stop(&told(chain, 1), "a", "b", &ping), None);
+            note(chain, "a", "b", &ping);
+            assert_eq!(stop(&told(chain, 1), "b", "a", &pong), None);
+            note(chain, "b", "a", &pong);
+        }
+        note(chain, "a", "b", "one more from a");
+        assert_eq!(
+            stop(&told(chain, 1), "b", "a", "one more from b"),
+            Some(Stop::PingPong)
+        );
+        // Another chain, one the user started since, starts over.
+        assert_eq!(
+            stop(&told(new_chain(), 1), "b", "a", "one more from b"),
+            None
+        );
+    }
+
+    #[test]
+    fn the_same_tell_twice_stops() {
+        let chain = new_chain();
+        note(chain, "a", "b", "CI 통과했어요. 머지해 주세요");
+        assert_eq!(
+            stop(&told(chain, 1), "a", "b", "CI  통과했어요.\n머지해 주세요"),
+            Some(Stop::Repeat)
+        );
+        assert_eq!(
+            stop(&told(chain, 1), "a", "c", "CI 통과했어요. 머지해 주세요"),
+            None
+        );
+    }
+
+    #[test]
+    fn the_cap_holds_without_a_chain() {
+        assert_eq!(
+            stop(&told(0, targeting::MAX_RELAY_HOPS), "a", "b", "x"),
+            None
+        );
+        assert_eq!(
+            stop(&told(0, targeting::MAX_RELAY_HOPS + 1), "a", "b", "x"),
+            Some(Stop::Cap)
+        );
+    }
+
+    #[test]
+    fn a_tell_from_another_pc_joins_its_pair_chain() {
+        let chain = new_chain();
+        let (a, b) = (format!("a-{chain}"), format!("team/b-{chain}"));
+        note(chain, &a, &b, "부탁해요");
+        assert_eq!(latest_between(&b, &a), Some(chain));
+        assert_eq!(latest_between(&a, "nobody"), None);
+    }
+}
