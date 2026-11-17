@@ -11,8 +11,10 @@ pub fn one_on_one_tell_targets(text: &str, self_id: &str, roster: &[AgentConfig]
 /// wakes the bot waiting on a tell is not a hop.
 pub const MAX_RELAY_HOPS: u32 = 4;
 
-/// Where a turn's reply should land after the speaker finishes.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// Where a turn's reply should land after the speaker finishes. Saved with a
+/// turn in flight, so a restart can run that turn on with the same asker.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct TurnOrigin {
     pub from: String,
     pub reply_agent: Option<String>,

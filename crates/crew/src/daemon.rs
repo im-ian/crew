@@ -189,6 +189,9 @@ static RECOVERED_TELLS: OnceLock<Mutex<HashMap<String, VecDeque<PendingDelivery>
     OnceLock::new();
 /// One silent resend per prompt. A second hang parks instead of sending again.
 static SILENT_RETRIES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+/// Bots the daemon stopped on its way down. Their turns are cut off, not
+/// over: the records stay on disk for the next daemon to send on.
+static CUT_OFF: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 #[derive(Clone)]
 struct PendingDelivery {
@@ -485,7 +488,13 @@ fn headless_of(id: &str) -> Option<Arc<HeadlessSession>> {
 }
 
 /// Put the prompt the CLI never answered at the front of the inbox, waiting.
+/// On the daemon's way down it stays the turn in flight instead, which the
+/// next daemon sends on: a line put back here would wait for the user.
 pub(crate) fn requeue_unanswered(id: &str, flight: headless::InFlight) {
+    if is_cut_off(id) {
+        return;
+    }
+    note_turn_over(id);
     let stored = prompts().lock().ok().and_then(|mut map| map.remove(id));
     let head = flight.text;
     let ids = flight.msg_ids;
@@ -1029,6 +1038,7 @@ fn start_delivery(
 ) -> anyhow::Result<()> {
     let id = start.0.clone();
     let id = id.as_str();
+    let asked = text;
     // A bot left waiting on allow / deny moves on without an answer: what
     // waited on that turn goes out now, not after this one.
     if matches!(live_status(id), Ok(AgentStatus::Blocked)) {
@@ -1073,15 +1083,25 @@ fn start_delivery(
     let peer = asked_by(&origin, id).or_else(|| crate::remote::waking_job_peer(id, &origin));
     let prev_peer = crate::transcript::set_peer(id, peer);
     let prev_origin = get_origin(id);
-    set_origin(id, origin);
     let epoch = serial_epoch(id);
+    let recorded = note_turn_started(id, asked, &text, msg_id, &origin, epoch);
+    set_origin(id, origin);
     // Before the CLI can print. A line that arrives first has to land on this
     // record, or a stop would treat an answered prompt as unheard.
     let armed = remember_prompt(id, prompt);
     let started = deliver(id, &text, newline, &skip_rows);
     match &started {
-        Ok(()) => follow_turn(id, epoch, std::mem::take(then)),
+        Ok(()) => {
+            follow_turn(id, epoch, std::mem::take(then));
+            if recorded.is_some() {
+                note_followers(id);
+            }
+        }
         Err(_) => {
+            // The turn it would have replaced, if any, is still the one on.
+            if let Some(before) = recorded {
+                update_waits(id, |saved| saved.turn = before);
+            }
             if armed {
                 forget_prompt(id);
             }
@@ -1703,6 +1723,7 @@ fn clear_serial_after(agent: &str) {
         *epoch = epoch.wrapping_add(1);
         *epoch
     };
+    note_turn_over(agent);
     note_epoch(agent, epoch);
 }
 
@@ -1716,6 +1737,7 @@ fn drop_mention_followers(agent: &str) {
             q.retain(|job| !job.named_in(agent));
         }
     }
+    note_followers(agent);
     // The hint says those teammates already have the request. Once their
     // tells are dropped, the queued line goes back to the raw transcript.
     let raw: HashMap<String, String> = crate::transcript::messages(agent)
@@ -1829,6 +1851,22 @@ fn tells_after(anchor: &str, to: &str) -> bool {
 fn defer_tell(anchor: &str, to: &str, from: &str, text: &str, origin: Option<TurnOrigin>) {
     let epoch = serial_epoch(anchor);
     let _ = defer_tell_if_epoch(anchor, epoch, to, from, text, origin);
+}
+
+/// `defer_tell_if_epoch`, with the turn's record brought up to date.
+fn defer_tell_saved(
+    anchor: &str,
+    epoch: u64,
+    to: &str,
+    from: &str,
+    text: &str,
+    origin: Option<TurnOrigin>,
+) -> bool {
+    let deferred = defer_tell_if_epoch(anchor, epoch, to, from, text, origin);
+    if deferred {
+        note_followers(anchor);
+    }
+    deferred
 }
 
 /// What waits on `agent`'s turn, unless a turn is still being started there.
@@ -2290,6 +2328,65 @@ struct AgentWaits {
     /// `@` tells still riding on a queued user line. They are not delivered yet.
     #[serde(default)]
     named: Vec<SavedNamed>,
+    /// The headless turn in flight. Written before the CLI gets the prompt and
+    /// dropped when the turn is over, so one still here after a restart was
+    /// cut off and runs on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    turn: Option<SavedTurn>,
+}
+
+/// A turn the CLI was given and had not finished.
+#[derive(Clone, Serialize, Deserialize)]
+struct SavedTurn {
+    /// The prompt as the CLI got it, teammates' replies included.
+    text: String,
+    /// The row it answers, when it has one.
+    #[serde(default)]
+    msg_id: Option<String>,
+    origin: TurnOrigin,
+    epoch: u64,
+    /// How many restarts already sent it on.
+    #[serde(default)]
+    resumes: u32,
+    /// What waits on this turn: the tells it ran and the rest of its chain.
+    #[serde(default)]
+    after: Vec<SavedJob>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct SavedJob {
+    to: String,
+    from: String,
+    text: String,
+    #[serde(default)]
+    origin: Option<TurnOrigin>,
+    #[serde(default)]
+    own: bool,
+}
+
+impl SavedJob {
+    fn of(job: &SerialJob) -> Self {
+        let SerialKind::Tell { from, text, origin } = &job.kind;
+        Self {
+            to: job.to.clone(),
+            from: from.clone(),
+            text: text.clone(),
+            origin: origin.clone(),
+            own: job.own,
+        }
+    }
+
+    fn job(&self) -> SerialJob {
+        SerialJob {
+            to: self.to.clone(),
+            kind: SerialKind::Tell {
+                from: self.from.clone(),
+                text: self.text.clone(),
+                origin: self.origin.clone(),
+            },
+            own: self.own,
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -2346,7 +2443,8 @@ fn update_waits(id: &str, edit: impl FnOnce(&mut AgentWaits)) {
     let empty = saved.epoch == 0
         && saved.parked.is_empty()
         && saved.tells.is_empty()
-        && saved.named.is_empty();
+        && saved.named.is_empty()
+        && saved.turn.is_none();
     if empty {
         let _ = fs::remove_file(&path);
         return;
@@ -2366,7 +2464,8 @@ fn note_epoch(id: &str, epoch: u64) {
         let tracked = saved.epoch > 0
             || !saved.parked.is_empty()
             || !saved.tells.is_empty()
-            || !saved.named.is_empty();
+            || !saved.named.is_empty()
+            || saved.turn.is_some();
         if tracked && epoch > saved.epoch {
             saved.epoch = epoch;
         }
@@ -2465,6 +2564,161 @@ fn forget_wait(id: &str, msg_id: &str) {
     });
 }
 
+/// How many restarts in a row may send one turn on. A turn that is still cut
+/// off after that is given up on, with a note in the chat.
+const MAX_TURN_RESUMES: u32 = 3;
+
+fn is_cut_off(id: &str) -> bool {
+    CUT_OFF
+        .get()
+        .and_then(|set| set.lock().ok().map(|set| set.contains(id)))
+        .unwrap_or(false)
+}
+
+/// Stop `session`'s turn as the daemon goes down. Its record stays for the
+/// next daemon, and so does its CLI session, so that turn picks up where it
+/// stopped. Nothing put back here would outlive this process.
+fn cut_off(session: &Arc<HeadlessSession>) {
+    if let Ok(mut set) = CUT_OFF.get_or_init(|| Mutex::new(HashSet::new())).lock() {
+        set.insert(session.id.clone());
+    }
+    headless::halt(session);
+}
+
+/// `prompt` is going to `id`'s CLI now. Recorded first, so a turn that ends
+/// at once cannot finish before its record and leave it behind. A prompt that
+/// sends a cut-off turn on keeps that turn's text and count. Returns what was
+/// recorded before, for a start that fails to put back.
+fn note_turn_started(
+    id: &str,
+    asked: &str,
+    prompt: &str,
+    msg_id: Option<&str>,
+    origin: &TurnOrigin,
+    epoch: u64,
+) -> Option<Option<SavedTurn>> {
+    // A terminal's turn is read off its screen, and a representative's job
+    // lives with the router. Neither is sent on from here.
+    if headless_of(id).is_none() || crate::remote::is_rep(id) {
+        return None;
+    }
+    Some(record_turn(id, asked, prompt, msg_id, origin, epoch))
+}
+
+fn record_turn(
+    id: &str,
+    asked: &str,
+    prompt: &str,
+    msg_id: Option<&str>,
+    origin: &TurnOrigin,
+    epoch: u64,
+) -> Option<SavedTurn> {
+    let mut before = None;
+    update_waits(id, |saved| {
+        before = saved.turn.take();
+        let (text, resumes) = match &before {
+            Some(old) if resume_prompt(old) == asked => (old.text.clone(), old.resumes + 1),
+            _ => (prompt.to_string(), 0),
+        };
+        saved.epoch = saved.epoch.max(epoch);
+        saved.turn = Some(SavedTurn {
+            text,
+            msg_id: msg_id.map(str::to_string),
+            origin: origin.clone(),
+            epoch,
+            resumes,
+            after: Vec::new(),
+        });
+    });
+    before
+}
+
+/// `id`'s turn is over: answered, stopped, or put back in the inbox. A turn
+/// the daemon cuts off on its way down is not over.
+fn note_turn_over(id: &str) {
+    if is_cut_off(id) {
+        return;
+    }
+    update_waits(id, |saved| saved.turn = None);
+}
+
+/// What waits on `agent`'s turn changed. The turn's record keeps a copy, so
+/// a tell the bot ran is not lost with a restart that cuts the turn off.
+fn note_followers(agent: &str) {
+    update_waits(agent, |saved| {
+        let Some(turn) = saved.turn.as_mut() else {
+            return;
+        };
+        turn.after = serial_board()
+            .lock()
+            .ok()
+            .and_then(|board| {
+                board
+                    .queues
+                    .get(agent)
+                    .map(|q| q.iter().map(SavedJob::of).collect())
+            })
+            .unwrap_or_default();
+    });
+}
+
+/// The prompt that sends a cut-off turn on, in the session it was cut off in.
+fn resume_prompt(turn: &SavedTurn) -> String {
+    let mut note = String::from(
+        "[crew system] Crew restarted while you were working on the message below, \
+         and your turn was cut off. Continue from where you stopped and finish it. \
+         Do not redo steps that are already done.",
+    );
+    if turn.after.iter().any(|job| job.own) {
+        note.push_str(
+            " The `crew tell`s you already ran were kept and go out when you finish, \
+             so do not run them again.",
+        );
+    }
+    format!("{note}\n\n{}", turn.text)
+}
+
+fn resumed_line(locale: &str) -> &'static str {
+    if locale == "en" {
+        "Crew restarted during this turn. Sending it again to pick up where it stopped."
+    } else {
+        "Crew가 다시 켜지면서 끊긴 작업을 이어서 하도록 다시 보냈어요"
+    }
+}
+
+fn gave_up_line(locale: &str) -> &'static str {
+    if locale == "en" {
+        "Crew restarted during this turn several times in a row, so it is not sent again."
+    } else {
+        "Crew가 다시 켜질 때마다 끊긴 작업이라 더는 다시 보내지 않아요"
+    }
+}
+
+/// A turn the last daemon left unfinished, ready to start first. None when it
+/// is not to run on: the bot was stopped since, or it was sent on too often.
+fn resumed_turn(id: &str, agent_cfg: &AgentConfig, current: u64) -> Option<PendingDelivery> {
+    let turn = load_waits(id).turn?;
+    let locale = crate::paths::locale();
+    if agent_cfg.uses_pty() || current > turn.epoch || turn.resumes >= MAX_TURN_RESUMES {
+        update_waits(id, |saved| saved.turn = None);
+        if turn.resumes >= MAX_TURN_RESUMES {
+            crate::transcript::push_system(id, "crew", gave_up_line(&locale), None);
+        }
+        return None;
+    }
+    eprintln!("[crew] resume {id}: a turn the restart cut off");
+    crate::transcript::push_system(id, "crew", resumed_line(&locale), None);
+    Some(PendingDelivery {
+        text: resume_prompt(&turn),
+        newline: true,
+        msg_id: turn.msg_id.clone(),
+        joins: false,
+        origin: turn.origin.clone(),
+        then: turn.after.iter().map(SavedJob::job).collect(),
+        parked: false,
+    })
+}
+
 fn drop_waits(id: &str) {
     let _ = fs::remove_file(paths::waits_path(id));
     if let Ok(mut map) = recovered_tells().lock() {
@@ -2494,6 +2748,8 @@ fn restore_waiting(cfg: &Config) {
         let saved = load_waits(id);
         restore_epoch(id, saved.epoch);
         let current = serial_epoch(id);
+        // It was under way before anything that waited, so it goes first.
+        let resumed = resumed_turn(id, agent_cfg, current);
         let msgs = crate::transcript::messages(id);
         let mut users = Vec::new();
         for (i, message) in msgs.iter().enumerate() {
@@ -2558,6 +2814,9 @@ fn restore_waiting(cfg: &Config) {
                 });
             }
             front.extend(existing);
+            if let Some(item) = resumed {
+                front.push_front(item);
+            }
             *q = front;
         }
         let mut tells = VecDeque::new();
@@ -2738,9 +2997,11 @@ pub async fn run() -> anyhow::Result<()> {
                         Ok(map) => map.values().cloned().collect(),
                         Err(_) => Vec::new(),
                     };
+                    // Cut off, not stopped: the turns belong to the daemon
+                    // that has the socket now, which read their records.
                     for agent in live {
                         if let LiveAgent::Headless(session) = agent {
-                            headless::halt(&session);
+                            cut_off(&session);
                         }
                     }
                     // Then only exit. The socket, pid and version name whoever
@@ -2956,6 +3217,9 @@ fn mark_routine_run(target: &str, key: &str, minute_key: &str) -> anyhow::Result
     write_routines(target, routines)
 }
 
+/// The daemon is going down, for an update or a quit. A turn it stops here is
+/// cut off, not over: its record stays, and so does the CLI session, so the
+/// next daemon sends it on where it stopped.
 fn shutdown_agents() {
     crate::transcript::seal_all_now();
     if let Ok(mut map) = inbox().lock() {
@@ -2966,7 +3230,10 @@ fn shutdown_agents() {
         Err(_) => return,
     };
     for live in list {
-        live.kill();
+        match live {
+            LiveAgent::Headless(session) => cut_off(&session),
+            pty => pty.kill(),
+        }
     }
 }
 
@@ -3742,7 +4009,7 @@ fn tell_agent_origin(
             // It runs once this turn is over, when the bot may be on another:
             // the reply goes where this turn's would.
             let sent_from = origin.clone().or_else(|| get_origin(&from));
-            if defer_tell_if_epoch(&from, epoch, to, &from, text, sent_from)
+            if defer_tell_saved(&from, epoch, to, &from, text, sent_from)
                 && !matches!(
                     live_status(&from),
                     Ok(AgentStatus::Working | AgentStatus::Blocked)
@@ -4700,6 +4967,9 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
 /// for the exit, since the next turn resumes the session the CLI is writing.
 /// `turn_ended` at the exit finds the wake spent and nothing left to release.
 pub(crate) fn turn_answered(id: &str) {
+    // First: a restart in between may lose what goes on, but must not send
+    // an answered turn again.
+    note_turn_over(id);
     remote_turn_over(id);
     wake_asker(id);
     release(take_followers(id));
@@ -4720,6 +4990,7 @@ pub(crate) fn turn_ended(id: &str) {
     if matches!(live_status(id), Ok(AgentStatus::Blocked)) {
         return;
     }
+    note_turn_over(id);
     // A headless turn closed its remote job before it went idle.
     if !is_headless(id) {
         remote_turn_over(id);
@@ -4846,6 +5117,229 @@ mod daemon_tests {
             let stored = fs::read_to_string(paths::transcript_path(&bot)).unwrap();
             assert!(!stored.contains("\"queued\":true"), "{stored}");
             crate::transcript::drop_agent(&bot);
+        });
+    }
+
+    fn headless_cfg(id: &str) -> AgentConfig {
+        let mut cfg = AgentConfig::new(id.into(), id.into(), vec!["/bin/sh".into()], None);
+        cfg.headless = true;
+        cfg
+    }
+
+    fn saved_turn(text: &str, origin: TurnOrigin, epoch: u64, resumes: u32) -> SavedTurn {
+        SavedTurn {
+            text: text.into(),
+            msg_id: None,
+            origin,
+            epoch,
+            resumes,
+            after: Vec::new(),
+        }
+    }
+
+    /// The daemon went down while a bot was on a teammate's tell. Boot puts
+    /// that turn first in line, with the asker it had and the tell the bot
+    /// ran, and says so in the chat. Started, it keeps the original prompt
+    /// and counts the restart.
+    #[test]
+    fn boot_sends_a_cut_off_turn_on() {
+        paths::testing::with_home("resume-turn", || {
+            let bot = test_id("bot");
+            let asker = test_id("asker");
+            let origin = TurnOrigin {
+                from: asker.clone(),
+                reply_agent: Some(asker.clone()),
+                hops: 2,
+                ..TurnOrigin::default()
+            };
+            let mut turn = saved_turn("[crew from:asker] 빼기 버그 고쳐 주세요", origin.clone(), 4, 0);
+            turn.after.push(SavedJob {
+                to: "reviewer".into(),
+                from: bot.clone(),
+                text: "리뷰 부탁해요".into(),
+                origin: Some(origin.clone()),
+                own: true,
+            });
+            update_waits(&bot, |saved| {
+                saved.epoch = 4;
+                saved.turn = Some(turn.clone());
+            });
+
+            let cfg = Config {
+                agents: vec![headless_cfg(&bot)],
+            };
+            restore_transcripts(&cfg);
+
+            let item = inbox()
+                .lock()
+                .unwrap()
+                .get(&bot)
+                .and_then(|q| q.front().cloned())
+                .expect("the cut-off turn waits first");
+            assert!(item.text.starts_with("[crew system] Crew restarted"), "{}", item.text);
+            assert!(item.text.ends_with(&turn.text), "{}", item.text);
+            assert!(item.text.contains("do not run them again"), "{}", item.text);
+            assert_eq!(item.origin, origin, "the answer still goes to the asker");
+            assert!(!item.parked);
+            assert_eq!(item.then.len(), 1);
+            assert!(item.then[0].own);
+            assert!(crate::transcript::messages(&bot)
+                .iter()
+                .any(|m| m.role == Role::System && m.text == resumed_line("ko")));
+
+            // The start that sends it on.
+            record_turn(&bot, &item.text, &item.text, None, &item.origin, 4);
+            let now = load_waits(&bot).turn.expect("still in flight");
+            assert_eq!(now.text, turn.text, "the prompt is not wrapped twice");
+            assert_eq!(now.resumes, 1);
+            clear_inbox(&bot);
+            drop_waits(&bot);
+            crate::transcript::drop_agent(&bot);
+        });
+    }
+
+    /// A stop after the record was written moved the bot's epoch on. That
+    /// turn was not cut off by the restart, and does not come back.
+    #[test]
+    fn boot_does_not_send_on_a_stopped_turn() {
+        paths::testing::with_home("resume-stopped", || {
+            let bot = test_id("bot");
+            update_waits(&bot, |saved| {
+                saved.epoch = 3;
+                saved.turn = Some(saved_turn("하던 일", TurnOrigin::user(), 2, 0));
+            });
+            let cfg = Config {
+                agents: vec![headless_cfg(&bot)],
+            };
+            restore_transcripts(&cfg);
+            assert!(inbox_is_empty(&bot));
+            assert!(load_waits(&bot).turn.is_none());
+            drop_waits(&bot);
+            crate::transcript::drop_agent(&bot);
+        });
+    }
+
+    /// A turn that every restart cuts off is not sent on forever. The chat
+    /// says it stopped.
+    #[test]
+    fn boot_gives_up_on_a_turn_cut_off_too_often() {
+        paths::testing::with_home("resume-limit", || {
+            let bot = test_id("bot");
+            update_waits(&bot, |saved| {
+                saved.turn = Some(saved_turn(
+                    "하던 일",
+                    TurnOrigin::user(),
+                    0,
+                    MAX_TURN_RESUMES,
+                ));
+            });
+            let cfg = Config {
+                agents: vec![headless_cfg(&bot)],
+            };
+            restore_transcripts(&cfg);
+            assert!(inbox_is_empty(&bot));
+            assert!(load_waits(&bot).turn.is_none());
+            assert!(crate::transcript::messages(&bot)
+                .iter()
+                .any(|m| m.role == Role::System && m.text == gave_up_line("ko")));
+            drop_waits(&bot);
+            crate::transcript::drop_agent(&bot);
+        });
+    }
+
+    /// While a turn runs its record is on disk, with the tell the bot ran on
+    /// the way; a crash at that moment leaves both for the next daemon. Once
+    /// the turn is over, nothing is left to send again.
+    #[test]
+    fn a_running_turn_is_on_disk_until_it_is_over() {
+        paths::testing::with_home("turn-record", || {
+            let bot = test_id("bot");
+            let peer = test_id("peer");
+            let go = paths::home_dir().join("go");
+            fake_one_shot_bot(
+                &bot,
+                &format!(
+                    "while [ ! -f '{}' ]; do sleep 0.05; done\necho 끝났어요",
+                    go.display()
+                ),
+            );
+            insert_spawned_agent(AgentConfig::new(
+                peer.clone(),
+                peer.clone(),
+                vec!["cat".into()],
+                None,
+            ))
+            .unwrap();
+            send_agent(&bot, "고쳐 주세요").unwrap();
+            eventually(Duration::from_secs(5), "the turn never started", || {
+                headless_child_started(&bot)
+            });
+            let turn = load_waits(&bot).turn.expect("a running turn is recorded");
+            assert!(turn.text.contains("고쳐 주세요"), "{}", turn.text);
+            assert_eq!(turn.origin, TurnOrigin::user());
+
+            tell_agent(&bot, &peer, "리뷰 부탁해요").unwrap();
+            let after = load_waits(&bot).turn.expect("still running").after;
+            assert_eq!(after.len(), 1, "the tell it ran waits with the turn");
+            assert_eq!(after[0].to, peer);
+            assert!(after[0].own);
+
+            fs::write(&go, "").unwrap();
+            eventually(Duration::from_secs(5), "never answered", || {
+                told(&bot, "끝났어요")
+            });
+            wait_idle(&bot);
+            assert!(
+                load_waits(&bot).turn.is_none(),
+                "a finished turn must not be sent again"
+            );
+            remove_agent(&peer).unwrap();
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// The daemon going down stops the turn but does not end it: the record
+    /// stays for the next daemon, and the prompt is not put back in line,
+    /// where it would come back a second time.
+    #[test]
+    fn going_down_keeps_the_turn_to_send_on() {
+        paths::testing::with_home("turn-cut", || {
+            let bot = test_id("bot");
+            fake_one_shot_bot(&bot, "exec sleep 5");
+            send_agent(&bot, "오래 걸리는 일").unwrap();
+            eventually(Duration::from_secs(5), "the turn never started", || {
+                headless_child_started(&bot)
+            });
+            let Some(LiveAgent::Headless(session)) = agents().lock().unwrap().get(&bot).cloned()
+            else {
+                panic!("runs headless");
+            };
+            cut_off(&session);
+            let turn = load_waits(&bot).turn.expect("the cut-off turn stays on disk");
+            assert!(turn.text.contains("오래 걸리는 일"), "{}", turn.text);
+            assert!(inbox_is_empty(&bot), "it is not put back in line as well");
+            assert!(load_waits(&bot).parked.is_empty());
+            assert!(crate::transcript::messages(&bot).iter().all(|m| !m.queued));
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A stop ends the turn on purpose. A restart after it has nothing to
+    /// send on.
+    #[test]
+    fn a_stopped_turn_leaves_no_record() {
+        paths::testing::with_home("turn-stop", || {
+            let bot = test_id("bot");
+            fake_one_shot_bot(&bot, "exec sleep 5");
+            send_agent(&bot, "오래 걸리는 일").unwrap();
+            eventually(Duration::from_secs(5), "the turn never started", || {
+                headless_child_started(&bot)
+            });
+            assert!(load_waits(&bot).turn.is_some());
+            interrupt_turn(&bot).unwrap();
+            wait_idle(&bot);
+            assert!(load_waits(&bot).turn.is_none());
+            remove_agent(&bot).unwrap();
         });
     }
 
