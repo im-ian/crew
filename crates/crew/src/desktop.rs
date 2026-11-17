@@ -1060,6 +1060,21 @@ fn web_url(url: &str) -> Result<&str, String> {
     Ok(raw)
 }
 
+/// What each dropped path is: "dir", "file", or "missing". The composer
+/// attaches a folder as a folder.
+#[tauri::command(async)]
+fn path_kinds(paths: Vec<String>) -> Vec<&'static str> {
+    paths.iter().map(|p| path_kind(std::path::Path::new(p))).collect()
+}
+
+fn path_kind(path: &std::path::Path) -> &'static str {
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.is_dir() => "dir",
+        Ok(_) => "file",
+        Err(_) => "missing",
+    }
+}
+
 #[tauri::command]
 fn save_upload(name: String, data: String) -> Result<String, String> {
     let bytes = crate::avatar::decode_input(&data).map_err(|e| e.to_string())?;
@@ -1180,6 +1195,7 @@ pub fn run() -> anyhow::Result<()> {
             open_path,
             open_url,
             pick_folder,
+            path_kinds,
             set_dock_badge,
             set_locale,
             set_notifications,
@@ -1232,6 +1248,18 @@ mod tests {
                 "{name} is missing from capabilities ({allow})"
             );
         }
+    }
+
+    #[test]
+    fn a_dropped_path_is_a_folder_a_file_or_gone() {
+        let dir = std::env::temp_dir().join(format!("crew-path-kind-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("13_쿠폰팩 1.png");
+        std::fs::write(&file, b"x").unwrap();
+        assert_eq!(path_kind(&dir), "dir");
+        assert_eq!(path_kind(&file), "file");
+        assert_eq!(path_kind(&dir.join("gone")), "missing");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

@@ -5346,6 +5346,11 @@ button.mention-chip:active {
 }
 .composer-box:hover { background: color-mix(in srgb, var(--field) 55%, var(--line)); }
 .composer-box:focus-within { background: var(--line); }
+/* A file from Finder is dragged over the window: the field takes it. */
+.composer-box.is-drop {
+  background: var(--line);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--working) 60%, transparent);
+}
 .composer-input {
   flex: 1;
   min-width: 0;
