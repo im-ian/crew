@@ -1882,7 +1882,9 @@ fn stream_line(
             turn_end = is_turn_end(cli, &v);
         }
     }
-    if let Some(chunk) = ingest_line(cli, line, state) {
+    let chunk = ingest_line(cli, line, state);
+    apply_retract(session, state);
+    if let Some(chunk) = chunk {
         feed_text(cli, session, &chunk, state.codex_new_message);
         if let Ok(mut inner) = session.inner.lock() {
             inner.last_output = Instant::now();
@@ -2227,6 +2229,7 @@ fn apply_grok_stdout(session: &HeadlessSession, state: &mut ParseState, line: &s
         remember_grok_tool_owner(&v, state);
     }
     let chunk = ingest_line(CliKind::Grok, line, state);
+    apply_retract(session, state);
     if let Some(text) = chunk.as_deref() {
         feed_text(CliKind::Grok, session, text, false);
     }
@@ -2335,6 +2338,20 @@ struct ParseState {
     /// A subagent's words come a token at a time, spaces and all, as over
     /// ACP, not a sentence at a time.
     child_tokens: bool,
+    /// The grok model response being streamed now, by its `streamStartMs`.
+    grok_stream: Option<u64>,
+    /// Reply text shown from that response, exactly as the row got it.
+    stream_shown: String,
+    /// Where `spoken` stood when that response began.
+    stream_spoken_mark: usize,
+    /// That response's first words came after a break this parser added.
+    stream_broke: bool,
+    /// Responses grok gave up on and asked again from the start. A word of
+    /// theirs that arrives late is dropped.
+    grok_failed_streams: HashSet<u64>,
+    /// Reply text the caller takes back off the end of the row: what a
+    /// response grok then retried had already shown.
+    retract: Option<String>,
 }
 
 impl ParseState {
@@ -2425,12 +2442,23 @@ fn ingest_line(cli: CliKind, line: &str, state: &mut ParseState) -> Option<Strin
         // A tool and a finished reply both end a sentence. One blank line
         // starts the next balloon. A chunk that already begins on a new line
         // keeps that break.
-        if tool || (turned && !c.starts_with('\n')) {
+        let broke = tool || (turned && !c.starts_with('\n'));
+        if cli == CliKind::Grok {
+            if state.stream_shown.is_empty() {
+                state.stream_broke = broke;
+            }
+        }
+        if broke {
             format!("\n\n{c}")
         } else {
             c
         }
     });
+    if cli == CliKind::Grok {
+        if let Some(c) = chunk.as_deref() {
+            state.stream_shown.push_str(c);
+        }
+    }
     // Armed after this event's own text: one claude message can hold the text
     // and the tool_use that follows it.
     if state.got_text && !crate::tool_card::from_events(&v).is_empty() {
@@ -2447,7 +2475,10 @@ fn grok_text(v: &Value, state: &mut ParseState) -> Option<String> {
     if grok_child_utterance(v, state) {
         return None;
     }
-    let (_, kind) = grok_event(v);
+    let (event, kind) = grok_event(v);
+    if follow_grok_stream(v, event, kind, state) {
+        return None;
+    }
     if matches!(
         kind,
         "auto_compact_started" | "auto_compact_completed" | "compaction_checkpoint"
@@ -2505,6 +2536,76 @@ fn grok_text(v: &Value, state: &mut ParseState) -> Option<String> {
         "thought" | "tool_call" | "tool_call_update" | "usage" | "plan" | "available_commands"
         | "end" => None,
         _ => None,
+    }
+}
+
+/// The model response a grok event belongs to: its `streamStartMs`. A retry
+/// starts a new one, so the words of the failed try carry the old value.
+fn grok_stream_of(event: &Value) -> Option<u64> {
+    event
+        .pointer("/_meta/streamStartMs")
+        .and_then(Value::as_u64)
+}
+
+/// Grok lost a model response mid-stream and asks again from the start
+/// (`retry_state` / `retrying`). Its words so far are dropped, and late ones
+/// with the same `streamStartMs` as well: the retry says it all again. The
+/// late ones can be logged after the retry, so arrival order cannot tell.
+/// True when this event is spent: the retry itself, or a word of a failed try.
+fn follow_grok_stream(v: &Value, event: &Value, kind: &str, state: &mut ParseState) -> bool {
+    if event_session_id(v).is_some_and(|sid| is_foreign_session(state, sid)) {
+        return false;
+    }
+    if kind == "retry_state" {
+        if event.get("type").and_then(Value::as_str) == Some("retrying") {
+            drop_failed_stream(state);
+        }
+        return true;
+    }
+    if let Some(stream) = grok_stream_of(event) {
+        if state.grok_failed_streams.contains(&stream) {
+            return kind == "agent_message_chunk";
+        }
+        if state.grok_stream != Some(stream) {
+            state.grok_stream = Some(stream);
+            state.stream_shown.clear();
+            state.stream_spoken_mark = state.spoken.len();
+        }
+    }
+    // A response that called a tool was not lost. Without stream ids, the
+    // words after it are a new response.
+    if matches!(kind, "tool_call" | "turn_completed") {
+        state.stream_shown.clear();
+        state.stream_spoken_mark = state.spoken.len();
+    }
+    false
+}
+
+fn drop_failed_stream(state: &mut ParseState) {
+    if let Some(stream) = state.grok_stream {
+        state.grok_failed_streams.insert(stream);
+    }
+    let shown = std::mem::take(&mut state.stream_shown);
+    if shown.is_empty() {
+        return;
+    }
+    let mark = state.stream_spoken_mark.min(state.spoken.len());
+    state.spoken.truncate(mark);
+    // The retry's first words need the break the failed try used up.
+    if state.stream_broke {
+        state.tool_after_text = true;
+    }
+    if state.spoken.is_empty() {
+        state.got_text = false;
+        state.tool_after_text = false;
+    }
+    state.retract = Some(shown);
+}
+
+/// Takes back off the row what a retried grok response had shown.
+fn apply_retract(session: &HeadlessSession, state: &mut ParseState) {
+    if let Some(tail) = state.retract.take() {
+        crate::transcript::retract_assistant_tail(&session.id, &tail);
     }
 }
 
@@ -4838,6 +4939,140 @@ mod tests {
             assert!(after.iter().any(|n| n == "grep"), "{after:?}");
             assert!(st.held_tools.is_empty());
         });
+    }
+
+    /// One grok ACP event of the parent session, with grok's `_meta`.
+    fn grok_acp(kind: &str, text: Option<&str>, stream: Option<u64>, event: u32) -> String {
+        let mut update = serde_json::json!({ "sessionUpdate": kind });
+        if let Some(text) = text {
+            update["content"] = serde_json::json!({ "type": "text", "text": text });
+        }
+        let mut meta = serde_json::json!({ "eventId": format!("sess-1-{event}") });
+        if let Some(stream) = stream {
+            meta["streamStartMs"] = serde_json::json!(stream);
+            meta["promptId"] = serde_json::json!("prompt-1");
+        }
+        update["_meta"] = meta;
+        serde_json::json!({
+            "method": "session/update",
+            "params": { "sessionId": "sess-1", "update": update }
+        })
+        .to_string()
+    }
+
+    fn grok_retry(event: u32) -> String {
+        serde_json::json!({
+            "method": "_x.ai/session/update",
+            "params": {
+                "sessionId": "sess-1",
+                "update": {
+                    "sessionUpdate": "retry_state",
+                    "type": "retrying",
+                    "attempt": 1,
+                    "max_retries": 15,
+                    "reason": "reqwest error stream: Transport error: error decoding response body",
+                    "error_type": "http"
+                },
+                "_meta": { "eventId": format!("sess-1-{event}") }
+            }
+        })
+        .to_string()
+    }
+
+    fn reply_text(agent: &str) -> String {
+        crate::transcript::messages(agent)
+            .into_iter()
+            .filter(|m| m.role == crate::protocol::Role::Assistant)
+            .map(|m| m.text)
+            .collect::<Vec<_>>()
+            .join("|")
+    }
+
+    /// PM's turn on grok, as its session log has it: a response that ran a
+    /// tool, then one that broke mid-stream and was retried. The broken try's
+    /// first word, `@bot-mvkco`, is logged after the retry (its event id is
+    /// lower, its `streamStartMs` the broken try's). The retry says it all
+    /// again, so the row read `@bot-mvkco@bot-mvkcoiip`.
+    #[test]
+    fn a_word_of_a_retried_grok_response_does_not_join_the_retry() {
+        crate::paths::testing::with_home("grok-retry-late", || {
+            let session = grok_session("grok-retry-late-bot");
+            crate::transcript::begin_turn(&session.id);
+            let mut st = ParseState::default();
+            let first = 1794874191949;
+            let failed = 1794874261964;
+            let retry = 1794874268135;
+            let lines = [
+                grok_acp("agent_message_chunk", Some("적용 전 웹을 띄우겠습니다."), Some(first), 2738),
+                r#"{"method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"tool_call","toolCallId":"call-58","title":"run_terminal_command","rawInput":{"command":"crew tell bot-mvkcoiip hi"}}}}"#.to_string(),
+                grok_acp("tool_call_update", None, Some(first), 2742),
+                grok_acp("agent_thought_chunk", Some("확인 메시지를 전달하겠습니다."), Some(failed), 2746),
+                grok_retry(2753),
+                grok_acp("agent_message_chunk", Some("@bot-mvkco"), Some(failed), 2752),
+                grok_acp("agent_thought_chunk", Some("곧 확인 메시지를 전송하겠습니다."), Some(retry), 2755),
+                grok_acp("agent_message_chunk", Some("@bot-mvkcoiip 와 @bot-mwa8f8ef 에게 넘겼습니다."), Some(retry), 2858),
+            ];
+            for line in &lines {
+                apply_grok_stdout(&session, &mut st, line);
+            }
+            assert_eq!(
+                reply_text(&session.id),
+                "적용 전 웹을 띄우겠습니다.\n\n@bot-mvkcoiip 와 @bot-mwa8f8ef 에게 넘겼습니다."
+            );
+            assert!(!st.spoken.contains("@bot-mvkco@"), "{}", st.spoken);
+            crate::transcript::drop_agent(&session.id);
+        });
+    }
+
+    /// The broken try's words came before the retry and are already on the
+    /// row. They are taken back off, the row goes out again without them, and
+    /// the retry starts after the same break.
+    #[test]
+    fn words_a_retried_grok_response_already_showed_are_taken_back() {
+        crate::paths::testing::with_home("grok-retry-shown", || {
+            let session = grok_session("grok-retry-shown-bot");
+            crate::transcript::begin_turn(&session.id);
+            let mut st = ParseState::default();
+            let lines = [
+                grok_acp("agent_message_chunk", Some("확인하겠습니다."), Some(1), 1),
+                r#"{"method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"read_file","rawInput":{"target_file":"a.rs"}}}}"#.to_string(),
+                grok_acp("tool_call_update", None, Some(1), 2),
+                grok_acp("agent_message_chunk", Some("원인은 "), Some(2), 3),
+                grok_acp("agent_message_chunk", Some("캐시"), Some(2), 4),
+            ];
+            for line in &lines {
+                apply_grok_stdout(&session, &mut st, line);
+            }
+            assert_eq!(reply_text(&session.id), "확인하겠습니다.\n\n원인은 캐시");
+            apply_grok_stdout(&session, &mut st, &grok_retry(5));
+            assert_eq!(reply_text(&session.id), "확인하겠습니다.");
+            let late = grok_acp("agent_message_chunk", Some("입니다"), Some(2), 6);
+            apply_grok_stdout(&session, &mut st, &late);
+            let said = Some("원인은 캐시 만료입니다.");
+            let again = grok_acp("agent_message_chunk", said, Some(3), 7);
+            apply_grok_stdout(&session, &mut st, &again);
+            let fixed = "확인하겠습니다.\n\n원인은 캐시 만료입니다.";
+            assert_eq!(reply_text(&session.id), fixed);
+            assert_eq!(st.spoken, "확인하겠습니다.원인은 캐시 만료입니다.");
+            crate::transcript::drop_agent(&session.id);
+        });
+    }
+
+    /// A child's retry is the child's: the parent's reply keeps its words.
+    #[test]
+    fn a_retry_in_a_child_session_leaves_the_parent_reply_alone() {
+        let mut st = ParseState::default();
+        st.session_id = Some("sess-1".into());
+        let said = ingest_line(
+            CliKind::Grok,
+            &grok_acp("agent_message_chunk", Some("부모가 말합니다."), Some(1), 1),
+            &mut st,
+        );
+        assert_eq!(said.as_deref(), Some("부모가 말합니다."));
+        let child_retry = grok_retry(2).replace("\"sess-1\"", "\"child-9\"");
+        ingest_line(CliKind::Grok, &child_retry, &mut st);
+        assert!(st.retract.is_none());
+        assert_eq!(st.spoken, "부모가 말합니다.");
     }
 
     /// After `end`, a child result is still a side note. The sealed parent

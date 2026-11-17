@@ -1577,6 +1577,40 @@ pub fn on_assistant_delta(agent: &str, chunk: &str) {
     on_pty_bytes(agent, chunk.as_bytes());
 }
 
+/// Take `tail` back off the end of the reply being written: the words of a
+/// model response the CLI then asked again from the start. The row goes out
+/// again with them gone. Nothing changes when the row does not end with them.
+pub fn retract_assistant_tail(agent: &str, tail: &str) -> bool {
+    let cleaned = strip_crew_markers(&normalize_text(&strip_ansi(tail)));
+    let cleaned = cleaned.trim_end();
+    if cleaned.trim().is_empty() {
+        return false;
+    }
+    let msg = {
+        let Ok(mut map) = chats().lock() else {
+            return false;
+        };
+        let Some(chat) = map.get_mut(agent) else {
+            return false;
+        };
+        let Some(idx) = chat.pending_idx else {
+            return false;
+        };
+        let text = chat.messages[idx].text.trim_end();
+        let Some(kept) = text.strip_suffix(cleaned) else {
+            return false;
+        };
+        let kept = kept.trim_end().to_string();
+        chat.messages[idx].text = kept;
+        chat.messages[idx].ts = now_ms();
+        chat.last_emit = Instant::now();
+        chat.dirty = false;
+        chat.messages[idx].clone()
+    };
+    emit(agent, msg);
+    true
+}
+
 /// A queued follow-up lands before the first token of the reply. Keep it
 /// under that reply, or the next token draws the bot's chat beneath it.
 fn pin_queued_below_reply(chat: &mut AgentChat) {
