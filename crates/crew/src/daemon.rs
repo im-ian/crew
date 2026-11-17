@@ -1349,12 +1349,8 @@ fn pump_inbox_inner(id: &str) {
     };
     // What the user said in a row while the bot was busy is one prompt: the
     // bot starts on all of it, and none of it stays "waiting" behind the first.
-    let text = run
-        .iter()
-        .map(|item| item.text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    let (newline, origin, msg_id) = (first.newline, first.origin.clone(), first.msg_id.clone());
+    let text = run_text(&run);
+    let (newline, origin, msg_id) = (first.newline, run_origin(&run), first.msg_id.clone());
     let joined_ids: Vec<String> = run.iter().filter_map(|item| item.msg_id.clone()).collect();
     // Cloned before `then` is taken, so a silent stop can put each line back
     // with the teammates it named.
@@ -1432,13 +1428,65 @@ fn next_run(id: &str) -> Vec<PendingDelivery> {
         return run;
     };
     let joins = first.joins;
+    let teammate = from_teammate(&first);
+    let from = first.origin.from.clone();
     run.push(first);
     if joins {
         while let Some(more) = q.pop_front_if(|next| next.joins && !next.parked) {
             run.push(more);
         }
+    } else if teammate {
+        // What the same teammate sent while this bot was busy is one turn:
+        // a later report has often made an earlier one stale already.
+        let rest = std::mem::take(q);
+        for item in rest {
+            if !item.parked && from_teammate(&item) && item.origin.from == from {
+                run.push(item);
+            } else {
+                q.push_back(item);
+            }
+        }
     }
     run
+}
+
+/// A tell or a reply from another bot, not a line the user typed or Crew's
+/// own word.
+fn from_teammate(item: &PendingDelivery) -> bool {
+    let from = item.origin.from.as_str();
+    !item.joins && !from.is_empty() && from != "user" && from != "crew"
+}
+
+/// One prompt for a run of deliveries. Several from one teammate say which
+/// came later, so the bot follows the newest where they differ.
+fn run_text(run: &[PendingDelivery]) -> String {
+    let teammate = run.len() > 1 && run.first().is_some_and(from_teammate);
+    let mut out = String::new();
+    for (i, item) in run.iter().enumerate() {
+        if i > 0 {
+            out.push_str("\n\n");
+            if teammate {
+                out.push_str(&crate::protocol::system_envelope(&format!(
+                    "{} sent this later, while you were busy. Where it differs from what they sent above, it replaces that.",
+                    item.origin.from
+                )));
+                out.push_str("\n\n");
+            }
+        }
+        out.push_str(&item.text);
+    }
+    out
+}
+
+/// Whose reply this run's turn owes: the newest delivery in it that asked
+/// for one, else the first.
+fn run_origin(run: &[PendingDelivery]) -> TurnOrigin {
+    run.iter()
+        .rev()
+        .find(|item| item.origin.reply_agent.is_some())
+        .or_else(|| run.first())
+        .map(|item| item.origin.clone())
+        .unwrap_or_default()
 }
 
 /// `item`'s row stops showing as waiting.
@@ -1844,6 +1892,21 @@ fn defer_tell_if_epoch(
             own: true,
         });
     true
+}
+
+/// `anchor` ran `crew tell` to `to` in the turn it is in. Its own tells wait
+/// on that turn until it ends.
+fn told_in_turn(anchor: &str, to: &str) -> bool {
+    serial_board()
+        .lock()
+        .ok()
+        .and_then(|board| {
+            board
+                .queues
+                .get(anchor)
+                .map(|q| q.iter().any(|j| j.own && j.to == to))
+        })
+        .unwrap_or(false)
 }
 
 fn tells_after(anchor: &str, to: &str) -> bool {
@@ -5130,7 +5193,12 @@ fn on_assistant_sealed(agent: &str, msg: &ChatMessage) {
     if let Some(peer) = targets.agent {
         if known_agent(&peer) && !text.is_empty() && msg.choice.is_none() {
             let row = crate::transcript::push_handoff(&peer, agent, &text);
-            enqueue_handoff(&peer, agent, &text, Some(&row.id));
+            // This turn already ran `crew tell` to that bot. The tell is its
+            // report; the reply stays in the chat as a record, and goes into
+            // no prompt and wakes no one.
+            if !told_in_turn(agent, &peer) {
+                enqueue_handoff(&peer, agent, &text, Some(&row.id));
+            }
         }
     }
     // Permission prompts stay with the CLI, which already runs allow-all.
@@ -8251,6 +8319,95 @@ exec sleep 5"#,
             assert!(wait_note(&bot).unwrap().contains("approval"));
             headless_status(&bot, AgentStatus::Idle);
             remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// Two reports from one teammate wait while the bot is busy. They go as one
+    /// turn, the later marked as replacing the earlier; another teammate's
+    /// tell keeps its own turn and its place.
+    #[test]
+    fn a_teammates_waiting_tells_go_as_one_turn() {
+        paths::testing::with_home("tell-merge", || {
+            let bot = test_id("lead");
+            let a = test_id("snow");
+            let b = test_id("moon");
+            for id in [&bot, &a, &b] {
+                claude_bot(id);
+            }
+            headless_status(&bot, AgentStatus::Working);
+            let asked = |from: &str| TurnOrigin {
+                chain: crate::relay::new_chain(),
+                ..TurnOrigin::mention_tell(from)
+            };
+            for (from, text) in [(&a, "미리보기 올렸어요"), (&b, "리뷰 끝"), (&a, "미리보기 다시 올렸어요")] {
+                tell_agent_origin(from, &bot, text, Some(asked(from)), false, &mut VecDeque::new())
+                    .unwrap();
+            }
+            headless_status(&bot, AgentStatus::Idle);
+
+            let run = next_run(&bot);
+            assert_eq!(run.len(), 2, "both of snow's");
+            let text = run_text(&run);
+            let first = text.find("미리보기 올렸어요").unwrap();
+            let later = text.find("미리보기 다시 올렸어요").unwrap();
+            assert!(first < later, "{text}");
+            assert!(text.contains("it replaces that"), "{text}");
+            assert_eq!(run_origin(&run).reply_agent.as_deref(), Some(a.as_str()));
+            let rest = next_run(&bot);
+            assert_eq!(rest.len(), 1);
+            assert!(rest[0].text.contains("리뷰 끝"));
+
+            take_origin(&bot);
+            for id in [&bot, &a, &b] {
+                clear_inbox(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// A teammate that already ran `crew tell` to the bot its reply goes to
+    /// does not send that bot its reply too: it stays in the chat as a
+    /// record, and goes into no prompt.
+    #[test]
+    fn a_reply_after_a_tell_back_is_only_a_record() {
+        paths::testing::with_home("tell-then-reply", || {
+            let lead = test_id("lead");
+            let worker = test_id("worker");
+            for id in [&lead, &worker] {
+                claude_bot(id);
+            }
+            let origin = TurnOrigin {
+                from: lead.clone(),
+                reply_agent: Some(lead.clone()),
+                hops: 1,
+                chain: crate::relay::new_chain(),
+                ..TurnOrigin::default()
+            };
+            set_origin(&worker, origin.clone());
+            let sealed = |text: &str| {
+                let row = crate::transcript::push_system(&worker, "crew", "x", None);
+                ChatMessage {
+                    role: Role::Assistant,
+                    text: text.into(),
+                    ..row
+                }
+            };
+            defer_tell(&worker, &lead, &worker, "PR #12 머지했어요", Some(origin.clone()));
+            on_assistant_sealed(&worker, &sealed("머지 끝났어요"));
+            assert!(crate::transcript::messages(&lead)
+                .iter()
+                .any(|m| m.text == "머지 끝났어요"), "the reply stays as a record");
+            assert!(take_handoff_from(&lead, &worker).is_none(), "and goes into no prompt");
+
+            clear_serial_after(&worker);
+            on_assistant_sealed(&worker, &sealed("다음 것도 끝났어요"));
+            assert!(take_handoff_from(&lead, &worker).is_some(), "without a tell it still goes");
+
+            take_origin(&worker);
+            for id in [&lead, &worker] {
+                clear_inbox(id);
+                remove_agent(id).unwrap();
+            }
         });
     }
 
