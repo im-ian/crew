@@ -940,6 +940,13 @@ fn set_lead_only_notify(enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Installed Nerd Fonts for private-use icons, preferred names first.
+/// Each entry is the `local()` names of one family (full, PostScript, family).
+#[tauri::command]
+fn list_nerd_fonts() -> Vec<Vec<String>> {
+    crate::nerd_font::installed_nerd_faces()
+}
+
 /// Mirror the worktree switch so bots started by the daemon use the same choice.
 #[tauri::command]
 fn set_worktree(enabled: bool) -> Result<(), String> {
@@ -1201,6 +1208,7 @@ pub fn run() -> anyhow::Result<()> {
             set_notifications,
             set_lead_only_notify,
             set_worktree,
+            list_nerd_fonts,
             set_escape_layer,
             remote_probe,
             remote_join,

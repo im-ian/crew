@@ -279,6 +279,12 @@
           "markdownDescription": "Enables the list_models command without any pre-configured scope."
         },
         {
+          "description": "Enables the list_nerd_fonts command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-nerd-fonts",
+          "markdownDescription": "Enables the list_nerd_fonts command without any pre-configured scope."
+        },
+        {
           "description": "Enables the list_routine_runs command without any pre-configured scope.",
           "type": "string",
           "const": "allow-list-routine-runs",
@@ -643,6 +649,12 @@
           "type": "string",
           "const": "deny-list-models",
           "markdownDescription": "Denies the list_models command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_nerd_fonts command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-nerd-fonts",
+          "markdownDescription": "Denies the list_nerd_fonts command without any pre-configured scope."
         },
         {
           "description": "Denies the list_routine_runs command without any pre-configured scope.",

@@ -213,6 +213,8 @@ export const api = {
   setLeadOnlyNotify: (enabled: boolean) =>
     invoke<void>("set_lead_only_notify", { enabled }),
   setWorktree: (enabled: boolean) => invoke<void>("set_worktree", { enabled }),
+  /** Installed Nerd Fonts. Each entry is the `local()` names of one family. */
+  listNerdFonts: () => invoke<string[][]>("list_nerd_fonts"),
   setEscapeLayer: (open: boolean) => invoke<void>("set_escape_layer", { open }),
   remoteProbe: (url: string) => invoke<RemoteServer>("remote_probe", { url }),
   /** The new local representative bot's id. */

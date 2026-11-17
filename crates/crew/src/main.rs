@@ -19,6 +19,7 @@ mod log;
 mod macos_escape;
 mod memory;
 mod models;
+mod nerd_font;
 mod nl_routine;
 mod notify;
 mod paths;

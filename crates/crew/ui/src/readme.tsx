@@ -215,7 +215,7 @@ if (shot === "file") {
     { id: "f2", role: "system", from: "impl", kind: "file", ts: at(2), text: `${SHOWN_FILE}:53` },
     {
       id: "f3", role: "assistant", from: "impl", ts: at(2),
-      text: "옆에 열어 뒀어요. 판별은 `crates/crew/ui/src/fontPref.ts:53`의 `missingFonts`가 하고, 너비는 `pageMeasure`가 화면에 잠깐 붙인 span으로 재요. 설정 화면 쪽은 `crates/crew/ui/src/components/SettingsPane.tsx`예요.",
+      text: "옆에 열어 뒀어요. 판별은 `crates/crew/ui/src/fontPref.ts:64`의 `missingFonts`가 하고, 너비는 `pageMeasure`가 화면에 잠깐 붙인 span으로 재요. 설정 화면 쪽은 `crates/crew/ui/src/components/SettingsPane.tsx`예요.",
     },
   );
   setTimeout(() => thread.impl.push(...fileRows), 900);
