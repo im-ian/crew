@@ -928,6 +928,13 @@ fn set_notifications(enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Mirror the lead-only switch: the daemon sends the alerts, window or not.
+#[tauri::command]
+fn set_lead_only_notify(enabled: bool) -> Result<(), String> {
+    crate::paths::write_lead_only_notify(enabled);
+    Ok(())
+}
+
 /// Mirror the worktree switch so bots started by the daemon use the same choice.
 #[tauri::command]
 fn set_worktree(enabled: bool) -> Result<(), String> {
@@ -1176,6 +1183,7 @@ pub fn run() -> anyhow::Result<()> {
             set_dock_badge,
             set_locale,
             set_notifications,
+            set_lead_only_notify,
             set_worktree,
             set_escape_layer,
             remote_probe,

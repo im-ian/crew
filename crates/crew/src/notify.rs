@@ -34,6 +34,14 @@ pub fn should_notify(prev: AgentStatus, next: AgentStatus, no_finish: bool) -> b
     prev == AgentStatus::Working && next == AgentStatus::Idle
 }
 
+/// A finish that stays quiet under lead-only notifications: the bot is in a
+/// group another bot leads. "Needs a look" still notifies, and so does a
+/// finish that leaves a question card open: both wait on the user, and the
+/// lead cannot answer them in the bot's place.
+pub fn quiet_for_lead(next: AgentStatus, lead_only: bool, led_by_another: bool, asking: bool) -> bool {
+    lead_only && led_by_another && next != AgentStatus::Blocked && !asking
+}
+
 pub fn notify_body(name: &str, next: AgentStatus, lang: &str) -> String {
     match (next == AgentStatus::Blocked, lang == "en") {
         (true, true) => format!("{name} needs a look"),
@@ -76,6 +84,19 @@ pub fn maybe_status_notify(
     no_finish: bool,
 ) {
     if !should_notify(prev, next, no_finish) {
+        return;
+    }
+    // Read only when the setting is on: a frame comes with every status change.
+    if paths::lead_only_notify()
+        && quiet_for_lead(
+            next,
+            true,
+            crate::groups::load()
+                .map(|groups| crate::groups::led_by_another(&groups, agent_id))
+                .unwrap_or(false),
+            crate::transcript::has_pending_choice(agent_id),
+        )
+    {
         return;
     }
     let body = notify_body(name, next, &paths::locale());
@@ -166,6 +187,18 @@ fn applescript_str(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lead_only_quiets_a_led_bots_finish_but_not_a_look_or_a_question() {
+        // Off, or a lead / loose bot / group with no lead: as before.
+        assert!(!quiet_for_lead(AgentStatus::Idle, false, true, false));
+        assert!(!quiet_for_lead(AgentStatus::Idle, true, false, false));
+        // A bot another one leads: its finish is quiet.
+        assert!(quiet_for_lead(AgentStatus::Idle, true, true, false));
+        // Waiting on the user still reaches the user.
+        assert!(!quiet_for_lead(AgentStatus::Blocked, true, true, false));
+        assert!(!quiet_for_lead(AgentStatus::Idle, true, true, true));
+    }
 
     #[test]
     fn applescript_escapes_quotes() {

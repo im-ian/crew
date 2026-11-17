@@ -208,6 +208,8 @@ export const api = {
   setLocale: (locale: string) => invoke<void>("set_locale", { locale }),
   setNotifications: (enabled: boolean) =>
     invoke<void>("set_notifications", { enabled }),
+  setLeadOnlyNotify: (enabled: boolean) =>
+    invoke<void>("set_lead_only_notify", { enabled }),
   setWorktree: (enabled: boolean) => invoke<void>("set_worktree", { enabled }),
   setEscapeLayer: (open: boolean) => invoke<void>("set_escape_layer", { open }),
   remoteProbe: (url: string) => invoke<RemoteServer>("remote_probe", { url }),

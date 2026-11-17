@@ -131,6 +131,14 @@ pub fn group_of<'a>(groups: &'a [SidebarGroup], agent_id: &str) -> Option<&'a Si
         .find(|g| g.id != UNGROUPED_ID && g.items.iter().any(|item| item == &key))
 }
 
+/// Bot `agent_id` sits in a group another bot leads. With lead-only
+/// notifications on, its finishes stay quiet and the lead speaks for it.
+pub fn led_by_another(groups: &[SidebarGroup], agent_id: &str) -> bool {
+    group_of(groups, agent_id)
+        .and_then(|g| g.lead.as_deref())
+        .is_some_and(|lead| lead != agent_id)
+}
+
 fn unique_group_name(groups: &[SidebarGroup], base: &str) -> String {
     let taken: std::collections::HashSet<&str> = groups.iter().map(|g| g.name.as_str()).collect();
     if !taken.contains(base) {
@@ -362,6 +370,28 @@ mod tests {
         assert_eq!(raw.matches("\"lead\"").count(), 1);
         let _ = fs::remove_file(&path);
         let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn only_a_bot_another_one_leads_is_led() {
+        let group = |id: &str, items: &[&str], lead: Option<&str>| SidebarGroup {
+            id: id.into(),
+            name: id.into(),
+            collapsed: false,
+            items: items.iter().map(|b| format!("agent:{b}")).collect(),
+            path: None,
+            lead: lead.map(Into::into),
+        };
+        let groups = vec![
+            group("g1", &["a1", "a2"], Some("a2")),
+            group("g2", &["b1"], None),
+            group(UNGROUPED_ID, &["c1"], None),
+        ];
+        assert!(led_by_another(&groups, "a1"));
+        assert!(!led_by_another(&groups, "a2"), "the lead itself");
+        assert!(!led_by_another(&groups, "b1"), "a group with no lead");
+        assert!(!led_by_another(&groups, "c1"), "a bot in no group");
+        assert!(!led_by_another(&groups, "zz"), "a bot the layout lacks");
     }
 
     #[test]

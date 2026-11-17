@@ -64,6 +64,24 @@ pub fn write_notifications_enabled(on: bool) {
     let _ = fs::write(notifications_path(), if on { "on" } else { "off" });
 }
 
+pub fn lead_only_notify_path() -> PathBuf {
+    home_dir().join("notify-lead-only")
+}
+
+/// In a sidebar group with a lead, only the lead's finishes notify. Off when
+/// unset, so every bot keeps notifying as before.
+pub fn lead_only_notify() -> bool {
+    match fs::read_to_string(lead_only_notify_path()) {
+        Ok(s) => s.trim() == "on",
+        Err(_) => false,
+    }
+}
+
+pub fn write_lead_only_notify(on: bool) {
+    let _ = fs::create_dir_all(home_dir());
+    let _ = fs::write(lead_only_notify_path(), if on { "on" } else { "off" });
+}
+
 pub fn worktree_path() -> PathBuf {
     home_dir().join("worktree")
 }
@@ -581,6 +599,21 @@ mod tests {
             );
             fs::write(locale_path(), "en").unwrap();
             assert_eq!(locale(), "en");
+        });
+    }
+
+    #[test]
+    fn lead_only_notify_defaults_off_and_only_on_enables_it() {
+        testing::with_home("leadnote", || {
+            assert!(!lead_only_notify());
+            write_lead_only_notify(true);
+            assert!(lead_only_notify());
+            write_lead_only_notify(false);
+            assert!(!lead_only_notify());
+            fs::write(lead_only_notify_path(), "on\n").unwrap();
+            assert!(lead_only_notify());
+            fs::write(lead_only_notify_path(), "yes").unwrap();
+            assert!(!lead_only_notify());
         });
     }
 

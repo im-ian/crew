@@ -64,6 +64,7 @@
     "allow-set-dock-badge",
     "allow-set-locale",
     "allow-set-notifications",
+    "allow-set-lead-only-notify",
     "allow-set-worktree",
     "allow-set-escape-layer",
     "allow-remote-probe",
