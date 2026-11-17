@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { translate } from "./i18n";
-import { briefStatus, statusView } from "./statusView";
+import { briefStatus, statusView, waitingOn } from "./statusView";
 import type { AgentInfo } from "./types";
 
 const ko = (
@@ -53,5 +53,31 @@ describe("briefStatus", () => {
     for (const status of ["working", "blocked", "exited"] as const) {
       expect(briefStatus(bot({ status }), ko)).toEqual(statusView(bot({ status }), NOW, ko));
     }
+  });
+});
+
+describe("waiting on other bots", () => {
+  const asked = { waiting_on: ["designer", "acme/acc_1"] };
+
+  it("shows only while the bot rests, in the order it asked", () => {
+    expect(waitingOn(bot(asked))).toEqual(["designer", "acme/acc_1"]);
+    expect(statusView(bot(asked), NOW, ko)).toEqual({ tone: "waiting", text: "기다리는 중" });
+    expect(briefStatus(bot(asked), ko)).toEqual({ tone: "waiting", text: "기다리는 중" });
+  });
+
+  it("gives way to needs review and working, and says nothing once exited", () => {
+    expect(statusView(bot({ ...asked, status: "blocked" }), NOW, ko)?.tone).toBe("blocked");
+    expect(statusView(bot({ ...asked, status: "working" }), NOW, ko)?.tone).toBe("working");
+    expect(statusView(bot({ ...asked, status: "exited" }), NOW, ko)?.tone).toBe("exited");
+    for (const status of ["blocked", "working", "exited"] as const) {
+      expect(waitingOn(bot({ ...asked, status }))).toEqual([]);
+    }
+  });
+
+  it("is plain idle with nobody to wait on", () => {
+    expect(waitingOn(bot())).toEqual([]);
+    expect(waitingOn(bot({ waiting_on: [] }))).toEqual([]);
+    expect(waitingOn(null)).toEqual([]);
+    expect(briefStatus(bot({ waiting_on: [] }), ko).tone).toBe("idle");
   });
 });

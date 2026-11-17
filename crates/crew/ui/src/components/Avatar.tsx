@@ -24,6 +24,11 @@ type Props = {
   onClick?: (e: MouseEvent) => void;
   /** An idle face follows the composer caret. */
   lookAtCaret?: boolean;
+  /**
+   * Resting while bots it asked work on its request (`waitingOn`). The face
+   * plays it (`.avatar-face.is-waiting`); the avatar itself adds nothing.
+   */
+  waiting?: boolean;
   /** Holds one working look. Only the catalog pages set it, the app draws one itself. */
   workLook?: WorkLook | null;
 };
@@ -87,6 +92,7 @@ export function Avatar({
   onClick,
   lookAtCaret = false,
   workLook = null,
+  waiting = false,
 }: Props) {
   const [broken, setBroken] = useState(false);
   useEffect(() => {
@@ -138,6 +144,7 @@ export function Avatar({
           look={look}
           signal={signal}
           lookAt={lookAt}
+          waiting={waiting}
         />
       ) : null}
       {face && look ? <WorkProps look={look} /> : null}

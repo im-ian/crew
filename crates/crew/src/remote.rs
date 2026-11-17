@@ -1369,6 +1369,19 @@ fn on_done(_alias: &str, v: &Value) {
     );
 }
 
+/// `(asker, remote id)` for each tell a local bot sent to a teammate's bot
+/// and still waits on, oldest first.
+pub fn asked_out() -> Vec<(String, String)> {
+    let Ok(st) = state().lock() else {
+        return Vec::new();
+    };
+    st.jobs
+        .out
+        .iter()
+        .filter_map(|j| Some((j.asker.clone()?, remote_id(&j.alias, &j.to))))
+        .collect()
+}
+
 fn finish_out(id: &str, ok: bool, error: &str) {
     let job = {
         let Ok(mut st) = state().lock() else {
@@ -1392,6 +1405,7 @@ fn finish_out(id: &str, ok: bool, error: &str) {
     if let Some(asker) = &job.asker {
         crate::daemon::remote_wake(asker, &rid, job.hops);
     }
+    crate::daemon::sync_waiting();
 }
 
 fn on_error(alias: &str, v: &Value) {
@@ -2507,6 +2521,7 @@ pub fn agent_infos() -> Vec<AgentInfo> {
                 remote_online: online,
                 watch: Vec::new(),
                 work_dir: None,
+                waiting_on: Vec::new(),
             });
         }
     }
@@ -2836,6 +2851,35 @@ mod tests {
         assert!(ws_url("  ").is_err());
         assert!(ws_url("wss://").is_err());
         assert!(ws_url("ftp://x").is_err());
+    }
+
+    /// A local bot that told a teammate's bot waits on it until the answer.
+    /// A tell the user wrote waits on nobody's behalf.
+    #[test]
+    fn a_tell_to_a_teammate_is_waited_on_by_the_bot_that_sent_it() {
+        let alias = format!("wait-{}", new_job_id());
+        let job = |id: &str, to: &str, asker: Option<&str>| OutJob {
+            id: id.into(),
+            alias: alias.clone(),
+            to: to.into(),
+            asker: asker.map(str::to_string),
+            owner: None,
+            hops: 0,
+            row: None,
+            sealed: Vec::new(),
+        };
+        {
+            let out = &mut state().lock().unwrap().jobs.out;
+            out.push(job(&format!("{alias}-1"), "acc_b", Some("me-bot")));
+            out.push(job(&format!("{alias}-2"), "acc_c", None));
+        }
+        let mine: Vec<_> = asked_out()
+            .into_iter()
+            .filter(|(_, rid)| rid.starts_with(&alias))
+            .collect();
+        assert_eq!(mine, [("me-bot".to_string(), remote_id(&alias, "acc_b"))]);
+        let out = &mut state().lock().unwrap().jobs.out;
+        out.retain(|j| j.alias != alias);
     }
 
     #[test]

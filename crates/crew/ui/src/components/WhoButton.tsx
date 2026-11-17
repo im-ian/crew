@@ -4,6 +4,7 @@ import { useT } from "../LocaleContext";
 import { NAME_CLICK_MS } from "../rename";
 import type { AgentInfo } from "../types";
 import { Avatar } from "./Avatar";
+import { waitingOn } from "../statusView";
 import { RenameField } from "./RenameField";
 
 type Props = {
@@ -92,6 +93,7 @@ export function WhoButton({
           color={agent?.avatar_color}
           letter={letter}
           status={agent?.status}
+          waiting={waitingOn(agent).length > 0}
         />
       ) : null}
       {editing && onRename ? (

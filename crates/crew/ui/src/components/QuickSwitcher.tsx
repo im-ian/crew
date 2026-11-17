@@ -3,7 +3,7 @@ import { handleBackdropPointerDown } from "../dialogLayer";
 import { useT } from "../LocaleContext";
 import { imeKey, stepIndex, switchRows } from "../quickSwitch";
 import type { AgentInfo, Group } from "../types";
-import { statusView } from "../statusView";
+import { statusView, waitingOn } from "../statusView";
 import { Avatar } from "./Avatar";
 
 type Props = {
@@ -124,6 +124,7 @@ export function QuickSwitcher({ agents, groups, order, recent, current, onPick, 
                     color={a.avatar_color}
                     badge={a.status || undefined}
                     status={a.status}
+                    waiting={waitingOn(a).length > 0}
                   />
                   <span className="quick-switch-name">{a.name || a.id}</span>
                   {row.group ? <span className="quick-switch-group">{row.group}</span> : null}
