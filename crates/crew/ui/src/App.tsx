@@ -48,6 +48,7 @@ import {
 } from "./theme";
 import { loadChatWidth, saveChatWidth } from "./chatWidth";
 import { loadDelivery, saveDelivery } from "./deliveryPref";
+import { loadIdleEvery, saveIdleEvery } from "./idlePref";
 import { loadShowTools, saveShowTools } from "./tools";
 import { waitingEdit, waitingIds } from "./queuePick";
 import { publishCaret } from "./caretPoint";
@@ -97,6 +98,7 @@ export function App() {
   const [showTools, setShowTools] = useState(loadShowTools);
   const [chatWidth, setChatWidth] = useState(loadChatWidth);
   const [delivery, setDelivery] = useState(loadDelivery);
+  const [idleEvery, setIdleEvery] = useState(loadIdleEvery);
   const [jumpSeq, setJumpSeq] = useState(0);
   const [queuePick, setQueuePick] = useState<string | null>(null);
   const waiting = useMemo(() => waitingIds(crew.messages), [crew.messages]);
@@ -730,6 +732,7 @@ export function App() {
             ready={!!rows}
             showTools={showTools}
             lookAtCaret={false}
+            idleMinutes={idleEvery}
             split
           />
         </section>
@@ -786,6 +789,7 @@ export function App() {
           peekFocus={peekOpen ? peek?.focus[0] ?? null : null}
           onPeek={togglePeek}
           showTools={showTools}
+          idleMinutes={idleEvery}
           onOpenRoutines={
             crew.currentAgent?.remote
               ? undefined
@@ -1068,6 +1072,11 @@ export function App() {
         onDelivery={(mode) => {
           setDelivery(mode);
           saveDelivery(mode);
+        }}
+        idleEvery={idleEvery}
+        onIdle={(every) => {
+          setIdleEvery(every);
+          saveIdleEvery(every);
         }}
         onClose={() => setSettingsOpen(false)}
         onOpenSkills={() => {
