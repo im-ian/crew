@@ -321,6 +321,9 @@ fn settle_handoff(peer: &str, tell: &str, reached: bool) {
     };
     if let Some(row) = gone {
         crate::transcript::remove_row(peer, &row);
+        // The row is gone. Leaving its tell or parked id in the waits file
+        // is how unpaired entries survive a restart.
+        forget_wait(peer, &row);
     }
 }
 
@@ -2844,6 +2847,13 @@ fn restore_waiting(cfg: &Config) {
             }
             users.push(message.clone());
         }
+        // Ids are taken before `users` is moved into the inbox. A row that is
+        // already queued stays live even when this pass does not enqueue it
+        // again, so its parked and named waits are not thrown away.
+        let mut live = HashSet::new();
+        for message in &users {
+            live.insert(message.id.clone());
+        }
         let joins_ok = !agent_cfg.uses_pty();
         if let Ok(mut map) = inbox().lock() {
             let q = map.entry(id.to_string()).or_default();
@@ -2906,6 +2916,7 @@ fn restore_waiting(cfg: &Config) {
                 // Nothing can send it again, so it would show as waiting
                 // forever with no way to take it back.
                 crate::transcript::set_queued(id, &message.id, false);
+                forget_wait(id, &message.id);
                 continue;
             };
             if current > meta.epoch {
@@ -2932,6 +2943,11 @@ fn restore_waiting(cfg: &Config) {
                 parked: false,
             });
         }
+        for item in &tells {
+            if let Some(msg_id) = &item.msg_id {
+                live.insert(msg_id.clone());
+            }
+        }
         if let Ok(mut map) = recovered_tells().lock() {
             if tells.is_empty() {
                 map.remove(id);
@@ -2939,7 +2955,18 @@ fn restore_waiting(cfg: &Config) {
                 map.insert(id.to_string(), tells);
             }
         }
+        // A tell or a parked id whose row is no longer waiting would sit in
+        // the file forever. The turn record is a different feature and stays.
+        prune_unpaired_waits(id, &live);
     }
+}
+
+fn prune_unpaired_waits(id: &str, live: &HashSet<String>) {
+    update_waits(id, |saved| {
+        saved.parked.retain(|msg_id| live.contains(msg_id));
+        saved.tells.retain(|tell| live.contains(&tell.msg_id));
+        saved.named.retain(|row| live.contains(&row.msg_id));
+    });
 }
 
 /// Boot reads back what every configured bot already owns on disk. Creating a
@@ -2960,8 +2987,36 @@ fn note_loss(strikes: &mut u8, lost: bool) -> bool {
     *strikes >= 2
 }
 
+/// Holds the daemon lock until `run` returns. A loser never gets one, so it
+/// cannot reap CLIs or start work before the socket exists. `Drop` clears a
+/// pid this process wrote if it never became the listener.
+struct HeldDaemon {
+    _lock: paths::DaemonLock,
+    pid_written: bool,
+}
+
+impl Drop for HeldDaemon {
+    fn drop(&mut self) {
+        if self.pid_written && paths::read_pid() == Some(std::process::id()) {
+            paths::remove_pid();
+        }
+    }
+}
+
 pub async fn run() -> anyhow::Result<()> {
     paths::ensure_home()?;
+    crate::log::install();
+    let mut held = match paths::try_daemon_lock() {
+        Ok(Some(lock)) => HeldDaemon {
+            _lock: lock,
+            pid_written: false,
+        },
+        Ok(None) => anyhow::bail!(
+            "daemon already running ({})",
+            paths::lock_path().display()
+        ),
+        Err(err) => return Err(err),
+    };
     if paths::is_socket_live() {
         anyhow::bail!(
             "daemon already running ({})",
@@ -2969,6 +3024,10 @@ pub async fn run() -> anyhow::Result<()> {
         );
     }
     paths::remove_stale_socket();
+    // Before the slow restore, so a second start sees a live pid and waits
+    // instead of spawning. The lock is what actually keeps it out.
+    paths::write_pid(std::process::id())?;
+    held.pid_written = true;
     // A crash skips `halt`, which is what stops a resident CLI. The pid file
     // is the record of ones the last process did not get to stop.
     crate::headless::reap_orphaned_clis();
@@ -3104,7 +3163,9 @@ pub async fn run() -> anyhow::Result<()> {
                         let shutdown = shutdown_tx.clone();
                         tokio::spawn(async move {
                             if let Err(err) = handle_client(stream, shutdown).await {
-                                eprintln!("[crew] client: {err:#}");
+                                if !quiet_client(&err, log_debug()) {
+                                    eprintln!("[crew] client: {err:#}");
+                                }
                             }
                         });
                     }
@@ -3314,6 +3375,24 @@ fn shutdown_agents() {
             pty => pty.kill(),
         }
     }
+}
+
+fn log_debug() -> bool {
+    std::env::var("CREW_LOG").ok().as_deref() == Some("debug")
+}
+
+/// A client that hung up is normal. It used to be hundreds of `Broken pipe`
+/// lines. `debug` keeps them.
+fn quiet_client(err: &anyhow::Error, debug: bool) -> bool {
+    if debug {
+        return false;
+    }
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe)
+            || cause.to_string().contains("Broken pipe")
+    })
 }
 
 async fn handle_client(
@@ -5310,6 +5389,64 @@ mod daemon_tests {
                 .map(|d| d.as_nanos())
                 .unwrap_or(0)
         )
+    }
+
+    #[test]
+    fn a_broken_pipe_is_not_a_client_error() {
+        let err = anyhow::Error::from(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "Broken pipe",
+        ));
+        assert!(quiet_client(&err, false));
+        assert!(!quiet_client(&err, true));
+        assert!(!quiet_client(&anyhow::anyhow!("bind failed"), false));
+    }
+
+    /// A tell or a parked id with no queued row is left over from a failed
+    /// send. Boot drops it. A turn the restart cut off is not one of those.
+    #[test]
+    fn boot_drops_waits_nothing_queued_matches() {
+        paths::testing::with_home("orphan-waits", || {
+            let bot = test_id("bot");
+            let row = crate::transcript::push_user(&bot, "user", "아직");
+            crate::transcript::set_queued(&bot, &row.id, true);
+            note_parked(&bot, vec![row.id.clone(), "1794470935969-6411".into()]);
+            update_waits(&bot, |saved| {
+                saved.tells.push(SavedTell {
+                    msg_id: "orphan-tell".into(),
+                    from: "moon-mwdb3xx8".into(),
+                    text: "없어진 말".into(),
+                    hops: 1,
+                    wake_spent: false,
+                    epoch: 1,
+                    reply_agent: None,
+                    routine: None,
+                    skip_judgment: false,
+                    watch_wake: false,
+                    chain: 0,
+                });
+                saved.named.push(SavedNamed {
+                    msg_id: "1794470935975-6413".into(),
+                    to: "bot-mwcxmdsp".into(),
+                    text: "짝 없음".into(),
+                    reply_agent: None,
+                });
+                saved.turn = Some(saved_turn("이어가", TurnOrigin::user(), 1, 0));
+            });
+
+            let cfg = Config {
+                agents: vec![headless_cfg(&bot)],
+            };
+            restore_transcripts(&cfg);
+
+            let waits = load_waits(&bot);
+            assert_eq!(waits.parked, vec![row.id.clone()]);
+            assert!(waits.tells.is_empty(), "orphan tells stay");
+            assert!(waits.named.is_empty(), "orphan named stays");
+            assert!(waits.turn.is_some(), "a cut-off turn stays");
+            crate::transcript::drop_agent(&bot);
+            drop_waits(&bot);
+        });
     }
 
     /// Boot reads a bot's transcript back. Creating a bot drops the file

@@ -439,6 +439,11 @@ static SPAWN_FAILURE: Mutex<Option<(Instant, String)>> = Mutex::new(None);
 
 const SPAWN_BACKOFF: Duration = Duration::from_secs(2);
 
+/// How long a restart may take before a tell or a start gives up. The daemon
+/// does its roster work before the socket exists, and failing at four seconds
+/// made the app spawn another one.
+pub const DAEMON_WAIT: Duration = Duration::from_secs(30);
+
 fn daemon_usable() -> bool {
     paths::is_socket_live()
         && (paths::daemon_version_matches(env!("CARGO_PKG_VERSION")) || running_as_agent())
@@ -469,6 +474,13 @@ pub fn ensure_daemon() -> anyhow::Result<()> {
         return Ok(());
     }
     if running_as_agent() {
+        // A bot must not spawn a daemon. During a restart the socket is down
+        // while the new process still holds the lock, so wait it out instead
+        // of dropping the tell.
+        if paths::wait_for_socket(DAEMON_WAIT) {
+            clear_spawn_failure();
+            return Ok(());
+        }
         bail!(
             "daemon is not running ({}); agent processes will not start one",
             paths::socket_path().display()
@@ -488,7 +500,11 @@ pub fn ensure_daemon() -> anyhow::Result<()> {
         return Err(err);
     }
     if let Err(err) = start_daemon() {
-        remember_spawn_failure(err.to_string());
+        // Still booting: the next ping should wait again, not repeat this
+        // failure for two seconds and spawn a second daemon.
+        if !paths::daemon_coming_up() {
+            remember_spawn_failure(err.to_string());
+        }
         return Err(err);
     }
     clear_spawn_failure();
@@ -497,8 +513,19 @@ pub fn ensure_daemon() -> anyhow::Result<()> {
 
 fn start_daemon() -> anyhow::Result<()> {
     paths::ensure_home()?;
-    if paths::socket_path().exists() {
+    // Someone already holds the lock or a live pid. Wait for their socket.
+    // Unlinking here used to delete the socket they had just bound.
+    if paths::daemon_coming_up() {
+        if paths::wait_for_socket(DAEMON_WAIT) {
+            return Ok(());
+        }
+        bail!("daemon did not start. log tail:\n{}", log_tail());
+    }
+    if paths::socket_path().exists() && !paths::is_socket_live() {
         paths::remove_stale_socket();
+    }
+    if paths::is_socket_live() {
+        return Ok(());
     }
 
     let exe = std::env::current_exe().context("current_exe")?;
@@ -516,26 +543,42 @@ fn start_daemon() -> anyhow::Result<()> {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    cmd.spawn().context("spawn crew daemon")?;
+    let mut child = cmd.spawn().context("spawn crew daemon")?;
 
-    let deadline = Instant::now() + Duration::from_secs(4);
-    while Instant::now() < deadline {
+    let deadline = Instant::now() + DAEMON_WAIT;
+    loop {
         if paths::is_socket_live() {
             return Ok(());
         }
-        thread::sleep(Duration::from_millis(50));
+        if Instant::now() >= deadline {
+            // Leave the child. It may hold the lock and still be opening the
+            // socket. Killing it here is what used to strand a half-started daemon.
+            bail!("daemon did not start. log tail:\n{}", log_tail());
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if paths::daemon_coming_up() {
+                    thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
+                bail!("daemon did not start ({status}). log tail:\n{}", log_tail());
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(50)),
+            Err(err) => return Err(err).context("wait for daemon"),
+        }
     }
+}
+
+fn log_tail() -> String {
     let tail = std::fs::read_to_string(paths::log_path()).unwrap_or_default();
-    let tail = tail
-        .lines()
+    tail.lines()
         .rev()
         .take(12)
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
         .collect::<Vec<_>>()
-        .join("\n");
-    bail!("daemon did not start. log tail:\n{tail}")
+        .join("\n")
 }
 
 pub fn stop_daemon() -> anyhow::Result<()> {
