@@ -229,7 +229,33 @@ fn clear_agent_context(id: &str) {
     if let Ok(mut map) = pending_handoffs().lock() {
         map.remove(id);
     }
+    save_fyis(id);
     clear_serial_after(id);
+}
+
+/// The notes `agent` has not read yet go in its waits file too, so a restart
+/// before its next prompt does not lose them. The file follows memory: called
+/// after every change to `agent`'s list, with that lock already let go.
+fn save_fyis(agent: &str) {
+    update_waits(agent, |saved| {
+        // Read under the file's lock, so two saves cannot land out of order.
+        saved.fyis = pending_handoffs()
+            .lock()
+            .ok()
+            .and_then(|map| {
+                map.get(agent).map(|q| {
+                    q.iter()
+                        .filter(|h| h.fyi)
+                        .map(|h| SavedFyi {
+                            from: h.from.clone(),
+                            text: h.text.clone(),
+                            row: h.row.clone(),
+                        })
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
+    });
 }
 
 fn pending_handoffs() -> &'static Mutex<HashMap<String, Vec<PendingHandoff>>> {
@@ -266,6 +292,7 @@ fn enqueue_fyi(peer: &str, from: &str, text: &str, row: &str) {
             fyi: true,
         });
     }
+    save_fyis(peer);
 }
 
 /// `enqueue_handoff` keeps one entry per sender, so this is all of them.
@@ -290,12 +317,17 @@ fn take_handoffs(agent: &str) -> Vec<PendingHandoff> {
     let Some(q) = map.get_mut(agent) else {
         return Vec::new();
     };
-    let (held, free) = std::mem::take(q)
+    let (held, free): (Vec<PendingHandoff>, Vec<PendingHandoff>) = std::mem::take(q)
         .into_iter()
         .partition(|h| h.held.is_some());
     *q = held;
     if q.is_empty() {
         map.remove(agent);
+    }
+    drop(map);
+    // Taken notes are in the prompt now, and the turn's record keeps that.
+    if free.iter().any(|h| h.fyi) {
+        save_fyis(agent);
     }
     free
 }
@@ -354,6 +386,7 @@ fn restore_handoffs(agent: &str, mut items: Vec<PendingHandoff>) {
     if items.is_empty() {
         return;
     }
+    let notes = items.iter().any(|h| h.fyi);
     if let Ok(mut map) = pending_handoffs().lock() {
         let q = map.entry(agent.to_string()).or_default();
         // A peer that sealed a new reply while the delivery was in flight
@@ -362,6 +395,9 @@ fn restore_handoffs(agent: &str, mut items: Vec<PendingHandoff>) {
         items.retain(|old| old.fyi || !q.iter().any(|new| !new.fyi && new.from == old.from));
         items.append(q);
         *q = items;
+    }
+    if notes {
+        save_fyis(agent);
     }
 }
 
@@ -2612,6 +2648,19 @@ struct AgentWaits {
     /// cut off and runs on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     turn: Option<SavedTurn>,
+    /// `crew tell --fyi` notes not read yet. They go on the next prompt.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    fyis: Vec<SavedFyi>,
+}
+
+/// A note waiting for the bot's next prompt.
+#[derive(Clone, Serialize, Deserialize)]
+struct SavedFyi {
+    from: String,
+    text: String,
+    /// The note's row in the bot's chat.
+    #[serde(default)]
+    row: Option<String>,
 }
 
 /// A turn the CLI was given and had not finished.
@@ -2725,7 +2774,8 @@ fn update_waits(id: &str, edit: impl FnOnce(&mut AgentWaits)) {
         && saved.parked.is_empty()
         && saved.tells.is_empty()
         && saved.named.is_empty()
-        && saved.turn.is_none();
+        && saved.turn.is_none()
+        && saved.fyis.is_empty();
     if empty {
         let _ = fs::remove_file(&path);
         return;
@@ -3032,6 +3082,7 @@ fn restore_waiting(cfg: &Config) {
         let current = serial_epoch(id);
         // It was under way before anything that waited, so it goes first.
         let resumed = resumed_turn(id, agent_cfg, current);
+        restore_fyis(id, &saved.fyis);
         let msgs = crate::transcript::messages(id);
         let mut users = Vec::new();
         for (i, message) in msgs.iter().enumerate() {
@@ -3159,6 +3210,33 @@ fn restore_waiting(cfg: &Config) {
         // A tell or a parked id whose row is no longer waiting would sit in
         // the file forever. The turn record is a different feature and stays.
         prune_unpaired_waits(id, &live);
+    }
+}
+
+/// Notes the last daemon had not handed on wait for the next prompt again.
+/// They start no turn, as before the restart.
+fn restore_fyis(id: &str, saved: &[SavedFyi]) {
+    if saved.is_empty() {
+        return;
+    }
+    if let Ok(mut map) = pending_handoffs().lock() {
+        let q = map.entry(id.to_string()).or_default();
+        let mut notes: Vec<PendingHandoff> = saved
+            .iter()
+            .filter(|fyi| {
+                !q.iter()
+                    .any(|h| h.fyi && h.row.is_some() && h.row == fyi.row)
+            })
+            .map(|fyi| PendingHandoff {
+                from: fyi.from.clone(),
+                text: fyi.text.clone(),
+                row: fyi.row.clone(),
+                held: None,
+                fyi: true,
+            })
+            .collect();
+        notes.append(q);
+        *q = notes;
     }
 }
 
@@ -9045,6 +9123,73 @@ exec sleep 5"#,
             wait_idle(&worker);
             assert!(take_handoffs(&worker).is_empty(), "read once");
             assert!(tell_fyi(&lead, "team/acc", "x").is_err(), "this PC only");
+
+            for id in [&lead, &worker] {
+                clear_inbox(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// A note not read yet lives in the waits file as well, so a restart
+    /// before the next prompt does not lose it. After the restart it still
+    /// starts no turn, goes on the next prompt once, and leaves the file.
+    #[test]
+    fn a_fyi_outlives_a_restart_and_goes_once() {
+        paths::testing::with_home("tell-fyi-restart", || {
+            let lead = test_id("lead");
+            let worker = test_id("worker");
+            let calls = paths::home_dir().join("calls");
+            fake_one_shot_bot(
+                &worker,
+                &format!(
+                    "for a; do last=$a; done\nprintf '%s\\n---\\n' \"$last\" >> '{}'\necho 네",
+                    calls.display()
+                ),
+            );
+            claude_bot(&lead);
+
+            tell_fyi(&lead, &worker, "규칙: PR은 스쿼시로 머지해요").unwrap();
+            let saved = load_waits(&worker).fyis;
+            assert_eq!(saved.len(), 1, "on disk before it is read");
+            assert_eq!(saved[0].from, lead);
+
+            // The daemon goes down: memory is gone, the file stays.
+            pending_handoffs().lock().unwrap().remove(&worker);
+            let cfg = Config {
+                agents: vec![configs().lock().unwrap().get(&worker).cloned().unwrap()],
+            };
+            restore_transcripts(&cfg);
+            assert!(inbox_is_empty(&worker), "no turn for a note after a restart");
+            assert!(!agent_busy(&worker).unwrap());
+            assert!(!calls.exists(), "nothing ran");
+
+            send_agent(&worker, "다음 일 해 주세요").unwrap();
+            eventually(Duration::from_secs(5), "the next prompt never ran", || {
+                fs::read_to_string(&calls).is_ok_and(|c| c.contains("다음 일"))
+            });
+            let prompt = fs::read_to_string(&calls).unwrap();
+            assert!(prompt.contains(&format!("[crew fyi from:{lead}]")), "{prompt}");
+            assert!(prompt.contains("스쿼시로 머지"), "{prompt}");
+            wait_idle(&worker);
+            assert!(load_waits(&worker).fyis.is_empty(), "gone from the file once sent");
+
+            // Another restart and another prompt do not bring it back.
+            restore_transcripts(&cfg);
+            assert!(take_handoffs(&worker).is_empty(), "read once");
+            fs::remove_file(&calls).unwrap();
+            send_agent(&worker, "그다음 일").unwrap();
+            eventually(Duration::from_secs(5), "the second prompt never ran", || {
+                fs::read_to_string(&calls).is_ok_and(|c| c.contains("그다음 일"))
+            });
+            // The chat history a one-shot CLI reads still shows the row; the
+            // note itself is not attached again.
+            let prompt = fs::read_to_string(&calls).unwrap();
+            assert!(
+                !prompt.contains(&format!("[crew fyi from:{lead}]")),
+                "sent twice: {prompt}"
+            );
+            wait_idle(&worker);
 
             for id in [&lead, &worker] {
                 clear_inbox(id);
