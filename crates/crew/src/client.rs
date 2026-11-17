@@ -663,9 +663,17 @@ pub fn print_event(ev: Event) -> anyhow::Result<()> {
                 println!();
             }
         }
-        Event::Told { from, to, now, note } => {
+        Event::Told {
+            from,
+            to,
+            now,
+            fyi,
+            note,
+        } => {
             println!("ok {from} → {to}");
-            if now {
+            if fyi {
+                // Nothing to wait for: the note says when it is read.
+            } else if now {
                 println!("{to} stopped what it was doing and has your tell now. Its answer comes to you later; do not wait or check for it.");
             } else if from != "user" {
                 // A bot reads this mid-turn, and its tell starts only once that turn ends.
