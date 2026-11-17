@@ -58,6 +58,9 @@ pub fn spawn(
     builder.env("CREW_HOME", paths::home_dir());
     // See headless::spawn_and_stream: keep grok off the user's ~/.claude/CLAUDE.md.
     builder.env("GROK_CLAUDE_AGENTS_ENABLED", "false");
+    if let Some(dir) = crate::worktree::cargo_target_for_cwd(&cwd) {
+        builder.env("CARGO_TARGET_DIR", dir);
+    }
 
     let pty_system = NativePtySystem::default();
     let pair = pty_system

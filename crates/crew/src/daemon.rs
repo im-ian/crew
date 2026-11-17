@@ -3382,6 +3382,7 @@ pub async fn run() -> anyhow::Result<()> {
     spawn_status_ticker();
     spawn_transcript_ticker();
     spawn_routine_ticker();
+    spawn_build_cache_ticker();
 
     // Another daemon can unlink this socket and bind its own at the same path
     // (issue #25). The daemon that was unlinked has no other way to find out:
@@ -3512,6 +3513,14 @@ fn spawn_status_ticker() {
                         pump_inbox(&id);
                     }
                 }
+                let working = session
+                    .inner
+                    .lock()
+                    .map(|inner| inner.status == AgentStatus::Working)
+                    .unwrap_or(false);
+                if working {
+                    crate::worktree::note_build_use(&session.cwd);
+                }
             }
         })
         .expect("status ticker");
@@ -3536,6 +3545,55 @@ pub fn on_pty_output(agent: &str, bytes: &[u8]) {
 
 pub fn on_pty_exit(agent: &str) {
     crate::transcript::seal_agent(agent);
+}
+
+fn agent_is_busy(live: &LiveAgent) -> bool {
+    match live.status() {
+        AgentStatus::Working | AgentStatus::Blocked => return true,
+        _ => {}
+    }
+    match live {
+        LiveAgent::Headless(session) => session
+            .inner
+            .lock()
+            .map(|inner| inner.turn_running())
+            .unwrap_or(true),
+        LiveAgent::Pty(_) => false,
+    }
+}
+
+fn busy_agent_ids() -> Option<HashSet<String>> {
+    let map = agents().lock().ok()?;
+    Some(
+        map.iter()
+            .filter(|(_, live)| agent_is_busy(live))
+            .map(|(id, _)| id.clone())
+            .collect(),
+    )
+}
+
+fn reap_build_caches() {
+    let Some(busy) = busy_agent_ids() else {
+        eprintln!("[crew] build cache skipped, agent list unavailable");
+        return;
+    };
+    for removed in crate::worktree::sweep_build_caches(&busy) {
+        eprintln!(
+            "[crew] removed build cache {} ({})",
+            removed.path.display(),
+            crate::worktree::format_bytes(removed.bytes)
+        );
+    }
+}
+
+fn spawn_build_cache_ticker() {
+    std::thread::Builder::new()
+        .name("crew-build-cache".into())
+        .spawn(|| loop {
+            reap_build_caches();
+            std::thread::sleep(Duration::from_secs(15 * 60));
+        })
+        .expect("build cache ticker");
 }
 
 fn spawn_routine_ticker() {

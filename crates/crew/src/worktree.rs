@@ -3,15 +3,38 @@
 //! The setting defaults off. While it is on, a bot whose folder is a git
 //! repository gets a worktree under `$CREW_HOME/worktrees` and every later
 //! turn of that bot reuses it. A folder that is not a repository stays put.
+//!
+//! Bots of one repository share `$CREW_HOME/cargo-target/<repo>`. Cargo's
+//! target lock is exclusive, so two builds of the same repo wait their turn.
+//! Builds of different repos do not. A per-bot `target/` left in a worktree
+//! is removed once that bot is idle and nothing is compiling into it. The
+//! shared directory goes when that repo has no worktree left, or when no bot
+//! has used it for a week. A directory a build still holds is left alone.
 
+use std::collections::HashSet;
+use std::fs::{self, File, OpenOptions};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use std::os::unix::io::AsRawFd;
 
 use crate::paths;
 
 /// Held across prepare so two bots cannot `git worktree add` the same repo at once.
 static PREPARE: Mutex<()> = Mutex::new(());
+
+/// A per-bot `target/` written this recently is still in use, even when the
+/// bot already looks idle. Long enough for cargo to take its lock.
+const BUILD_CACHE_GRACE: Duration = Duration::from_secs(2 * 60);
+
+/// A shared cache no bot has used for this long is rebuilt on the next build.
+const BUILD_CACHE_STALE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+static SWEEP_NONCE: AtomicU64 = AtomicU64::new(0);
 
 /// A bot in `dir` edits a worktree of its own: worktrees are on and `dir` is
 /// in a git repository with a commit to branch from.
@@ -277,6 +300,373 @@ fn run_git(dir: &Path, args: &[&str]) -> GitOut {
     }
 }
 
+/// One Cargo target directory for every worktree of `shared`.
+pub fn cargo_target_dir(shared: &Path) -> PathBuf {
+    paths::home_dir()
+        .join("cargo-target")
+        .join(repo_key(shared))
+}
+
+/// The shared target dir for a turn whose `cwd` is inside a Crew worktree.
+/// `None` when this turn is not in one, or the process already chose a dir.
+/// Creates the directory and marks it used.
+pub fn cargo_target_for_cwd(cwd: &Path) -> Option<PathBuf> {
+    if std::env::var_os("CARGO_TARGET_DIR").is_some_and(|value| !value.is_empty()) {
+        return None;
+    }
+    let dir = shared_cargo_dir(cwd)?;
+    if let Err(err) = fs::create_dir_all(&dir) {
+        eprintln!("[crew] cargo target {}: {err:#}", dir.display());
+        return None;
+    }
+    touch_stamp(&dir);
+    Some(dir)
+}
+
+/// Remember that a bot is working in the worktree at `cwd`, so a long turn
+/// does not look abandoned. Does nothing until that repo already has a cache.
+pub fn note_build_use(cwd: &Path) {
+    let Some(dir) = shared_cargo_dir(cwd) else {
+        return;
+    };
+    if !dir.is_dir() || stamp_age_under(&dir, Duration::from_secs(60)) {
+        return;
+    }
+    touch_stamp(&dir);
+}
+
+pub struct RemovedCache {
+    pub path: PathBuf,
+    pub bytes: u64,
+}
+
+pub fn format_bytes(bytes: u64) -> String {
+    const GIB: u64 = 1024 * 1024 * 1024;
+    const MIB: u64 = 1024 * 1024;
+    if bytes >= GIB {
+        format!("{:.1} GiB", bytes as f64 / GIB as f64)
+    } else if bytes >= MIB {
+        format!("{:.1} MiB", bytes as f64 / MIB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+/// Drop build caches that are safe to rebuild.
+///
+/// `busy` is the agents in a turn. Their per-bot `target/` stays, and so does
+/// the shared cache of any repo they have a worktree in. A directory whose
+/// `.cargo-lock` is held stays too.
+pub fn sweep_build_caches(busy: &HashSet<String>) -> Vec<RemovedCache> {
+    sweep_at(busy, SystemTime::now(), BUILD_CACHE_GRACE, BUILD_CACHE_STALE)
+}
+
+fn sweep_at(
+    busy: &HashSet<String>,
+    now: SystemTime,
+    grace: Duration,
+    stale: Duration,
+) -> Vec<RemovedCache> {
+    let busy_dirs: HashSet<String> = busy.iter().map(|id| paths::safe_agent_id(id)).collect();
+    let mut removed = Vec::new();
+    let worktrees = paths::home_dir().join("worktrees");
+    reclaim_per_bot(&worktrees, &busy_dirs, now, grace, &mut removed);
+    reclaim_shared(&worktrees, &busy_dirs, now, stale, &mut removed);
+    removed
+}
+
+fn shared_cargo_dir(cwd: &Path) -> Option<PathBuf> {
+    let key = repo_key_of_cwd(cwd)?;
+    Some(paths::home_dir().join("cargo-target").join(key))
+}
+
+fn repo_key_of_cwd(cwd: &Path) -> Option<String> {
+    let cwd = norm(cwd);
+    let root = norm(&paths::home_dir().join("worktrees"));
+    let rel = cwd.strip_prefix(&root).ok()?;
+    let key = rel.components().next()?.as_os_str().to_str()?;
+    if key.is_empty() || key.starts_with('.') {
+        return None;
+    }
+    Some(key.to_string())
+}
+
+fn stamp_path(dir: &Path) -> PathBuf {
+    dir.join(".crew-used")
+}
+
+fn touch_stamp(dir: &Path) {
+    let _ = File::create(stamp_path(dir));
+}
+
+fn stamp_age_under(dir: &Path, window: Duration) -> bool {
+    let Ok(meta) = fs::metadata(stamp_path(dir)) else {
+        return false;
+    };
+    let Ok(modified) = meta.modified() else {
+        return true;
+    };
+    modified
+        .elapsed()
+        .map(|age| age < window)
+        .unwrap_or(true)
+}
+
+fn stamp_mtime(dir: &Path) -> Option<SystemTime> {
+    fs::metadata(stamp_path(dir))
+        .and_then(|meta| meta.modified())
+        .ok()
+}
+
+fn reclaim_per_bot(
+    worktrees: &Path,
+    busy_dirs: &HashSet<String>,
+    now: SystemTime,
+    grace: Duration,
+    removed: &mut Vec<RemovedCache>,
+) {
+    let Ok(repos) = fs::read_dir(worktrees) else {
+        return;
+    };
+    for repo in repos.flatten() {
+        if !is_real_dir(&repo.path()) {
+            continue;
+        }
+        reap_leftovers(&repo.path(), removed);
+        let Ok(bots) = fs::read_dir(repo.path()) else {
+            continue;
+        };
+        for bot in bots.flatten() {
+            let path = bot.path();
+            if !is_real_dir(&path) {
+                continue;
+            }
+            if bot
+                .file_name()
+                .to_str()
+                .is_some_and(|name| busy_dirs.contains(name))
+            {
+                continue;
+            }
+            reap_leftovers(&path, removed);
+            let target = path.join("target");
+            if !is_real_dir(&target) || written_since(&target, now, grace) {
+                continue;
+            }
+            if let Some(bytes) = reclaim_tree(&target) {
+                removed.push(RemovedCache { path: target, bytes });
+            }
+        }
+    }
+}
+
+fn reclaim_shared(
+    worktrees: &Path,
+    busy_dirs: &HashSet<String>,
+    now: SystemTime,
+    stale: Duration,
+    removed: &mut Vec<RemovedCache>,
+) {
+    let root = paths::home_dir().join("cargo-target");
+    reap_leftovers(&root, removed);
+    let Ok(repos) = fs::read_dir(&root) else {
+        return;
+    };
+    for repo in repos.flatten() {
+        let dir = repo.path();
+        if !is_real_dir(&dir) {
+            continue;
+        }
+        let Some(key) = repo.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if key.starts_with('.') {
+            continue;
+        }
+        let bots = worktrees.join(&key);
+        if repo_is_busy(&bots, busy_dirs) || try_hold(&dir).is_none() {
+            // A turn or a build is using this cache. Taking the lock failed,
+            // or a bot is in a turn, so the week starts over.
+            touch_stamp(&dir);
+            continue;
+        }
+        match worktree_bots(&bots) {
+            None => continue,
+            Some(true) if shared_is_fresh(&dir, now, stale) => continue,
+            Some(_) => {}
+        }
+        if let Some(bytes) = reclaim_tree(&dir) {
+            removed.push(RemovedCache { path: dir, bytes });
+        }
+    }
+}
+
+/// `None` when the worktree list could not be read. An unreadable list is not
+/// proof the repo is gone, so the caller keeps the cache.
+fn worktree_bots(repo_dir: &Path) -> Option<bool> {
+    match fs::read_dir(repo_dir) {
+        Ok(entries) => Some(
+            entries
+                .flatten()
+                .any(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false)),
+        ),
+        Err(err) if err.kind() == ErrorKind::NotFound => Some(false),
+        Err(_) => None,
+    }
+}
+
+fn repo_is_busy(repo_dir: &Path, busy_dirs: &HashSet<String>) -> bool {
+    let Ok(entries) = fs::read_dir(repo_dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| busy_dirs.contains(name))
+    })
+}
+
+fn shared_is_fresh(dir: &Path, now: SystemTime, stale: Duration) -> bool {
+    let cutoff = now.checked_sub(stale).unwrap_or(UNIX_EPOCH);
+    if let Some(when) = stamp_mtime(dir) {
+        return when >= cutoff;
+    }
+    // No stamp yet. A directory just created for a bot stays until it is
+    // either stamped or old enough that nobody came back for it.
+    fs::metadata(dir)
+        .and_then(|meta| meta.modified())
+        .map(|when| when >= cutoff)
+        .unwrap_or(true)
+}
+
+fn written_since(dir: &Path, now: SystemTime, window: Duration) -> bool {
+    let cutoff = now.checked_sub(window).unwrap_or(UNIX_EPOCH);
+    let recent = |path: &Path| {
+        fs::symlink_metadata(path)
+            .and_then(|meta| meta.modified())
+            .map(|when| when >= cutoff)
+            .unwrap_or(true)
+    };
+    if recent(dir) {
+        return true;
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return true;
+    };
+    entries.flatten().any(|entry| recent(&entry.path()))
+}
+
+fn is_real_dir(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|meta| meta.file_type().is_dir())
+        .unwrap_or(false)
+}
+
+fn reap_leftovers(parent: &Path, removed: &mut Vec<RemovedCache>) {
+    let Ok(entries) = fs::read_dir(parent) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.starts_with(".sweep-") {
+            continue;
+        }
+        let path = entry.path();
+        if !is_real_dir(&path) {
+            continue;
+        }
+        let bytes = dir_size(&path);
+        if fs::remove_dir_all(&path).is_ok() {
+            removed.push(RemovedCache { path, bytes });
+        }
+    }
+}
+
+/// Keeps an exclusive lock on `.cargo-lock` until dropped.
+struct CargoHold {
+    file: Option<File>,
+}
+
+impl Drop for CargoHold {
+    fn drop(&mut self) {
+        if let Some(file) = self.file.take() {
+            unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
+        }
+    }
+}
+
+/// `None` when a build holds the lock, or the lock file cannot be judged.
+fn try_hold(dir: &Path) -> Option<CargoHold> {
+    match OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(dir.join(".cargo-lock"))
+    {
+        Ok(file) => {
+            let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+            if rc == 0 {
+                Some(CargoHold { file: Some(file) })
+            } else {
+                None
+            }
+        }
+        Err(err) if err.kind() == ErrorKind::NotFound => Some(CargoHold { file: None }),
+        Err(_) => None,
+    }
+}
+
+/// Move `dir` aside and delete it. `None` when it is a link, a build holds it,
+/// or the rename did not happen.
+fn reclaim_tree(dir: &Path) -> Option<u64> {
+    if !is_real_dir(dir) {
+        return None;
+    }
+    let hold = try_hold(dir)?;
+    let parent = dir.parent()?;
+    let tmp = parent.join(format!(
+        ".sweep-{}-{}",
+        std::process::id(),
+        SWEEP_NONCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    if fs::rename(dir, &tmp).is_err() {
+        return None;
+    }
+    drop(hold);
+    let bytes = dir_size(&tmp);
+    if let Err(err) = fs::remove_dir_all(&tmp) {
+        eprintln!("[crew] build cache {}: {err:#}", tmp.display());
+        return None;
+    }
+    Some(bytes)
+}
+
+fn dir_size(dir: &Path) -> u64 {
+    let mut total = 0u64;
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.file_type().is_symlink() || meta.is_file() {
+            total = total.saturating_add(meta.len());
+            continue;
+        }
+        if !meta.is_dir() {
+            continue;
+        }
+        if let Ok(entries) = fs::read_dir(&path) {
+            for entry in entries.flatten() {
+                stack.push(entry.path());
+            }
+        }
+    }
+    total
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -497,5 +887,219 @@ mod tests {
             assert!(said, "the chat should say the worktree was not made");
             let _ = std::fs::remove_dir_all(&root);
         });
+    }
+
+    fn restore_cargo_env() -> Option<std::ffi::OsString> {
+        let old = std::env::var_os("CARGO_TARGET_DIR");
+        std::env::remove_var("CARGO_TARGET_DIR");
+        old
+    }
+
+    fn put_cargo_env(old: Option<std::ffi::OsString>) {
+        match old {
+            Some(value) => std::env::set_var("CARGO_TARGET_DIR", value),
+            None => std::env::remove_var("CARGO_TARGET_DIR"),
+        }
+    }
+
+    struct PutBack(Option<std::ffi::OsString>);
+
+    impl Drop for PutBack {
+        fn drop(&mut self) {
+            put_cargo_env(self.0.take());
+        }
+    }
+
+    fn age(path: &Path, secs: u64) {
+        let when = SystemTime::now() - Duration::from_secs(secs);
+        let file = File::open(path).expect("open to set mtime");
+        file.set_modified(when).unwrap();
+    }
+
+    #[test]
+    fn bots_of_one_repo_share_a_cargo_target() {
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        paths::testing::with_home("wt-share", || {
+            let _env = PutBack(restore_cargo_env());
+            let root = temp_repo("share");
+            paths::write_worktrees_enabled(true);
+            let first = place_for("bot-a", &root);
+            let second = place_for("bot-b", &root);
+            let a = cargo_target_for_cwd(&first.cwd).expect("shared target");
+            let b = cargo_target_for_cwd(&second.cwd).expect("same repo");
+            assert_eq!(a, b);
+            assert_eq!(a, cargo_target_dir(&root));
+            assert!(a.join(".crew-used").is_file());
+            let outside = paths::home_dir().join("not-a-worktree");
+            std::fs::create_dir_all(&outside).unwrap();
+            assert!(cargo_target_for_cwd(&outside).is_none());
+            std::env::set_var("CARGO_TARGET_DIR", "/tmp/crew-chosen-target");
+            assert!(cargo_target_for_cwd(&first.cwd).is_none());
+            let _ = std::fs::remove_dir_all(&root);
+        });
+    }
+
+    #[test]
+    fn sweep_drops_an_idle_target_and_keeps_a_busy_one() {
+        paths::testing::with_home("wt-sweep", || {
+            let idle = paths::home_dir()
+                .join("worktrees")
+                .join("repo-1")
+                .join("bot-idle")
+                .join("target");
+            let busy = paths::home_dir()
+                .join("worktrees")
+                .join("repo-1")
+                .join("bot-busy")
+                .join("target");
+            for dir in [&idle, &busy] {
+                std::fs::create_dir_all(dir.join("debug")).unwrap();
+                std::fs::write(dir.join("debug").join("lib.rlib"), vec![7u8; 64]).unwrap();
+                age(dir, 3600);
+                age(&dir.join("debug"), 3600);
+            }
+            let fresh = paths::home_dir()
+                .join("worktrees")
+                .join("repo-1")
+                .join("bot-fresh")
+                .join("target");
+            std::fs::create_dir_all(fresh.join("debug")).unwrap();
+            std::fs::write(fresh.join("debug").join("lib.rlib"), vec![7u8; 8]).unwrap();
+
+            let mut working = HashSet::new();
+            working.insert("bot-busy".to_string());
+            let removed = sweep_at(
+                &working,
+                SystemTime::now(),
+                Duration::from_secs(60),
+                Duration::from_secs(7 * 24 * 60 * 60),
+            );
+            assert!(
+                removed.iter().any(|item| item.path == idle && item.bytes >= 64),
+                "idle cache should be reported"
+            );
+            assert!(!idle.exists());
+            assert!(busy.join("debug").join("lib.rlib").is_file());
+            assert!(fresh.join("debug").join("lib.rlib").is_file());
+        });
+    }
+
+    #[test]
+    fn sweep_leaves_a_target_cargo_has_locked() {
+        paths::testing::with_home("wt-lock", || {
+            let target = paths::home_dir()
+                .join("worktrees")
+                .join("repo-1")
+                .join("bot-idle")
+                .join("target");
+            std::fs::create_dir_all(target.join("debug")).unwrap();
+            std::fs::write(target.join("debug").join("lib.rlib"), b"keep").unwrap();
+            let lock = File::create(target.join(".cargo-lock")).unwrap();
+            age(&target, 3600);
+            age(&target.join("debug"), 3600);
+            age(&target.join(".cargo-lock"), 3600);
+            let rc = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+            assert_eq!(rc, 0);
+            let removed = sweep_at(
+                &HashSet::new(),
+                SystemTime::now(),
+                Duration::from_secs(60),
+                Duration::from_secs(60),
+            );
+            assert!(removed.iter().all(|item| item.path != target));
+            assert_eq!(
+                std::fs::read(target.join("debug").join("lib.rlib")).unwrap(),
+                b"keep"
+            );
+            drop(lock);
+        });
+    }
+
+    #[test]
+    fn sweep_does_not_follow_a_linked_target() {
+        paths::testing::with_home("wt-link", || {
+            let real = paths::home_dir().join("real-target");
+            std::fs::create_dir_all(&real).unwrap();
+            std::fs::write(real.join("keep"), b"safe").unwrap();
+            let bot = paths::home_dir()
+                .join("worktrees")
+                .join("repo-1")
+                .join("bot-idle");
+            std::fs::create_dir_all(&bot).unwrap();
+            std::os::unix::fs::symlink(&real, bot.join("target")).unwrap();
+            let _ = sweep_at(
+                &HashSet::new(),
+                SystemTime::now(),
+                Duration::from_secs(0),
+                Duration::from_secs(0),
+            );
+            assert_eq!(std::fs::read(real.join("keep")).unwrap(), b"safe");
+        });
+    }
+
+    #[test]
+    fn sweep_drops_a_shared_cache_when_the_worktrees_are_gone_or_stale() {
+        paths::testing::with_home("wt-shared", || {
+            let gone = paths::home_dir().join("cargo-target").join("repo-gone");
+            std::fs::create_dir_all(&gone).unwrap();
+            std::fs::write(gone.join("lib.rlib"), vec![1u8; 16]).unwrap();
+            touch_stamp(&gone);
+
+            let live_repo = paths::home_dir().join("worktrees").join("repo-live");
+            std::fs::create_dir_all(live_repo.join("bot-a")).unwrap();
+            let live = paths::home_dir().join("cargo-target").join("repo-live");
+            std::fs::create_dir_all(&live).unwrap();
+            std::fs::write(live.join("lib.rlib"), vec![1u8; 16]).unwrap();
+            touch_stamp(&live);
+
+            let old_repo = paths::home_dir().join("worktrees").join("repo-old");
+            std::fs::create_dir_all(old_repo.join("bot-a")).unwrap();
+            let old = paths::home_dir().join("cargo-target").join("repo-old");
+            std::fs::create_dir_all(&old).unwrap();
+            std::fs::write(old.join("lib.rlib"), vec![1u8; 16]).unwrap();
+            touch_stamp(&old);
+            age(&stamp_path(&old), 8 * 24 * 60 * 60);
+
+            let week = Duration::from_secs(7 * 24 * 60 * 60);
+            let removed = sweep_at(&HashSet::new(), SystemTime::now(), week, week);
+            assert!(removed.iter().any(|item| item.path == gone && item.bytes >= 16));
+            assert!(!gone.exists());
+            assert!(live.join("lib.rlib").is_file(), "a fresh shared cache stays");
+            assert!(removed.iter().any(|item| item.path == old));
+            assert!(!old.exists(), "a week without use drops the shared cache");
+        });
+    }
+
+    #[test]
+    fn sweep_keeps_a_shared_cache_a_busy_bot_still_has() {
+        paths::testing::with_home("wt-shared-busy", || {
+            let repo = paths::home_dir().join("worktrees").join("repo-live");
+            std::fs::create_dir_all(repo.join("bot-busy")).unwrap();
+            let live = paths::home_dir().join("cargo-target").join("repo-live");
+            std::fs::create_dir_all(&live).unwrap();
+            std::fs::write(live.join("lib.rlib"), b"hot").unwrap();
+            touch_stamp(&live);
+            age(&stamp_path(&live), 30 * 24 * 60 * 60);
+            let mut busy = HashSet::new();
+            busy.insert("bot-busy".into());
+            let removed = sweep_at(
+                &busy,
+                SystemTime::now(),
+                Duration::from_secs(1),
+                Duration::from_secs(1),
+            );
+            assert!(removed.iter().all(|item| item.path != live));
+            assert_eq!(std::fs::read(live.join("lib.rlib")).unwrap(), b"hot");
+            assert!(stamp_age_under(&live, Duration::from_secs(60)));
+        });
+    }
+
+    #[test]
+    fn format_bytes_uses_mib_and_gib() {
+        assert_eq!(format_bytes(12), "12 B");
+        assert_eq!(format_bytes(2 * 1024 * 1024), "2.0 MiB");
+        assert_eq!(format_bytes(3 * 1024 * 1024 * 1024), "3.0 GiB");
     }
 }

@@ -972,6 +972,9 @@ fn run_turn(
     let program = cfg.binary_name();
     let place = crate::worktree::place_for(&cfg.id, &crate::config::Config::default_cwd(&cfg));
     let cwd = place.cwd.clone();
+    // A process kept from the previous turn already has the target dir. This
+    // refreshes the "last used" mark so a week of turns does not look idle.
+    crate::worktree::note_build_use(&cwd);
     // A slash command means something only to the bot's own CLI.
     let own_only = crate::daemon::is_slash_command(&prompt);
     // Its CLI is still out of its limit: the turn goes straight to the next
@@ -1727,6 +1730,11 @@ fn cli_command(session: &HeadlessSession, argv: &[String], cwd: &Path) -> Comman
     cmd.env("GROK_CLAUDE_AGENTS_ENABLED", "false");
     cmd.env("TERM", "dumb");
     cmd.env("NO_COLOR", "1");
+    // One target dir per repository. Cargo locks it, so bots of the same repo
+    // build one at a time instead of each keeping a copy.
+    if let Some(dir) = crate::worktree::cargo_target_for_cwd(cwd) {
+        cmd.env("CARGO_TARGET_DIR", dir);
+    }
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
     // Its own group, so a stop reaches all of it (see `kill_all`).
