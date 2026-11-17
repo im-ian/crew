@@ -7332,6 +7332,13 @@ html[data-glass] .dialog.quick-switch-box {
   -webkit-user-select: none;
   user-select: none;
 }
+/* A waited-on bot has a question card open. The outline stays put while the
+   chip breathes, so a face-only chip still reads as asking. */
+.wait-chip.is-asking {
+  color: var(--blocked);
+  outline: 1px solid color-mix(in srgb, var(--blocked) 70%, transparent);
+  outline-offset: -1px;
+}
 /* The header's chips open their bot's chat. The ring sits inside, as the
    chip line clips what is outside it. */
 button.wait-chip {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { translate } from "./i18n";
-import { briefStatus, statusView, waitingOn } from "./statusView";
+import { askingAmong, briefStatus, statusView, waitingOn, waitingUserPhrase } from "./statusView";
 import type { AgentInfo } from "./types";
 
 const ko = (
@@ -79,5 +79,37 @@ describe("waiting on other bots", () => {
     expect(waitingOn(bot({ waiting_on: [] }))).toEqual([]);
     expect(waitingOn(null)).toEqual([]);
     expect(briefStatus(bot({ waiting_on: [] }), ko).tone).toBe("idle");
+  });
+});
+
+describe("a waited-on bot asking the user", () => {
+  const designer = bot({ id: "designer", name: "설계자", asking: true });
+  const worker = bot({ id: "worker", name: "개발자" });
+  const remote = bot({ id: "acme/acc_1", name: "원격", remote: "acme", asking: true });
+
+  it("names the local bot that has a card open", () => {
+    const ids = ["designer", "worker"];
+    expect(askingAmong(ids, [designer, worker]).map((a) => a.id)).toEqual(["designer"]);
+    expect(waitingUserPhrase(askingAmong(ids, [designer, worker]), ko)).toBe(
+      "설계자가 사용자 답을 기다리는 중",
+    );
+  });
+
+  it("counts the rest, and skips a remote card", () => {
+    const second = bot({ id: "qa", name: "QA", asking: true });
+    const ids = ["designer", "qa", "acme/acc_1"];
+    expect(askingAmong(ids, [designer, second, remote]).map((a) => a.id)).toEqual([
+      "designer",
+      "qa",
+    ]);
+    expect(waitingUserPhrase(askingAmong(ids, [designer, second, remote]), ko)).toBe(
+      "설계자 외 1명이 사용자 답을 기다리는 중",
+    );
+    expect(waitingUserPhrase(askingAmong(["acme/acc_1"], [remote]), ko)).toBeNull();
+  });
+
+  it("leaves the short status when nobody is asking", () => {
+    expect(waitingUserPhrase([], ko)).toBeNull();
+    expect(statusView(bot({ waiting_on: ["designer"] }), NOW, ko)?.text).toBe("기다리는 중");
   });
 });

@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
@@ -382,6 +382,92 @@ fn save_shared_seen(agent_id: &str, note: Option<&str>) {
 /// and for codex, which does not say when it compacts.
 fn shared_note_due(every_turn: bool, resume: bool, seen: Option<&str>, note: &str) -> bool {
     every_turn || !resume || seen != Some(note)
+}
+
+/// How much of a compacted tell is repeated. The start is the assignment and
+/// the end is where it was blocked, so a long one keeps both.
+const TELL_REPEAT_CLIP: usize = 8_000;
+
+/// The tell this bot is on, so a compact can put it back. One turn per bot.
+fn armed_tells() -> &'static Mutex<HashMap<String, String>> {
+    static ARMED: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    ARMED.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// A turn a teammate started with `crew tell`. The user's own message, a
+/// routine, and a `[crew system]` note are not one.
+fn bot_tell(prompt: &str) -> bool {
+    let from = crate::targeting::origin_from_envelope(prompt).from;
+    let from = from.trim();
+    !from.is_empty() && from != "user" && from != "crew"
+}
+
+/// Remember `prompt` when it is a teammate's tell. Anything else drops the
+/// memory, so a later compact does not repeat a task this turn is not on.
+fn arm_tell(agent: &str, prompt: &str) {
+    let Ok(mut map) = armed_tells().lock() else {
+        return;
+    };
+    if bot_tell(prompt) {
+        map.insert(agent.to_string(), prompt.to_string());
+    } else {
+        map.remove(agent);
+    }
+}
+
+fn armed_tell(agent: &str) -> Option<String> {
+    armed_tells().lock().ok()?.get(agent).cloned()
+}
+
+/// The note that puts a compacted tell back in front of the model.
+fn tell_note(prompt: &str) -> String {
+    let body = crate::protocol::clip_middle(prompt.trim(), TELL_REPEAT_CLIP);
+    format!(
+        "[crew system] The conversation was compacted while you were on the message below. \
+         It is repeated so you still have it. Do not answer this note. Keep working on that message.\n\
+         <tell>\n{body}\n</tell>"
+    )
+}
+
+fn read_saved_tell(agent: &str) -> Option<String> {
+    fs::read_to_string(paths::cli_tell_path(agent))
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+}
+
+fn save_tell(agent: &str, prompt: &str) {
+    let path = paths::cli_tell_path(agent);
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let body = crate::protocol::clip_middle(prompt.trim(), TELL_REPEAT_CLIP);
+    let _ = fs::write(path, body);
+}
+
+fn clear_saved_tell(agent: &str) {
+    let _ = fs::remove_file(paths::cli_tell_path(agent));
+}
+
+/// A compact folded the tell this bot is on. The next prompt repeats it.
+/// A turn that is not a tell leaves a tell saved earlier, so a compact of
+/// that later turn does not throw the task away.
+fn note_compacted_tell(agent: &str) {
+    if let Some(prompt) = armed_tell(agent) {
+        save_tell(agent, &prompt);
+    }
+}
+
+/// The saved tell in front of `prompt`, unless `prompt` is a slash command
+/// that has to stay the first line. `true` when this turn carries the note,
+/// so a turn that keeps it can drop the file.
+fn with_repeated_tell(agent: &str, prompt: String) -> (String, bool) {
+    if crate::daemon::is_slash_command(&prompt) {
+        return (prompt, false);
+    }
+    let Some(saved) = read_saved_tell(agent) else {
+        return (prompt, false);
+    };
+    (format!("{}\n\n{prompt}", tell_note(&saved)), true)
 }
 
 /// Drop the CLI session so the next turn opens a new one. Refused mid-turn:
@@ -877,6 +963,10 @@ fn run_turn(
         }
     }
     let mut turn = crate::transcript::begin_turn(&session.id);
+    // Armed before the repeat, so a compact of this turn saves the tell itself
+    // and not the note we just put in front of it.
+    arm_tell(&session.id, &prompt);
+    let (prompt, repeating_tell) = with_repeated_tell(&session.id, prompt);
     let original_prompt = prompt.clone();
 
     let program = cfg.binary_name();
@@ -1166,6 +1256,13 @@ fn run_turn(
             // Like the recap: a turn that failed leaves the news for the next.
             if outcome.got_text && !dead {
                 let _ = save_memory_seen(&session.id, &memory_seen);
+            }
+            // The tell this turn was on, unless a compact folded it. A slash
+            // command did not carry the note, so the file stays for the next one.
+            if outcome.compacted {
+                note_compacted_tell(&session.id);
+            } else if repeating_tell && outcome.got_text && !dead {
+                clear_saved_tell(&session.id);
             }
             // The copy the session now holds, unless a compact may have folded it.
             if outcome.compacted || slash {
@@ -5681,6 +5778,63 @@ mod tests {
             &mut st,
         );
         assert!(!st.compacted);
+    }
+
+    /// A tell compacted mid-turn is put back on the next prompt. A slash
+    /// command does not spend it, and a later turn that is not a tell does
+    /// not throw away one already saved.
+    #[test]
+    fn a_compacted_tell_is_repeated_on_the_next_prompt() {
+        crate::paths::testing::with_home("tell-repeat", || {
+            let agent = "tell-repeat-bot";
+            let tell = "[crew from:designer]\n묶음 D를 고쳐 주세요";
+            for plain in [
+                "그냥 해줘",
+                "[crew routine:morning]\n아침 보고",
+                "[crew system]\n노트",
+                "[crew from:crew]\n시스템",
+            ] {
+                arm_tell(agent, plain);
+                assert!(armed_tell(agent).is_none(), "{plain}");
+            }
+            arm_tell(agent, tell);
+            assert_eq!(armed_tell(agent).as_deref(), Some(tell));
+
+            note_compacted_tell(agent);
+            assert!(paths::cli_tell_path(agent).is_file());
+            let (next, repeated) = with_repeated_tell(agent, "이어서 해줘".into());
+            assert!(repeated);
+            assert!(next.contains("Do not answer this note"));
+            assert!(next.contains("<tell>"));
+            assert!(next.contains(tell));
+            assert!(next.ends_with("이어서 해줘"));
+
+            let (slash, slash_repeated) = with_repeated_tell(agent, "/compact".into());
+            assert!(!slash_repeated);
+            assert_eq!(slash, "/compact");
+            assert!(paths::cli_tell_path(agent).is_file());
+
+            // What a later turn does once it has kept the note.
+            clear_saved_tell(agent);
+            assert!(!paths::cli_tell_path(agent).exists());
+
+            arm_tell(agent, tell);
+            note_compacted_tell(agent);
+            arm_tell(agent, "사용자가 이어서");
+            note_compacted_tell(agent);
+            let saved = std::fs::read_to_string(paths::cli_tell_path(agent)).unwrap();
+            assert!(saved.contains("묶음 D를 고쳐 주세요"), "{saved}");
+
+            let long = format!("[crew from:designer]\n{}끝", "가".repeat(9_000));
+            arm_tell(agent, &long);
+            note_compacted_tell(agent);
+            let saved = std::fs::read_to_string(paths::cli_tell_path(agent)).unwrap();
+            assert!(saved.contains("[crew from:designer]"));
+            assert!(saved.contains('끝'));
+            assert!(saved.contains('…'));
+            assert!(saved.chars().count() < long.chars().count());
+            arm_tell(agent, "done");
+        });
     }
 
     #[test]

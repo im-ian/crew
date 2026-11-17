@@ -12,6 +12,7 @@ import {
   settleChips,
   type WaitChip,
 } from "../waitChips";
+import { askingAmong, waitingUserPhrase } from "../statusView";
 import { Avatar } from "./Avatar";
 
 type Props = {
@@ -113,6 +114,8 @@ function ChipList({
     <span className="wait-chips">
       {chips.map((chip) => {
         const name = nameOf(agents, chip.id);
+        const agent = find(agents, chip.id);
+        const asking = !!agent?.asking && !agent.remote;
         const at = live.indexOf(chip.id);
         const style = {
           ["--c" as string]: colorOf(agents, chip.id),
@@ -120,7 +123,11 @@ function ChipList({
           ...(at >= 0 ? { ["--d" as string]: `${delay(at)}s` } : null),
         };
         const className =
-          "wait-chip" + (chip.entering ? " is-entering" : "") + (chip.leaving ? " is-leaving" : "");
+          "wait-chip" +
+          (chip.entering ? " is-entering" : "") +
+          (chip.leaving ? " is-leaving" : "") +
+          (asking ? " is-asking" : "");
+        const userLine = asking ? t("header.waitingUser", { name }) : "";
         const body = (
           <>
             <ChipFace agents={agents} id={chip.id} />
@@ -128,7 +135,7 @@ function ChipList({
           </>
         );
         // A bot this window does not know has no chat to open.
-        if (onOpen && find(agents, chip.id)) {
+        if (onOpen && agent) {
           return (
             <button
               key={chip.id}
@@ -137,8 +144,8 @@ function ChipList({
               className={className}
               data-id={chip.id}
               style={style}
-              title={name}
-              aria-label={t("header.waitingOnOpen", { name })}
+              title={asking ? userLine : name}
+              aria-label={asking ? userLine : t("header.waitingOnOpen", { name })}
               tabIndex={chip.leaving ? -1 : undefined}
               onClick={() => onOpen(chip.id)}
             >
@@ -154,8 +161,8 @@ function ChipList({
             data-id={chip.id}
             style={style}
             role="img"
-            title={name}
-            aria-label={t("header.waitingOn", { name })}
+            title={asking ? userLine : name}
+            aria-label={asking ? userLine : t("header.waitingOn", { name })}
           >
             {body}
           </span>
@@ -236,14 +243,15 @@ export function WaitStatus({ ids, agents, onOpen }: StatusProps) {
 
   if (!chips.length) return null;
   const count = liveIds(chips).length;
+  const userLine = waitingUserPhrase(askingAmong(ids, agents), t);
   return (
     <span
       className={"head-status is-waiting" + (ids.length ? "" : " is-ending")}
       style={cycleStyle(chips)}
     >
       <span className="head-status-text">
-        {t("header.statusWaiting")}
-        {count > 1 ? <b>{count}</b> : null}
+        {userLine ?? t("header.statusWaiting")}
+        {!userLine && count > 1 ? <b>{count}</b> : null}
       </span>
       <Relay />
       <span className="wait-scroll" ref={scroll}>
@@ -265,7 +273,9 @@ export function WaitTag({ ids, agents }: Props) {
   const { chips, refFor } = useWaitChips(ids);
   if (!chips.length) return null;
   const live = liveIds(chips);
-  const rest = live.slice(SIDE_CHIPS).map((id) => nameOf(agents, id)).join(", ");
+  const hidden = live.slice(SIDE_CHIPS);
+  const rest = hidden.map((id) => nameOf(agents, id)).join(", ");
+  const hiddenLine = waitingUserPhrase(askingAmong(hidden, agents), t);
   const more = live.length > SIDE_CHIPS;
   return (
     <span
@@ -278,8 +288,8 @@ export function WaitTag({ ids, agents }: Props) {
         <span
           className="wait-more"
           role="img"
-          title={rest}
-          aria-label={t("header.waitingOn", { name: rest })}
+          title={hiddenLine ?? rest}
+          aria-label={hiddenLine ?? t("header.waitingOn", { name: rest })}
         >
           +{live.length - SIDE_CHIPS}
         </span>

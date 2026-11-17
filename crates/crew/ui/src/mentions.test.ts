@@ -387,3 +387,50 @@ describe("a name in parentheses after an id", () => {
     ]);
   });
 });
+
+describe("a name before an id", () => {
+  it("folds the bot's own name into one chip", () => {
+    expect(mentionRuns("Alpha(@alpha) 확인", agents)).toEqual([
+      { text: "@Alpha", agent: agents[0] },
+      { text: " 확인" },
+    ]);
+    expect(mentionRuns("춘식이(@gamma)에게", agents)).toEqual([
+      { text: "@춘식이", agent: agents[1] },
+      { text: "에게" },
+    ]);
+    expect(injectMentionChips("<p>Alpha(@alpha) 확인</p>", agents)).toBe(
+      '<p><span class="mention-chip" data-mention="alpha"></span> 확인</p>',
+    );
+    expect(mentionRuns("Alpha(@alpha(Alpha))", agents)).toEqual([
+      { text: "@Alpha", agent: agents[0] },
+    ]);
+  });
+
+  it("folds one word of a longer name, in either case", () => {
+    const moon = { ...agents[0], id: "dev2", name: "개발자 Moon" };
+    expect(mentionRuns("Moon(@dev2) 봐줘", [moon]).map((r) => r.text)).toEqual([
+      "@개발자 Moon",
+      " 봐줘",
+    ]);
+    expect(mentionRuns("개발자 Moon(@dev2)", [moon]).map((r) => r.text)).toEqual(["@개발자 Moon"]);
+    expect(mentionRuns("alpha(@alpha) 확인", agents).map((r) => r.text)).toEqual(["@Alpha", " 확인"]);
+  });
+
+  it("keeps a prefix that is not the name", () => {
+    expect(mentionRuns("notAlpha(@alpha)", agents).map((r) => r.agent?.id ?? r.text)).toEqual([
+      "notAlpha(",
+      "alpha",
+      ")",
+    ]);
+    expect(mentionRuns("Alpha (@alpha)", agents).map((r) => r.agent?.id ?? r.text)).toEqual([
+      "Alpha (",
+      "alpha",
+      ")",
+    ]);
+    expect(mentionRuns("개발자(@alpha)", agents).map((r) => r.agent?.id ?? r.text)).toEqual([
+      "개발자(",
+      "alpha",
+      ")",
+    ]);
+  });
+});
