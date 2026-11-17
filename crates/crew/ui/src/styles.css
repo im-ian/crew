@@ -7556,11 +7556,3 @@ button.wait-chip:focus-visible {
   .head-status.is-waiting.is-ending,
   .wait-cluster.is-side.is-ending .wait-relay { transition: none; }
 }
-
-/* A stall uses the bot's own bubble. The border is dashed and the fill is clear. */
-.row.them .bubble.incoming.idle {
-  background: transparent;
-  border: 1px dashed color-mix(in srgb, var(--muted) 55%, transparent);
-  box-shadow: none;
-}
-.idle-seg { max-width: 340px; }

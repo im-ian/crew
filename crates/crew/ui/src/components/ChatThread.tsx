@@ -64,8 +64,6 @@ import { isSelfMentionDelivery, mentionRuns, mentionText } from "../mentions";
 import { MentionRunsView } from "./MentionChip";
 import { focusField, MentionField } from "./MentionField";
 import { clockLabels, messageClockParts } from "../clock";
-import { idleCards, withIdleRows } from "../idleSummary";
-import { IdleCard } from "./IdleCard";
 import { threadFaceId } from "../threadFace";
 import {
   acceptHeight,
@@ -104,25 +102,13 @@ import { STICK_PX, rebuiltTop, stickMove, type StickMove } from "../stick";
 const ASK_INSET = 16;
 
 function rowKey(row: ThreadRow): string {
-  if (row.kind === "idle") return row.card.id;
   if (row.kind === "msg") return row.msg.id;
   return row.msgs[0].id;
 }
 
 function rowHas(row: ThreadRow, id: string): boolean {
-  if (row.kind === "idle") return row.card.id === id;
   if (row.kind === "msg") return row.msg.id === id;
   return row.msgs.some((m) => m.id === id);
-}
-
-function useIdleNow(on: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!on) return;
-    const id = window.setInterval(() => setNow(Date.now()), 20_000);
-    return () => window.clearInterval(id);
-  }, [on]);
-  return now;
 }
 
 function indexOfRow(list: readonly ThreadRow[], id: string | null | undefined): number {
@@ -250,8 +236,6 @@ type Props = {
   onOpenRoutines?: () => void;
   /** The bot's face follows the composer caret: it is idle. */
   lookAtCaret?: boolean;
-  /** Minutes before an idle card. `0` is off. Defaults to 10. */
-  idleMinutes?: number;
   /** The chat is split in two. Turning it on or off rebuilds the box around the thread. */
   split?: boolean;
 };
@@ -285,10 +269,8 @@ export function ChatThread({
   onOpenRoutines,
   lookAtCaret = false,
   split = false,
-  idleMinutes = 10,
 }: Props) {
   const { locale } = useLocale();
-  const idleNow = useIdleNow(idleMinutes > 0);
   const ref = useRef<HTMLDivElement>(null);
   // Opening on the first unread line holds the thread there. Reaching the
   // bottom, or any scroll that ends there, lets it follow new lines again.
@@ -314,22 +296,7 @@ export function ChatThread({
   // A bot that has only talked with other bots has no conversation here: the
   // thread stays empty, and its side chat opens beside it (`sideOnlyPeer`).
   const direct = all.some((row) => row.kind === "msg" || row.kind === "files");
-  const idle = useMemo(() => {
-    if (!direct || idleMinutes <= 0 || selectedKind !== "agent" || !currentAgent) return [];
-    return idleCards({
-      messages,
-      now: idleNow,
-      thresholdMin: idleMinutes,
-      status: currentAgent.status,
-      waitingOn: currentAgent.waiting_on,
-      agents,
-      cutOff: currentAgent.cut_off,
-      changed: currentAgent.changed,
-      asking: currentAgent.asking,
-      lang: locale === "en" ? "en" : "ko",
-    });
-  }, [direct, idleMinutes, selectedKind, currentAgent, messages, idleNow, agents, locale]);
-  const rows = direct ? withIdleRows(all, idle) : [];
+  const rows = direct ? all : [];
   // Work another bot asked for runs in the exchange with it; its run in the
   // thread says so, with the newest line, on the last run with that bot.
   const asked = askedWork(messages, currentAgent?.status === "working");
@@ -377,22 +344,16 @@ export function ChatThread({
 
   // A new bot asks before any row exists, so the dots have to stand alone.
   // A side-only thread already has rows, and those dots stay in the side chat.
-  // A live stall card already says the bot is not moving. Dots would deny it.
-  const liveIdle = rows.some((row) => row.kind === "idle" && row.card.live);
-  const placeholders = liveIdle
-    ? []
-    : direct || (streaming && messages.length === 0)
+  const placeholders =
+    direct || (streaming && messages.length === 0)
       ? workingPlaceholders()
       : [];
   const empty = !direct && placeholders.length === 0;
   const typingId = placeholders[0] ? "working-" + placeholders[0].id : null;
   const typingFrom = new Set(placeholders.map((agent) => agent.id));
-  // A live stall hides the typing row, so the face moves onto that bubble.
-  const lastRow = rows[rows.length - 1];
-  const idleFace = !typingId && lastRow?.kind === "idle" ? lastRow.card.id : null;
   const faceId =
     selectedKind === "agent" && selected
-      ? idleFace ?? threadFaceId(visible, selected, typingId)
+      ? threadFaceId(visible, selected, typingId)
       : null;
   // Only what is written after the chat opens plays the entrance. The thread
   // is not remounted per chat, so the moment is kept per chat key.
@@ -751,20 +712,6 @@ export function ChatThread({
       node = <ToolGroup items={row.msgs} highlightId={highlightId} />;
     } else if (row.kind === "files") {
       node = <FileGroup msgs={row.msgs} flashId={highlightId} />;
-    } else if (row.kind === "idle") {
-      const agent = currentAgent;
-      const self = selectedKind === "agent" && !!agent && agent.id === selected;
-      node = (
-        <IdleCard
-          card={row.card}
-          agent={agent}
-          agents={agents}
-          showFace={!self || row.card.id === faceId}
-          showName={!self}
-          lookAtCaret={!!self && row.card.id === faceId && lookAtCaret}
-          onSelectAgent={openAgent || undefined}
-        />
-      );
     } else if (row.kind === "notes") {
       node = (
         <NoteGroup

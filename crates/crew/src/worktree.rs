@@ -7,7 +7,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
 
 use crate::paths;
 
@@ -208,115 +207,6 @@ struct GitOut {
     stderr: String,
 }
 
-/// How long a dirty-file list may be reused. The window polls agents often,
-/// and `git status` is the expensive part of that poll.
-const CHANGED_TTL: Duration = Duration::from_secs(20);
-const CHANGED_LIMIT: usize = 40;
-
-struct ChangedCache {
-    key: PathBuf,
-    at: Instant,
-    files: Vec<String>,
-}
-
-fn changed_cache() -> &'static Mutex<Vec<ChangedCache>> {
-    static CACHE: Mutex<Vec<ChangedCache>> = Mutex::new(Vec::new());
-    &CACHE
-}
-
-/// Files dirty in the bot's own worktree, relative to that worktree.
-/// Empty when `cwd` is not under `$CREW_HOME/worktrees`: the shared checkout
-/// is every bot's, so its status is not this bot's work.
-pub fn changed_files(cwd: &Path) -> Vec<String> {
-    if !in_crew_worktree(cwd) {
-        return Vec::new();
-    }
-    let key = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
-    if let Some(hit) = fresh_changes(&key) {
-        return hit;
-    }
-    let files = status_paths(cwd);
-    remember_changes(key, files.clone());
-    files
-}
-
-fn fresh_changes(key: &Path) -> Option<Vec<String>> {
-    let cache = changed_cache().lock().unwrap_or_else(|err| err.into_inner());
-    cache.iter().find_map(|row| {
-        (row.key == key && row.at.elapsed() < CHANGED_TTL).then(|| row.files.clone())
-    })
-}
-
-fn remember_changes(key: PathBuf, files: Vec<String>) {
-    let mut cache = changed_cache().lock().unwrap_or_else(|err| err.into_inner());
-    cache.retain(|row| row.key != key);
-    if cache.len() > 32 {
-        cache.clear();
-    }
-    cache.push(ChangedCache {
-        key,
-        at: Instant::now(),
-        files,
-    });
-}
-
-fn in_crew_worktree(cwd: &Path) -> bool {
-    let root = paths::home_dir().join("worktrees");
-    let cwd = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
-    let root = std::fs::canonicalize(&root).unwrap_or(root);
-    cwd.starts_with(&root)
-}
-
-fn status_paths(cwd: &Path) -> Vec<String> {
-    let out = run_git(
-        cwd,
-        &["status", "--porcelain", "--untracked-files=all"],
-    );
-    if !out.status {
-        return Vec::new();
-    }
-    porcelain_paths(&out.stdout)
-}
-
-fn porcelain_paths(stdout: &str) -> Vec<String> {
-    let mut files = Vec::new();
-    for line in stdout.lines() {
-        let Some(path) = porcelain_path(line) else {
-            continue;
-        };
-        if files.iter().any(|have| have == &path) {
-            continue;
-        }
-        files.push(path);
-        if files.len() == CHANGED_LIMIT {
-            break;
-        }
-    }
-    files
-}
-
-/// `XY PATH`, or `XY ORIG -> PATH` for a rename. Git quotes paths that need it.
-fn porcelain_path(line: &str) -> Option<String> {
-    let rest = line.get(3..)?.trim();
-    if rest.is_empty() {
-        return None;
-    }
-    let path = match rest.rsplit_once(" -> ") {
-        Some((_, dest)) => dest.trim(),
-        None => rest,
-    };
-    let path = unquote_git(path);
-    if path.is_empty() { None } else { Some(path) }
-}
-
-fn unquote_git(path: &str) -> String {
-    let path = path.trim();
-    let Some(inner) = path.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
-        return path.to_string();
-    };
-    inner.replace("\\\"", "\"").replace("\\\\", "\\")
-}
-
 fn run_git(dir: &Path, args: &[&str]) -> GitOut {
     match Command::new("git")
         .arg("-C")
@@ -341,53 +231,6 @@ fn run_git(dir: &Path, args: &[&str]) -> GitOut {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn porcelain_keeps_the_new_name_of_a_rename() {
-        let text = " M src/a.ts\n?? \"src/b ts\"\nR  old.tsx -> src/Sidebar.tsx\n";
-        assert_eq!(
-            porcelain_paths(text),
-            vec![
-                "src/a.ts".to_string(),
-                "src/b ts".to_string(),
-                "src/Sidebar.tsx".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn changes_come_from_the_bots_worktree_only() {
-        let bin = Command::new("git").arg("--version").output();
-        if bin.is_err() {
-            return;
-        }
-        paths::testing::with_home("wt-dirty", || {
-            let home = paths::home_dir();
-            let wt = home.join("worktrees").join("repo").join("bot");
-            let shared = home.join("shared");
-            std::fs::create_dir_all(&wt).unwrap();
-            std::fs::create_dir_all(&shared).unwrap();
-            init_repo(&wt);
-            init_repo(&shared);
-            std::fs::write(wt.join("Sidebar.tsx"), "x\n").unwrap();
-            std::fs::write(shared.join("Other.tsx"), "y\n").unwrap();
-            assert_eq!(changed_files(&wt), vec!["Sidebar.tsx".to_string()]);
-            assert!(
-                changed_files(&shared).is_empty(),
-                "the shared checkout is not one bot's work"
-            );
-        });
-    }
-
-    fn init_repo(dir: &Path) {
-        let out = Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(["init", "-b", "main"])
-            .output()
-            .unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    }
 
     fn git(dir: &Path, args: &[&str]) {
         let out = Command::new("git")

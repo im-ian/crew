@@ -412,14 +412,6 @@ pub struct AgentInfo {
     /// counts too. Empty for a bot waiting on nobody.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub waiting_on: Vec<String>,
-    /// A `turn` left in `waits/<id>.json` while no CLI is running it: the
-    /// daemon restarted and cut the turn off (the record PR #293 keeps).
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub cut_off: bool,
-    /// Paths dirty in this bot's own worktree, relative to that worktree.
-    /// Empty when it edits the shared checkout, which is not its alone.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub changed: Vec<String>,
 }
 
 /// One task a bot left running after it answered.

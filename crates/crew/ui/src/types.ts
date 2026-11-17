@@ -137,10 +137,6 @@ export type AgentInfo = {
    * A teammate's bot on another PC counts too. Absent when it waits on none.
    */
   waiting_on?: string[];
-  /** A turn record is on disk and no CLI is running it: a restart cut it off. */
-  cut_off?: boolean;
-  /** Paths dirty in this bot's own worktree. Empty on the shared checkout. */
-  changed?: string[];
 };
 
 /** One task a bot left running after it answered. */
