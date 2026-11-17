@@ -75,8 +75,12 @@ enum Cmd {
         from: Option<String>,
         /// Cut into their turn now instead of waiting for it to end. For an
         /// urgent word: stop, cancel, hold
-        #[arg(long)]
+        #[arg(long, conflicts_with = "fyi")]
         now: bool,
+        /// A note they read with their next message. It starts no turn, and
+        /// no answer comes back. For a rule or news that needs no reply
+        #[arg(long)]
+        fyi: bool,
         /// Message. Read from stdin when left out, so a heredoc works too
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         message: Vec<String>,
@@ -421,8 +425,9 @@ fn run() -> anyhow::Result<()> {
             to,
             from,
             now,
+            fyi,
             message,
-        }) => run_tell(to, from, now, message),
+        }) => run_tell(to, from, now, fyi, message),
         Some(Cmd::Show { path, agent }) => run_show(path, agent),
         Some(Cmd::Ask { .. }) => {
             let ask = matches.subcommand_matches("ask").expect("ask matches");
@@ -1093,6 +1098,7 @@ fn run_tell(
     to: String,
     from: Option<String>,
     now: bool,
+    fyi: bool,
     message: Vec<String>,
 ) -> anyhow::Result<()> {
     connect_for_tell()?;
@@ -1113,6 +1119,7 @@ fn run_tell(
         to,
         text,
         now,
+        fyi,
     })?)
 }
 

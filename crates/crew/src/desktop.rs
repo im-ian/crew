@@ -188,6 +188,7 @@ fn tell_message(from: Option<String>, to: String, text: String) -> Result<(), St
         to,
         text,
         now: false,
+        fyi: false,
     }) {
         Ok(Event::Told { .. }) | Ok(Event::Ok) => Ok(()),
         Ok(Event::Error { message }) => Err(message),

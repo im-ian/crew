@@ -28,6 +28,10 @@ pub enum Request {
         /// does, instead of waiting for it to end.
         #[serde(default, skip_serializing_if = "is_false")]
         now: bool,
+        /// `crew tell --fyi`: a note for the teammate's next prompt. It starts
+        /// no turn, and nothing answers it.
+        #[serde(default, skip_serializing_if = "is_false")]
+        fyi: bool,
     },
     Input {
         agent: String,
@@ -323,6 +327,9 @@ pub enum Event {
         /// The tell cut into the teammate's turn (`crew tell --now`).
         #[serde(default, skip_serializing_if = "is_false")]
         now: bool,
+        /// A note for the next prompt (`crew tell --fyi`), not a turn.
+        #[serde(default, skip_serializing_if = "is_false")]
+        fyi: bool,
         /// Said to the sender: how long the tell waits, and why.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         note: Option<String>,
@@ -672,6 +679,11 @@ pub fn handoff_envelope(from: &str, text: &str) -> String {
     format!("[crew handoff from:{from}]\n{text}")
 }
 
+/// A note a teammate passed on with `crew tell --fyi`. Read it; it wants no answer.
+pub fn fyi_envelope(from: &str, text: &str) -> String {
+    format!("[crew fyi from:{}]\n{text}", from.trim())
+}
+
 /// A full report fits. The 800 it was cut a teammate's report off after its
 /// progress lines and table, before what it was blocked on.
 pub const HANDOFF_CLIP: usize = 4000;
@@ -767,6 +779,7 @@ mod tests {
             to: "beta".into(),
             text: "hi".into(),
             now: false,
+            fyi: false,
         };
         let line = req.to_line().unwrap();
         assert!(line.contains("\"type\":\"tell\""));

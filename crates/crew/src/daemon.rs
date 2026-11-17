@@ -220,6 +220,9 @@ struct PendingHandoff {
     /// The row id of a tell from the same bot, waiting in the inbox to take
     /// this reply's place. Nothing ahead of that tell carries the reply.
     held: Option<String>,
+    /// A `crew tell --fyi`: a note to read, not a reply. A reply from the same
+    /// bot does not replace it, and it wakes no one.
+    fyi: bool,
 }
 
 fn clear_agent_context(id: &str) {
@@ -240,12 +243,27 @@ fn enqueue_handoff(peer: &str, from: &str, text: &str, row: Option<&str>) {
     }
     if let Ok(mut map) = pending_handoffs().lock() {
         let q = map.entry(peer.to_string()).or_default();
-        q.retain(|h| h.from != from);
+        q.retain(|h| h.from != from || h.fyi);
         q.push(PendingHandoff {
             from: from.to_string(),
             text,
             row: row.map(str::to_string),
             held: None,
+            fyi: false,
+        });
+    }
+}
+
+/// A note for `peer` to read with its next prompt (`crew tell --fyi`).
+fn enqueue_fyi(peer: &str, from: &str, text: &str, row: &str) {
+    let text = crate::protocol::clip_middle(text.trim(), crate::protocol::HANDOFF_CLIP);
+    if let Ok(mut map) = pending_handoffs().lock() {
+        map.entry(peer.to_string()).or_default().push(PendingHandoff {
+            from: from.to_string(),
+            text,
+            row: Some(row.to_string()),
+            held: None,
+            fyi: true,
         });
     }
 }
@@ -254,7 +272,9 @@ fn enqueue_handoff(peer: &str, from: &str, text: &str, row: Option<&str>) {
 fn take_handoff_from(peer: &str, from: &str) -> Option<PendingHandoff> {
     let mut map = pending_handoffs().lock().ok()?;
     let q = map.get_mut(peer)?;
-    let at = q.iter().position(|h| h.from == from && h.held.is_none())?;
+    let at = q
+        .iter()
+        .position(|h| h.from == from && h.held.is_none() && !h.fyi)?;
     let item = q.remove(at);
     if q.is_empty() {
         map.remove(peer);
@@ -286,7 +306,10 @@ fn hold_handoff(peer: &str, from: &str, tell: &str) {
     if let Ok(mut map) = pending_handoffs().lock() {
         let held = map
             .get_mut(peer)
-            .and_then(|q| q.iter_mut().find(|h| h.from == from && h.held.is_none()));
+            .and_then(|q| {
+                q.iter_mut()
+                    .find(|h| h.from == from && h.held.is_none() && !h.fyi)
+            });
         if let Some(h) = held {
             h.held = Some(tell.to_string());
         }
@@ -336,7 +359,7 @@ fn restore_handoffs(agent: &str, mut items: Vec<PendingHandoff>) {
         // A peer that sealed a new reply while the delivery was in flight
         // already replaced its entry. Keeping both would put the superseded
         // text first and spend one of the three kept slots on it.
-        items.retain(|old| !q.iter().any(|new| new.from == old.from));
+        items.retain(|old| old.fyi || !q.iter().any(|new| !new.fyi && new.from == old.from));
         items.append(q);
         *q = items;
     }
@@ -351,13 +374,23 @@ fn flush_handoffs(agent: &str, prompt: &str) -> String {
 }
 
 fn render_handoffs(items: &[PendingHandoff]) -> String {
+    // Notes are each read; only replies are cut to the newest few.
+    let (fyis, items): (Vec<&PendingHandoff>, Vec<&PendingHandoff>) =
+        items.iter().partition(|h| h.fyi);
+    let mut out = String::new();
+    for h in fyis {
+        out.push_str(&crate::protocol::fyi_envelope(&h.from, &h.text));
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+    }
+    let items = items.as_slice();
     let omitted = items.len().saturating_sub(MAX_PENDING_HANDOFFS);
     let keep = if items.len() > MAX_PENDING_HANDOFFS {
         &items[items.len() - MAX_PENDING_HANDOFFS..]
     } else {
         items
     };
-    let mut out = String::new();
     if omitted > 0 {
         let noun = if omitted == 1 { "reply" } else { "replies" };
         out.push_str(&crate::protocol::system_envelope(&format!(
@@ -3816,11 +3849,17 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             to,
             text,
             now,
-        } => match tell_with(&from, &to, &text, now) {
+            fyi,
+        } => match if fyi {
+            tell_fyi(&from, &to, &text)
+        } else {
+            tell_with(&from, &to, &text, now)
+        } {
             Ok(note) => vec![Event::Told {
                 from: from_id(&from),
                 to,
                 now,
+                fyi,
                 note,
             }],
             Err(err) => vec![Event::Error {
@@ -4294,6 +4333,38 @@ fn tell_with(from: &str, to: &str, text: &str, now: bool) -> anyhow::Result<Opti
     Ok(note)
 }
 
+/// `crew tell --fyi`: a note `to` reads with its next prompt. It shows in
+/// both chats like a tell, but it starts no turn, so nothing answers it and
+/// nobody is woken. For a rule, or news that needs no reply.
+fn tell_fyi(from: &str, to: &str, text: &str) -> anyhow::Result<Option<String>> {
+    let to = to.trim();
+    if crate::remote::split_id(to).is_some() && !known_agent(to) {
+        anyhow::bail!("--fyi reaches bots on this PC only. Send {to} a plain `crew tell`.");
+    }
+    if !known_agent(to) {
+        anyhow::bail!("unknown agent {to}");
+    }
+    let from = from_id(from);
+    if from == to {
+        anyhow::bail!("a note to yourself goes in `crew memory`");
+    }
+    let row = crate::transcript::push_system(to, &from, text, None);
+    enqueue_fyi(to, &from, text, &row.id);
+    if from != "user" && known_agent(&from) {
+        crate::transcript::push_notice(&from, &format!("to:{to}"), text, None);
+    }
+    let _ = events().send(Event::Told {
+        from,
+        to: to.to_string(),
+        now: false,
+        fyi: true,
+        note: None,
+    });
+    Ok(Some(format!(
+        "{to} reads this with its next message. It starts no turn, and no answer comes back to you."
+    )))
+}
+
 /// When each bot's turn in progress began.
 fn turn_starts() -> &'static Mutex<HashMap<String, Instant>> {
     static STARTS: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
@@ -4572,6 +4643,7 @@ fn tell_agent_origin(
         from: from.clone(),
         to: to.to_string(),
         now: false,
+        fyi: false,
         note: None,
     });
     sync_waiting();
@@ -4633,6 +4705,7 @@ fn tell_remote(
         from,
         to: rid,
         now: false,
+        fyi: false,
         note: None,
     });
     sync_waiting();
@@ -8921,6 +8994,48 @@ exec sleep 5"#,
             assert!(take_handoff_from(&lead, &worker).is_some(), "without a tell it still goes");
 
             take_origin(&worker);
+            for id in [&lead, &worker] {
+                clear_inbox(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// `crew tell --fyi` starts no turn. A reply from the same bot does not
+    /// replace it, and the receiver reads it with its next message.
+    #[test]
+    fn a_fyi_waits_for_the_next_prompt() {
+        paths::testing::with_home("tell-fyi", || {
+            let lead = test_id("lead");
+            let worker = test_id("worker");
+            let calls = paths::home_dir().join("calls");
+            fake_one_shot_bot(
+                &worker,
+                &format!(
+                    "for a; do last=$a; done\nprintf '%s\\n---\\n' \"$last\" >> '{}'\necho 네",
+                    calls.display()
+                ),
+            );
+            claude_bot(&lead);
+
+            let note = tell_fyi(&lead, &worker, "규칙: PR은 스쿼시로 머지해요").unwrap();
+            assert!(note.unwrap().contains("no answer comes back"));
+            assert!(inbox_is_empty(&worker), "no turn for a note");
+            assert!(!agent_busy(&worker).unwrap());
+            enqueue_handoff(&worker, &lead, "앞 일은 끝났어요", None);
+            assert!(take_handoff_from(&worker, &lead).is_some(), "the reply is its own");
+
+            send_agent(&worker, "다음 일 해 주세요").unwrap();
+            eventually(Duration::from_secs(5), "the next prompt never ran", || {
+                fs::read_to_string(&calls).is_ok_and(|c| c.contains("다음 일"))
+            });
+            let prompt = fs::read_to_string(&calls).unwrap();
+            assert!(prompt.contains(&format!("[crew fyi from:{lead}]")), "{prompt}");
+            assert!(prompt.contains("스쿼시로 머지"), "{prompt}");
+            wait_idle(&worker);
+            assert!(take_handoffs(&worker).is_empty(), "read once");
+            assert!(tell_fyi(&lead, "team/acc", "x").is_err(), "this PC only");
+
             for id in [&lead, &worker] {
                 clear_inbox(id);
                 remove_agent(id).unwrap();
