@@ -1,4 +1,3 @@
-import type { IdleCard } from "./idleTypes";
 import { noteRef } from "./peek";
 import type { AgentInfo, ChatMessage } from "./types";
 
@@ -26,9 +25,7 @@ export type ThreadRow =
   | { kind: "tools"; msgs: ChatMessage[] }
   | { kind: "notes"; peerId: string; msgs: ChatMessage[] }
   /** Files a bot showed one after another, as one card. */
-  | { kind: "files"; msgs: ChatMessage[] }
-  /** A stall while a turn was still open. It stays in the thread after the bot moves again. */
-  | { kind: "idle"; card: IdleCard };
+  | { kind: "files"; msgs: ChatMessage[] };
 
 /**
  * One compact note for a run of them. A long turn can compact several times,
@@ -40,9 +37,7 @@ export function oneCompactNote(list: ChatMessage[]): ChatMessage[] {
 
 /** When a row was written: its message, or the first one of a folded run. */
 export function rowTs(row: ThreadRow): number {
-  if (row.kind === "msg") return row.msg.ts;
-  if (row.kind === "idle") return row.card.activityTs;
-  return row.msgs[0].ts;
+  return row.kind === "msg" ? row.msg.ts : row.msgs[0].ts;
 }
 
 /**
@@ -161,7 +156,6 @@ export function dividerCandidates(
 ): { id: string; ts: number; mine: boolean }[] {
   const out: { id: string; ts: number; mine: boolean }[] = [];
   for (const row of rows) {
-    if (row.kind === "idle") continue;
     if (row.kind === "notes") {
       for (const m of row.msgs) out.push({ id: m.id, ts: m.ts || 0, mine: false });
       continue;

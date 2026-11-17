@@ -7,7 +7,6 @@ import { useLocale, useT } from "../LocaleContext";
 import type { Locale } from "../i18n";
 import type { ChatWidth } from "../chatWidth";
 import type { Delivery } from "../deliveryPref";
-import { idleFrom, type IdleEvery } from "../idlePref";
 import { applyFont, pageMeasure, loadFont, missingFonts, saveFont } from "../fontPref";
 import { applyFontSize, FONT_SIZES, loadFontSize, saveFontSize, type FontSize } from "../fontSize";
 import { loadLeadOnlyNotify, loadNotify, saveLeadOnlyNotify, saveNotify } from "../notifyPref";
@@ -35,8 +34,6 @@ type Props = {
   onShowTools: (show: boolean) => void;
   delivery: Delivery;
   onDelivery: (mode: Delivery) => void;
-  idleEvery: IdleEvery;
-  onIdle: (every: IdleEvery) => void;
   onClose: () => void;
   onOpenSkills: () => void;
   updater: UpdaterApi;
@@ -64,8 +61,6 @@ export function SettingsPane({
   onShowTools,
   delivery,
   onDelivery,
-  idleEvery,
-  onIdle,
   onClose,
   onOpenSkills,
   updater,
@@ -375,23 +370,6 @@ export function SettingsPane({
                 />
               </Field>
               <p className="apply-note">{t("settings.tools.note")}</p>
-              <Field label={t("settings.idle")}>
-                <div className="idle-seg">
-                  <Seg
-                    value={idleEvery === 0 ? "off" : String(idleEvery)}
-                    options={[
-                      { value: "off", label: t("settings.idle.off") },
-                      { value: "10", label: t("settings.idle.m10") },
-                      { value: "30", label: t("settings.idle.m30") },
-                      { value: "60", label: t("settings.idle.h1") },
-                    ]}
-                    onChange={(v) => onIdle(idleFrom(v))}
-                  />
-                </div>
-              </Field>
-              <p className="apply-note">
-                {idleEvery === 0 ? t("settings.idle.note.off") : t("settings.idle.note")}
-              </p>
               <Field label={t("settings.skills")}>
                 <button type="button" className="ghost settings-action" onClick={onOpenSkills}>
                   {t("settings.skillsOpen")}

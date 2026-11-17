@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -489,19 +489,6 @@ fn headless_of(id: &str) -> Option<Arc<HeadlessSession>> {
         LiveAgent::Headless(session) => Some(Arc::clone(session)),
         LiveAgent::Pty(_) => None,
     }
-}
-
-/// The CLI is inside a turn right now. A `turn` record on disk during that
-/// is the in-flight note, not a restart that cut it off.
-fn headless_turn_running(id: &str) -> bool {
-    let Some(session) = headless_of(id) else {
-        return false;
-    };
-    session
-        .inner
-        .lock()
-        .map(|inner| inner.turn_running())
-        .unwrap_or(false)
 }
 
 /// Put the prompt the CLI never answered at the front of the inbox, waiting.
@@ -3738,8 +3725,6 @@ fn list_agents() -> Vec<AgentInfo> {
                 watch: s.watch(),
                 work_dir: Some(s.cwd().display().to_string()),
                 waiting_on: Vec::new(),
-                cut_off: false,
-                changed: Vec::new(),
             }
         })
         .collect();
@@ -3755,15 +3740,6 @@ fn list_agents() -> Vec<AgentInfo> {
         a.failed = turn_failed(&a.id);
         a.asking = crate::transcript::has_pending_choice(&a.id);
         a.for_bot = answers_a_bot(&a.id);
-        let running = headless_turn_running(&a.id);
-        a.cut_off = crate::idle::cut_off(&a.id, running);
-        // Git status is not free. Only a bot that can still be mid-task
-        // needs the dirty list the idle card shows.
-        if a.cut_off || a.status == AgentStatus::Working || !a.waiting_on.is_empty() {
-            if let Some(dir) = a.work_dir.as_deref() {
-                a.changed = crate::worktree::changed_files(Path::new(dir));
-            }
-        }
     }
     list.extend(crate::remote::agent_infos());
     // Read only when the setting is on: the window asks for this list often.
