@@ -36,6 +36,37 @@ export function waitingOn(agent: AgentInfo | null | undefined): string[] {
   return agent.waiting_on ?? [];
 }
 
+/**
+ * Local bots among `ids` with a question card open. A remote bot's card is
+ * for its owner, so it does not count as waiting on this user.
+ */
+export function askingAmong(ids: readonly string[], agents: readonly AgentInfo[]): AgentInfo[] {
+  const byId = new Map(agents.map((a) => [a.id, a]));
+  const seen = new Set<string>();
+  const out: AgentInfo[] = [];
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const a = byId.get(id);
+    if (a?.asking && !a.remote) out.push(a);
+  }
+  return out;
+}
+
+/**
+ * The status line when a bot this one waits on is asking the user.
+ * Null when none of them is. Several name the first and count the rest.
+ */
+export function waitingUserPhrase(
+  asking: readonly Pick<AgentInfo, "id" | "name">[],
+  t: TFn,
+): string | null {
+  if (!asking.length) return null;
+  const name = asking[0].name || asking[0].id;
+  if (asking.length === 1) return t("header.waitingUser", { name });
+  return t("header.waitingUserMore", { name, n: asking.length - 1 });
+}
+
 function wordFor(agent: AgentInfo, t: TFn): StatusView | null {
   if (agent.remote && agent.asking) return { tone: "blocked", text: t("header.statusOwner") };
   if (agent.status === "working") return { tone: "working", text: t("header.statusWorking") };

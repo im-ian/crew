@@ -255,7 +255,7 @@ export function mentionIds(
 export type MentionRun = { text: string; agent?: AgentInfo; group?: Group };
 
 /** A handle `handleAt` found: a bot after `@`, or a group after `#`. */
-export type Handle = { label: string; length: number } & (
+export type Handle = { label: string; length: number; absorb: number } & (
   | { sigil: "@"; agent: AgentInfo; group?: undefined }
   | { sigil: "#"; group: Group; agent?: undefined }
 );
@@ -298,19 +298,62 @@ export function handleAt(
       ? namedGroups(groups).find((g) => g.id.toLowerCase() === lower)
       : undefined;
     if (!group) return undefined;
-    return { sigil: "#", group, label: group.name, length: 1 + token.length };
+    return { sigil: "#", group, label: group.name, length: 1 + token.length, absorb: 0 };
   }
   if (text[i] !== "@") return undefined;
   const token = handleToken(text, i, HANDLE_ID, html);
   if (!token) return undefined;
   const agent = resolveId(token, agents);
   if (!agent) return undefined;
-  return {
-    sigil: "@",
-    agent,
-    label: mentionLabel(agent),
-    length: 1 + token.length + nameAfter(text.slice(i + 1 + token.length), agent),
-  };
+  const end = i + 1 + token.length + nameAfter(text.slice(i + 1 + token.length), agent);
+  // `Name(@id)` paints the name twice. The word glued to `(` has to be this
+  // bot's name, and a `)` has to close it. `개발자(@alpha)` stays as written.
+  let absorb = 0;
+  let length = end - i;
+  if (i > 0 && text[i - 1] === "(" && text[end] === ")") {
+    const nameLen = nameBefore(text.slice(0, i - 1), agent);
+    if (nameLen > 0) {
+      absorb = nameLen + 1;
+      length += 1;
+    }
+  }
+  return { sigil: "@", agent, label: mentionLabel(agent), length, absorb };
+}
+
+/**
+ * How many characters at the end of `before` are this bot's name, so
+ * `Alpha(@alpha)` can drop them. Zero when that word is not the name, or
+ * when it does not start on a boundary (`notAlpha`). The whole name wins
+ * over one word of it.
+ */
+function nameBefore(before: string, agent: AgentInfo): number {
+  const names = new Set<string>();
+  for (const raw of [agent.name || agent.id, mentionLabel(agent)]) {
+    const n = raw.trim();
+    if (!n) continue;
+    names.add(n);
+    for (const word of n.split(/[\s·]+/)) {
+      if (word) names.add(word);
+    }
+  }
+  const ranked = [...names].sort((a, b) => b.length - a.length);
+  const lower = before.toLowerCase();
+  for (const name of ranked) {
+    const n = name.toLowerCase();
+    if (!n || !lower.endsWith(n)) continue;
+    const start = before.length - name.length;
+    if (start > 0) {
+      const prev = before[start - 1];
+      if (!opensHandle(prev) && prev !== ">") continue;
+    }
+    return name.length;
+  }
+  return 0;
+}
+
+/** Drop `absorb` characters the chip takes over from the end of `buf`. */
+function withoutAbsorb(buf: string, absorb: number): string {
+  return absorb > 0 ? buf.slice(0, Math.max(0, buf.length - absorb)) : buf;
 }
 
 /**
@@ -348,6 +391,7 @@ export function mentionRuns(
   while (i < text.length) {
     const hit = prevWs ? handleAt(text, i, agents, groups) : undefined;
     if (hit) {
+      plain = withoutAbsorb(plain, hit.absorb);
       if (plain) runs.push({ text: plain });
       plain = "";
       runs.push(
@@ -431,6 +475,7 @@ export function injectMentionChips(
     }
     const hit = prevWs ? handleAt(html, i, agents, groups, true) : undefined;
     if (hit) {
+      out = withoutAbsorb(out, hit.absorb);
       out +=
         hit.sigil === "@"
           ? `<span class="mention-chip" data-mention="${attr(hit.agent.id)}"></span>`

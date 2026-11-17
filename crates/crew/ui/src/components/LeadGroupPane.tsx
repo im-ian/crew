@@ -4,7 +4,7 @@ import { listStamp } from "../clock";
 import { Star, Users, X } from "../icons";
 import { useLocale, useT } from "../LocaleContext";
 import { mentionRuns } from "../mentions";
-import { briefStatus, waitingOn } from "../statusView";
+import { askingAmong, briefStatus, waitingOn, waitingUserPhrase } from "../statusView";
 import type { AgentInfo, Group } from "../types";
 import { Avatar } from "./Avatar";
 import { MentionRunsView } from "./MentionChip";
@@ -89,6 +89,10 @@ function GroupBotRow({
   const labelGroups = useLabelGroups();
   const name = bot.name || bot.id;
   const status = briefStatus(bot, t);
+  const statusText =
+    status.tone === "waiting"
+      ? (waitingUserPhrase(askingAmong(waitingOn(bot), agents), t) ?? status.text)
+      : status.text;
   const ts = bot.last_ts || 0;
   const stamp = listStamp(ts, locale);
   const runs = useMemo(
@@ -129,8 +133,11 @@ function GroupBotRow({
           ) : null}
         </div>
         <div className="lead-row-line">
-          <span className={"head-status is-" + status.tone}>
-            <span className="head-status-text">{status.text}</span>
+          <span
+            className={"head-status is-" + status.tone}
+            title={statusText !== status.text ? statusText : undefined}
+          >
+            <span className="head-status-text">{statusText}</span>
           </span>
           {bot.preview ? (
             <span className="agent-preview lead-row-preview">

@@ -4,7 +4,7 @@ import { useT } from "../LocaleContext";
 import { Search } from "../icons";
 import { imeKey, stepIndex, switchSections, type SwitchSection } from "../quickSwitch";
 import type { AgentInfo, Group } from "../types";
-import { statusView, waitingOn } from "../statusView";
+import { askingAmong, statusView, waitingOn, waitingUserPhrase } from "../statusView";
 import { Avatar } from "./Avatar";
 
 type Props = {
@@ -146,7 +146,15 @@ export function QuickSwitcher({ agents, groups, order, recent, current, onPick, 
                   {section.rows.map((row, at) => {
                     const i = first + at;
                     const a = row.agent;
-                    const status = statusView(a, now, t);
+                    const viewed = statusView(a, now, t);
+                    const status =
+                      viewed?.tone === "waiting"
+                        ? {
+                            ...viewed,
+                            text:
+                              waitingUserPhrase(askingAmong(waitingOn(a), agents), t) ?? viewed.text,
+                          }
+                        : viewed;
                     const here = a.id === current;
                     return (
                       <div

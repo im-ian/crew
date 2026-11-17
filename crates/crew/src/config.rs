@@ -1216,7 +1216,7 @@ pub fn team_rules_for(
         "Shared memory is current on every turn. A `[crew system]` note that starts with `Shared memory` holds the live teammate list and your live name, plus the notes every bot shares. That note replaces any teammate list in these instructions, including after a compact. Use the note. To read it, run `crew share show`. To add a note for every bot, run `crew share append <<'EOF'` with one short line, then `EOF`. To replace the shared notes, run `crew share show`, then `crew share set <<'EOF'` with the notes only, then `EOF`. Crew writes the teammate list, so `crew share set` does not change it. Do not copy the teammate list into your own memory. Do not save secrets there. When you sit in a group, the note also holds a `# Group memory` section for that group. To add to it, run `crew group memory append <<'EOF'` with one short line, then `EOF`. To replace it, run `crew group memory show`, then `crew group memory set <<'EOF'` with the whole new notes, then `EOF`.\n",
     );
     s.push_str(
-        "A teammate is written `@<id>`, and Crew shows it as their name. To name a teammate in your reply, write `@<id>` too; that only shows their name and sends nothing. Crew already shows the name, so do not add it after the id: write `@bot-3`, with a space or punctuation right after it. When the user writes one, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, so after `crew tell`, end your turn. Do not wait, sleep, or check for the reply. A teammate that is working gets a tell when its turn ends, which can take many minutes. When it must hear something before it goes on, such as stop, cancel, or hold, run `crew tell --now <id> <text>`: that stops the turn it is in, and it starts on yours right away. A group is written `#<group-id>`, and Crew shows it as the group's name. When the user writes one, they are naming the group the work belongs to; it messages no one, and a note under their message gives that group's bots, folder, and memory.\n",
+        "A teammate is written `@<id>`, and Crew shows it as their name. To name a teammate in your reply, write `@<id>` too; that only shows their name and sends nothing. Crew already shows the name, so do not write the name before or after the id: `@bot-3(Name)` and `Name(@bot-3)` both show the name twice. Write `@bot-3`, with a space or punctuation right after it. When the user writes one, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, so after `crew tell`, end your turn. Do not wait, sleep, or check for the reply. A teammate that is working gets a tell when its turn ends, which can take many minutes. When it must hear something before it goes on, such as stop, cancel, or hold, run `crew tell --now <id> <text>`: that stops the turn it is in, and it starts on yours right away. A group is written `#<group-id>`, and Crew shows it as the group's name. When the user writes one, they are naming the group the work belongs to; it messages no one, and a note under their message gives that group's bots, folder, and memory.\n",
     );
     if let Some(note) = background_note(agent) {
         s.push_str(note);
@@ -1235,7 +1235,10 @@ pub fn team_rules_for(
         "To schedule recurring work, actually run `crew routine add --name \"...\" --schedule \"0 8 * * 1-5\" --prompt \"...\"`. Turn the user's words into 5-field cron yourself: numbers only, minute hour day month weekday (0 = Sunday), local time. If the day or time is unclear, ask with `crew ask` first. `crew routine list` shows yours; change one with `crew routine edit|remove|pause|resume <name>` (`crew routine --help`). Each prints your routines with their next run; tell the user the schedule and next run it shows. That creates a Crew routine, not a chat reminder.\n",
     );
     s.push_str(
-        "When you are asked to do work, say first, in one or two short sentences, how you will go about it, before you run a tool. As you go, keep the user in the loop the way a colleague at the next desk would: a short line on what you are on now, what just finished, or what changed your plan, so they can follow along without asking. Keep each to one line; what you found goes in the result. Finish with the result. Write every line in the language the user wrote in. Each of these lines starts after a blank line, so it is a balloon of its own. Judge the size first: a small task, or anything you can answer right away, gets just the answer, with no plan or progress lines.\n",
+        "When you are asked to do work, say first, in one or two short sentences, how you will go about it, before you run a tool. As you go, keep the user in the loop the way a colleague at the next desk would: a short line on what you are on now, what just finished, or what changed your plan, so they can follow along without asking. Keep each to one line; what you found goes in the result. Finish with the result. Write every line in the language the user wrote in, including a progress line and a short line between tools. Each of these lines starts after a blank line, so it is a balloon of its own. Judge the size first: a small task, or anything you can answer right away, gets just the answer, with no plan or progress lines.\n",
+    );
+    s.push_str(
+        "If the conversation is compacted while a teammate's tell is the task you are on, that tell is repeated in a `[crew system]` note on your next message. Do not answer the note. Until it arrives, keep working on that tell and do not drop it because earlier messages were folded away.\n",
     );
     s.push_str(
         "In a paragraph of your reply, start each sentence on a new line, with no blank line between them; a blank line starts a new chat balloon. Keep list items, options, tables, headings and code as they are.\n",
@@ -1313,7 +1316,7 @@ pub fn roster_update_text(
     folder: Option<&crate::groups::SidebarGroup>,
 ) -> String {
     format!(
-        "You are `{}` ({}). {} A teammate is written `@<id>`, and Crew shows it as their name; write them that way in your reply too, with a space or punctuation right after the id and no name added after it. When the user writes one they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>`. Do not ask the user to switch chats. Do not pretend.",
+        "You are `{}` ({}). {} A teammate is written `@<id>`, and Crew shows it as their name; write them that way in your reply too, with a space or punctuation right after the id and no name before or after it. When the user writes one they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>`. Do not ask the user to switch chats. Do not pretend.",
         agent.id,
         agent.display_name(),
         teammates_sentence(agent, roster, folder)
@@ -2967,8 +2970,8 @@ mod tests {
         assert!(!rules.contains("alpha — Alpha"));
         assert!(rules.contains("crew tell"));
         assert!(rules.contains("@<id>"));
-        // `@id(name)` reads as one word, so it is no chip and no tell.
-        assert!(rules.contains("do not add it after the id"));
+        // `Name(@id)` and `@id(Name)` both paint the name twice.
+        assert!(rules.contains("do not write the name before or after the id"));
         // This grok stays up, so a background task does not hold the next
         // message. That warning is for a process per turn.
         assert!(!rules.contains("must not run as your CLI's background task"));
@@ -3559,6 +3562,8 @@ mod tests {
         assert!(rules.contains("Finish with the result."));
         assert!(rules.contains("keep the user in the loop"));
         assert!(rules.contains("in the language the user wrote in"));
+        assert!(rules.contains("including a progress line and a short line between tools"));
+        assert!(rules.contains("repeated in a `[crew system]` note"));
         assert!(rules.contains("gets just the answer, with no plan or progress lines"));
         assert!(
             !rules.contains("Worktree mode"),
