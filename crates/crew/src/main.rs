@@ -71,6 +71,10 @@ enum Cmd {
         /// Sender id. Defaults to $CREW_AGENT_ID, else `user`
         #[arg(long)]
         from: Option<String>,
+        /// Cut into their turn now instead of waiting for it to end. For an
+        /// urgent word: stop, cancel, hold
+        #[arg(long)]
+        now: bool,
         /// Message. Read from stdin when left out, so a heredoc works too
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         message: Vec<String>,
@@ -411,7 +415,12 @@ fn run() -> anyhow::Result<()> {
                 id: None,
             })?)
         }
-        Some(Cmd::Tell { to, from, message }) => run_tell(to, from, message),
+        Some(Cmd::Tell {
+            to,
+            from,
+            now,
+            message,
+        }) => run_tell(to, from, now, message),
         Some(Cmd::Show { path, agent }) => run_show(path, agent),
         Some(Cmd::Ask { .. }) => {
             let ask = matches.subcommand_matches("ask").expect("ask matches");
@@ -1079,7 +1088,12 @@ fn stray_ask_flag(arg: &str) -> String {
     }
 }
 
-fn run_tell(to: String, from: Option<String>, message: Vec<String>) -> anyhow::Result<()> {
+fn run_tell(
+    to: String,
+    from: Option<String>,
+    now: bool,
+    message: Vec<String>,
+) -> anyhow::Result<()> {
     connect_for_tell()?;
     let from = client::tell_from(from);
     let to = to.trim().to_string();
@@ -1093,7 +1107,12 @@ fn run_tell(to: String, from: Option<String>, message: Vec<String>) -> anyhow::R
     if text.trim().is_empty() {
         anyhow::bail!("tell needs a message");
     }
-    client::print_event(client::rpc(Request::Tell { from, to, text })?)
+    client::print_event(client::rpc(Request::Tell {
+        from,
+        to,
+        text,
+        now,
+    })?)
 }
 
 

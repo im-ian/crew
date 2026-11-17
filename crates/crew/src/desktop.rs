@@ -183,7 +183,12 @@ fn answer_choice(
 #[tauri::command(async)]
 fn tell_message(from: Option<String>, to: String, text: String) -> Result<(), String> {
     let from = client::tell_from(from);
-    match client::rpc(Request::Tell { from, to, text }) {
+    match client::rpc(Request::Tell {
+        from,
+        to,
+        text,
+        now: false,
+    }) {
         Ok(Event::Told { .. }) | Ok(Event::Ok) => Ok(()),
         Ok(Event::Error { message }) => Err(message),
         Ok(_) => Err("unexpected daemon response".into()),

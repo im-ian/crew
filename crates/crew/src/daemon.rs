@@ -1101,6 +1101,9 @@ fn start_delivery(
     let started = deliver(id, &text, newline, &skip_rows);
     match &started {
         Ok(()) => {
+            if let Ok(mut map) = turn_starts().lock() {
+                map.insert(id.to_string(), Instant::now());
+            }
             follow_turn(id, epoch, std::mem::take(then));
             if recorded.is_some() {
                 note_followers(id);
@@ -3498,10 +3501,17 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
                 Request::Search { query } => vec![Event::Search {
             hits: search_corpus(&query),
         }],
-        Request::Tell { from, to, text } => match tell_agent(&from, &to, &text) {
-            Ok(()) => vec![Event::Told {
+        Request::Tell {
+            from,
+            to,
+            text,
+            now,
+        } => match tell_with(&from, &to, &text, now) {
+            Ok(note) => vec![Event::Told {
                 from: from_id(&from),
                 to,
+                now,
+                note,
             }],
             Err(err) => vec![Event::Error {
                 message: err.to_string(),
@@ -3956,6 +3966,100 @@ fn tell_agent(from: &str, to: &str, text: &str) -> anyhow::Result<()> {
     tell_agent_origin(from, to, text, None, true, &mut VecDeque::new())
 }
 
+/// `crew tell`, `--now` or not. What it returns is said to the sender: how
+/// long the tell will wait, so a bot is not left guessing why nothing came.
+fn tell_with(from: &str, to: &str, text: &str, now: bool) -> anyhow::Result<Option<String>> {
+    let to = to.trim();
+    if now {
+        return tell_now(from, to, text);
+    }
+    // Read before the tell: once it starts, the teammate is busy with it.
+    let note = wait_note(to);
+    tell_agent(from, to, text)?;
+    Ok(note)
+}
+
+/// When each bot's turn in progress began.
+fn turn_starts() -> &'static Mutex<HashMap<String, Instant>> {
+    static STARTS: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    STARTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn minutes_working(id: &str) -> u64 {
+    turn_starts()
+        .lock()
+        .ok()
+        .and_then(|map| map.get(id).map(|at| at.elapsed().as_secs() / 60))
+        .unwrap_or(0)
+}
+
+/// Why a tell to `to` will wait, when it will: the turn it is in, and what
+/// already waits ahead of it. None when `to` can start on it.
+fn wait_note(to: &str) -> Option<String> {
+    if !known_agent(to) {
+        return None;
+    }
+    let ahead = inbox()
+        .lock()
+        .ok()
+        .and_then(|map| map.get(to).map(VecDeque::len))
+        .unwrap_or(0);
+    let behind = match ahead {
+        0 => String::new(),
+        1 => ", behind 1 other message".to_string(),
+        n => format!(", behind {n} other messages"),
+    };
+    let why = match live_status(to).ok()? {
+        AgentStatus::Working => match minutes_working(to) {
+            0 => format!("{to} is working on something else"),
+            1 => format!("{to} has been working for 1 minute"),
+            n => format!("{to} has been working for {n} minutes"),
+        },
+        AgentStatus::Blocked => format!("{to} is waiting on the user's approval"),
+        _ if ahead > 0 => format!("{to} has messages waiting"),
+        _ => return None,
+    };
+    Some(format!(
+        "{why}, so your tell waits until it is free{behind}. If it is urgent, such as stop, cancel, or hold, send it with `crew tell --now {to} ...` instead."
+    ))
+}
+
+/// `crew tell --now`: the tell does not wait for the sender's turn to end,
+/// and a headless teammate stops the turn it is in and starts on this, as a
+/// user's steer does. That stop ends the chain of the turn it cuts off. A
+/// terminal cannot be stopped mid-turn, so there it waits as any tell.
+fn tell_now(from: &str, to: &str, text: &str) -> anyhow::Result<Option<String>> {
+    if crate::remote::split_id(to).is_some() && !known_agent(to) {
+        tell_agent_origin(from, to, text, None, true, &mut VecDeque::new())?;
+        return Ok(Some(format!(
+            "{to} is on another PC, so --now does not apply: the tell went as usual."
+        )));
+    }
+    if !known_agent(to) {
+        anyhow::bail!("unknown agent {to}");
+    }
+    let sender = from_id(from);
+    ensure_accepts_turn(to)?;
+    // Checked before the stop, so a tell that may not go stops nothing.
+    if sender != "user" && sender != to {
+        relay_check(&sender, to, text, &tell_origin(&sender, text, get_origin(&sender).as_ref()))?;
+    }
+    let mut note = None;
+    // A turn waiting on approval is answered by the next message anyway.
+    if matches!(live_status(to), Ok(AgentStatus::Working)) {
+        if is_headless(to) {
+            halt_turn(to)?;
+        } else {
+            note = Some(format!(
+                "{to} runs in a terminal, which cannot be stopped mid-turn, so your tell waits until it is free."
+            ));
+        }
+    }
+    // The sender's own turn does not hold it back.
+    tell_agent_origin(from, to, text, None, false, &mut VecDeque::new())?;
+    Ok(note)
+}
+
 /// A tell sent for `from` once its owner allowed it, as if `from` sent it in
 /// the turn `origin` stands for.
 pub(crate) fn tell_as(
@@ -4152,6 +4256,8 @@ fn tell_agent_origin(
     let _ = events().send(Event::Told {
         from: from.clone(),
         to: to.to_string(),
+        now: false,
+        note: None,
     });
     sync_waiting();
     Ok(())
@@ -4211,6 +4317,8 @@ fn tell_remote(
     let _ = events().send(Event::Told {
         from,
         to: rid,
+        now: false,
+        note: None,
     });
     sync_waiting();
     if !then.is_empty() {
@@ -8089,6 +8197,61 @@ exec sleep 5"#,
             Some(LiveAgent::Headless(s)) => s.inner.lock().unwrap().status = to,
             _ => panic!("runs headless"),
         }
+    }
+
+    /// `crew tell --now` from a bot mid-turn: it does not wait for that turn,
+    /// and the working teammate stops and starts on it at once.
+    #[test]
+    fn a_tell_now_cuts_into_the_teammates_turn() {
+        paths::testing::with_home("tell-now", || {
+            let lead = test_id("lead");
+            let worker = test_id("worker");
+            let calls = paths::home_dir().join("calls");
+            fake_one_shot_bot(
+                &worker,
+                &format!(
+                    "for a; do last=$a; done\nprintf '%s\\n---\\n' \"$last\" >> '{}'\nexec sleep 5",
+                    calls.display()
+                ),
+            );
+            claude_bot(&lead);
+            send_agent(&worker, "머지까지 해 주세요").unwrap();
+            eventually(Duration::from_secs(5), "the first turn never started", || {
+                fs::read_to_string(&calls).is_ok_and(|c| c.contains("머지까지"))
+            });
+            headless_status(&lead, AgentStatus::Working);
+
+            let note = wait_note(&worker).expect("a working bot makes a tell wait");
+            assert!(note.contains("--now"), "{note}");
+
+            assert_eq!(tell_with(&lead, &worker, "머지하지 마세요", true).unwrap(), None);
+            eventually(Duration::from_secs(5), "the tell never cut in", || {
+                fs::read_to_string(&calls).is_ok_and(|c| c.contains("머지하지 마세요"))
+            });
+            assert!(!tells_after(&lead, &worker), "it did not wait for the lead's turn");
+
+            headless_status(&lead, AgentStatus::Idle);
+            interrupt_turn(&worker).unwrap();
+            take_origin(&lead);
+            for id in [&lead, &worker] {
+                clear_inbox(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// A tell to a bot that can start on it says nothing more.
+    #[test]
+    fn a_tell_to_a_free_bot_has_no_wait_note() {
+        paths::testing::with_home("tell-free", || {
+            let bot = test_id("free");
+            claude_bot(&bot);
+            assert_eq!(wait_note(&bot), None);
+            headless_status(&bot, AgentStatus::Blocked);
+            assert!(wait_note(&bot).unwrap().contains("approval"));
+            headless_status(&bot, AgentStatus::Idle);
+            remove_agent(&bot).unwrap();
+        });
     }
 
     fn claude_bot(id: &str) {
