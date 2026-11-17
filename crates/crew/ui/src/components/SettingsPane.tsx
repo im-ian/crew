@@ -7,7 +7,16 @@ import { useLocale, useT } from "../LocaleContext";
 import type { Locale } from "../i18n";
 import type { ChatWidth } from "../chatWidth";
 import type { Delivery } from "../deliveryPref";
-import { applyFont, pageMeasure, loadFont, missingFonts, saveFont } from "../fontPref";
+import {
+  applyCodeFont,
+  applyFont,
+  loadCodeFont,
+  loadFont,
+  missingFonts,
+  pageMeasure,
+  saveCodeFont,
+  saveFont,
+} from "../fontPref";
 import { applyFontSize, FONT_SIZES, loadFontSize, saveFontSize, type FontSize } from "../fontSize";
 import { loadLeadOnlyNotify, loadNotify, saveLeadOnlyNotify, saveNotify } from "../notifyPref";
 import { loadNoticeKeep, saveNoticeKeep } from "../noticeKeepPref";
@@ -82,6 +91,7 @@ export function SettingsPane({
   }
   const [worktree, setWorktree] = useState(loadWorktree);
   const [font, setFont] = useState(loadFont);
+  const [codeFont, setCodeFont] = useState(loadCodeFont);
   const [fontSize, setFontSize] = useState(loadFontSize);
 
   function changeFontSize(next: FontSize) {
@@ -91,6 +101,7 @@ export function SettingsPane({
   }
   const measure = useMemo(pageMeasure, []);
   const missing = useMemo(() => missingFonts(font, measure), [font, measure]);
+  const missingCode = useMemo(() => missingFonts(codeFont, measure), [codeFont, measure]);
   // The plain default until the daemon's list is read: it is that list's top.
   const [aiList, setAiList] = useState<AiChoice[]>(() => [loadBotDefault()]);
 
@@ -329,6 +340,26 @@ export function SettingsPane({
                 {missing.length
                   ? t("settings.font.missing", { names: missing.join(", ") })
                   : t("settings.font.note")}
+              </p>
+              <Field label={t("settings.codeFont")} htmlFor="settings-code-font">
+                <input
+                  id="settings-code-font"
+                  className="textin"
+                  placeholder={t("settings.codeFont.placeholder")}
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={codeFont}
+                  onChange={(e) => {
+                    setCodeFont(e.target.value);
+                    applyCodeFont(e.target.value);
+                    saveCodeFont(e.target.value);
+                  }}
+                />
+              </Field>
+              <p className={"apply-note" + (missingCode.length ? " is-error" : "")}>
+                {missingCode.length
+                  ? t("settings.font.missing", { names: missingCode.join(", ") })
+                  : t("settings.codeFont.note")}
               </p>
               <Field label={t("settings.fontSize")}>
                 <Seg
