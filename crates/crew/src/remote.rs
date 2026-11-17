@@ -2532,6 +2532,8 @@ pub fn agent_infos() -> Vec<AgentInfo> {
                 watch: Vec::new(),
                 work_dir: None,
                 waiting_on: Vec::new(),
+                cut_off: false,
+                changed: Vec::new(),
             });
         }
     }

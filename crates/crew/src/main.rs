@@ -13,6 +13,7 @@ mod fallback;
 mod files;
 mod groups;
 mod headless;
+mod idle;
 mod interrupt;
 #[cfg(target_os = "macos")]
 mod macos_escape;
