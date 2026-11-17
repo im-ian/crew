@@ -180,11 +180,23 @@ pub fn is_limit_error(text: &str) -> bool {
         "limit reached",
         "hit your limit",
         "out of extra usage",
+        "-hour limit",
+        "weekly limit",
+        "session limit",
     ];
     if PHRASES.iter().any(|p| lower.contains(p)) {
         return true;
     }
-    has_status_429(&lower)
+    hit_your_limit(&lower) || has_status_429(&lower)
+}
+
+/// Claude's `You've hit your 5-hour limit`, `hit your Opus weekly limit`:
+/// a limit named between "hit your" and "limit", in the same sentence.
+fn hit_your_limit(lower: &str) -> bool {
+    lower.match_indices("hit your ").any(|(at, p)| {
+        let near: String = lower[at + p.len()..].chars().take(40).collect();
+        near.split(['.', '\n', '·', '∙']).next().is_some_and(|s| s.contains("limit"))
+    })
 }
 
 /// `429` as an HTTP status, not inside a longer number.
@@ -205,7 +217,8 @@ fn has_status_429(lower: &str) -> bool {
 }
 
 /// When the limit in this message resets, if it says: Claude's
-/// `limit reached|<unix seconds>`, or `try again in 2 hours 5 minutes`.
+/// `limit reached|<unix seconds>`, `resets 6:50pm (Asia/Seoul)`, or
+/// `try again in 2 hours 5 minutes`.
 pub fn reset_in_error(text: &str, now: i64) -> Option<i64> {
     if let Some(at) = text.find("limit reached|") {
         let digits: String = text[at + "limit reached|".len()..]
@@ -217,6 +230,9 @@ pub fn reset_in_error(text: &str, now: i64) -> Option<i64> {
                 return Some(t);
             }
         }
+    }
+    if let Some(at) = reset_at_clock(text, now) {
+        return Some(at);
     }
     let lower = text.to_ascii_lowercase();
     let at = lower.find("try again in ")?;
@@ -253,6 +269,116 @@ pub fn reset_in_error(text: &str, now: i64) -> Option<i64> {
         found = true;
     }
     found.then_some(now + secs)
+}
+
+/// Claude's `resets 6:50pm (Asia/Seoul)`, `resets 11am`, `resets Nov 21,
+/// 9am`: the next such time on this Mac's clock. A zone that is not this
+/// Mac's is left unread, as this binary has no zone table: the limit is then
+/// tried again after [`RETRY_SECS`], not waited out at a wrong hour.
+fn reset_at_clock(text: &str, now: i64) -> Option<i64> {
+    let lower = text.to_ascii_lowercase();
+    let rest = &lower[lower.find("resets ")? + "resets ".len()..];
+    if let Some(open) = rest.find('(') {
+        let zone = rest[open + 1..].split(')').next().unwrap_or("").trim();
+        if !zone.is_empty() && !is_local_zone(zone) {
+            return None;
+        }
+    }
+    let mut words = rest
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .filter(|w| !w.is_empty())
+        .peekable();
+    let mut word = words.next()?;
+    let mut date = None;
+    if let Some(month) = month_of(word) {
+        let day: u8 = words.next()?.parse().ok()?;
+        date = Some((month, day));
+        word = words.next()?;
+        if word == "at" {
+            word = words.next()?;
+        }
+    }
+    let word = word.trim_end_matches(|c: char| !c.is_ascii_alphanumeric());
+    let (clock, mut half) = match word.strip_suffix("am").or_else(|| word.strip_suffix("pm")) {
+        Some(c) => (c, Some(word.ends_with("pm"))),
+        None => (word, None),
+    };
+    if half.is_none() {
+        match words.peek().map(|w| w.trim_end_matches(|c: char| !c.is_ascii_alphanumeric())) {
+            Some("am") => half = Some(false),
+            Some("pm") => half = Some(true),
+            _ => {}
+        }
+    }
+    let (h, m) = match clock.split_once(':') {
+        Some((h, m)) => (h.parse::<u8>().ok()?, m.parse::<u8>().ok()?),
+        None => (clock.parse::<u8>().ok()?, 0),
+    };
+    let hour = match half {
+        Some(pm) if (1..=12).contains(&h) => h % 12 + if pm { 12 } else { 0 },
+        None if h < 24 => h,
+        _ => return None,
+    };
+    if m > 59 {
+        return None;
+    }
+    let today = crate::cron::local_at(now as libc::time_t).ok()?;
+    match date {
+        Some((month, day)) => {
+            let at = local_unix(today.year, month, day, hour, m)?;
+            // Written without a year: one well past is next year's.
+            if at < now - 86_400 {
+                local_unix(today.year + 1, month, day, hour, m)
+            } else {
+                Some(at)
+            }
+        }
+        None => {
+            let at = local_unix(today.year, today.month, today.day, hour, m)?;
+            if at > now {
+                Some(at)
+            } else {
+                local_unix(today.year, today.month, today.day + 1, hour, m)
+            }
+        }
+    }
+}
+
+fn month_of(word: &str) -> Option<u8> {
+    const MONTHS: [&str; 12] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    MONTHS.iter().position(|m| word.starts_with(m)).map(|i| i as u8 + 1)
+}
+
+/// A local wall-clock time as unix seconds. `day` may run past the month's end.
+fn local_unix(year: i32, month: u8, day: u8, hour: u8, minute: u8) -> Option<i64> {
+    // SAFETY: `mktime` reads and normalises the `tm` it is given, nothing else.
+    unsafe {
+        let mut tm: libc::tm = std::mem::zeroed();
+        tm.tm_year = year - 1900;
+        tm.tm_mon = month as i32 - 1;
+        tm.tm_mday = day as i32;
+        tm.tm_hour = hour as i32;
+        tm.tm_min = minute as i32;
+        tm.tm_isdst = -1;
+        let t = libc::mktime(&mut tm);
+        (t != -1).then_some(t as i64)
+    }
+}
+
+/// Whether `zone` (`asia/seoul`) is this Mac's: `TZ`, or where
+/// `/etc/localtime` points. When neither says, it is taken as this Mac's.
+fn is_local_zone(zone: &str) -> bool {
+    let zone = zone.to_ascii_lowercase();
+    if let Ok(tz) = std::env::var("TZ") {
+        let tz = tz.trim_start_matches(':').to_ascii_lowercase();
+        if !tz.is_empty() {
+            return tz == zone || tz.ends_with(&format!("/{zone}"));
+        }
+    }
+    match std::fs::read_link("/etc/localtime") {
+        Ok(path) => path.to_string_lossy().to_ascii_lowercase().ends_with(&format!("zoneinfo/{zone}")),
+        Err(_) => true,
+    }
 }
 
 /// The name a note gives a CLI.
@@ -374,6 +500,11 @@ mod tests {
             "API Error: 429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\"}}",
             "[API Error: RESOURCE_EXHAUSTED: Quota exceeded for quota metric]",
             "You have run out of credits for this period",
+            // Claude Code, as it says it today.
+            "You've hit your 5-hour limit · resets 6:50pm (Asia/Seoul)",
+            "You've hit your session limit · resets 11am (Asia/Seoul)",
+            "You've hit your weekly limit · resets Nov 21, 9am (Asia/Seoul)",
+            "You've hit your Opus limit · resets 3pm",
         ] {
             assert!(is_limit_error(text), "{text}");
         }
@@ -400,6 +531,40 @@ mod tests {
         );
         assert_eq!(reset_in_error("try again in 1 day, 3h and 4m", 0), Some(86_400 + 3 * 3600 + 4 * 60));
         assert_eq!(reset_in_error("rate limit reached, please wait", 0), None);
+    }
+
+    #[test]
+    fn reads_the_clock_claude_says_its_limit_resets_at() {
+        let now = now();
+        let at = reset_in_error("You've hit your 5-hour limit · resets 6:50pm", now).expect("reset");
+        let t = crate::cron::local_at(at as libc::time_t).unwrap();
+        assert_eq!((t.hour, t.minute), (18, 50));
+        assert!(at > now && at - now <= 25 * 3600, "the next 6:50pm");
+
+        let at = reset_in_error("You've hit your session limit · resets 11am", now).expect("reset");
+        let t = crate::cron::local_at(at as libc::time_t).unwrap();
+        assert_eq!((t.hour, t.minute), (11, 0));
+
+        let at = reset_in_error("You've hit your weekly limit · resets Nov 21, 9am", now).expect("reset");
+        let t = crate::cron::local_at(at as libc::time_t).unwrap();
+        assert_eq!((t.month, t.day, t.hour), (11, 21, 9));
+        assert!(at > now - 86_400);
+
+        // The words Claude used, with this Mac's zone or another one.
+        let said = "You've hit your 5-hour limit · resets 6:50pm (Asia/Seoul)";
+        match reset_in_error(said, now) {
+            Some(at) => {
+                assert!(is_local_zone("Asia/Seoul"));
+                let t = crate::cron::local_at(at as libc::time_t).unwrap();
+                assert_eq!((t.hour, t.minute), (18, 50));
+            }
+            None => assert!(!is_local_zone("Asia/Seoul")),
+        }
+        if !is_local_zone("Pacific/Chatham") {
+            assert_eq!(reset_in_error("resets 6:50pm (Pacific/Chatham)", now), None);
+        }
+        assert_eq!(reset_in_error("resets soon", now), None);
+        assert_eq!(reset_in_error("resets 13pm", now), None);
     }
 
     #[test]
