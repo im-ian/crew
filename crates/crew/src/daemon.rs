@@ -1088,6 +1088,11 @@ fn start_delivery(
     let prev_peer = crate::transcript::set_peer(id, peer);
     let prev_origin = get_origin(id);
     let epoch = serial_epoch(id);
+    // Before the record, so a turn sent on after a restart stays in its chain.
+    let mut origin = origin;
+    if origin.chain == 0 {
+        origin.chain = crate::relay::new_chain();
+    }
     let recorded = note_turn_started(id, asked, &text, msg_id, &origin, epoch);
     set_origin(id, origin);
     // Before the CLI can print. A line that arrives first has to land on this
@@ -5331,7 +5336,14 @@ mod daemon_tests {
             });
             let turn = load_waits(&bot).turn.expect("a running turn is recorded");
             assert!(turn.text.contains("고쳐 주세요"), "{}", turn.text);
-            assert_eq!(turn.origin, TurnOrigin::user());
+            assert_eq!(
+                turn.origin,
+                TurnOrigin {
+                    chain: turn.origin.chain,
+                    ..TurnOrigin::user()
+                }
+            );
+            assert_ne!(turn.origin.chain, 0, "the record keeps the turn's chain");
 
             tell_agent(&bot, &peer, "리뷰 부탁해요").unwrap();
             let after = load_waits(&bot).turn.expect("still running").after;
