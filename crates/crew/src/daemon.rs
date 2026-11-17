@@ -377,7 +377,11 @@ fn origins() -> &'static Mutex<HashMap<String, TurnOrigin>> {
     ORIGINS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn set_origin(id: &str, origin: TurnOrigin) {
+/// A turn with no chain yet is one the user started: it begins one.
+fn set_origin(id: &str, mut origin: TurnOrigin) {
+    if origin.chain == 0 {
+        origin.chain = crate::relay::new_chain();
+    }
     if let Ok(mut map) = origins().lock() {
         map.insert(id.to_string(), origin);
     }
@@ -1084,6 +1088,11 @@ fn start_delivery(
     let prev_peer = crate::transcript::set_peer(id, peer);
     let prev_origin = get_origin(id);
     let epoch = serial_epoch(id);
+    // Before the record, so a turn sent on after a restart stays in its chain.
+    let mut origin = origin;
+    if origin.chain == 0 {
+        origin.chain = crate::relay::new_chain();
+    }
     let recorded = note_turn_started(id, asked, &text, msg_id, &origin, epoch);
     set_origin(id, origin);
     // Before the CLI can print. A line that arrives first has to land on this
@@ -1166,11 +1175,10 @@ fn submit_delivery_then(
     origin: TurnOrigin,
     then: &mut VecDeque<SerialJob>,
 ) -> anyhow::Result<()> {
+    // A tell was checked when it was sent (`relay_check`). This is the cap
+    // for whatever else reaches here.
     if targeting::relay_exhausted(&origin) {
-        anyhow::bail!(
-            "relay limit reached after {} bot-to-bot hops; waiting for the user",
-            targeting::MAX_RELAY_HOPS
-        );
+        anyhow::bail!("{}", crate::relay::error_text(&crate::relay::Stop::Cap, id));
     }
     // Lines the CLI never answered sit parked at the front. The next line the
     // user types takes them along, instead of leaving them there.
@@ -2040,6 +2048,7 @@ fn owed_wake(origin: &TurnOrigin, id: &str) -> Option<(String, TurnOrigin)> {
     let wake = TurnOrigin {
         from: id.to_string(),
         hops: origin.hops,
+        chain: origin.chain,
         ..TurnOrigin::default()
     };
     Some((asker, wake))
@@ -2406,6 +2415,8 @@ struct SavedTell {
     skip_judgment: bool,
     #[serde(default)]
     watch_wake: bool,
+    #[serde(default)]
+    chain: u64,
 }
 
 /// One teammate a queued user line still has to message.
@@ -2524,6 +2535,7 @@ fn remember_tell(id: &str, item: &PendingDelivery) {
             routine: item.origin.routine.clone(),
             skip_judgment: item.origin.skip_judgment,
             watch_wake: item.origin.watch_wake,
+            chain: item.origin.chain,
         });
     });
 }
@@ -2848,6 +2860,7 @@ fn restore_waiting(cfg: &Config) {
                     wake_spent: meta.wake_spent,
                     skip_judgment: meta.skip_judgment,
                     watch_wake: meta.watch_wake,
+                    chain: meta.chain,
                 },
                 then: VecDeque::new(),
                 parked: false,
@@ -3959,6 +3972,39 @@ pub(crate) fn wake_from_crew(bot: &str, text: &str) -> anyhow::Result<()> {
     submit_delivery(bot, &envelope, true, Some(msg.id), origin)
 }
 
+/// The origin `from`'s tell carries: one hop past the turn it was sent from,
+/// in that turn's chain. A tell from no turn starts a chain of its own.
+fn tell_origin(from: &str, text: &str, parent: Option<&TurnOrigin>) -> TurnOrigin {
+    let envelope = crate::protocol::envelope(from, text);
+    let parsed = targeting::origin_from_envelope(&envelope);
+    let mut origin = targeting::inherit_origin(parent, parsed);
+    if origin.chain == 0 {
+        origin.chain = crate::relay::new_chain();
+    }
+    origin
+}
+
+/// A tell that would go round without the user does not go. Both chats say
+/// why and what was not sent, and the sender's `crew tell` fails with it.
+fn relay_check(from: &str, to: &str, text: &str, origin: &TurnOrigin) -> anyhow::Result<()> {
+    let Some(stop) = crate::relay::stop(origin, from, to, text) else {
+        return Ok(());
+    };
+    let name = |id: &str| {
+        agent_config(id)
+            .map(|cfg| cfg.display_name().to_string())
+            .unwrap_or_else(|| id.to_string())
+    };
+    let line = crate::relay::chat_line(&paths::locale(), &stop, &name(from), &name(to), text);
+    for chat in [from, to] {
+        if known_agent(chat) || crate::remote::split_id(chat).is_some() {
+            crate::transcript::push_system(chat, "crew", &line, None);
+        }
+    }
+    eprintln!("[crew] relay stopped {from} -> {to}: {stop:?}");
+    anyhow::bail!("{}", crate::relay::error_text(&stop, &name(to)))
+}
+
 /// `then` is the rest of a chain that waits on this tell's turn.
 fn tell_agent_origin(
     from: &str,
@@ -3983,6 +4029,12 @@ fn tell_agent_origin(
     }
     let from = from_id(from);
     ensure_accepts_turn(to)?;
+    // Checked when the bot runs `crew tell`, so its command fails and it can
+    // tell the user, and again when a held tell goes out.
+    if from != "user" && from != to {
+        let parent = origin.clone().or_else(|| get_origin(&from));
+        relay_check(&from, to, text, &tell_origin(&from, text, parent.as_ref()))?;
+    }
     // A representative handing a teammate's work outside its folder waits
     // for its owner to pick the bot.
     if allow_defer
@@ -4031,9 +4083,9 @@ fn tell_agent_origin(
         }
     });
     let envelope = crate::protocol::envelope(&from, text);
-    let parsed = targeting::origin_from_envelope(&envelope);
     let parent = origin.or_else(|| get_origin(&from));
-    let mut origin = targeting::inherit_origin(parent.as_ref(), parsed);
+    let mut origin = tell_origin(&from, text, parent.as_ref());
+    let chain = origin.chain;
     // A chain hands its answer back to the bot it started with. When that is
     // a teammate on another PC, the local bot a representative asked answers
     // the representative instead: it wakes, and decides what goes out.
@@ -4065,6 +4117,7 @@ fn tell_agent_origin(
         return Err(err);
     }
     if from != "user" && from != to {
+        crate::relay::note(chain, &from, to, text);
         note_asked(&from, to);
         let known = agents()
             .lock()
@@ -4116,18 +4169,24 @@ fn tell_remote(
         }
     });
     let from = from_id(from);
-    let envelope = crate::protocol::envelope(&from, text);
-    let parsed = targeting::origin_from_envelope(&envelope);
     let parent = origin.or_else(|| get_origin(&from));
-    let origin = targeting::inherit_origin(parent.as_ref(), parsed);
-    if targeting::relay_exhausted(&origin) {
-        anyhow::bail!(
-            "relay limit reached after {} bot-to-bot hops; waiting for the user",
-            targeting::MAX_RELAY_HOPS
-        );
+    let origin = tell_origin(&from, text, parent.as_ref());
+    let rid = crate::remote::canonical_id(to).unwrap_or_else(|| to.to_string());
+    if from != "user" {
+        relay_check(&from, &rid, text, &origin)?;
     }
     let asker = (from != "user" && known_agent(&from)).then_some(from.as_str());
-    let rid = crate::remote::tell(asker, mention_owner.as_deref(), to, text, origin.hops)?;
+    let rid = crate::remote::tell(
+        asker,
+        mention_owner.as_deref(),
+        to,
+        text,
+        origin.hops,
+        origin.chain,
+    )?;
+    if from != "user" {
+        crate::relay::note(origin.chain, &from, &rid, text);
+    }
     if let Some(asker) = asker {
         note_asked(asker, &rid);
         crate::transcript::push_remote_tell(&rid, asker, text, Some(asker.to_string()));
@@ -4160,22 +4219,22 @@ pub(crate) fn remote_deliver(
     text: &str,
     hops: u32,
 ) -> anyhow::Result<String> {
+    // The router carries hops but not the chain. The tell joins the chain
+    // these two bots last told each other in, so a loop across PCs is seen.
     let origin = TurnOrigin {
         from: from.to_string(),
         reply_agent: Some(from.to_string()),
         hops,
+        chain: crate::relay::latest_between(from, bot).unwrap_or_else(crate::relay::new_chain),
         ..TurnOrigin::default()
     };
-    if targeting::relay_exhausted(&origin) {
-        anyhow::bail!(
-            "relay limit reached after {} bot-to-bot hops",
-            targeting::MAX_RELAY_HOPS
-        );
-    }
+    relay_check(from, bot, text, &origin)?;
     ensure_accepts_turn(bot)?;
     let envelope = crate::protocol::envelope(from, text);
     let msg = crate::transcript::push_system(bot, from, text, asked_by(&origin, bot));
+    let chain = origin.chain;
     submit_delivery(bot, &envelope, true, Some(msg.id.clone()), origin)?;
+    crate::relay::note(chain, from, bot, text);
     Ok(msg.id)
 }
 
@@ -4197,13 +4256,14 @@ pub(crate) fn remote_reply(asker: &str, from: &str, text: &str) {
 
 /// The remote bot is done: wake the bot that asked, as `wake_asker` does.
 /// `hops` is the tell that started the remote turn. The wake does not add one.
-pub(crate) fn remote_wake(asker: &str, from: &str, hops: u32) {
+pub(crate) fn remote_wake(asker: &str, from: &str, hops: u32, chain: u64) {
     if !known_agent(asker) {
         return;
     }
     let wake = TurnOrigin {
         from: from.to_string(),
         hops,
+        chain,
         ..TurnOrigin::default()
     };
     if targeting::relay_exhausted(&wake) {
@@ -5276,7 +5336,14 @@ mod daemon_tests {
             });
             let turn = load_waits(&bot).turn.expect("a running turn is recorded");
             assert!(turn.text.contains("고쳐 주세요"), "{}", turn.text);
-            assert_eq!(turn.origin, TurnOrigin::user());
+            assert_eq!(
+                turn.origin,
+                TurnOrigin {
+                    chain: turn.origin.chain,
+                    ..TurnOrigin::user()
+                }
+            );
+            assert_ne!(turn.origin.chain, 0, "the record keeps the turn's chain");
 
             tell_agent(&bot, &peer, "리뷰 부탁해요").unwrap();
             let after = load_waits(&bot).turn.expect("still running").after;
@@ -6035,8 +6102,9 @@ mod daemon_tests {
     }
 
     /// A lead tells three workers, hears each report, and tells the next stage.
-    /// The report wakes the lead without a hop, so four stages stay inside the
-    /// limit. The fifth tell is what stops, and it stays quiet.
+    /// The report wakes the lead without a hop, and new work for the same
+    /// worker is not a loop, so every stage up to the cap goes. The tell past
+    /// the cap is what stops.
     #[test]
     fn a_lead_assigns_past_two_stages_without_the_relay_limit() {
         paths::testing::with_home("relay-stages", || {
@@ -6124,8 +6192,9 @@ mod daemon_tests {
         });
     }
 
-    /// Two bots tell each other. Each tell is a hop, so they still stop once
-    /// the chain is past the limit. The stop is the tell, not a wake.
+    /// Two bots tell each other with new work, without the user. They go on
+    /// for `MAX_ROUND_TRIPS` round trips; the tell that would start one more
+    /// stops, both chats say so, and the sender's command fails.
     #[test]
     fn two_bots_telling_each_other_still_hit_the_relay_limit() {
         paths::testing::with_home("relay-pingpong", || {
@@ -6139,8 +6208,12 @@ mod daemon_tests {
 
             let mut from = a.clone();
             let mut to = b.clone();
-            let mut parent = TurnOrigin::user();
-            for hop in 1..=targeting::MAX_RELAY_HOPS {
+            let mut parent = TurnOrigin {
+                chain: crate::relay::new_chain(),
+                ..TurnOrigin::user()
+            };
+            let allowed = 2 * crate::relay::MAX_ROUND_TRIPS + 1;
+            for hop in 1..=allowed as u32 {
                 tell_agent_origin(
                     &from,
                     &to,
@@ -6157,7 +6230,6 @@ mod daemon_tests {
                     .and_then(|q| q.pop_front())
                     .unwrap_or_else(|| panic!("tell {hop} did not queue"));
                 assert_eq!(item.origin.hops, hop, "tell {hop}");
-                assert!(!targeting::relay_exhausted(&item.origin));
                 parent = item.origin;
                 std::mem::swap(&mut from, &mut to);
             }
@@ -6170,9 +6242,17 @@ mod daemon_tests {
                 false,
                 &mut VecDeque::new(),
             )
-            .expect_err("another tell must stop");
+            .expect_err("another round trip must stop");
             assert!(err.to_string().contains("relay limit"), "{err}");
             assert!(inbox_is_empty(&to), "the tell past the limit does not start");
+            for chat in [&from, &to] {
+                assert!(
+                    crate::transcript::messages(chat)
+                        .iter()
+                        .any(|m| m.from == "crew" && m.text.contains("핑퐁") && m.text.contains("one more")),
+                    "{chat} hears why and what did not go"
+                );
+            }
 
             for id in [&a, &b] {
                 headless_status(id, AgentStatus::Idle);
@@ -6180,6 +6260,65 @@ mod daemon_tests {
                 take_origin(id);
                 remove_agent(id).unwrap();
             }
+        });
+    }
+
+    /// A bot that is mid-turn runs `crew tell` with what it already told that
+    /// teammate. The tell would wait for the turn to end, and fail silently
+    /// then. It fails now instead, so the bot can tell the user.
+    #[test]
+    fn a_repeated_tell_fails_when_the_bot_runs_it() {
+        paths::testing::with_home("relay-repeat", || {
+            paths::write_notifications_enabled(false);
+            let a = test_id("lead");
+            let b = test_id("worker");
+            for id in [&a, &b] {
+                claude_bot(id);
+            }
+            headless_status(&a, AgentStatus::Working);
+            let chain = crate::relay::new_chain();
+            set_origin(
+                &a,
+                TurnOrigin {
+                    chain,
+                    ..TurnOrigin::user()
+                },
+            );
+            crate::relay::note(chain, &a, &b, "빼기 버그 고쳐 주세요");
+
+            let err = tell_agent(&a, &b, "빼기 버그  고쳐 주세요")
+                .expect_err("the same tell again must stop");
+            assert!(err.to_string().contains("relay limit"), "{err}");
+            assert!(!tells_after(&a, &b), "nothing waits to go out later");
+            assert!(crate::transcript::messages(&b)
+                .iter()
+                .any(|m| m.from == "crew" && m.text.contains("되풀이")));
+
+            tell_agent(&a, &b, "이번엔 리뷰 부탁해요").expect("new work still goes");
+            assert!(tells_after(&a, &b));
+
+            headless_status(&a, AgentStatus::Idle);
+            clear_serial_after(&a);
+            take_origin(&a);
+            for id in [&a, &b] {
+                clear_inbox(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// A teammate on another PC sends the same tell again. The router does not
+    /// carry the chain, so it joins the one the two bots were already in.
+    #[test]
+    fn a_repeated_tell_from_another_pc_stops() {
+        paths::testing::with_home("relay-remote", || {
+            let bot = test_id("rep");
+            let rid = format!("team/{}", test_id("acc"));
+            let chain = crate::relay::new_chain();
+            crate::relay::note(chain, &rid, &bot, "같이 봐 주세요");
+            let err = remote_deliver(&bot, &rid, "같이 봐 주세요", 3)
+                .expect_err("the same tell from the same teammate stops");
+            assert!(err.to_string().contains("relay limit"), "{err}");
         });
     }
 
@@ -7546,7 +7685,10 @@ exec sleep 5"#,
                 None,
             ))
             .unwrap();
-            let running = TurnOrigin::mention_tell("asker");
+            let running = TurnOrigin {
+            chain: crate::relay::new_chain(),
+            ..TurnOrigin::mention_tell("asker")
+        };
             set_origin(&bot, running.clone());
             let start = claim_start(&bot).expect("nothing is starting");
             assert!(claim_start(&bot).is_none(), "one start at a time");
@@ -8380,7 +8522,10 @@ exec sleep 1"#,
     #[test]
     fn a_failed_delivery_keeps_the_running_turn() {
         let id = test_id("unknown");
-        let running = TurnOrigin::mention_tell("asker");
+        let running = TurnOrigin {
+            chain: crate::relay::new_chain(),
+            ..TurnOrigin::mention_tell("asker")
+        };
         set_origin(&id, running.clone());
         crate::transcript::set_peer(&id, Some("asker".into()));
         assert!(start_delivery(
@@ -10632,7 +10777,6 @@ sleep 1"#,
                     parked: false,
                 },
             );
-            assert_eq!(targeting::MAX_RELAY_HOPS, 4);
             let stored = fs::read_to_string(paths::transcript_path(&bot)).unwrap();
             assert!(stored.contains("\"queued\":true"), "{stored}");
 
