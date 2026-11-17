@@ -41,7 +41,8 @@ const RANK: Record<BotNoticeKind, number> = {
  * ends earns a success, the same bar the face's dance uses, so a quick reply
  * does not light the island every few seconds. A run another bot asked for
  * and waits on earns none: that bot carries on in its own chat, and the
- * user hears when it is done.
+ * user hears when it is done. Nor does the finish of a bot whose group lead
+ * speaks for it (`finish_quiet`).
  */
 export function botNotices(
   prev: Map<string, BotSnap>,
@@ -68,7 +69,8 @@ export function botNotices(
     };
     if (asking && !was.asking) pick("question");
     if (a.status === "blocked" && was.status !== "blocked") pick("blocked");
-    if (was.status === "working" && a.status === "idle") {
+    // The lead speaks for a bot it leads, when the user asked for that.
+    if (was.status === "working" && a.status === "idle" && !a.finish_quiet) {
       if (failed) pick("failure");
       else if (!a.for_bot && was.startedAt !== null && now - was.startedAt >= LONG_RUN_MS) {
         pick("success");

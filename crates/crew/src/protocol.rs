@@ -388,6 +388,11 @@ pub struct AgentInfo {
     /// the user. It stays until the next turn starts, like `failed`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub for_bot: bool,
+    /// Lead-only notifications are on and another bot leads its group, so its
+    /// finish, failed or not, says nothing. A question or a look it needs
+    /// still does (`notify::finish_quiet`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub finish_quiet: bool,
     /// The router alias of a bot on another PC. Its id is `<alias>/<account>`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote: Option<String>,
