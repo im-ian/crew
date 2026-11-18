@@ -19,7 +19,14 @@ import { QuickSwitcher } from "./components/QuickSwitcher";
 import { loadRecent, pushRecent, saveRecent } from "./quickSwitch";
 import { Sidebar } from "./components/Sidebar";
 import { Island } from "./components/Island";
-import { chatOrder, loadRemoteFolds, loadRemoteLayout, representing } from "./remote";
+import {
+  adjacentChat,
+  chatOrder,
+  chatSlots,
+  loadRemoteFolds,
+  loadRemoteLayout,
+  representing,
+} from "./remote";
 import { copyText } from "./components/CopyButton";
 import { useT } from "./LocaleContext";
 import { BotLabelProvider } from "./BotLabelContext";
@@ -608,22 +615,18 @@ export function App() {
         return;
       }
       if (id === "prev-chat" || id === "next-chat") {
-        const order = chatOrder(
-          { groups: c.groups, ungrouped: c.ungrouped, order: c.order },
-          c.agents,
-          c.remotes,
-          loadRemoteFolds(),
-          loadRemoteLayout(),
+        const nextId = adjacentChat(
+          chatSlots(
+            { groups: c.groups, ungrouped: c.ungrouped, order: c.order },
+            c.agents,
+            c.remotes,
+            loadRemoteFolds(),
+            loadRemoteLayout(),
+          ),
+          c.selectedKind === "agent" ? c.selected : null,
+          id === "next-chat" ? "next" : "prev",
         );
-        if (!order.length) return;
-        const i = order.findIndex(
-          (row) => row.kind === c.selectedKind && row.id === c.selected,
-        );
-        const next =
-          id === "next-chat"
-            ? order[(i < 0 ? 0 : i + 1) % order.length]
-            : order[(i < 0 ? order.length - 1 : i - 1 + order.length) % order.length];
-        c.selectAgent(next.id);
+        if (nextId) c.selectAgent(nextId);
         return;
       }
       if (id === "approve" || id === "deny") {
