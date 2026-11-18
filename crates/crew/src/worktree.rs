@@ -6,14 +6,18 @@
 //! a git repository gets a worktree under `$CREW_HOME/worktrees` and every
 //! later turn of that bot reuses it. A folder that is not a repository stays put.
 //!
-//! Bots of one repository share `$CREW_HOME/cargo-target/<repo>`. Cargo's
-//! target lock is exclusive, so two builds of the same repo wait their turn.
-//! Builds of different repos do not. A per-bot `target/` left in a worktree
-//! is removed once that bot is idle and nothing is compiling into it. The
-//! shared directory goes when that repo has no worktree left, or when no bot
-//! has used it for a week. A directory a build still holds is left alone.
-//! A shared checkout listed in `$CREW_HOME/cargo-target-skip` is left out of
-//! all of this: its worktrees keep the target Cargo chooses.
+//! Bots of one repository share `$CREW_HOME/cargo-target/<repo>`. The
+//! worktree's `target` is a symlink to that directory, so `target/debug/...`
+//! is the shared cache. Cargo's target lock is exclusive, so two builds of
+//! the same repo wait their turn. Builds of different repos do not. A real
+//! per-bot `target/` left from before is replaced with that symlink once the
+//! bot is idle and nothing is compiling into it. The symlink stays, and a
+//! sweep does not follow it into the shared cache. The shared directory goes
+//! when that repo has no worktree left, or when no bot has used it for a week.
+//! A directory a build still holds is left alone. A shared checkout listed in
+//! `$CREW_HOME/cargo-target-skip` is left out of all of this: its worktrees
+//! keep the target Cargo chooses. A group whose worktree choice is off is not
+//! given the symlink.
 
 use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
@@ -173,6 +177,7 @@ fn prepare(agent_id: &str, base: &Path) -> anyhow::Result<Place> {
 
 /// The worktree root, or the same subfolder the bot was given inside it.
 fn place_at(dir: PathBuf, shared: PathBuf, base: &Path) -> Place {
+    link_shared_target(&dir, &shared);
     let cwd = match norm(base).strip_prefix(&norm(&shared)) {
         Ok(rel) if !rel.as_os_str().is_empty() => dir.join(rel),
         _ => dir.clone(),
@@ -181,6 +186,92 @@ fn place_at(dir: PathBuf, shared: PathBuf, base: &Path) -> Place {
         cwd,
         isolated: Some(Isolated { dir, shared }),
     }
+}
+
+/// Point `worktree/target` at this repo's shared Cargo cache.
+/// A real directory is replaced only when it is idle and unlocked, the same
+/// rule as the sweep. A skipped checkout is left untouched.
+fn link_shared_target(worktree: &Path, shared: &Path) {
+    let key = repo_key(shared);
+    if skipped_repo_keys().contains(&key) {
+        return;
+    }
+    let cache = paths::home_dir().join("cargo-target").join(key);
+    if fs::create_dir_all(&cache).is_err() {
+        return;
+    }
+    let link = worktree.join("target");
+    if is_real_dir(&link) && !take_real_target(&link) {
+        return;
+    }
+    point_target_at_cache(worktree, &cache);
+}
+
+fn take_real_target(target: &Path) -> bool {
+    if !is_real_dir(target) || written_since(target, SystemTime::now(), BUILD_CACHE_GRACE) {
+        return false;
+    }
+    reclaim_tree(target).is_some()
+}
+
+fn point_target_at_cache(worktree: &Path, cache: &Path) {
+    let link = worktree.join("target");
+    if link_points_at(&link, cache) {
+        hide_target_link(worktree);
+        return;
+    }
+    match fs::symlink_metadata(&link) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            if fs::remove_file(&link).is_err() {
+                return;
+            }
+        }
+        Ok(_) => return,
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(_) => return,
+    }
+    if std::os::unix::fs::symlink(cache, &link).is_ok() {
+        hide_target_link(worktree);
+    }
+}
+
+fn link_points_at(link: &Path, cache: &Path) -> bool {
+    fs::read_link(link).is_ok_and(|dest| dest == cache)
+}
+
+/// `target/` in a gitignore does not match a symlink. One `/target` line in
+/// the exclude git actually reads keeps it out of `git status`. That file is
+/// not part of the commit.
+fn hide_target_link(worktree: &Path) {
+    let out = run_git(worktree, &["rev-parse", "--git-path", "info/exclude"]);
+    if !out.status {
+        return;
+    }
+    let raw = out.stdout.trim();
+    if raw.is_empty() {
+        return;
+    }
+    let path = PathBuf::from(raw);
+    let path = if path.is_absolute() {
+        path
+    } else {
+        worktree.join(path)
+    };
+    if let Some(parent) = path.parent() {
+        if fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    if existing.lines().any(|line| line.trim() == "/target") {
+        return;
+    }
+    let mut next = existing;
+    if !next.is_empty() && !next.ends_with('\n') {
+        next.push('\n');
+    }
+    next.push_str("/target\n");
+    let _ = fs::write(&path, next);
 }
 
 fn worktree_dir(agent_id: &str, shared: &Path) -> PathBuf {
@@ -379,7 +470,9 @@ pub fn format_bytes(bytes: u64) -> String {
 ///
 /// `busy` is the agents in a turn. Their per-bot `target/` stays, and so does
 /// the shared cache of any repo they have a worktree in. A directory whose
-/// `.cargo-lock` is held stays too.
+/// `.cargo-lock` is held stays too. A real per-bot `target/` that is dropped
+/// becomes a symlink to the shared cache when that bot still works in a
+/// worktree. An existing symlink is left alone, and is never followed.
 pub fn sweep_build_caches(busy: &HashSet<String>) -> Vec<RemovedCache> {
     sweep_at(busy, SystemTime::now(), BUILD_CACHE_GRACE, BUILD_CACHE_STALE)
 }
@@ -514,11 +607,10 @@ fn reclaim_per_bot(
             if !is_real_dir(&path) {
                 continue;
             }
-            if bot
-                .file_name()
-                .to_str()
-                .is_some_and(|name| busy_dirs.contains(name))
-            {
+            let Some(name) = bot.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            if busy_dirs.contains(&name) {
                 continue;
             }
             reap_leftovers(&path, removed);
@@ -527,7 +619,20 @@ fn reclaim_per_bot(
                 continue;
             }
             if let Some(bytes) = reclaim_tree(&target) {
-                removed.push(RemovedCache { path: target, bytes });
+                removed.push(RemovedCache {
+                    path: target,
+                    bytes,
+                });
+                // An off group is not working here. Skip repos never reach this
+                // loop. A loose bot still follows the legacy file.
+                if enabled_for(&name) {
+                    if let Some(key) = repo.file_name().to_str() {
+                        let cache = paths::home_dir().join("cargo-target").join(key);
+                        if fs::create_dir_all(&cache).is_ok() {
+                            point_target_at_cache(&path, &cache);
+                        }
+                    }
+                }
             }
         }
     }
@@ -902,10 +1007,17 @@ mod tests {
         root
     }
 
+    fn is_symlink(path: &Path) -> bool {
+        fs::symlink_metadata(path)
+            .map(|meta| meta.file_type().is_symlink())
+            .unwrap_or(false)
+    }
+
     fn wipe(dir: &Path) {
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
-            if path.is_dir() {
+            let meta = std::fs::symlink_metadata(&path).unwrap();
+            if meta.is_dir() {
                 std::fs::remove_dir_all(&path).unwrap();
             } else {
                 std::fs::remove_file(&path).unwrap();
@@ -1061,6 +1173,9 @@ mod tests {
 
             let elsewhere = place_for("bot-other", &other);
             let other_target = elsewhere.cwd.join("target");
+            if is_symlink(&other_target) {
+                std::fs::remove_file(&other_target).unwrap();
+            }
             std::fs::create_dir_all(other_target.join("debug")).unwrap();
             std::fs::write(other_target.join("debug").join("lib.rlib"), vec![7u8; 32]).unwrap();
             age(&other_target, 3600);
@@ -1082,7 +1197,15 @@ mod tests {
                 removed.iter().any(|item| item.path == other_target),
                 "another repo is still swept"
             );
-            assert!(!other_target.exists());
+            assert!(
+                is_symlink(&other_target),
+                "an idle real target becomes the shared-cache link"
+            );
+            assert_eq!(
+                std::fs::read_link(&other_target).unwrap(),
+                cargo_target_dir(&other)
+            );
+            assert!(!other_target.join("debug").join("lib.rlib").exists());
             let shared = cargo_target_for_cwd(&elsewhere.cwd).expect("not skipped");
             assert_eq!(shared, cargo_target_dir(&other));
 
@@ -1203,9 +1326,16 @@ mod tests {
                 removed.iter().any(|item| item.path == idle && item.bytes >= 64),
                 "idle cache should be reported"
             );
-            assert!(!idle.exists());
+            assert!(is_symlink(&idle), "an idle real target becomes the link");
+            assert_eq!(
+                std::fs::read_link(&idle).unwrap(),
+                paths::home_dir().join("cargo-target").join("repo-1")
+            );
+            assert!(!idle.join("debug").join("lib.rlib").exists());
             assert!(busy.join("debug").join("lib.rlib").is_file());
+            assert!(!is_symlink(&busy));
             assert!(fresh.join("debug").join("lib.rlib").is_file());
+            assert!(!is_symlink(&fresh));
         });
     }
 
@@ -1316,6 +1446,144 @@ mod tests {
             assert!(removed.iter().all(|item| item.path != live));
             assert_eq!(std::fs::read(live.join("lib.rlib")).unwrap(), b"hot");
             assert!(stamp_age_under(&live, Duration::from_secs(60)));
+        });
+    }
+
+    #[test]
+    fn a_worktree_target_links_at_the_shared_cache() {
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        paths::testing::with_home("wt-link-cache", || {
+            let _env = PutBack(restore_cargo_env());
+            let root = temp_repo("link");
+            std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
+            git(&root, &["add", ".gitignore"]);
+            git(&root, &["commit", "-m", "ignore real target dirs"]);
+            paths::write_worktrees_enabled(true);
+
+            let place = place_for("bot-link", &root);
+            let dir = place.isolated.expect("worktree").dir;
+            let cache = cargo_target_dir(&root);
+            let link = dir.join("target");
+            assert!(is_symlink(&link), "a new worktree points target at the cache");
+            assert_eq!(std::fs::read_link(&link).unwrap(), cache);
+            assert!(cache.is_dir());
+            std::fs::create_dir_all(cache.join("debug")).unwrap();
+            std::fs::write(cache.join("debug").join("crew"), b"bin").unwrap();
+            assert_eq!(std::fs::read(dir.join("target/debug/crew")).unwrap(), b"bin");
+
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(["status", "--porcelain"])
+                .output()
+                .unwrap();
+            assert!(status.status.success());
+            let text = String::from_utf8_lossy(&status.stdout);
+            assert!(
+                !text.lines().any(|line| line.contains("target")),
+                "git status shows the link: {text}"
+            );
+            let shared_status = Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["status", "--porcelain"])
+                .output()
+                .unwrap();
+            assert!(
+                String::from_utf8_lossy(&shared_status.stdout)
+                    .trim()
+                    .is_empty(),
+                "the shared checkout stays clean"
+            );
+
+            std::fs::remove_file(&link).unwrap();
+            std::fs::create_dir_all(link.join("debug")).unwrap();
+            std::fs::write(link.join("debug").join("old"), b"old").unwrap();
+            age(&link, 3600);
+            age(&link.join("debug"), 3600);
+            let again = place_for("bot-link", &root);
+            assert_eq!(again.cwd, dir);
+            assert!(is_symlink(&link), "an idle real target becomes the link");
+            assert!(!link.join("debug").join("old").exists());
+            assert_eq!(std::fs::read(cache.join("debug").join("crew")).unwrap(), b"bin");
+
+            std::fs::remove_file(&link).unwrap();
+            std::fs::create_dir_all(link.join("debug")).unwrap();
+            std::fs::write(link.join("debug").join("keep"), b"keep").unwrap();
+            let lock = File::create(link.join(".cargo-lock")).unwrap();
+            age(&link, 3600);
+            age(&link.join("debug"), 3600);
+            age(&link.join(".cargo-lock"), 3600);
+            let rc = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+            assert_eq!(rc, 0);
+            place_for("bot-link", &root);
+            assert!(!is_symlink(&link), "a locked target stays a real directory");
+            assert_eq!(std::fs::read(link.join("debug").join("keep")).unwrap(), b"keep");
+
+            let mut working = HashSet::new();
+            working.insert("bot-link".into());
+            let removed = sweep_at(
+                &working,
+                SystemTime::now(),
+                Duration::from_secs(60),
+                Duration::from_secs(7 * 24 * 60 * 60),
+            );
+            assert!(removed.iter().all(|item| item.path != link));
+            assert_eq!(
+                std::fs::read(link.join("debug").join("keep")).unwrap(),
+                b"keep",
+                "a working bot keeps its real target"
+            );
+            drop(lock);
+
+            let removed = sweep_at(
+                &HashSet::new(),
+                SystemTime::now(),
+                Duration::from_secs(60),
+                Duration::from_secs(7 * 24 * 60 * 60),
+            );
+            assert!(removed.iter().any(|item| item.path == link));
+            assert!(is_symlink(&link));
+            assert_eq!(
+                std::fs::read(cache.join("debug").join("crew")).unwrap(),
+                b"bin",
+                "a sweep does not follow the link into the shared cache"
+            );
+
+            let skipped_root = temp_repo("skipped");
+            std::fs::write(
+                paths::home_dir().join("cargo-target-skip"),
+                format!("{}\n", skipped_root.display()),
+            )
+            .unwrap();
+            let skipped = place_for("bot-skip", &skipped_root);
+            let skipped_dir = skipped.isolated.expect("skip still isolates").dir;
+            assert!(
+                !skipped_dir.join("target").exists(),
+                "a skipped repo grows no target link"
+            );
+            assert!(cargo_target_for_cwd(&skipped.cwd).is_none());
+
+            let off_root = temp_repo("off");
+            crate::groups::save(&[crate::groups::SidebarGroup {
+                id: "off".into(),
+                name: "off".into(),
+                collapsed: false,
+                items: vec!["agent:bot-off".into()],
+                path: None,
+                lead: None,
+                worktree: crate::groups::WorktreeChoice::Off,
+            }])
+            .unwrap();
+            let off = place_for("bot-off", &off_root);
+            assert!(off.isolated.is_none());
+            assert!(!off_root.join("target").exists());
+
+            let _ = std::fs::remove_dir_all(&root);
+            let _ = std::fs::remove_dir_all(&skipped_root);
+            let _ = std::fs::remove_dir_all(&off_root);
         });
     }
 
