@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { interpolate, translate } from "./i18n";
+import { interpolate, makeT, translate } from "./i18n";
 import { EN, KO } from "./locales";
 
 describe("interpolate", () => {
@@ -20,6 +20,19 @@ describe("translate", () => {
   it("falls back to Korean for an unknown language", () => {
     // @ts-expect-error - a stored preference could be anything
     expect(translate("fr", "settings.title")).toBe("설정");
+  });
+});
+
+describe("the user's name", () => {
+  it("is 나 / You when unset", () => {
+    expect(makeT("ko")("thread.you")).toBe("나");
+    expect(makeT("en", "")("thread.you")).toBe("You");
+  });
+
+  it("replaces 나 / You in both languages and nothing else", () => {
+    expect(makeT("ko", "대호")("thread.you")).toBe("대호");
+    expect(makeT("en", "대호")("thread.you")).toBe("대호");
+    expect(makeT("ko", "대호")("settings.title")).toBe("설정");
   });
 });
 

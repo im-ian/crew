@@ -38,7 +38,22 @@ export function interpolate(template: string, vars?: Vars): string {
   );
 }
 
-export function translate(locale: Locale, key: MessageKey, vars?: Vars): string {
+/**
+ * `userName` is what the user set in Settings › Display. Where the app would
+ * call them "나" or "You", it calls them by it instead.
+ */
+export function translate(
+  locale: Locale,
+  key: MessageKey,
+  vars?: Vars,
+  userName = "",
+): string {
+  if (key === "thread.you" && userName) return userName;
   const table = DICTS[locale] ?? DICTS.ko;
   return interpolate(table[key] ?? DICTS.ko[key] ?? key, vars);
+}
+
+/** The app's `t`: `locale`'s words, with the user called `userName` when set. */
+export function makeT(locale: Locale, userName = ""): TFn {
+  return (key, vars) => translate(locale, key, vars, userName);
 }
