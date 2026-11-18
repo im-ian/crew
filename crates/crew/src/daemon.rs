@@ -10314,11 +10314,11 @@ while IFS= read -r line; do printf '%s\n' '{{"type":"system","subtype":"init","s
             eventually(Duration::from_secs(10), "the send was not answered", || {
                 told(&bot, "다음 거 할게요")
             });
-            assert_eq!(
-                watch_of(&bot),
-                ["Watch PR 12 CI"],
-                "the send stopped the watch"
-            );
+            // A turn hides the watch until it settles, and its answer shows
+            // a moment before that.
+            eventually(Duration::from_secs(10), "the send stopped the watch", || {
+                watch_of(&bot) == ["Watch PR 12 CI"] && !agent_busy(&bot).unwrap()
+            });
             end_watch();
             eventually(
                 Duration::from_secs(10),
@@ -10879,11 +10879,11 @@ done
             eventually(Duration::from_secs(10), "the send was not answered", || {
                 told(&bot, &format!("answer 2 from {pid}"))
             });
-            assert_eq!(
-                watch_of(&bot),
-                ["Watch PR 12 CI"],
-                "the send stopped the watch"
-            );
+            // A turn hides the watch until it settles, and its answer shows
+            // a moment before that.
+            eventually(Duration::from_secs(10), "the send stopped the watch", || {
+                watch_of(&bot) == ["Watch PR 12 CI"] && !agent_busy(&bot).unwrap()
+            });
             end_watch();
             eventually(
                 Duration::from_secs(10),
@@ -11451,11 +11451,11 @@ done
             eventually(Duration::from_secs(10), "the send was not answered", || {
                 told(&bot, &format!("answer 2 from {pid}"))
             });
-            assert_eq!(
-                watch_of(&bot),
-                ["Watch PR 12 CI"],
-                "the send stopped the watch"
-            );
+            // A turn hides the watch until it settles, and its answer shows
+            // a moment before that.
+            eventually(Duration::from_secs(10), "the send stopped the watch", || {
+                watch_of(&bot) == ["Watch PR 12 CI"] && !agent_busy(&bot).unwrap()
+            });
             end_watch();
             eventually(
                 Duration::from_secs(10),
