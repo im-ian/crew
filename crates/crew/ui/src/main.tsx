@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { PairGate } from "./components/PairGate";
 import { LocaleProvider } from "./LocaleContext";
 import { installAppZoom } from "./appZoom";
 import { api } from "./api";
@@ -9,6 +10,7 @@ import { applyFontSize, loadFontSize } from "./fontSize";
 import { applyLocale, loadLocale } from "./i18n";
 import { blockNativeMenu } from "./nativeMenu";
 import { applyTheme, loadThemePref } from "./theme";
+import { isWeb } from "./web";
 import "./styles.css";
 
 applyTheme(loadThemePref());
@@ -23,7 +25,13 @@ installAppZoom();
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <LocaleProvider>
-      <App />
+      {isWeb() ? (
+        <PairGate>
+          <App />
+        </PairGate>
+      ) : (
+        <App />
+      )}
     </LocaleProvider>
   </StrictMode>,
 );

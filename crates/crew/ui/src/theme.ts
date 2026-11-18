@@ -43,6 +43,10 @@ export function applyTheme(pref: ThemePref) {
   if (pref === "glass") root.dataset.glass = "";
   else delete root.dataset.glass;
   root.style.colorScheme = resolved;
+  // A phone's browser bar and the home screen app's status bar take this.
+  document
+    .querySelector('meta[name="theme-color"]')
+    ?.setAttribute("content", resolved === "light" ? "#ffffff" : "#19191b");
   void syncWindowTheme(pref, resolved);
 }
 

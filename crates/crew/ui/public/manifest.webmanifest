@@ -1,0 +1,14 @@
+{
+  "name": "Crew",
+  "short_name": "Crew",
+  "description": "Crew on your laptop, from your phone.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#19191b",
+  "theme_color": "#19191b",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

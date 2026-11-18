@@ -1,4 +1,4 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { fileSrc } from "./transport";
 import katex from "katex";
 import MarkdownIt, { type Env, type StateBlock, type StateInline, type Token } from "markdown-it";
 
@@ -413,7 +413,7 @@ export function mediaSrc(src: string, baseDir?: string): string {
   if (!local) return src;
   const path = local.startsWith("~") ? local : local;
   try {
-    return convertFileSrc(path);
+    return fileSrc(path);
   } catch {
     return src;
   }

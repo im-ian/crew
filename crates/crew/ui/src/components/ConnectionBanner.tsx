@@ -1,4 +1,5 @@
 import { useT } from "../LocaleContext";
+import { UNREACHABLE } from "../web";
 
 type Props = {
   visible: boolean;
@@ -9,12 +10,14 @@ type Props = {
 /// the insertion, and so the grid row does not shift when it appears.
 export function ConnectionBanner({ visible, detail }: Props) {
   const t = useT();
-  const text = detail.trim();
+  // On a phone the laptop itself can be gone: asleep, or off the tailnet.
+  const laptop = detail === UNREACHABLE;
+  const text = laptop ? "" : detail.trim();
   return (
     <div className="conn-banner-slot" role="status">
       {visible ? (
         <div className="conn-banner">
-          <div className="conn-banner-head">{t("conn.down")}</div>
+          <div className="conn-banner-head">{t(laptop ? "conn.laptopDown" : "conn.down")}</div>
           {/* The daemon's own words, which are English and often a log tail. */}
           {text ? <div className="conn-banner-detail">{text}</div> : null}
         </div>
