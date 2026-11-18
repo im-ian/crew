@@ -45,7 +45,14 @@ import {
 } from "./fileRef";
 import { FileView } from "./components/FileView";
 import { LeadGroupPane } from "./components/LeadGroupPane";
-import { groupBots, ledGroup } from "./leadGroup";
+import {
+  dropLeadKept,
+  groupBots,
+  ledGroup,
+  shownLeadGroup,
+  toggleLeadKept,
+  type LeadKept,
+} from "./leadGroup";
 import { X } from "./icons";
 import type { TFn } from "./i18n";
 import { isTypingTarget, shortcutId } from "./shortcuts";
@@ -144,20 +151,22 @@ export function App() {
   const [file, setFile] = useState<{ list: FileTarget[]; at: number } | null>(null);
   const fileOpen = !!(file && crew.currentAgent);
   // A group's bots beside its lead's chat, the third thing that panel holds.
-  // Holds the lead's id, and counts only while that chat is the open one.
-  const [leadPane, setLeadPane] = useState<string | null>(null);
+  // Kept for each lead the user opened it on until they close it, so it is
+  // there again when that chat is. A file or a side chat takes its place
+  // meanwhile and gives it back when it closes.
+  const [leadKept, setLeadKept] = useState<LeadKept>({});
   const paneGroup =
-    leadPane && crew.selectedKind === "agent" && leadPane === crew.selected
-      ? ledGroup(crew.groups, leadPane)
+    crew.selectedKind === "agent"
+      ? shownLeadGroup(leadKept, crew.groups, crew.selected, !!file || !!peek)
       : null;
   const leadOpen = !!(paneGroup && crew.currentAgent);
+  const leadPane = leadOpen ? crew.selected : null;
   const current = file ? file.list[file.at] ?? null : null;
   // The file rows each chat had when it was first loaded. One that arrives
   // after is a bot running `crew show` now, and opens.
   const seenFiles = useRef(new Map<string, Set<string>>());
   const openFile = useCallback((target: FileTarget, group?: FileTarget[]) => {
     setPeek(null);
-    setLeadPane(null);
     setFile(fileTabs(group?.length ? group : [target], target));
   }, []);
   const fileCtx = useMemo(() => ({ open: openFile, current }), [openFile, current]);
@@ -351,8 +360,7 @@ export function App() {
   useLayoutEffect(() => {
     setPeek(null);
     setFile(null);
-    // A split half's button picks its bot first, so this one can stay.
-    setLeadPane((cur) => (cur === crew.selected ? cur : null));
+    // The group pane is the lead's to keep: it shows again with that chat.
     autoFor.current = null;
   }, [crew.selected, crew.selectedKind]);
 
@@ -383,7 +391,6 @@ export function App() {
     const peer = sideOnlyPeer(crew.messages, crew.agents, hit, crew.selected);
     if (peer) {
       setFile(null);
-      setLeadPane(null);
       setPeek({ peer, focus: hit ? [hit] : [], openAtFocus: !!hit });
     }
   }, [
@@ -470,7 +477,6 @@ export function App() {
 
   function togglePeek(peer: string, focus: string[] = []) {
     setFile(null);
-    setLeadPane(null);
     setPeek((cur) =>
       cur && cur.peer === peer && cur.focus[0] === focus[0]
         ? null
@@ -555,9 +561,13 @@ export function App() {
       if ((peek || file || leadPane) && e.key === "Escape") {
         if (typing) return;
         e.preventDefault();
-        setPeek(null);
-        setFile(null);
-        setLeadPane(null);
+        // A file or side chat goes first; the group pane under it shows again.
+        if (peek || file) {
+          setPeek(null);
+          setFile(null);
+        } else if (leadPane) {
+          closeLeadPane(leadPane);
+        }
         return;
       }
       const id = shortcutId(e, typing);
@@ -652,7 +662,11 @@ export function App() {
   function toggleLeadPane(id: string) {
     setPeek(null);
     setFile(null);
-    setLeadPane((cur) => (cur === id ? null : id));
+    setLeadKept((kept) => toggleLeadKept(kept, crew.groups, id, leadPane === id));
+  }
+
+  function closeLeadPane(id: string) {
+    setLeadKept((kept) => dropLeadKept(kept, id));
   }
 
   /** The header's group button, for a bot that leads its sidebar group. */
@@ -976,7 +990,7 @@ export function App() {
             agents={crew.agents}
             leadId={leadPane}
             onPick={(id) => crew.selectAgent(id)}
-            onClose={() => setLeadPane(null)}
+            onClose={() => closeLeadPane(leadPane)}
           />
         ) : null}
         {file && crew.currentAgent ? (
