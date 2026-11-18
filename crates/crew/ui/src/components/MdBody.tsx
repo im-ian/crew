@@ -101,6 +101,8 @@ type Props = {
   baseDir?: string;
   /** `messageDefinitions` of the message `text` is a balloon of, for links and footnotes defined in another balloon. */
   defs?: string;
+  /** Drawn inside the balloon before the text, like the quote a reply answers. */
+  lead?: ReactNode;
 };
 
 export function MdBody({
@@ -110,6 +112,7 @@ export function MdBody({
   onMention,
   baseDir,
   defs,
+  lead,
 }: Props) {
   const t = useT();
   const onMentionRef = useRef(onMention);
@@ -139,6 +142,7 @@ export function MdBody({
   }, [text, defs, chipAgents, groups, clickable, baseDir, zoomLabel, openPreview]);
   return (
     <div className={className}>
+      {lead}
       {nodes}
       {preview ? (
         <MediaPreview shots={preview.shots} start={preview.index} onClose={closeShot} />

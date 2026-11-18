@@ -15,7 +15,7 @@ import { useLocale, useT } from "../LocaleContext";
 import { useBotLabel, useLabelGroups } from "../BotLabelContext";
 import type { TFn } from "../i18n";
 import type { ReplyTarget } from "../reply";
-import { splitReply } from "../reply";
+import { plainText, splitReply } from "../reply";
 import type {
   AgentInfo,
   ChatMessage,
@@ -1546,7 +1546,7 @@ function TransferNote({
       {show ? (
         <>
           {reply ? (
-            <ReplyQuote reply={reply} agents={agents} onJump={onJump} />
+            <ReplyQuote reply={reply} agents={agents} onJump={onJump} alone />
           ) : null}
           {body ? (
             <XferBody
@@ -1682,6 +1682,9 @@ function Incoming({
   const raw = dots.show ? [...splitBubbles(body), ""] : splitBubbles(body);
   const media = raw.filter((part) => isMediaBlock(part));
   const parts = raw.filter((part) => !isMediaBlock(part));
+  // The quote opens the first balloon, so it reads as part of this answer.
+  // A picture comes before the balloons, so then the quote stands above it.
+  const quoteInside = !!reply && !media.length && parts.length > 0 && !pendingAsk;
   return (
     <div
       className={
@@ -1727,7 +1730,9 @@ function Incoming({
             {who}
           </div>
         )}
-        {reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
+        {reply && !quoteInside ? (
+          <ReplyQuote reply={reply} agents={agents} onJump={onJump} alone />
+        ) : null}
         {media.length ? (
           <div className="msg-media">
             {media.map((part, i) => (
@@ -1770,6 +1775,11 @@ function Incoming({
                 agents={agents}
                 onMention={onSelectAgent}
                 baseDir={workDir(agent)}
+                lead={
+                  quoteInside && reply && i === 0 ? (
+                    <ReplyQuote reply={reply} agents={agents} onJump={onJump} />
+                  ) : undefined
+                }
               />
             );
             return (
@@ -2696,6 +2706,8 @@ function Bubble({
   const parts = splitBubbles(body);
   const media = parts.filter((part) => isMediaBlock(part));
   const prose = parts.filter((part) => !isMediaBlock(part)).join("\n\n");
+  // Inside the balloon when the reply is words only; a picture comes first.
+  const quoteInside = !!reply && !media.length && !!prose.trim();
   const cls =
     "bubble md" + (caret ? " streaming" : "") + (queued ? " queued" : "");
   return (
@@ -2711,7 +2723,9 @@ function Bubble({
       data-msg-id={m.id}
     >
       <div className="me-msg">
-        {reply ? <ReplyQuote reply={reply} agents={agents} onJump={onJump} /> : null}
+        {reply && !quoteInside ? (
+          <ReplyQuote reply={reply} agents={agents} onJump={onJump} alone />
+        ) : null}
         {media.length ? (
           <div className="msg-media">
             {media.map((part, i) => (
@@ -2734,6 +2748,11 @@ function Bubble({
               agents={agents}
               onMention={onSelectAgent}
               baseDir={workDir(currentAgent)}
+              lead={
+                quoteInside && reply ? (
+                  <ReplyQuote reply={reply} agents={agents} onJump={onJump} />
+                ) : undefined
+              }
             />
             <MsgActions
               copy={prose.trim()}
@@ -2818,31 +2837,65 @@ function makeReply(m: ChatMessage, agents: AgentInfo[], t: TFn): ReplyTarget {
   return { id: m.id, from: m.from || "user", who, text };
 }
 
+function quoteFrom(from: string): string | null {
+  if (from === "user") return null;
+  return sentTarget(from) ?? from;
+}
+
 function quoteWho(from: string, agents: AgentInfo[], t: TFn): string {
-  if (from === "user") return t("thread.you");
-  const id = sentTarget(from) ?? from;
+  const id = quoteFrom(from);
+  if (!id) return t("thread.you");
   return displayWho(id, agents.find((a) => a.id === id) ?? null, t);
 }
 
+/**
+ * The message a reply answers: who it went to and its first words. It opens
+ * the reply's balloon; `alone` draws it on its own where there is no balloon
+ * to open, above a picture or in a note between bots.
+ */
 function ReplyQuote({
   reply,
   agents,
   onJump,
+  alone = false,
 }: {
   reply: { id: string; from: string; snippet: string };
   agents: AgentInfo[];
   onJump?: (id: string) => void;
+  alone?: boolean;
 }) {
   const t = useT();
+  const id = quoteFrom(reply.from);
+  const agent = id ? agents.find((a) => a.id === id) ?? null : null;
+  const who = quoteWho(reply.from, agents, t);
+  // The name is set in bold inside the sentence, in either word order.
+  const [before, after = ""] = t("thread.replyTo").split("{who}");
   return (
     <button
       type="button"
-      className="reply-quote"
+      className={"reply-quote" + (alone ? " is-alone" : "")}
       title={t("thread.jumpToReply")}
       onClick={() => onJump?.(reply.id)}
     >
-      <span className="reply-quote-who">{quoteWho(reply.from, agents, t)}</span>
-      <span className="reply-quote-text">{reply.snippet}</span>
+      <span className="reply-quote-head">
+        {agent ? (
+          <Avatar
+            as="span"
+            className="reply-quote-face"
+            id={agent.id}
+            name={who}
+            src={agent.avatar}
+            shape={agent.avatar_shape}
+            color={agent.avatar_color}
+          />
+        ) : null}
+        <span className="reply-quote-to">
+          {before}
+          <b>{who}</b>
+          {after}
+        </span>
+      </span>
+      <span className="reply-quote-text">{plainText(reply.snippet)}</span>
     </button>
   );
 }

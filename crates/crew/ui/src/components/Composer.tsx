@@ -8,7 +8,7 @@ import { groupCandidates, mentionIds } from "../mentions";
 import { sendSteers, type Delivery } from "../deliveryPref";
 import { composerAfterSend } from "../sendGate";
 import { stepQueuePick } from "../queuePick";
-import { oneLine, wrapReply, type ReplyTarget } from "../reply";
+import { oneLine, plainText, wrapReply, type ReplyTarget } from "../reply";
 import { caretClientPoint, type CaretPoint } from "../caretPoint";
 import { droppedAttaches, type PathKind } from "../dropAttach";
 import type { AskPick } from "./AskHoldDialog";
@@ -744,7 +744,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
               <span className="reply-bar-who">
                 {t("composer.replyTo", { who: reply.who })}
               </span>
-              <span className="reply-bar-snippet">{oneLine(reply.text)}</span>
+              <span className="reply-bar-snippet">{oneLine(plainText(reply.text))}</span>
             </button>
             <button
               type="button"
