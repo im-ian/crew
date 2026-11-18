@@ -16,6 +16,10 @@ type Props = {
   active: boolean;
   /** New bots only: step off a default CLI that is not installed. */
   pickInstalled?: boolean;
+  /** A template names the AI it wants, which another PC may have. */
+  allowMissing?: boolean;
+  /** No typed command: a template cannot make one again. */
+  noCustom?: boolean;
   onCli: (cli: CliKind) => void;
   onModel: (model: string) => void;
   onEffort: (effort: string) => void;
@@ -33,6 +37,8 @@ export function ModelPicker({
   effort,
   active,
   pickInstalled = false,
+  allowMissing = false,
+  noCustom = false,
   onCli,
   onModel,
   onEffort,
@@ -135,7 +141,7 @@ export function ModelPicker({
         <div className="model-pick-card" role="dialog" aria-label={t("field.ai")}>
           <div className="model-pick-cols">
             <div className="model-pick-col">
-              {CLIS.map((c) => {
+              {CLIS.filter((c) => !noCustom || c.value !== "custom").map((c) => {
                 const missing = lists[c.value]?.installed === false;
                 return (
                   <button
@@ -143,7 +149,7 @@ export function ModelPicker({
                     type="button"
                     className={"model-pick-row" + (c.value === cli ? " on" : "")}
                     aria-pressed={c.value === cli}
-                    disabled={missing}
+                    disabled={missing && !allowMissing}
                     onMouseDown={() => {
                       skipCommit.current = true;
                     }}

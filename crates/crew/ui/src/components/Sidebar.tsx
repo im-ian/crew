@@ -55,7 +55,18 @@ import { listedHits, matchRuns } from "../searchView";
 import { PlanUsageButton } from "./PlanUsageBar";
 import { WaitTag } from "./WaitingOn";
 import { waitingFailed, waitingOn } from "../statusView";
-import { ChevronDown, Columns2, Ellipsis, Layers, Plus, Rows2, Search, Settings, Star } from "../icons";
+import {
+  ChevronDown,
+  Columns2,
+  Ellipsis,
+  LayoutTemplate,
+  Layers,
+  Plus,
+  Rows2,
+  Search,
+  Settings,
+  Star,
+} from "../icons";
 
 const RAIL_DEFAULT = 232;
 const RAIL_MIN = 176;
@@ -417,6 +428,9 @@ type Props = {
   drafting?: string[];
   searchRef?: Ref<HTMLInputElement>;
   onOpenSettings?: () => void;
+  onOpenTemplates?: () => void;
+  /** The templates window is up: its button shows pressed. */
+  templatesOpen?: boolean;
 };
 
 function matches(parts: Array<string | null | undefined>, query: string): boolean {
@@ -492,6 +506,8 @@ export function Sidebar({
   drafting = [],
   searchRef,
   onOpenSettings,
+  onOpenTemplates,
+  templatesOpen = false,
 }: Props) {
   const t = useT();
   const { locale } = useLocale();
@@ -1380,6 +1396,18 @@ export function Sidebar({
           >
             <Settings />
           </button>
+          {onOpenTemplates ? (
+            <button
+              type="button"
+              className={"icon-btn" + (templatesOpen ? " is-on" : "")}
+              title={t("sidebar.templates")}
+              aria-label={t("sidebar.templates")}
+              aria-pressed={templatesOpen}
+              onClick={onOpenTemplates}
+            >
+              <LayoutTemplate />
+            </button>
+          ) : null}
           <PlanUsageButton agents={agents} />
         </div>
       ) : null}
