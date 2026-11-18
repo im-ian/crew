@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { UNGROUPED_ID } from "./groups";
 import {
   aliasError,
+  adjacentChat,
   chatOrder,
+  chatSlots,
   folderBefore,
   freeAlias,
   isOnline,
@@ -225,9 +227,127 @@ describe("remote bots", () => {
   });
 });
 
-function folder(id: string, items: string[] = []): Group {
-  return { id, name: id, collapsed: false, items };
+function folder(id: string, items: string[] = [], collapsed = false, lead?: string): Group {
+  return { id, name: id, collapsed, items, ...(lead ? { lead } : {}) };
 }
+
+describe("adjacentChat", () => {
+  const saved = { sections: [] as string[], bots: {} };
+  const bots = [
+    local("a1"),
+    local("a2"),
+    local("bLead"),
+    local("bOther"),
+    local("cLead"),
+    local("cOther"),
+    local("d"),
+    remote("team", "acc_1", "mina"),
+    remote("lab", "acc_2", "jun"),
+  ];
+  const routers = [router("team"), router("lab")];
+  // Open, then two collapsed groups, a loose bot, a folded router, an open one.
+  const rail = {
+    groups: [
+      folder("top", ["agent:a1", "agent:a2"]),
+      folder("mid", ["agent:bLead", "agent:bOther"], true, "bLead"),
+      folder("low", ["agent:cLead", "agent:cOther"], true, "cLead"),
+    ],
+    ungrouped: ["agent:d"],
+    order: ["top", "mid", "low", "agent:d"],
+  };
+
+  function slots(folded: string[] = ["team"]) {
+    return chatSlots(rail, bots, routers, folded, saved);
+  }
+
+  it("keeps collapsed groups and folded routers out of the switcher order", () => {
+    expect(chatOrder(rail, bots, routers, ["team"], saved).map((row) => row.id)).toEqual([
+      "a1",
+      "a2",
+      "d",
+      "lab/acc_2",
+    ]);
+  });
+
+  it("steps through an open group and wraps at the ends", () => {
+    const order = slots();
+    expect(adjacentChat(order, "a1", "next")).toBe("a2");
+    expect(adjacentChat(order, "a2", "prev")).toBe("a1");
+    expect(adjacentChat(order, "a2", "next")).toBe("d");
+    expect(adjacentChat(order, "a1", "prev")).toBe("lab/acc_2");
+    expect(adjacentChat(order, "lab/acc_2", "next")).toBe("a1");
+    expect(adjacentChat(order, "missing", "next")).toBe("a1");
+    expect(adjacentChat(order, null, "prev")).toBe("lab/acc_2");
+  });
+
+  it("leaves a collapsed group's lead for the chats beside that group", () => {
+    const order = slots();
+    expect(adjacentChat(order, "bLead", "next")).toBe("d");
+    expect(adjacentChat(order, "bLead", "prev")).toBe("a2");
+  });
+
+  it("leaves another bot in a collapsed group for the same chats", () => {
+    const order = slots();
+    expect(adjacentChat(order, "bOther", "next")).toBe("d");
+    expect(adjacentChat(order, "bOther", "prev")).toBe("a2");
+  });
+
+  it("skips a run of collapsed groups", () => {
+    const order = slots();
+    expect(adjacentChat(order, "bOther", "next")).toBe("d");
+    expect(adjacentChat(order, "cLead", "prev")).toBe("a2");
+    expect(adjacentChat(order, "cOther", "next")).toBe("d");
+    expect(adjacentChat(order, "cOther", "prev")).toBe("a2");
+  });
+
+  it("wraps when the closed section is the first or the last", () => {
+    const ends = {
+      groups: [
+        folder("top", ["agent:bLead", "agent:bOther"], true, "bLead"),
+        folder("mid", ["agent:a1", "agent:a2"]),
+        folder("bot", ["agent:cLead"], true, "cLead"),
+      ],
+      ungrouped: [] as string[],
+      order: ["top", "mid", "bot"],
+    };
+    const here = [local("a1"), local("a2"), local("bLead"), local("bOther"), local("cLead")];
+    const order = chatSlots(ends, here, [], [], saved);
+    expect(chatOrder(ends, here, [], [], saved).map((row) => row.id)).toEqual(["a1", "a2"]);
+    expect(adjacentChat(order, "bLead", "next")).toBe("a1");
+    expect(adjacentChat(order, "bOther", "prev")).toBe("a2");
+    expect(adjacentChat(order, "cLead", "prev")).toBe("a2");
+    expect(adjacentChat(order, "cLead", "next")).toBe("a1");
+  });
+
+  it("treats a folded router like a collapsed group", () => {
+    const order = slots();
+    expect(adjacentChat(order, "team/acc_1", "next")).toBe("lab/acc_2");
+    expect(adjacentChat(order, "team/acc_1", "prev")).toBe("d");
+  });
+
+  it("skips folded routers that sit in a row", () => {
+    const office = remote("office", "acc_3", "rae");
+    const row = chatSlots(
+      rail,
+      [...bots, office],
+      [router("team"), router("lab"), router("office")],
+      ["team", "lab"],
+      saved,
+    );
+    expect(adjacentChat(row, "team/acc_1", "next")).toBe("office/acc_3");
+    expect(adjacentChat(row, "lab/acc_2", "prev")).toBe("d");
+    expect(adjacentChat(row, "lab/acc_2", "next")).toBe("office/acc_3");
+  });
+
+  it("goes nowhere when every section is closed", () => {
+    const closed = {
+      groups: [folder("mid", ["agent:bLead", "agent:bOther"], true, "bLead")],
+      ungrouped: [] as string[],
+    };
+    const here = [local("bLead"), local("bOther")];
+    expect(adjacentChat(chatSlots(closed, here, [], [], saved), "bOther", "next")).toBeNull();
+  });
+});
 
 describe("rail sections", () => {
   const U = UNGROUPED_ID;

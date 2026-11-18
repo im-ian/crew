@@ -349,9 +349,74 @@ export function unplaceRep(
   return { sections: saved.sections, bots };
 }
 
+/** One sidebar section in rail order: a folder, a loose bot, or a router. */
+export type ChatSlot = {
+  key: string;
+  /** Bots that belong to this section, top to bottom. */
+  ids: readonly string[];
+  /**
+   * A collapsed folder or a folded router is closed. Its bots are not steps.
+   * A chat open inside one jumps to the section beside it.
+   */
+  open: boolean;
+};
+
 /**
- * Rows for ⌘[ and ⌘], top to bottom as the rail stacks folders, loose bots
- * and routers. A collapsed folder or a folded router is skipped.
+ * Sidebar sections top to bottom, as the rail stacks folders, loose bots
+ * and routers. A closed section stays in the list so a chat open inside it
+ * still has a place. It contributes no step.
+ */
+export function chatSlots(
+  rail: RailLayout,
+  agents: AgentInfo[],
+  remotes: RemoteInfo[],
+  folded: readonly string[],
+  saved: RemoteLayout,
+): ChatSlot[] {
+  const sections = remoteSections(agents, remotes, undefined, saved.bots);
+  // A representative put in its router's section is stepped through there.
+  const placed = placedReps(sections);
+  const local = localAgents(agents).filter((a) => !placed.has(a.id));
+  const localSlots = railSlots(rail.groups, rail.ungrouped, local, rail.order);
+  const byGroup = new Map(rail.groups.map((g) => [g.id, g]));
+  const here = new Set(local.map((a) => a.id));
+  const byKey = new Map<string, ChatSlot>();
+  for (const slot of localSlots) {
+    const group = byGroup.get(slot);
+    if (!group) {
+      const parsed = parseItemKey(slot);
+      if (parsed && here.has(parsed.id)) {
+        byKey.set(slot, { key: slot, ids: [parsed.id], open: true });
+      }
+      continue;
+    }
+    const ids: string[] = [];
+    for (const key of group.items) {
+      const parsed = parseItemKey(key);
+      if (parsed && here.has(parsed.id)) ids.push(parsed.id);
+    }
+    byKey.set(slot, { key: slot, ids, open: !group.collapsed });
+  }
+  for (const s of sections) {
+    byKey.set(remoteKey(s.alias), {
+      key: remoteKey(s.alias),
+      ids: s.bots.map((b) => b.id),
+      open: !folded.includes(s.alias),
+    });
+  }
+  return railSections(
+    localSlots,
+    sections.map((s) => s.alias),
+    saved.sections,
+  ).flatMap((key) => {
+    const slot = byKey.get(key);
+    return slot ? [slot] : [];
+  });
+}
+
+/**
+ * Rows for the ⌘K list, top to bottom. A collapsed folder or a folded
+ * router is skipped. ⌘⌥↑ and ⌘⌥↓ use {@link adjacentChat}.
  */
 export function chatOrder(
   rail: RailLayout,
@@ -360,44 +425,50 @@ export function chatOrder(
   folded: readonly string[],
   saved: RemoteLayout,
 ): { kind: Kind; id: string }[] {
-  const sections = remoteSections(agents, remotes, undefined, saved.bots);
-  // A representative put in its router's section is stepped through there.
-  const placed = placedReps(sections);
-  const local = localAgents(agents).filter((a) => !placed.has(a.id));
-  const slots = railSlots(rail.groups, rail.ungrouped, local, rail.order);
-  const rows = new Map<string, { kind: Kind; id: string }[]>();
-  const byGroup = new Map(rail.groups.map((g) => [g.id, g]));
-  const here = new Set(local.map((a) => a.id));
-  for (const slot of slots) {
-    const group = byGroup.get(slot);
-    if (!group) {
-      const parsed = parseItemKey(slot);
-      if (parsed && here.has(parsed.id)) rows.set(slot, [parsed]);
-      continue;
-    }
-    if (group.collapsed) {
-      rows.set(slot, []);
-      continue;
-    }
-    const bots: { kind: Kind; id: string }[] = [];
-    for (const key of group.items) {
-      const parsed = parseItemKey(key);
-      if (parsed && here.has(parsed.id)) bots.push(parsed);
-    }
-    rows.set(slot, bots);
+  return chatSlots(rail, agents, remotes, folded, saved).flatMap((slot) =>
+    slot.open ? slot.ids.map((id) => ({ kind: "agent" as const, id })) : [],
+  );
+}
+
+/**
+ * The chat ⌘⌥↓ (`next`) or ⌘⌥↑ (`prev`) opens.
+ * Open sections are stepped through, and the ends wrap.
+ * A chat inside a collapsed group or a folded router is not a step: next is
+ * the first open chat below that section, prev the last one above it.
+ * A run of closed sections is skipped. An unknown chat still wraps to an end.
+ */
+export function adjacentChat(
+  slots: readonly ChatSlot[],
+  selectedId: string | null,
+  dir: "next" | "prev",
+): string | null {
+  const steps: { id: string; slot: number }[] = [];
+  slots.forEach((slot, index) => {
+    if (!slot.open) return;
+    for (const id of slot.ids) steps.push({ id, slot: index });
+  });
+  if (!steps.length) return null;
+
+  const at = selectedId == null ? -1 : steps.findIndex((step) => step.id === selectedId);
+  if (at >= 0) {
+    const n = steps.length;
+    const i = dir === "next" ? (at + 1) % n : (at - 1 + n) % n;
+    return steps[i].id;
   }
-  for (const s of sections) {
-    if (folded.includes(s.alias)) continue;
-    rows.set(
-      remoteKey(s.alias),
-      s.bots.map((b) => ({ kind: "agent" as const, id: b.id })),
-    );
+
+  const closed =
+    selectedId == null
+      ? -1
+      : slots.findIndex((slot) => !slot.open && slot.ids.includes(selectedId));
+  if (closed >= 0) {
+    if (dir === "next") return (steps.find((step) => step.slot > closed) ?? steps[0]).id;
+    for (let i = steps.length - 1; i >= 0; i--) {
+      if (steps[i].slot < closed) return steps[i].id;
+    }
+    return steps[steps.length - 1].id;
   }
-  return railSections(
-    slots,
-    sections.map((s) => s.alias),
-    saved.sections,
-  ).flatMap((key) => rows.get(key) ?? []);
+
+  return dir === "next" ? steps[0].id : steps[steps.length - 1].id;
 }
 
 /** Aliases of the routers this local bot stands in for. */
