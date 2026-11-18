@@ -160,6 +160,26 @@ fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
     // each time would let a daemon dribbling one unrelated event a second keep
     // a caller here forever.
     let deadline = answer.map(|answer| Instant::now() + answer);
+    read_answer(stream, &req, deadline)
+}
+
+/// Narrow the read budget to `left`. macOS refuses the option with EINVAL
+/// once the daemon has closed its end, even with its answer still in the
+/// buffer. That is no error here: the read after it cannot block on a closed
+/// socket, and gets the answer or the end.
+fn arm_read(stream: &UnixStream, left: Duration) -> anyhow::Result<()> {
+    match stream.set_read_timeout(Some(left)) {
+        Err(err) if err.kind() != std::io::ErrorKind::InvalidInput => Err(err.into()),
+        _ => Ok(()),
+    }
+}
+
+/// The first event on `stream` that answers `req`, by `deadline`.
+fn read_answer(
+    stream: UnixStream,
+    req: &Request,
+    deadline: Option<Instant>,
+) -> anyhow::Result<Event> {
     let mut reader = BufReader::new(stream);
     let mut buf = String::new();
     loop {
@@ -168,10 +188,7 @@ fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
             if left.is_zero() {
                 return Err(no_answer());
             }
-            reader
-                .get_ref()
-                .set_read_timeout(Some(left))
-                .map_err(closed_early)?;
+            arm_read(reader.get_ref(), left)?;
         }
         buf.clear();
         let n = reader.read_line(&mut buf).map_err(stalled)?;
@@ -184,7 +201,7 @@ fn rpc_within(req: Request, answer: Option<Duration>) -> anyhow::Result<Event> {
             continue;
         }
         let ev = Event::from_line(buf.trim_end())?;
-        if answers(&req, &ev) {
+        if answers(req, &ev) {
             return Ok(ev);
         }
     }
@@ -1074,6 +1091,27 @@ mod tests {
         assert!(connection_lost(&err), "{err:#}");
         let other = closed_early(std::io::Error::from_raw_os_error(13));
         assert!(!connection_lost(&other), "{other:#}");
+    }
+
+    /// A daemon answers and closes its end. On a loaded machine that can
+    /// happen before the caller narrows its read budget, and macOS refuses
+    /// the option then. The answer is already in the buffer, so it is the
+    /// answer, not a lost connection: a `crew tell` reported as failed is
+    /// sent again by the bot.
+    #[test]
+    fn an_answer_the_daemon_closed_behind_is_still_read() {
+        let (client, mut daemon) = UnixStream::pair().expect("pair");
+        let pong = Event::Pong.to_line().expect("pong");
+        writeln!(daemon, "{pong}").expect("write");
+        drop(daemon);
+        let deadline = Some(Instant::now() + Duration::from_secs(5));
+        let ev = read_answer(client, &Request::Ping, deadline).expect("the answer");
+        assert!(matches!(ev, Event::Pong), "{ev:?}");
+
+        let (client, daemon) = UnixStream::pair().expect("pair");
+        drop(daemon);
+        let err = read_answer(client, &Request::Ping, deadline).expect_err("nothing came");
+        assert!(connection_lost(&err), "{err:#}");
     }
 
     #[test]

@@ -7605,6 +7605,25 @@ fi
         }
     }
 
+    /// Where a fake CLI's CI watch waits for the test to end it.
+    fn watch_end_path() -> PathBuf {
+        paths::home_dir().join("watch-ends")
+    }
+
+    /// The shell a fake CLI's CI watch runs: it waits for `end_watch`, so a
+    /// loaded machine cannot end it before the send it has to outlast. Thirty
+    /// seconds at most, so a test that failed leaves no shell behind.
+    fn watch_until_ended() -> String {
+        format!(
+            "i=0; while [ ! -e '{}' ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done",
+            watch_end_path().display()
+        )
+    }
+
+    fn end_watch() {
+        fs::write(watch_end_path(), "").unwrap();
+    }
+
     fn eventually(within: Duration, what: &str, done: impl Fn() -> bool) {
         let deadline = Instant::now() + within;
         while !done() {
@@ -10278,29 +10297,31 @@ exec sleep 1"#,
                 &format!(
                     r#"echo $$ >> '{}'
 printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"CI 끝나면 알려줄게요"}}]}}}}' '{{"type":"system","subtype":"background_tasks_changed","tasks":[{{"task_id":"t1","description":"Watch PR 12 CI"}}]}}' '{{"type":"result","subtype":"success","result":"CI 끝나면 알려줄게요"}}'
-(sleep 2; printf '%s\n' '{{"type":"system","subtype":"background_tasks_changed","tasks":[]}}' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"CI 통과했어요"}}]}}}}' '{{"type":"result","subtype":"success","result":"CI 통과했어요"}}') &
+({wait}; printf '%s\n' '{{"type":"system","subtype":"background_tasks_changed","tasks":[]}}' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"CI 통과했어요"}}]}}}}' '{{"type":"result","subtype":"success","result":"CI 통과했어요"}}') &
 while IFS= read -r line; do printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"다음 거 할게요"}}]}}}}' '{{"type":"result","subtype":"success"}}'; done"#,
-                    pids.display()
+                    pids.display(),
+                    wait = watch_until_ended()
                 ),
             );
             wait_idle(&bot);
             send_agent(&bot, "머지해줘").unwrap();
-            eventually(Duration::from_secs(3), "the watch was not shown", || {
+            eventually(Duration::from_secs(10), "the watch was not shown", || {
                 watch_of(&bot) == ["Watch PR 12 CI"]
             });
             wait_idle(&bot);
             send_agent(&bot, "다음 거").unwrap();
             assert!(queued_text(&bot).is_empty(), "a send waited on the watch");
-            eventually(Duration::from_secs(3), "the send was not answered", || {
+            eventually(Duration::from_secs(10), "the send was not answered", || {
                 told(&bot, "다음 거 할게요")
             });
-            assert_eq!(
-                watch_of(&bot),
-                ["Watch PR 12 CI"],
-                "the send stopped the watch"
-            );
+            // A turn hides the watch until it settles, and its answer shows
+            // a moment before that.
+            eventually(Duration::from_secs(10), "the send stopped the watch", || {
+                watch_of(&bot) == ["Watch PR 12 CI"] && !agent_busy(&bot).unwrap()
+            });
+            end_watch();
             eventually(
-                Duration::from_secs(5),
+                Duration::from_secs(10),
                 "the later answer was dropped",
                 || told(&bot, "CI 통과했어요"),
             );
@@ -10704,7 +10725,7 @@ while IFS= read -r line; do
       say "CI 끝나면 알려줄게요"
       note '"sessionUpdate":"turn_completed","prompt_id":"p1","stop_reason":"end_turn"'
       answer "$id" '{"stopReason":"end_turn"}'
-      ( sleep 6
+      ( {WATCH}
         note '"sessionUpdate":"background_tasks","tasks":[{"task_id":"t1","description":"Watch PR 12 CI","kind":"monitor","status":"completed"}]'
         say "CI 통과했어요"
         note '"sessionUpdate":"turn_completed","prompt_id":"task-completed-t1","stop_reason":"end_turn"' ) & ;;
@@ -10726,7 +10747,8 @@ done
 "#
         .replace("{STARTS}", &starts.display().to_string())
         .replace("{STDIN}", &stdin.display().to_string())
-        .replace("{FAILS}", &home.join("load-fails").display().to_string());
+        .replace("{FAILS}", &home.join("load-fails").display().to_string())
+        .replace("{WATCH}", &watch_until_ended());
         let bin = home.join(cli);
         fs::write(&bin, script).unwrap();
         fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
@@ -10852,16 +10874,17 @@ done
             send_agent(&bot, "다음 거").unwrap();
             assert!(queued_text(&bot).is_empty(), "a send waited on the watch");
             let pid = started_pids(&starts)[0].clone();
-            // The watch ends six seconds after it starts. The answer has
-            // to come before that, even on a loaded machine.
-            eventually(Duration::from_secs(5), "the send was not answered", || {
+            // The watch runs until the test ends it, so the answer comes
+            // while it runs however loaded the machine is.
+            eventually(Duration::from_secs(10), "the send was not answered", || {
                 told(&bot, &format!("answer 2 from {pid}"))
             });
-            assert_eq!(
-                watch_of(&bot),
-                ["Watch PR 12 CI"],
-                "the send stopped the watch"
-            );
+            // A turn hides the watch until it settles, and its answer shows
+            // a moment before that.
+            eventually(Duration::from_secs(10), "the send stopped the watch", || {
+                watch_of(&bot) == ["Watch PR 12 CI"] && !agent_busy(&bot).unwrap()
+            });
+            end_watch();
             eventually(
                 Duration::from_secs(10),
                 "the later answer was dropped",
@@ -11277,7 +11300,7 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","method":"item/started","params":{"item":{"command":"Watch PR 12 CI","id":"c1","status":"inProgress","type":"commandExecution"},"threadId":"%s","turnId":"%s"}}\n' "$sid" "$tid"
       say "CI 끝나면 알려줄게요"
       finish completed
-      ( sleep 6
+      ( {WATCH}
         printf '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"command":"Watch PR 12 CI","id":"c1","status":"completed","type":"commandExecution"},"threadId":"%s"}}\n' "$sid"
         printf '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"%s","turn":{"id":"later","status":"inProgress"}}}\n' "$sid"
         printf '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"delta":"CI 통과했어요","itemId":"mlater","threadId":"%s","turnId":"later"}}\n' "$sid"
@@ -11301,7 +11324,8 @@ done
         .replace("{STARTS}", &starts.display().to_string())
         .replace("{STDIN}", &stdin.display().to_string())
         .replace("{FAILS}", &home.join("load-fails").display().to_string())
-        .replace("{OUTLIVED}", &home.join("outlived").display().to_string());
+        .replace("{OUTLIVED}", &home.join("outlived").display().to_string())
+        .replace("{WATCH}", &watch_until_ended());
         let bin = home.join("codex");
         fs::write(&bin, script).unwrap();
         fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
@@ -11422,16 +11446,17 @@ done
             send_agent(&bot, "다음 거").unwrap();
             assert!(queued_text(&bot).is_empty(), "a send waited on the watch");
             let pid = started_pids(&starts)[0].clone();
-            // The watch ends six seconds after it starts. The answer has
-            // to come before that, even on a loaded machine.
-            eventually(Duration::from_secs(5), "the send was not answered", || {
+            // The watch runs until the test ends it, so the answer comes
+            // while it runs however loaded the machine is.
+            eventually(Duration::from_secs(10), "the send was not answered", || {
                 told(&bot, &format!("answer 2 from {pid}"))
             });
-            assert_eq!(
-                watch_of(&bot),
-                ["Watch PR 12 CI"],
-                "the send stopped the watch"
-            );
+            // A turn hides the watch until it settles, and its answer shows
+            // a moment before that.
+            eventually(Duration::from_secs(10), "the send stopped the watch", || {
+                watch_of(&bot) == ["Watch PR 12 CI"] && !agent_busy(&bot).unwrap()
+            });
+            end_watch();
             eventually(
                 Duration::from_secs(10),
                 "the later answer was dropped",
