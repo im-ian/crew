@@ -606,7 +606,8 @@ fn content_type(path: &Path) -> &'static str {
         "html" | "htm" => "text/html; charset=utf-8",
         "js" | "mjs" => "text/javascript; charset=utf-8",
         "css" => "text/css; charset=utf-8",
-        "json" | "webmanifest" => "application/json",
+        "json" => "application/json",
+        "webmanifest" => "application/manifest+json",
         "svg" => "image/svg+xml",
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
@@ -1066,7 +1067,8 @@ fn file_request(req: Request, url: &str) {
         let _ = req.respond(error(400, "path is required"));
         return;
     };
-    let Some(real) = file_allowed(Path::new(&raw)) else {
+    // The window sends a path as a bot wrote it, `~/…` included.
+    let Some(real) = file_allowed(&crate::paths::expand_tilde(&raw)) else {
         let _ = req.respond(error(404, "not found"));
         return;
     };
@@ -1176,6 +1178,10 @@ mod tests {
                 "outside the roots"
             );
             assert!(file_allowed(&home.join("uploads")).is_none(), "a folder");
+            assert_eq!(
+                content_type(Path::new("/manifest.webmanifest")),
+                "application/manifest+json"
+            );
         });
     }
 
@@ -1393,6 +1399,31 @@ mod tests {
             assert_eq!((code, body), (206, b"2345".to_vec()));
             assert!(head.contains("sandbox"), "{head}");
             assert_eq!(get(addr, "/api/file?path=/etc/hosts", &auth).0, 404);
+            // A path as a bot wrote it, from the home folder.
+            let file = Path::new(&path)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+            let old_home = std::env::var("HOME").ok();
+            std::env::set_var("HOME", paths::home_dir());
+            let tilde = get(
+                addr,
+                &format!(
+                    "/api/file?path=%7E%2Fuploads%2F{}",
+                    file.replace('%', "%25")
+                ),
+                &auth,
+            );
+            match old_home {
+                Some(h) => std::env::set_var("HOME", h),
+                None => std::env::remove_var("HOME"),
+            }
+            assert_eq!(
+                (tilde.0, tilde.2),
+                (200, b"0123456789".to_vec()),
+                "a ~ path"
+            );
 
             set_enabled(false).unwrap();
             std::thread::sleep(Duration::from_millis(300));
