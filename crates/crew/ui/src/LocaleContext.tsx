@@ -17,6 +17,8 @@ import {
   type TFn,
 } from "./i18n";
 import { cleanUserName, loadUserName, saveUserName } from "./userName";
+import { useLaptopPrefs } from "./displayPrefs";
+import { isWeb } from "./web";
 
 type LocaleCtx = {
   locale: Locale;
@@ -41,7 +43,9 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   }, [locale]);
 
   const [userName, setUserNameState] = useState(loadUserName);
-  const name = cleanUserName(userName);
+  // A phone calls the user what the laptop does.
+  const laptop = useLaptopPrefs();
+  const name = cleanUserName(isWeb() ? (laptop?.userName ?? "") : userName);
 
   useEffect(() => {
     saveUserName(userName);

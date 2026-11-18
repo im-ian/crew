@@ -3,6 +3,7 @@ import type { CloneParts } from "./cloneParts";
 import type { MobilePair, MobileStatus } from "./mobileAccess";
 import type { Template } from "./templates";
 import type { PathKind } from "./dropAttach";
+import type { DisplayPrefs } from "./displayPrefs";
 import type {
   AgentInfo,
   ChatMessage,
@@ -218,6 +219,9 @@ export const api = {
     invoke<void>("set_notifications", { enabled }),
   setLeadOnlyNotify: (enabled: boolean) =>
     invoke<void>("set_lead_only_notify", { enabled }),
+  /** The window's fonts and text size, for a paired phone to read. */
+  setDisplayPrefs: (prefs: DisplayPrefs) => invoke<void>("set_display_prefs", { prefs }),
+  getDisplayPrefs: () => invoke<DisplayPrefs>("get_display_prefs"),
   /** Empty clears it, so bots go back to "the user". */
   setUserName: (name: string) => invoke<void>("set_user_name", { name }),
   /** Installed Nerd Fonts. Each entry is the `local()` names of one family. */

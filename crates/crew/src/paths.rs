@@ -148,6 +148,54 @@ pub fn write_user_name(name: &str) {
     }
 }
 
+pub fn display_prefs_path() -> PathBuf {
+    home_dir().join("display.json")
+}
+
+/// How the laptop's window shows chat: its fonts and text size. The window
+/// mirrors them here so a paired phone can show chat the same way.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DisplayPrefs {
+    pub font: String,
+    pub code_font: String,
+    pub font_size: String,
+    /// From `user-name`, not this file: the name has its own.
+    #[serde(skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub user_name: Option<String>,
+}
+
+/// Longest font list kept. A font list is a line, not a document.
+const DISPLAY_FIELD_MAX: usize = 200;
+
+fn display_field(value: &str) -> String {
+    value.chars().filter(|c| !c.is_control()).take(DISPLAY_FIELD_MAX).collect()
+}
+
+/// What the window last mirrored, with the name the user goes by. Defaults
+/// when the window never wrote it.
+pub fn display_prefs() -> DisplayPrefs {
+    let mut prefs: DisplayPrefs = fs::read_to_string(display_prefs_path())
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default();
+    prefs.user_name = user_name();
+    prefs
+}
+
+pub fn write_display_prefs(prefs: &DisplayPrefs) {
+    let kept = DisplayPrefs {
+        font: display_field(&prefs.font),
+        code_font: display_field(&prefs.code_font),
+        font_size: display_field(&prefs.font_size),
+        user_name: None,
+    };
+    let _ = fs::create_dir_all(home_dir());
+    if let Ok(raw) = serde_json::to_string(&kept) {
+        let _ = fs::write(display_prefs_path(), raw);
+    }
+}
+
 pub fn pid_path() -> PathBuf {
     home_dir().join("crew.pid")
 }
@@ -759,6 +807,29 @@ mod tests {
             write_user_name("   ");
             assert_eq!(user_name(), None);
             assert!(!user_name_path().exists(), "an empty name leaves no file");
+        });
+    }
+
+    #[test]
+    fn display_prefs_round_trip_with_the_name_from_its_own_file() {
+        testing::with_home("display", || {
+            assert_eq!(display_prefs(), DisplayPrefs::default());
+            write_user_name("대호");
+            write_display_prefs(&DisplayPrefs {
+                font: "Pretendard".into(),
+                code_font: "D2Coding,\nJetBrains Mono".into(),
+                font_size: "large".into(),
+                user_name: Some("not kept here".into()),
+            });
+            let prefs = display_prefs();
+            assert_eq!(prefs.font, "Pretendard");
+            assert_eq!(prefs.code_font, "D2Coding,JetBrains Mono");
+            assert_eq!(prefs.font_size, "large");
+            assert_eq!(prefs.user_name.as_deref(), Some("대호"));
+            let raw = fs::read_to_string(display_prefs_path()).unwrap();
+            assert!(!raw.contains("userName"), "{raw}");
+            fs::write(display_prefs_path(), "not json").unwrap();
+            assert_eq!(display_prefs().font, "");
         });
     }
 

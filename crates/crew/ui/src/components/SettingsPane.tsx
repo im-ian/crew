@@ -17,7 +17,7 @@ import {
   saveCodeFont,
   saveFont,
 } from "../fontPref";
-import { applyFontSize, FONT_SIZES, loadFontSize, saveFontSize, type FontSize } from "../fontSize";
+import { applyFontSize, FONT_SIZES, fontSizeOf, loadFontSize, saveFontSize, type FontSize } from "../fontSize";
 import { loadLeadOnlyNotify, loadNotify, saveLeadOnlyNotify, saveNotify } from "../notifyPref";
 import { loadNoticeKeep, saveNoticeKeep } from "../noticeKeepPref";
 import type { NoticeKeep } from "../island";
@@ -33,6 +33,7 @@ import { RemoteSettings, type RemoteChange } from "./RemoteSettings";
 import { Seg } from "./Seg";
 import { ShortcutList } from "./ShortcutHelp";
 import { isWeb } from "../web";
+import { mirrorDisplayPrefs, useLaptopPrefs } from "../displayPrefs";
 
 type Props = {
   open: boolean;
@@ -98,10 +99,22 @@ export function SettingsPane({
     setFontSize(next);
     applyFontSize(next);
     saveFontSize(next);
+    mirrorDisplayPrefs();
   }
+  // A phone shows chat as the laptop does, and changes it there.
+  const web = isWeb();
+  const laptop = useLaptopPrefs();
+  const shownName = web ? (laptop?.userName ?? "") : userName;
+  const shownFont = web ? (laptop?.font ?? "") : font;
+  const shownCodeFont = web ? (laptop?.codeFont ?? "") : codeFont;
+  const shownSize = web ? fontSizeOf(laptop?.fontSize ?? null) : fontSize;
   const measure = useMemo(pageMeasure, []);
-  const missing = useMemo(() => missingFonts(font, measure), [font, measure]);
-  const missingCode = useMemo(() => missingFonts(codeFont, measure), [codeFont, measure]);
+  // A phone lacks the laptop's fonts by nature; that is no mistake to flag.
+  const missing = useMemo(() => (web ? [] : missingFonts(font, measure)), [web, font, measure]);
+  const missingCode = useMemo(
+    () => (web ? [] : missingFonts(codeFont, measure)),
+    [web, codeFont, measure],
+  );
   // The plain default until the daemon's list is read: it is that list's top.
   const [aiList, setAiList] = useState<AiChoice[]>(() => [loadBotDefault()]);
 
@@ -281,6 +294,7 @@ export function SettingsPane({
             </div>
           ) : section === "display" ? (
             <div className="form-stack">
+              {web ? <p className="apply-note">{t("settings.display.fromLaptop")}</p> : null}
               <Field label={t("settings.userName")} htmlFor="settings-user-name">
                 <input
                   id="settings-user-name"
@@ -289,7 +303,8 @@ export function SettingsPane({
                   autoComplete="off"
                   spellCheck={false}
                   maxLength={80}
-                  value={userName}
+                  readOnly={web}
+                  value={shownName}
                   onChange={(e) => setUserName(e.target.value)}
                 />
               </Field>
@@ -320,11 +335,13 @@ export function SettingsPane({
                   placeholder={t("settings.font.placeholder")}
                   autoComplete="off"
                   spellCheck={false}
-                  value={font}
+                  readOnly={web}
+                  value={shownFont}
                   onChange={(e) => {
                     setFont(e.target.value);
                     applyFont(e.target.value);
                     saveFont(e.target.value);
+                    mirrorDisplayPrefs();
                   }}
                 />
               </Field>
@@ -340,11 +357,13 @@ export function SettingsPane({
                   placeholder={t("settings.codeFont.placeholder")}
                   autoComplete="off"
                   spellCheck={false}
-                  value={codeFont}
+                  readOnly={web}
+                  value={shownCodeFont}
                   onChange={(e) => {
                     setCodeFont(e.target.value);
                     applyCodeFont(e.target.value);
                     saveCodeFont(e.target.value);
+                    mirrorDisplayPrefs();
                   }}
                 />
               </Field>
@@ -355,12 +374,13 @@ export function SettingsPane({
               </p>
               <Field label={t("settings.fontSize")}>
                 <Seg
-                  value={fontSize}
+                  value={shownSize}
                   options={FONT_SIZES.map((size) => ({
                     value: size,
                     label: t(`settings.fontSize.${size}`),
                   }))}
                   onChange={changeFontSize}
+                  disabled={web}
                 />
               </Field>
               <p className="apply-note">{t("settings.fontSize.note")}</p>

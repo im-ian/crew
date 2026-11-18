@@ -69,6 +69,7 @@ const LOCAL: Record<string, (args: Record<string, unknown>) => unknown> = {
   set_user_name: () => undefined,
   set_notifications: () => undefined,
   set_lead_only_notify: () => undefined,
+  set_display_prefs: () => undefined,
   set_dock_badge: () => undefined,
   set_escape_layer: () => undefined,
   list_nerd_fonts: () => [],

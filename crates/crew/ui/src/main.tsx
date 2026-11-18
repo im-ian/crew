@@ -11,6 +11,7 @@ import { applyLocale, loadLocale } from "./i18n";
 import { blockNativeMenu } from "./nativeMenu";
 import { applyTheme, loadThemePref } from "./theme";
 import { isWeb } from "./web";
+import { followLaptopPrefs, mirrorDisplayPrefs } from "./displayPrefs";
 import "./styles.css";
 
 applyTheme(loadThemePref());
@@ -21,6 +22,9 @@ applyFontSize(loadFontSize());
 applyLocale(loadLocale());
 blockNativeMenu(document);
 installAppZoom();
+// The laptop's window tells the daemon how it shows chat; a phone follows it.
+mirrorDisplayPrefs();
+followLaptopPrefs();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
