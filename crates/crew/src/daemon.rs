@@ -295,6 +295,31 @@ fn enqueue_fyi(peer: &str, from: &str, text: &str, row: &str) {
     save_fyis(peer);
 }
 
+/// The notes `from` left `peer` that it has not read, taken out to be read
+/// now. Oldest first.
+fn take_fyis_from(peer: &str, from: &str) -> Vec<PendingHandoff> {
+    let taken = {
+        let Ok(mut map) = pending_handoffs().lock() else {
+            return Vec::new();
+        };
+        let Some(q) = map.get_mut(peer) else {
+            return Vec::new();
+        };
+        let (taken, kept): (Vec<PendingHandoff>, Vec<PendingHandoff>) = std::mem::take(q)
+            .into_iter()
+            .partition(|h| h.fyi && h.from == from);
+        *q = kept;
+        if q.is_empty() {
+            map.remove(peer);
+        }
+        taken
+    };
+    if !taken.is_empty() {
+        save_fyis(peer);
+    }
+    taken
+}
+
 /// `enqueue_handoff` keeps one entry per sender, so this is all of them.
 fn take_handoff_from(peer: &str, from: &str) -> Option<PendingHandoff> {
     let mut map = pending_handoffs().lock().ok()?;
@@ -5847,12 +5872,29 @@ fn wake_asker_inner(id: &str) {
     if tells_after(id, &asker) {
         return;
     }
-    let Some(reply) = take_handoff_from(&asker, id) else {
-        return;
+    // The reply wakes the asker, and the notes this bot left it go on the
+    // same prompt. A turn that said nothing and reported with `--fyi` only
+    // wakes it with those notes: once, either way.
+    let (text, taken) = match take_handoff_from(&asker, id) {
+        Some(reply) => (
+            crate::protocol::handoff_envelope(id, &reply.text),
+            vec![reply],
+        ),
+        None => {
+            let notes = take_fyis_from(&asker, id);
+            if notes.is_empty() {
+                return;
+            }
+            let text = notes
+                .iter()
+                .map(|h| crate::protocol::fyi_envelope(&h.from, &h.text))
+                .collect::<Vec<_>>()
+                .join("\n");
+            (text, notes)
+        }
     };
-    let text = crate::protocol::handoff_envelope(id, &reply.text);
     if submit_delivery(&asker, &text, true, None, wake).is_err() {
-        restore_handoffs(&asker, vec![reply]);
+        restore_handoffs(&asker, taken);
     }
 }
 
@@ -12060,6 +12102,104 @@ esac"#,
                 "the lead's answer to the wake came back"
             );
             for id in [&lead, &worker] {
+                wait_idle(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// A bot that reports the work it was given with `--fyi` still wakes the
+    /// bot that gave it, once: with its reply, the note going on that same
+    /// prompt, or with the note alone when the turn said nothing. A note to a
+    /// bot that gave it no work wakes no one.
+    #[test]
+    fn a_result_sent_as_fyi_wakes_the_asker_once() {
+        paths::testing::with_home("fyi-report", || {
+            crate::transcript::set_seal_hook(on_assistant_sealed);
+            let [lead, worker, other] = ["lead", "worker", "other"].map(test_id);
+            let logs = paths::home_dir().join("logs");
+            fs::create_dir_all(&logs).unwrap();
+            let body = format!(
+                r#"case "$last" in
+*do-work*)
+sleep 1
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"끝났어요"}}]}}}}' '{{"type":"result","subtype":"success","result":"끝났어요"}}'
+;;
+*quiet-work*)
+sleep 1
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"result","subtype":"success","result":""}}'
+;;
+*)
+printf '%s\n---\n' "$last" >> '{logs}'/"$CREW_AGENT_ID"
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s2"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"확인했어요"}}]}}}}' '{{"type":"result","subtype":"success","result":"확인했어요"}}'
+;;
+esac"#,
+                logs = logs.display()
+            );
+            for id in [&lead, &worker, &other] {
+                fake_bot_running(id, &body);
+                wait_idle(id);
+            }
+            let prompts = |id: &str| -> Vec<String> {
+                fs::read_to_string(logs.join(id))
+                    .unwrap_or_default()
+                    .split("\n---\n")
+                    .filter(|p| !p.trim().is_empty())
+                    .map(str::to_string)
+                    .collect()
+            };
+            let fyi = format!("[crew fyi from:{worker}]");
+
+            tell_agent(&lead, &worker, "do-work 해 주세요").unwrap();
+            eventually(Duration::from_secs(3), "the work never started", || {
+                agent_busy(&worker).unwrap_or(false)
+            });
+            tell_fyi(&worker, &lead, "[완료] PR #1 머지").unwrap();
+            tell_fyi(&worker, &other, "규칙: 머지는 스쿼시").unwrap();
+            eventually(Duration::from_secs(8), "the lead was never woken", || {
+                prompts(&lead).len() == 1
+            });
+            wait_idle(&worker);
+            wait_idle(&lead);
+            std::thread::sleep(Duration::from_millis(500));
+            let woke = prompts(&lead);
+            assert_eq!(woke.len(), 1, "woken twice: {woke:?}");
+            assert!(woke[0].contains("끝났어요"), "{}", woke[0]);
+            assert!(
+                woke[0].contains(&fyi) && woke[0].contains("PR #1 머지"),
+                "{}",
+                woke[0]
+            );
+            assert!(prompts(&other).is_empty(), "a note to another bot woke it");
+
+            tell_agent(&lead, &worker, "quiet-work 해 주세요").unwrap();
+            eventually(
+                Duration::from_secs(3),
+                "the quiet work never started",
+                || agent_busy(&worker).unwrap_or(false),
+            );
+            tell_fyi(&worker, &lead, "[완료] PR #2 머지").unwrap();
+            eventually(
+                Duration::from_secs(8),
+                "a note-only report woke no one",
+                || prompts(&lead).len() == 2,
+            );
+            wait_idle(&worker);
+            wait_idle(&lead);
+            std::thread::sleep(Duration::from_millis(500));
+            let woke = prompts(&lead);
+            assert_eq!(woke.len(), 2, "{woke:?}");
+            assert!(
+                woke[1].contains(&fyi) && woke[1].contains("PR #2 머지"),
+                "{}",
+                woke[1]
+            );
+            assert!(
+                load_waits(&lead).fyis.is_empty(),
+                "a note read on the wake stays saved"
+            );
+            assert!(prompts(&other).is_empty());
+            for id in [&lead, &worker, &other] {
                 wait_idle(id);
                 remove_agent(id).unwrap();
             }
