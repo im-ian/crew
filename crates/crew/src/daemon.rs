@@ -2231,10 +2231,26 @@ fn note_asked(asker: &str, bot: &str) {
 /// A wake that went out, or a stop that took it, ends the wait.
 fn waiting_map() -> HashMap<String, Vec<String>> {
     let mut pairs: Vec<(String, String)> = Vec::new();
+    // Answered already, with work it was given still running in the
+    // background: the asker is still waiting on how that ends.
+    let mut answered: Vec<(String, String)> = Vec::new();
     if let Ok(map) = origins().lock() {
         for (bot, origin) in map.iter() {
             if let Some((asker, _)) = owed_wake(origin, bot) {
                 pairs.push((asker, bot.clone()));
+            } else if origin.wake_spent {
+                if let Some(asker) = targeting::waiting_asker(origin, bot) {
+                    answered.push((asker, bot.clone()));
+                }
+            }
+        }
+    }
+    if !answered.is_empty() {
+        if let Ok(map) = agents().lock() {
+            for (asker, bot) in answered {
+                if map.get(&bot).is_some_and(|a| !a.watch().is_empty()) {
+                    pairs.push((asker, bot));
+                }
             }
         }
     }
@@ -5524,13 +5540,18 @@ fn note_routine_switch(id: &str, name: &str, enabled: bool) {
 /// stopped. A watch that turn leaves gets no second turn, so a bot that
 /// watches again and runs out again stops there.
 pub(crate) fn wake_after_watch(id: &str, watched: &[String], row: String) {
-    if get_origin(id).is_some_and(|o| o.watch_wake) {
+    let before = get_origin(id);
+    if before.as_ref().is_some_and(|o| o.watch_wake) {
         return;
     }
     let note = crate::protocol::system_envelope(&watch_wake_text(watched));
+    // Work a bot handed over is still that bot's: the look answers it.
     let origin = TurnOrigin {
         watch_wake: true,
-        ..TurnOrigin::user()
+        ..before
+            .as_ref()
+            .and_then(|o| continued_origin(o, id))
+            .unwrap_or_else(TurnOrigin::user)
     };
     if let Err(err) = submit_delivery(id, &note, true, Some(row), origin) {
         eprintln!("[crew] watch wake for {id}: {err:#}");
@@ -5749,11 +5770,35 @@ pub(crate) fn headless_turn_over(id: &str) {
     }
 }
 
-/// The CLI started another reply on its own after the one it was asked for.
-/// Nobody asked for it, so it answers in the bot's own chat, not a side chat.
+/// The CLI started another reply on its own after the one it was asked for:
+/// background work from that turn finished, such as a CI watch. It carries on
+/// the work that turn was given, so it answers whoever gave it. A bot that
+/// handed it over gets the reply and one wake for it, as for the first one;
+/// the user's own work answers in the bot's own chat, as before.
 pub(crate) fn turn_reopened(id: &str) {
-    take_origin(id);
-    crate::transcript::set_peer(id, None);
+    let next = take_origin(id).and_then(|o| continued_origin(&o, id));
+    let peer = next.as_ref().and_then(|o| asked_by(o, id));
+    if let Some(origin) = next {
+        set_origin(id, origin);
+    }
+    crate::transcript::set_peer(id, peer);
+    sync_waiting();
+}
+
+/// The origin of a turn that carries on `prev`'s work: the same asker, chain
+/// and hops, with a wake of its own. That wake comes back to the asker as a
+/// turn that answers no one, so the two cannot keep waking each other. None
+/// when `prev`'s reply went to no bot.
+fn continued_origin(prev: &TurnOrigin, id: &str) -> Option<TurnOrigin> {
+    targeting::postback_targets(prev, id).agent?;
+    Some(TurnOrigin {
+        from: prev.from.clone(),
+        reply_agent: prev.reply_agent.clone(),
+        routine: prev.routine.clone(),
+        hops: prev.hops,
+        chain: prev.chain,
+        ..TurnOrigin::default()
+    })
 }
 
 /// `id`'s turn is over: wake the bot waiting on its answer, and stop tagging
@@ -7458,6 +7503,76 @@ fi
                 .count();
             assert_eq!(stops, 2);
             remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// The same, on work a bot handed over: the look Crew starts carries on
+    /// that work, so what it finds goes back to the bot that asked.
+    #[test]
+    fn a_watch_that_ran_out_answers_the_asker() {
+        use std::os::unix::fs::PermissionsExt;
+        paths::testing::with_home("watch-ran-out-asker", || {
+            crate::transcript::set_seal_hook(on_assistant_sealed);
+            paths::write_notifications_enabled(false);
+            let home = paths::home_dir();
+            let bin = home.join("grok");
+            let calls = home.join("calls");
+            let lead_log = home.join("lead-prompts");
+            let stopped = "the wait for background work ran out after 3600 s and exit stopped 1 background task (t-1).";
+            fs::write(
+                &bin,
+                format!(
+                    "#!/bin/sh\nfor a; do last=$a; done\nprintf '%s\\n---\\n' \"$last\" >> '{calls}'\nif [ $(grep -c '^---$' '{calls}') -eq 1 ]; then said='CI 끝나면 머지할게요'; else said='CI 아직 돌아요'; fi\nprintf '%s\\n' \"{{\\\"type\\\":\\\"text\\\",\\\"data\\\":\\\"$said\\\"}}\" '{{\"type\":\"error\",\"message\":\"{stopped}\"}}'\nexit 1\n",
+                    calls = calls.display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+            let lead = test_id("lead");
+            fake_bot_running(
+                &lead,
+                &format!(
+                    r#"printf '%s\n---\n' "$last" >> '{}'
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s2"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"확인했어요"}}]}}}}' '{{"type":"result","subtype":"success","result":"확인했어요"}}'"#,
+                    lead_log.display()
+                ),
+            );
+            let bot = test_id("ranout");
+            insert_spawned_agent(AgentConfig::new(
+                bot.clone(),
+                bot.clone(),
+                grok_per_turn(&bin),
+                Some(home.display().to_string()),
+            ))
+            .unwrap();
+            wait_idle(&bot);
+            wait_idle(&lead);
+            tell_agent(&lead, &bot, "머지해줘").unwrap();
+            let heard = |text: &str| {
+                fs::read_to_string(&lead_log)
+                    .unwrap_or_default()
+                    .matches(text)
+                    .count()
+            };
+            eventually(
+                Duration::from_secs(10),
+                "the look never reached the lead",
+                || heard("CI 아직 돌아요") == 1,
+            );
+            wait_idle(&bot);
+            wait_idle(&lead);
+            std::thread::sleep(Duration::from_millis(500));
+            assert_eq!(heard("CI 끝나면 머지할게요"), 1);
+            assert_eq!(heard("CI 아직 돌아요"), 1, "the look went twice");
+            let log = fs::read_to_string(&calls).unwrap();
+            assert_eq!(
+                log.matches("\n---\n").count(),
+                2,
+                "woken more than once: {log}"
+            );
+            for id in [&bot, &lead] {
+                remove_agent(id).unwrap();
+            }
         });
     }
 
@@ -11826,6 +11941,100 @@ printf '%s\n' '{"type":"system","subtype":"background_tasks_changed","tasks":[]}
             wait_idle(&bot);
             assert_eq!(shown(&bot), Some(AgentStatus::Idle));
             for id in [&bot, &builder] {
+                wait_idle(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// Work a bot handed over and the worker left watching in the background:
+    /// the asker waits while the watch runs, the reply the CLI starts on its
+    /// own when the watch ends goes back to the asker and wakes it once, and
+    /// the asker's answer to that wake goes nowhere. The user's own work is
+    /// `claude_takes_a_send_while_it_watches`.
+    #[test]
+    fn a_handed_over_watch_reports_back_to_the_asker() {
+        paths::testing::with_home("watch-asker", || {
+            crate::transcript::set_seal_hook(on_assistant_sealed);
+            let [lead, worker] = ["lead", "worker"].map(test_id);
+            let log = paths::home_dir().join("lead-prompts");
+            let body = format!(
+                r#"case "$last" in
+*CI-watch*)
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"CI 끝나면 머지할게요"}}]}}}}' '{{"type":"system","subtype":"background_tasks_changed","tasks":[{{"task_id":"t1","description":"Watch PR 7"}}]}}' '{{"type":"result","subtype":"success","result":"CI 끝나면 머지할게요"}}'
+sleep 2
+printf '%s\n' '{{"type":"system","subtype":"background_tasks_changed","tasks":[]}}' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"머지했어요"}}]}}}}' '{{"type":"result","subtype":"success","result":"머지했어요"}}'
+;;
+*)
+printf '%s\n---\n' "$last" >> '{log}'
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s2"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"확인했어요"}}]}}}}' '{{"type":"result","subtype":"success","result":"확인했어요"}}'
+;;
+esac"#,
+                log = log.display()
+            );
+            fake_bot_running(&lead, &body);
+            fake_bot_running(&worker, &body);
+            wait_idle(&lead);
+            wait_idle(&worker);
+            let waiting = |id: &str| {
+                list_agents()
+                    .into_iter()
+                    .find(|a| a.id == id)
+                    .map(|a| a.waiting_on)
+                    .unwrap_or_default()
+            };
+            let heard = |text: &str| {
+                fs::read_to_string(&log)
+                    .unwrap_or_default()
+                    .matches(text)
+                    .count()
+            };
+            tell_agent(&lead, &worker, "CI-watch 뒤에 머지해 줘").unwrap();
+            eventually(
+                Duration::from_secs(5),
+                "the first reply never came back",
+                || heard("CI 끝나면 머지할게요") == 1,
+            );
+            eventually(
+                Duration::from_secs(3),
+                "the watch did not keep the wait",
+                || watch_of(&worker) == ["Watch PR 7"] && waiting(&lead) == [worker.clone()],
+            );
+            eventually(
+                Duration::from_secs(8),
+                "the later reply never came back",
+                || heard("머지했어요") == 1,
+            );
+            wait_idle(&worker);
+            wait_idle(&lead);
+            eventually(
+                Duration::from_secs(3),
+                "the wait outlived the watch",
+                || waiting(&lead).is_empty(),
+            );
+            std::thread::sleep(Duration::from_millis(300));
+            assert_eq!(heard("머지했어요"), 1, "the result went twice");
+            assert_eq!(
+                heard("CI 끝나면 머지할게요"),
+                1,
+                "the first reply went twice"
+            );
+            let later = crate::transcript::messages(&worker)
+                .into_iter()
+                .find(|m| m.role == Role::Assistant && m.text == "머지했어요")
+                .expect("the later reply is in the worker's chat");
+            assert_eq!(
+                later.peer.as_deref(),
+                Some(lead.as_str()),
+                "it answers the lead"
+            );
+            assert!(
+                !crate::transcript::messages(&worker)
+                    .iter()
+                    .any(|m| m.text.contains("확인했어요")),
+                "the lead's answer to the wake came back"
+            );
+            for id in [&lead, &worker] {
                 wait_idle(id);
                 remove_agent(id).unwrap();
             }
