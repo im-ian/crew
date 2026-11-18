@@ -7865,3 +7865,234 @@ button.wait-chip:focus-visible {
   min-height: 44px;
   font-size: 16px;
 }
+
+/* ---------- Phone ----------
+   The same views in one column, at the width of MOBILE_QUERY (mobile.ts):
+   the rail slides in as a drawer, side panels and the bot sheet fill the
+   screen, dialogs rise from the bottom as sheets. --vvh and --vv-top follow
+   the visual viewport, so the keyboard never covers the composer. Nothing
+   here reaches a desktop window. */
+.rail-scrim,
+.head-rail {
+  display: none;
+}
+@media (max-width: 640px) {
+  :root {
+    --titlebar: 0px;
+    --content-pad: 14px;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+    --phone-h: var(--vvh, 100dvh);
+  }
+  html,
+  body,
+  #root {
+    height: var(--phone-h);
+    max-height: var(--phone-h);
+  }
+  /* iOS scrolls the page under the keyboard; this keeps the app on what
+     shows. The transform also makes #root the box the app's fixed layers
+     (drawer, panels, dialogs) are placed in, so they follow it too. */
+  #root {
+    transform: translateY(var(--vv-top, 0px));
+  }
+
+  /* One column; the rail is a drawer over it. */
+  .app {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .app > aside {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 40;
+    width: min(86vw, 340px);
+    height: var(--phone-h);
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+    padding-left: var(--safe-left);
+    transform: translateX(-102%);
+    transition: transform 0.24s var(--ease-out);
+    -webkit-touch-callout: none;
+  }
+  .app.rail-open > aside {
+    transform: none;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.35);
+  }
+  .rail-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 39;
+    background: rgba(0, 0, 0, 0.42);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s var(--ease);
+  }
+  .app.rail-open > .rail-scrim {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .app > aside .drag-top,
+  .app > aside .rail-resize {
+    display: none;
+  }
+  .app > aside .search-row {
+    padding-top: var(--space-10);
+  }
+  .rail-foot {
+    padding-bottom: var(--space-10);
+  }
+
+  main {
+    grid-column: 1;
+    padding-top: var(--safe-top);
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+  }
+  main.has-peek {
+    padding-right: var(--safe-right);
+  }
+
+  /* The chat's header: the drawer button first, the run line folded away. */
+  header {
+    padding: var(--space-6) var(--space-8) 0 var(--space-6);
+    margin-bottom: var(--space-4);
+    gap: var(--space-4);
+  }
+  .head-rail {
+    display: grid;
+  }
+  .head-run {
+    display: none;
+  }
+  .head-action {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* Composer: room for the home bar, and 44px to press. */
+  .composer {
+    padding: var(--space-6) var(--space-10) calc(var(--space-10) + var(--safe-bottom));
+  }
+  .composer-box {
+    min-height: 52px;
+  }
+  .composer-box button[type="submit"],
+  .composer-box .stop-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .attach-btn {
+    width: 40px;
+    height: 40px;
+  }
+  /* Below 16px iOS zooms the page into a field it focuses. */
+  .composer-input,
+  .textin,
+  .search,
+  .quick-switch-input {
+    font-size: max(16px, 1em);
+  }
+  .composer-input {
+    max-height: 30vh;
+  }
+
+  /* Side panels (file view, peeked chat, a lead's group) fill the screen. */
+  .peek-room {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: auto;
+    z-index: 35;
+    width: 100%;
+    height: var(--phone-h);
+    border-left: 0;
+    padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+  }
+  .peek-resize {
+    display: none;
+  }
+
+  /* The bot sheet covers the screen. */
+  .overlay {
+    position: fixed;
+    top: 0;
+    height: var(--phone-h);
+    z-index: 45;
+  }
+  .sheet,
+  .agent-sheet {
+    width: 100%;
+    border-left: 0;
+    padding-top: calc(var(--space-16) + var(--safe-top));
+    padding-bottom: calc(var(--space-16) + var(--safe-bottom));
+  }
+
+  /* Dialogs rise from the bottom, as wide as the screen. */
+  .modal {
+    z-index: 50;
+    top: 0;
+    bottom: auto;
+    height: var(--phone-h);
+  }
+  .modal.open {
+    align-items: flex-end;
+  }
+  .modal .dialog,
+  .modal .dialog.settings-dialog,
+  .modal .dialog.ng-dialog {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    max-height: calc(var(--phone-h) - var(--safe-top) - var(--space-8));
+    border-radius: 18px 18px 0 0;
+    border-bottom: 0;
+    padding-left: calc(var(--space-16) + var(--safe-left));
+    padding-right: calc(var(--space-16) + var(--safe-right));
+    padding-bottom: calc(var(--space-16) + var(--safe-bottom));
+  }
+  .modal .dialog.settings-dialog {
+    height: calc(var(--phone-h) - var(--safe-top) - var(--space-8));
+    padding-left: 0;
+    padding-right: 0;
+    padding-bottom: var(--safe-bottom);
+  }
+  @keyframes dialog-in {
+    from { transform: translateY(24px); opacity: 0.6; }
+  }
+  .actions {
+    gap: var(--space-8);
+  }
+  .actions > .ghost,
+  .actions > .primary,
+  .actions > .danger {
+    min-height: 44px;
+  }
+
+  /* Menus open over everything and have rows a finger can hit. */
+  .ctx {
+    z-index: 60;
+    max-width: calc(100vw - 16px);
+  }
+  .ctx button {
+    padding: var(--space-12) var(--space-14);
+  }
+
+  /* The pairing screen scrolls inside the app's height, so the keyboard
+     never hides its code field. */
+  .pair-screen {
+    height: var(--phone-h);
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  /* A held row opens its menu (mobile.ts), not the system's link preview. */
+  .rail-lists .rail-row,
+  .rail-lists .group-head {
+    -webkit-touch-callout: none;
+  }
+}

@@ -5,7 +5,7 @@ import { cliFromCmd, headerModelLine, pinnedDefault } from "../options";
 import { isOnline, remoteLabel } from "../remote";
 import type { AgentInfo, CliKind, Group } from "../types";
 import { WhoButton } from "./WhoButton";
-import { Info, Users, X } from "../icons";
+import { Info, Menu, Users, X } from "../icons";
 import { statusView, waitingFailed, waitingOn } from "../statusView";
 import { WaitStatus } from "./WaitingOn";
 
@@ -24,6 +24,8 @@ type Props = {
   onSelectAgent?: (id: string) => void;
   /** Set on a split half: closes it, and the other half takes the room. */
   onClose?: () => void;
+  /** Set on a phone, where the rail is a drawer: opens it. */
+  onOpenRail?: () => void;
 };
 
 export function ChatHeader({
@@ -36,6 +38,7 @@ export function ChatHeader({
   onRenameAgent,
   onSelectAgent,
   onClose,
+  onOpenRail,
 }: Props) {
   const t = useT();
   const cli = currentAgent ? cliFromCmd(currentAgent.cmd, currentAgent.headless) : null;
@@ -101,6 +104,17 @@ export function ChatHeader({
   return (
     // `deep` moves the window from the empty header. Buttons stay clicks.
     <header data-tauri-drag-region="deep">
+      {onOpenRail ? (
+        <button
+          type="button"
+          className="head-action head-rail"
+          title={t("header.openRail")}
+          aria-label={t("header.openRail")}
+          onClick={onOpenRail}
+        >
+          <Menu />
+        </button>
+      ) : null}
       <div className="head-identity">
         {identity}
         {line ? (

@@ -341,6 +341,17 @@ export function LoaderCircle(props: Props) {
   );
 }
 
+/** Lucide `menu`. Opens the rail drawer on a phone. */
+export function Menu(props: Props) {
+  return (
+    <Icon {...props}>
+      <path d="M4 5h16" />
+      <path d="M4 12h16" />
+      <path d="M4 19h16" />
+    </Icon>
+  );
+}
+
 export function Layers(props: Props) {
   return (
     <Icon {...props}>
