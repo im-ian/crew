@@ -225,12 +225,18 @@ struct PendingHandoff {
     fyi: bool,
 }
 
-fn clear_agent_context(id: &str) {
+/// `id` is removed, or reset to a new session. Its notes and what waits on
+/// its turn go. The tells it ran still go out on a reset, as after a stop: it
+/// was told they were sent. A removed bot has no chat to answer them in.
+fn clear_agent_context(id: &str, keep_tells: bool) {
     if let Ok(mut map) = pending_handoffs().lock() {
         map.remove(id);
     }
     save_fyis(id);
-    clear_serial_after(id);
+    let own = end_serial(id);
+    if keep_tells {
+        release(own);
+    }
 }
 
 /// The notes `agent` has not read yet go in its waits file too, so a restart
@@ -1884,19 +1890,35 @@ fn follow_turn(agent: &str, epoch: u64, mut jobs: VecDeque<SerialJob>) {
     *q = jobs;
 }
 
-/// A stop: nothing waiting on this turn answers it.
+/// A stop: nothing waiting on this turn answers it. The tells the bot ran in
+/// it are not waiting on an answer: `crew tell` already said "ok", and the bot
+/// went on as if they were sent. They go out now.
 fn clear_serial_after(agent: &str) {
-    let epoch = {
+    release(end_serial(agent));
+}
+
+/// The board's part of a stop: what waited on the turn is taken off and the
+/// epoch moves, so nothing from before can attach again. Returns the tells
+/// the bot ran itself; the teammates its message named end with the turn.
+fn end_serial(agent: &str) -> VecDeque<SerialJob> {
+    let (epoch, own) = {
         let Ok(mut board) = serial_board().lock() else {
-            return;
+            return VecDeque::new();
         };
-        board.queues.remove(agent);
+        let own: VecDeque<SerialJob> = board
+            .queues
+            .remove(agent)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|job| job.own)
+            .collect();
         let epoch = board.epoch.entry(agent.to_string()).or_insert(0);
         *epoch = epoch.wrapping_add(1);
-        *epoch
+        (*epoch, own)
     };
     note_turn_over(agent);
     note_epoch(agent, epoch);
+    own
 }
 
 /// A newer message from the user drops the teammates their earlier ones named
@@ -2098,10 +2120,43 @@ fn run_chain(mut chain: VecDeque<SerialJob>) {
         let SerialKind::Tell { from, text, origin } = &job.kind;
         match tell_agent_origin(from, &job.to, text, origin.clone(), false, &mut chain) {
             Ok(()) => return,
-            Err(err) => eprintln!("[crew] serial -> {}: {err:#}", job.to),
+            Err(err) => {
+                eprintln!("[crew] serial -> {}: {err:#}", job.to);
+                // The bot was told this one was sent. It does not go quietly.
+                // A relay stop already said so in both chats.
+                if job.own && err.downcast_ref::<RelayStopped>().is_none() {
+                    undelivered(from, &job.to, &err);
+                }
+            }
         }
     }
 }
+
+/// A `crew tell` the bot got "ok" for, that could not go after all.
+fn undelivered(from: &str, to: &str, err: &anyhow::Error) {
+    if !known_agent(from) {
+        return;
+    }
+    let line = if crate::paths::locale() == "en" {
+        format!("A crew tell to @{to} could not be delivered: {err}")
+    } else {
+        format!("@{to} 에게 보낸 crew tell을 전달하지 못했어요: {err}")
+    };
+    crate::transcript::push_system(from, "crew", &line, None);
+}
+
+/// A tell the relay rules held back. `relay_check` already said so in both
+/// chats.
+#[derive(Debug)]
+struct RelayStopped(String);
+
+impl std::fmt::Display for RelayStopped {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for RelayStopped {}
 
 fn roster_vec() -> Vec<AgentConfig> {
     let cfgs = configs().lock().expect("configs mutex");
@@ -3074,6 +3129,11 @@ fn resumed_turn(id: &str, agent_cfg: &AgentConfig, current: u64) -> Option<Pendi
     let locale = crate::paths::locale();
     if agent_cfg.uses_pty() || current > turn.epoch || turn.resumes >= MAX_TURN_RESUMES {
         update_waits(id, |saved| saved.turn = None);
+        // The turn does not run on, but the tells it ran were "ok" to the
+        // bot. They go out once the bots are open.
+        if let Ok(mut held) = boot_tells().lock() {
+            held.extend(turn.after.iter().filter(|job| job.own).map(SavedJob::job));
+        }
         if turn.resumes >= MAX_TURN_RESUMES {
             crate::transcript::push_system(id, "crew", gave_up_line(&locale), None);
         }
@@ -3090,6 +3150,21 @@ fn resumed_turn(id: &str, agent_cfg: &AgentConfig, current: u64) -> Option<Pendi
         then: turn.after.iter().map(SavedJob::job).collect(),
         parked: false,
     })
+}
+
+/// Tells from turns the last daemon cut off and this one does not send on.
+fn boot_tells() -> &'static Mutex<VecDeque<SerialJob>> {
+    static HELD: OnceLock<Mutex<VecDeque<SerialJob>>> = OnceLock::new();
+    HELD.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+/// Once the bots are open: the tells `resumed_turn` kept go out.
+fn release_boot_tells() {
+    let held = boot_tells()
+        .lock()
+        .map(|mut q| std::mem::take(&mut *q))
+        .unwrap_or_default();
+    release(held);
 }
 
 fn drop_waits(id: &str) {
@@ -3395,6 +3470,7 @@ pub async fn run() -> anyhow::Result<()> {
     for agent_cfg in &cfg.agents {
         pump_inbox_inner(&agent_cfg.id);
     }
+    release_boot_tells();
     let _ = write_roster(&cfg.agents);
     crate::remote::start();
 
@@ -4679,7 +4755,7 @@ fn relay_check(from: &str, to: &str, text: &str, origin: &TurnOrigin) -> anyhow:
         }
     }
     eprintln!("[crew] relay stopped {from} -> {to}: {stop:?}");
-    anyhow::bail!("{}", crate::relay::error_text(&stop, &name(to)))
+    Err(RelayStopped(crate::relay::error_text(&stop, &name(to))).into())
 }
 
 /// `then` is the rest of a chain that waits on this tell's turn.
@@ -4748,8 +4824,10 @@ fn tell_agent_origin(
             }
             return Ok(());
         }
+        // The turn that ran it was stopped. Saying "ok" would let the bot
+        // believe it went; it did not, and the command says so.
         if agent_interrupted(&from) {
-            return Ok(());
+            anyhow::bail!("this turn was stopped, so the tell to {to} was not sent");
         }
     }
     let mention_owner = origin.as_ref().and_then(|o| {
@@ -5288,7 +5366,7 @@ fn remove_agent(id: &str) -> anyhow::Result<()> {
     drop_waits(id);
     // Before the kill, which would otherwise put a silent prompt back.
     forget_prompt(id);
-    clear_agent_context(id);
+    clear_agent_context(id, false);
     session.kill();
     // After the kill: an in-flight headless turn persists through `push_tool`
     // and may run `crew memory append`, either of which would write its file
@@ -5713,7 +5791,7 @@ fn reset_agent(id: &str, drop_routines: bool) -> anyhow::Result<String> {
     // would put its prompt back, parked at the front of the cleared inbox,
     // and every line queued after it would wait for the user.
     forget_prompt(id);
-    clear_agent_context(id);
+    clear_agent_context(id, true);
     let new_session = open_agent(&cfg, cols, rows, true, &roster)?;
     {
         let mut map = agents().lock().expect("agents mutex");
@@ -6662,7 +6740,7 @@ mod daemon_tests {
         assert_eq!(flush_handoffs(&peer, "please continue"), "please continue");
         crate::transcript::drop_agent(&peer);
         configs().lock().unwrap().remove(&peer);
-        clear_agent_context(&peer);
+        clear_agent_context(&peer, false);
     }
 
     /// A user's @mention from another chat failed: that chat hears it
@@ -6687,7 +6765,7 @@ mod daemon_tests {
         note_turn_failed(&speaker, false);
         crate::transcript::drop_agent(&peer);
         configs().lock().unwrap().remove(&peer);
-        clear_agent_context(&peer);
+        clear_agent_context(&peer, false);
         failed_waits().lock().unwrap().remove(&peer);
     }
 
@@ -6742,7 +6820,7 @@ mod daemon_tests {
 
         for id in [&worker, &late, &plain, &peer] {
             crate::transcript::drop_agent(id);
-            clear_agent_context(id);
+            clear_agent_context(id, false);
         }
         configs().lock().unwrap().remove(&peer);
     }
@@ -6942,8 +7020,9 @@ mod daemon_tests {
     }
 
     /// A tell that never goes out leaves the reply as the answer. Taken when
-    /// the tell was run, the reply went with a tell that a stop then cleared,
-    /// or that was refused on the way.
+    /// the tell was run, the reply went with a tell its sender's removal then
+    /// dropped, or that was refused on the way. A stop sends such a tell
+    /// (`a_tell_survives_a_stop_or_an_error`).
     #[test]
     fn a_tell_that_does_not_go_out_keeps_the_reply() {
         paths::testing::with_home("tell-fails", || {
@@ -6956,9 +7035,9 @@ mod daemon_tests {
             set_origin(&speaker, TurnOrigin::mention_tell(&asker));
             on_assistant_sealed(&speaker, &sealed_reply(&speaker, "**바위.**"));
 
-            // Held until the speaker's turn is over, and stopped with it.
+            // Held until the speaker's turn is over, and dropped with it.
             tell_agent(&speaker, &asker, "바위.").unwrap();
-            clear_serial_after(&speaker);
+            let _ = end_serial(&speaker);
             assert_eq!(handoff_rows(&asker), 1);
 
             // Refused: the bots already relayed this chain too many times.
@@ -7085,7 +7164,7 @@ mod daemon_tests {
             defer_tell(&speaker, &asker, &speaker, "보", None);
             wake_asker(&speaker);
             assert!(inbox_is_empty(&asker), "its own tell is the one turn");
-            clear_serial_after(&speaker);
+            let _ = end_serial(&speaker);
 
             set_origin(&speaker, turn);
             wake_asker(&speaker);
@@ -12321,6 +12400,178 @@ esac"#,
                 1
             );
             for id in [&lead, &worker, &again, &fine] {
+                wait_idle(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// A bot whose own script answers `long-work` slowly and everything else
+    /// at once, logging each prompt it gets under its id.
+    fn slow_bots(ids: &[&String]) -> std::path::PathBuf {
+        let logs = paths::home_dir().join("logs");
+        fs::create_dir_all(&logs).unwrap();
+        let body = format!(
+            r#"printf '%s\n---\n' "$last" >> '{logs}'/"$CREW_AGENT_ID"
+case "$last" in
+*long-work*) sleep 6 ;;
+*fail-work*) sleep 1; printf '%s\n' '{{"type":"result","subtype":"error_during_execution","is_error":true,"result":"boom"}}'; exit 1 ;;
+esac
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"확인했어요"}}]}}}}' '{{"type":"result","subtype":"success","result":"확인했어요"}}'"#,
+            logs = logs.display()
+        );
+        for id in ids {
+            fake_bot_running(id, &body);
+            wait_idle(id);
+        }
+        logs
+    }
+
+    fn heard(logs: &std::path::Path, id: &str, text: &str) -> usize {
+        fs::read_to_string(logs.join(id))
+            .unwrap_or_default()
+            .matches(text)
+            .count()
+    }
+
+    fn sent_rows(id: &str, to: &str) -> usize {
+        crate::transcript::messages(id)
+            .iter()
+            .filter(|m| m.from == format!("to:{to}"))
+            .count()
+    }
+
+    /// A tell a bot ran is held until its turn ends. The user cutting in ends
+    /// that turn early: the tell still goes, once. A tell run after a stop
+    /// fails instead of saying "ok" and going nowhere.
+    #[test]
+    fn a_tell_survives_the_user_cutting_in() {
+        paths::testing::with_home("tell-cut-in", || {
+            let [lead, worker, late] = ["lead", "worker", "late"].map(test_id);
+            let logs = slow_bots(&[&lead, &worker, &late]);
+            send_agent(&lead, "long-work 해 주세요").unwrap();
+            eventually(Duration::from_secs(3), "the turn never started", || {
+                agent_busy(&lead).unwrap_or(false)
+            });
+            tell_agent(&lead, &worker, "리뷰해 주세요").unwrap();
+            assert_eq!(
+                heard(&logs, &worker, "리뷰해 주세요"),
+                0,
+                "held until the turn ends"
+            );
+
+            send_user_line(&lead, "새 말", "새 말", true, false, None).unwrap();
+            eventually(Duration::from_secs(5), "the held tell was dropped", || {
+                heard(&logs, &worker, "리뷰해 주세요") == 1
+            });
+            for id in [&lead, &worker] {
+                wait_idle(id);
+            }
+            std::thread::sleep(Duration::from_millis(500));
+            assert_eq!(heard(&logs, &worker, "리뷰해 주세요"), 1, "sent twice");
+            assert_eq!(sent_rows(&lead, &worker), 1);
+
+            send_agent(&lead, "long-work 다시").unwrap();
+            eventually(
+                Duration::from_secs(3),
+                "the second turn never started",
+                || agent_busy(&lead).unwrap_or(false),
+            );
+            halt_turn(&lead).unwrap();
+            let after = tell_agent(&lead, &late, "멈춘 뒤의 말");
+            assert!(after.is_err(), "a tell after a stop said ok");
+            std::thread::sleep(Duration::from_millis(500));
+            assert_eq!(heard(&logs, &late, "멈춘 뒤의 말"), 0);
+            for id in [&lead, &worker, &late] {
+                wait_idle(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// Stopped with the button, or ended on an error: the tells that turn ran
+    /// go out all the same.
+    #[test]
+    fn a_tell_survives_a_stop_or_an_error() {
+        paths::testing::with_home("tell-stop-error", || {
+            let [lead, worker] = ["lead", "worker"].map(test_id);
+            let logs = slow_bots(&[&lead, &worker]);
+            send_agent(&lead, "long-work 해 주세요").unwrap();
+            eventually(Duration::from_secs(3), "the turn never started", || {
+                agent_busy(&lead).unwrap_or(false)
+            });
+            tell_agent(&lead, &worker, "멈춰도 가는 말").unwrap();
+            stop_turn(&lead).unwrap();
+            eventually(Duration::from_secs(5), "a stop dropped the tell", || {
+                heard(&logs, &worker, "멈춰도 가는 말") == 1
+            });
+            wait_idle(&lead);
+            wait_idle(&worker);
+
+            send_agent(&lead, "fail-work 해 주세요").unwrap();
+            eventually(
+                Duration::from_secs(3),
+                "the failing turn never started",
+                || agent_busy(&lead).unwrap_or(false),
+            );
+            tell_agent(&lead, &worker, "오류여도 가는 말").unwrap();
+            eventually(Duration::from_secs(8), "an error dropped the tell", || {
+                heard(&logs, &worker, "오류여도 가는 말") == 1
+            });
+            for id in [&lead, &worker] {
+                wait_idle(id);
+            }
+            std::thread::sleep(Duration::from_millis(500));
+            assert_eq!(heard(&logs, &worker, "멈춰도 가는 말"), 1);
+            assert_eq!(heard(&logs, &worker, "오류여도 가는 말"), 1);
+            for id in [&lead, &worker] {
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// The daemon went down mid-turn, and the next one does not send that turn
+    /// on: the tells it ran go out once the bots are open. One to a bot that
+    /// is gone says so in the sender's chat instead of vanishing.
+    #[test]
+    fn a_tell_survives_a_restart_or_says_it_did_not() {
+        paths::testing::with_home("tell-restart", || {
+            let [lead, worker] = ["lead", "worker"].map(test_id);
+            let logs = slow_bots(&[&lead, &worker]);
+            let job = |to: &str, text: &str| SavedJob {
+                to: to.into(),
+                from: lead.clone(),
+                text: text.into(),
+                origin: None,
+                own: true,
+            };
+            update_waits(&lead, |saved| {
+                let mut turn = saved_turn("long-work", TurnOrigin::user(), 0, MAX_TURN_RESUMES);
+                turn.after = vec![
+                    job(&worker, "재시작 뒤에 가는 말"),
+                    job("gone-bot", "갈 곳 없는 말"),
+                ];
+                saved.turn = Some(turn);
+            });
+            let cfg = Config {
+                agents: vec![configs().lock().unwrap().get(&lead).cloned().unwrap()],
+            };
+            restore_transcripts(&cfg);
+            release_boot_tells();
+            eventually(
+                Duration::from_secs(5),
+                "the restart dropped the tell",
+                || heard(&logs, &worker, "재시작 뒤에 가는 말") == 1,
+            );
+            assert!(
+                crate::transcript::messages(&lead)
+                    .iter()
+                    .any(|m| m.from == "crew"
+                        && m.text.contains("@gone-bot")
+                        && m.text.contains("전달하지 못했어요")),
+                "an undelivered tell went quietly"
+            );
+            for id in [&lead, &worker] {
                 wait_idle(id);
                 remove_agent(id).unwrap();
             }
