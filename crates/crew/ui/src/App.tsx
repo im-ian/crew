@@ -93,7 +93,15 @@ import {
   type SplitDir,
 } from "./split";
 import { usePaneMessages } from "./usePaneMessages";
-import { EDGE_PX, installLongPress, railSwipe, useMobile, watchViewport } from "./mobile";
+import {
+  EDGE_PX,
+  installLongPress,
+  railSwipe,
+  TouchMenuContext,
+  useMobile,
+  watchViewport,
+  type OpenTouchMenu,
+} from "./mobile";
 import type { AgentInfo } from "./types";
 
 export function App() {
@@ -104,6 +112,36 @@ export function App() {
   // A phone: the rail is a drawer over the chat, and a chosen chat shuts it.
   const mobile = useMobile();
   const [railOpen, setRailOpen] = useState(false);
+  // A held message's menu on a phone: its reply, copy and select.
+  const [touchMenu, setTouchMenu] = useState<{ x: number; y: number; items: MenuEntry[] } | null>(
+    null,
+  );
+  const openTouchMenu = useCallback<OpenTouchMenu>((x, y, items) => {
+    setTouchMenu({
+      x,
+      y,
+      items: items.map((item) =>
+        item.type === "action"
+          ? {
+              ...item,
+              onClick: () => {
+                setTouchMenu(null);
+                item.onClick();
+              },
+            }
+          : item,
+      ),
+    });
+  }, []);
+  useEffect(() => {
+    if (!touchMenu) return;
+    const shut = (e: Event) => {
+      if (e.target instanceof Element && e.target.closest(".ctx")) return;
+      setTouchMenu(null);
+    };
+    document.addEventListener("pointerdown", shut, true);
+    return () => document.removeEventListener("pointerdown", shut, true);
+  }, [touchMenu]);
   const railOpenRef = useRef(railOpen);
   railOpenRef.current = railOpen;
   useEffect(() => {
@@ -1124,6 +1162,9 @@ export function App() {
         onLoad={crew.loadGroupMemory}
         onSave={crew.saveGroupSettings}
       />
+      {touchMenu ? (
+        <ContextMenu open x={touchMenu.x} y={touchMenu.y} items={touchMenu.items} />
+      ) : null}
       <ContextMenu
         open={crew.ctx.open}
         x={crew.ctx.x}
@@ -1245,7 +1286,11 @@ export function App() {
       groups={crew.groups}
       viewer={crew.selectedKind === "agent" ? crew.selected : null}
     >
-      <FileOpenContext.Provider value={fileCtx}>{app}</FileOpenContext.Provider>
+      <FileOpenContext.Provider value={fileCtx}>
+        <TouchMenuContext.Provider value={mobile ? openTouchMenu : null}>
+          {app}
+        </TouchMenuContext.Provider>
+      </FileOpenContext.Provider>
     </BotLabelProvider>
   );
 }

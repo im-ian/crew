@@ -1,4 +1,5 @@
-import { useSyncExternalStore } from "react";
+import { createContext, useSyncExternalStore } from "react";
+import type { MenuEntry } from "./components/ContextMenu";
 
 /**
  * A phone-wide window: one column, the rail a drawer, side panels and dialogs
@@ -71,8 +72,35 @@ export function railSwipe(
 export const LONG_PRESS_MS = 480;
 /** A finger that moves this far is scrolling, not holding. */
 export const LONG_PRESS_SLOP = 10;
-/** Where a right click opens a menu: the rail's rows and the routine list. */
-export const LONG_PRESS_TARGETS = "aside, .routine";
+/**
+ * Where a held finger opens a menu: the rail's rows, the routine list, and a
+ * message (its reply, copy and select, the buttons a mouse finds on hover).
+ */
+export const LONG_PRESS_TARGETS = "aside, .routine, .bubble-row, .xfer";
+
+/** A `contextmenu` this file sent for a held finger, not a right click. */
+export function isLongPress(e: Event): boolean {
+  return !!(e as Event & { crewLongPress?: boolean }).crewLongPress;
+}
+
+/** Opens a touch menu at a point. App provides it while the window is a phone. */
+export type OpenTouchMenu = (x: number, y: number, items: MenuEntry[]) => void;
+export const TouchMenuContext = createContext<OpenTouchMenu | null>(null);
+
+/**
+ * Lets one message's text be selected after "Select text": a phone's chat
+ * text is not selectable, so a held finger opens the message menu instead of
+ * the system's selection. The next touch outside it ends the selection.
+ */
+export function selectTextIn(el: Element) {
+  el.classList.add("is-selecting");
+  const end = (e: Event) => {
+    if (e.target instanceof Node && el.contains(e.target)) return;
+    el.classList.remove("is-selecting");
+    document.removeEventListener("touchstart", end, true);
+  };
+  window.setTimeout(() => document.addEventListener("touchstart", end, true), 0);
+}
 
 export function longPressTarget(el: EventTarget | null): Element | null {
   if (!(el instanceof Element)) return null;

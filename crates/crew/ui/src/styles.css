@@ -8090,9 +8090,36 @@ button.wait-chip:focus-visible {
     overflow-y: auto;
   }
 
+  /* A held message opens its menu (reply, copy, select text) instead of the
+     system's selection; "Select text" lets that one message be selected. */
+  .bubble-row,
+  .xfer {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .bubble-row.is-selecting,
+  .bubble-row.is-selecting *,
+  .xfer.is-selecting,
+  .xfer.is-selecting * {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+
   /* A held row opens its menu (mobile.ts), not the system's link preview. */
   .rail-lists .rail-row,
   .rail-lists .group-head {
     -webkit-touch-callout: none;
+  }
+}
+
+/* A finger finds no hover: the buttons a mouse reveals stay shown. A
+   message's own buttons come from holding it instead (mobile.ts). */
+@media (hover: none) {
+  .code-wrap .code-copy,
+  .group-more,
+  .file-tab-close {
+    opacity: 1;
   }
 }
