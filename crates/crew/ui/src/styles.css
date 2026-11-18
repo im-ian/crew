@@ -659,6 +659,27 @@ button.linkish {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* One dot for a collapsed group with no lead. Working stays still, the way a
+   rail badge does. Needs-review breathes on the blocked orbit's 3.4s, which
+   is as much motion as a 6px dot can carry. */
+.group-fold-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--working);
+}
+.group-fold-dot.is-blocked {
+  background: var(--blocked);
+  animation: group-fold-dot 3.4s ease-in-out infinite;
+}
+@keyframes group-fold-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .group-fold-dot.is-blocked { animation: none; }
+}
 .group-name:hover { color: var(--ink); }
 /* The focused group, where ⌘⇧N puts a new bot. Ink, not a fill, so it never
    reads as the open chat's row. */
@@ -1819,6 +1840,15 @@ aside.folded .empty-rail {
 .group-head.compact .group-more {
   display: none;
 }
+/* The name is hidden on the folded rail. Keep the dot, and only the dot. */
+.group-head.compact .group-name:has(.group-fold-dot) {
+  display: flex;
+  flex: 0 0 auto;
+  width: auto;
+  padding: 0;
+  overflow: visible;
+}
+.group-head.compact .group-name-text { display: none; }
 .rail-row.compact {
   grid-template-columns: 32px;
   justify-content: center;

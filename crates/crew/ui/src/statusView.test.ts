@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { translate } from "./i18n";
-import { askingAmong, briefStatus, statusView, waitingFailed, waitingOn, waitingUserPhrase } from "./statusView";
-import type { AgentInfo } from "./types";
+import { askingAmong, briefStatus, collapsedGroupMark, statusView, waitingFailed, waitingOn, waitingUserPhrase } from "./statusView";
+import type { AgentInfo, Group } from "./types";
 
 const ko = (
   key: Parameters<typeof translate>[1],
@@ -13,6 +13,54 @@ function bot(over: Partial<AgentInfo> = {}): AgentInfo {
 }
 
 const NOW = 1_000_000_000;
+
+function group(over: Partial<Group> = {}): Group {
+  return {
+    id: "g",
+    name: "g",
+    collapsed: true,
+    items: ["agent:a", "agent:b"],
+    ...over,
+  };
+}
+
+describe("collapsedGroupMark", () => {
+  const working = bot({ id: "a", status: "working" });
+  const blocked = bot({ id: "b", status: "blocked" });
+
+  it("draws nothing when a lead is still shown", () => {
+    expect(collapsedGroupMark(group({ lead: "a" }), [working, blocked])).toBeNull();
+  });
+
+  it("lets a question or an approval win over working", () => {
+    expect(collapsedGroupMark(group(), [working, blocked])).toEqual({
+      tone: "blocked",
+      working: 1,
+      attention: 1,
+    });
+    const asking = bot({ id: "b", status: "working", asking: true });
+    expect(collapsedGroupMark(group(), [working, asking])).toEqual({
+      tone: "blocked",
+      working: 1,
+      attention: 1,
+    });
+  });
+
+  it("draws nothing when nobody is working or waiting", () => {
+    expect(
+      collapsedGroupMark(group(), [bot({ id: "a" }), bot({ id: "b", status: "exited" })]),
+    ).toBeNull();
+    expect(collapsedGroupMark(group({ collapsed: false }), [working, blocked])).toBeNull();
+  });
+
+  it("is a working dot when that is all there is", () => {
+    expect(collapsedGroupMark(group(), [working, bot({ id: "b" })])).toEqual({
+      tone: "working",
+      working: 1,
+      attention: 0,
+    });
+  });
+});
 
 describe("statusView", () => {
   it("says nothing for an idle bot or none", () => {
