@@ -977,7 +977,7 @@ pub(crate) fn list_nerd_fonts() -> Vec<Vec<String>> {
 
 /// Mirror how the window shows chat, so a paired phone can show it the same.
 #[tauri::command]
-fn set_display_prefs(prefs: crate::paths::DisplayPrefs) -> Result<(), String> {
+pub(crate) fn set_display_prefs(prefs: crate::paths::DisplayPrefs) -> Result<(), String> {
     crate::paths::write_display_prefs(&prefs);
     Ok(())
 }
@@ -985,7 +985,7 @@ fn set_display_prefs(prefs: crate::paths::DisplayPrefs) -> Result<(), String> {
 /// The window's fonts and text size, and the name the user goes by. A phone
 /// reads them; the laptop's window is where they change.
 #[tauri::command]
-fn get_display_prefs() -> Result<crate::paths::DisplayPrefs, String> {
+pub(crate) fn get_display_prefs() -> Result<crate::paths::DisplayPrefs, String> {
     Ok(crate::paths::display_prefs())
 }
 
