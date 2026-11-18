@@ -1344,6 +1344,47 @@ fn all_teammates_sentence(roster: &[AgentConfig]) -> String {
     format!("Teammates: {}.", parts.join("; "))
 }
 
+/// How this bot works with the lead of its group. `None` when the group has
+/// no lead, or this bot sits in no group.
+///
+/// It rides the shared memory note, not the standing team rules. A resumed
+/// session keeps those rules from the turn it started. The note is attached
+/// again when its text changes, so a new lead or none shows up on the next
+/// turn. A lead that is not in the group counts as none.
+fn lead_guidance(
+    agent: &AgentConfig,
+    roster: &[AgentConfig],
+    folder: Option<&crate::groups::SidebarGroup>,
+) -> Option<String> {
+    let folder = folder?;
+    if !crate::groups::holds(folder, &agent.id) {
+        return None;
+    }
+    let lead_id = folder.lead.as_deref()?;
+    if !crate::groups::holds(folder, lead_id) {
+        return None;
+    }
+    if lead_id == agent.id {
+        return Some(
+            "You are the lead of this group. You assign work to teammates and take their reports. When a teammate sends you a question with `crew tell`, ask the user with `crew ask`, then `crew tell` the answer back to that teammate.".to_string(),
+        );
+    }
+    let raw = roster
+        .iter()
+        .find(|a| a.id == lead_id)
+        .map(|a| a.display_name())
+        .unwrap_or(lead_id);
+    let name = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    let name = if name.is_empty() {
+        lead_id.to_string()
+    } else {
+        name
+    };
+    Some(format!(
+        "The lead of this group is `@{lead_id}` ({name}). On work the lead assigned with `crew tell`, report the result to the lead once. When that work needs a question for the user, do not run `crew ask`. Send the question, the background, and the options to the lead with `crew tell`, then end your turn. When the user tells you the work directly, answer the user as usual and use `crew ask`. Work assigned by a bot from another group follows the rules you already have."
+    ))
+}
+
 /// What `crew share show` prints, and the body of the per-turn note. The
 /// teammate list is built from the live roster, not from the notes file.
 /// `folder` is the group `agent` sits in.
@@ -1361,6 +1402,10 @@ pub fn shared_memory_body(
             agent.display_name()
         ));
         s.push_str(&teammates_sentence(agent, roster, folder));
+        if let Some(line) = lead_guidance(agent, roster, folder) {
+            s.push('\n');
+            s.push_str(&line);
+        }
     } else {
         s.push_str(&all_teammates_sentence(roster));
     }
@@ -3429,6 +3474,69 @@ mod tests {
             let s = teammates_sentence(&me, &roster, g);
             assert_eq!(s, "Teammates: far — Far; mate — Mate.");
         }
+    }
+
+    /// A group with a lead tells each bot how to report. The lead's id and
+    /// name are the live ones. A group with no lead, a bot in no group, and
+    /// a lead that is not in the group stay as they were. The standing team
+    /// rules stay free of it, so a resumed session does not keep a stale lead.
+    #[test]
+    fn a_group_lead_is_named_in_the_shared_note() {
+        let bot = |id: &str, name: &str| {
+            AgentConfig::new(id.into(), name.into(), vec!["grok".into()], None)
+        };
+        let lead = bot("bot-lead", "설계자");
+        let member = bot("bot-member", "주니어");
+        let outside = bot("bot-out", "바깥");
+        let roster = [lead.clone(), member.clone(), outside.clone()];
+        let group = |ids: &[&str], lead: Option<&str>| crate::groups::SidebarGroup {
+            id: "g1".into(),
+            name: "Crew".into(),
+            collapsed: false,
+            items: ids.iter().map(|id| format!("agent:{id}")).collect(),
+            path: None,
+            lead: lead.map(str::to_string),
+        };
+        let led = group(&["bot-lead", "bot-member"], Some("bot-lead"));
+        let member_note = shared_memory_note(&member, &roster, "", Some(&led));
+        let member_line = "The lead of this group is `@bot-lead` (설계자). On work the lead assigned with `crew tell`, report the result to the lead once. When that work needs a question for the user, do not run `crew ask`. Send the question, the background, and the options to the lead with `crew tell`, then end your turn. When the user tells you the work directly, answer the user as usual and use `crew ask`. Work assigned by a bot from another group follows the rules you already have.";
+        assert!(member_note.contains(member_line), "{member_note}");
+        assert!(!member_note.contains("You are the lead of this group"));
+
+        let lead_note = shared_memory_note(&lead, &roster, "", Some(&led));
+        let lead_line = "You are the lead of this group. You assign work to teammates and take their reports. When a teammate sends you a question with `crew tell`, ask the user with `crew ask`, then `crew tell` the answer back to that teammate.";
+        assert!(lead_note.contains(lead_line), "{lead_note}");
+        assert!(!lead_note.contains("The lead of this group is"));
+        assert!(!lead_note.contains("do not run `crew ask`"));
+
+        let plain = group(&["bot-lead", "bot-member"], None);
+        for (who, folder) in [
+            (&member, Some(&plain)),
+            (&outside, None),
+            (&member, None),
+        ] {
+            let note = shared_memory_note(who, &roster, "", folder);
+            assert!(!note.contains("The lead of this group is"), "{note}");
+            assert!(!note.contains("You are the lead of this group"), "{note}");
+        }
+
+        // A lead that left the group is not one.
+        let stray = group(&["bot-member"], Some("bot-lead"));
+        let note = shared_memory_note(&member, &roster, "", Some(&stray));
+        assert!(!note.contains("The lead of this group is"), "{note}");
+        assert!(!note.contains("You are the lead of this group"), "{note}");
+
+        // A name the roster no longer has still names the id.
+        let gone = group(&["bot-lead", "bot-member"], Some("bot-lead"));
+        let note = shared_memory_note(&member, &[member.clone()], "", Some(&gone));
+        assert!(
+            note.contains("The lead of this group is `@bot-lead` (bot-lead)."),
+            "{note}"
+        );
+
+        let rules = team_rules(&member, &roster);
+        assert!(!rules.contains("The lead of this group is"));
+        assert!(!rules.contains("You are the lead of this group"));
     }
 
     #[test]

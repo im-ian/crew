@@ -5967,6 +5967,71 @@ mod tests {
         });
     }
 
+    /// The lead line is read from the group on disk. A resumed session hears
+    /// a new lead, or none, on the next turn, because the note text changed.
+    #[test]
+    fn a_changed_lead_is_on_the_next_shared_note() {
+        crate::paths::testing::with_home("lead-note", || {
+            let bot = |id: &str, name: &str| {
+                AgentConfig::new(id.into(), name.into(), vec!["grok".into()], None)
+            };
+            let lead = bot("bot-lead", "Designer");
+            let member = bot("bot-member", "Junior");
+            let outside = bot("bot-out", "Out");
+            let roster = [lead.clone(), member.clone(), outside.clone()];
+            let group = |lead_id: Option<&str>| crate::groups::SidebarGroup {
+                id: "g1".into(),
+                name: "Crew".into(),
+                collapsed: false,
+                items: vec!["agent:bot-lead".into(), "agent:bot-member".into()],
+                path: None,
+                lead: lead_id.map(str::to_string),
+            };
+            crate::groups::save(&[group(Some("bot-lead"))]).unwrap();
+            let member_note = shared_note_for_turn("hi", &member, &roster).unwrap();
+            assert!(member_note.contains(
+                "The lead of this group is `@bot-lead` (Designer). On work the lead assigned with `crew tell`, report the result to the lead once."
+            ), "{member_note}");
+            assert!(member_note.contains("do not run `crew ask`"));
+            assert!(member_note.contains(
+                "Send the question, the background, and the options to the lead with `crew tell`, then end your turn."
+            ));
+            assert!(member_note.contains(
+                "When the user tells you the work directly, answer the user as usual and use `crew ask`."
+            ));
+            assert!(member_note.contains(
+                "Work assigned by a bot from another group follows the rules you already have."
+            ));
+            assert!(!member_note.contains("You are the lead of this group"));
+
+            let lead_note = shared_note_for_turn("hi", &lead, &roster).unwrap();
+            assert!(lead_note.contains(
+                "You are the lead of this group. You assign work to teammates and take their reports. When a teammate sends you a question with `crew tell`, ask the user with `crew ask`, then `crew tell` the answer back to that teammate."
+            ), "{lead_note}");
+            assert!(!lead_note.contains("The lead of this group is"));
+
+            let outside_note = shared_note_for_turn("hi", &outside, &roster).unwrap();
+            assert!(!outside_note.contains("The lead of this group is"));
+            assert!(!outside_note.contains("You are the lead of this group"));
+
+            crate::groups::save(&[group(None)]).unwrap();
+            let cleared = shared_note_for_turn("hi", &member, &roster).unwrap();
+            assert!(!cleared.contains("The lead of this group is"), "{cleared}");
+            assert!(!cleared.contains("You are the lead of this group"), "{cleared}");
+            assert!(shared_note_due(false, true, Some(&member_note), &cleared));
+
+            crate::groups::save(&[group(Some("bot-member"))]).unwrap();
+            let swapped = shared_note_for_turn("hi", &member, &roster).unwrap();
+            assert!(swapped.contains("You are the lead of this group"), "{swapped}");
+            assert!(shared_note_due(false, true, Some(&cleared), &swapped));
+            let former = shared_note_for_turn("hi", &lead, &roster).unwrap();
+            assert!(
+                former.contains("The lead of this group is `@bot-member` (Junior)."),
+                "{former}"
+            );
+        });
+    }
+
     #[test]
     fn uuid_is_lowercase_hyphenated() {
         let id = new_cli_uuid();
