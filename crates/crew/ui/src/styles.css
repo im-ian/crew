@@ -6615,6 +6615,11 @@ textarea.textin.skill-body {
 }
 .toggle[hidden] { display: none; }
 .toggle input { accent-color: var(--btn-disabled-ink); }
+.toggle:has(input:disabled) { cursor: default; color: var(--muted); }
+.clone-settings { margin-top: var(--space-14); }
+.clone-parts { margin-bottom: var(--space-16); }
+.clone-parts .toggle { margin-top: var(--space-10); }
+.clone-part-hint { margin: var(--space-4) 0 0 calc(13px + var(--space-10)); }
 .modal {
   position: fixed;
   inset: 0;

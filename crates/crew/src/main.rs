@@ -677,7 +677,11 @@ fn run() -> anyhow::Result<()> {
         }
         Some(Cmd::Agent(AgentCmd::Clone { id, name })) => {
             if paths::is_socket_live() {
-                match client::rpc(Request::CloneAgent { id, name })? {
+                match client::rpc(Request::CloneAgent {
+                    id,
+                    name,
+                    parts: Default::default(),
+                })? {
                     Event::Error { message } => anyhow::bail!("{message}"),
                     ev => client::print_event(ev),
                 }

@@ -249,7 +249,8 @@ pub fn clear_recap(agent_id: &str) {
 fn with_recap(recap: &str, prompt: &str) -> String {
     format!(
         "[crew recap] This bot's earlier CLI session could not come along: it moved to \
-         you from another AI CLI or another folder, or that session stopped answering. \
+         you from another AI CLI or another folder, it is a copy of another bot that \
+         brought its chat along, or that session stopped answering. \
          Below is the chat so far, oldest first; `assistant` lines are the bot's earlier \
          replies, errors its old CLI printed included. Read it for context only; do not answer it. \
          Answer the message after it.\n<chat>\n{recap}\n</chat>\n\n{prompt}"

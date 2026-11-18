@@ -162,6 +162,36 @@ fn drop_key(key: &str, path: &Path) {
     }
 }
 
+/// `dst` takes `src`'s chat, for a clone that brings the conversation along.
+/// What still waits on the original stays with it: a queued line is not the
+/// copy's to send, and an open card or approval is not the copy's to answer.
+pub fn copy_chat(src: &str, dst: &str) {
+    let rows: Vec<ChatMessage> = messages(src)
+        .into_iter()
+        .filter(|m| !m.queued)
+        .filter(|m| !m.choice.as_ref().is_some_and(|c| c.state == ChoiceState::Pending))
+        .filter(|m| m.approval != Some(ApprovalState::Pending))
+        .collect();
+    if rows.is_empty() {
+        return;
+    }
+    // A bot that has not written yet may have no chat open.
+    if chats().lock().is_ok_and(|map| !map.contains_key(dst)) {
+        load_agent(dst);
+    }
+    let Ok(mut map) = chats().lock() else {
+        return;
+    };
+    let Some(chat) = map.get_mut(dst) else {
+        return;
+    };
+    // Older than anything the copy has said: they go first.
+    let mut all = rows;
+    all.append(&mut chat.messages);
+    chat.messages = all;
+    persist(dst, chat);
+}
+
 pub fn messages(agent: &str) -> Vec<ChatMessage> {
     chats()
         .lock()

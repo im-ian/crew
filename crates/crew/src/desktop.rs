@@ -15,7 +15,7 @@ use crate::config::{
     empty_to_none, resolve_add_cmd, unique_agent_id, AgentCli, AvatarShape, Effort,
 };
 use crate::groups::SidebarGroup;
-use crate::protocol::{AgentInfo, ChatMessage, Event, Request};
+use crate::protocol::{AgentInfo, ChatMessage, CloneParts, Event, Request};
 
 fn parse_effort(effort: Option<String>) -> Result<Option<Effort>, String> {
     match effort.as_deref() {
@@ -476,14 +476,19 @@ fn add_agent(
 }
 
 #[tauri::command(async)]
-fn clone_agent(id: String, name: Option<String>) -> Result<String, String> {
+fn clone_agent(
+    id: String,
+    name: Option<String>,
+    parts: Option<CloneParts>,
+) -> Result<String, String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     let id = id.trim().to_string();
     if id.is_empty() {
         return Err("id is required".into());
     }
     let name = name.and_then(empty_to_none);
-    match client::rpc(Request::CloneAgent { id, name }) {
+    let parts = parts.unwrap_or_default();
+    match client::rpc(Request::CloneAgent { id, name, parts }) {
         Ok(Event::Cloned { id }) => Ok(id),
         Ok(Event::Ok) => Err("clone succeeded without a new id".into()),
         Ok(Event::Error { message }) => Err(message),

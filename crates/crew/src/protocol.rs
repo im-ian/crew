@@ -68,6 +68,10 @@ pub enum Request {
         id: String,
         #[serde(default)]
         name: Option<String>,
+        /// What comes along besides the settings. Missing is what a clone
+        /// always took.
+        #[serde(default)]
+        parts: CloneParts,
     },
     SetAgent {
         id: String,
@@ -679,6 +683,38 @@ pub fn handoff_envelope(from: &str, text: &str) -> String {
     format!("[crew handoff from:{from}]\n{text}")
 }
 
+/// What a clone takes from its original besides the settings (command, model,
+/// role, title, face and the rest). A field left out is what a clone took
+/// before there was a choice: all of it but the chat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CloneParts {
+    #[serde(default = "yes")]
+    pub avatar: bool,
+    #[serde(default = "yes")]
+    pub routines: bool,
+    #[serde(default = "yes")]
+    pub memory: bool,
+    /// The conversation so far. The clone's chat shows it, and its first CLI
+    /// session reads it once, on a session of its own.
+    #[serde(default)]
+    pub chat: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for CloneParts {
+    fn default() -> Self {
+        Self {
+            avatar: true,
+            routines: true,
+            memory: true,
+            chat: false,
+        }
+    }
+}
+
 /// A note a teammate passed on with `crew tell --fyi`. Read it; it wants no answer.
 pub fn fyi_envelope(from: &str, text: &str) -> String {
     format!("[crew fyi from:{}]\n{text}", from.trim())
@@ -1046,22 +1082,47 @@ mod tests {
         let req = Request::CloneAgent {
             id: "grok".into(),
             name: Some("Twin".into()),
+            parts: CloneParts {
+                memory: false,
+                chat: true,
+                ..CloneParts::default()
+            },
         };
         let line = req.to_line().unwrap();
         assert!(line.contains("\"type\":\"clone_agent\""));
         let back: Request = serde_json::from_str(&line).unwrap();
         match back {
-            Request::CloneAgent { id, name } => {
+            Request::CloneAgent { id, name, parts } => {
                 assert_eq!(id, "grok");
                 assert_eq!(name.as_deref(), Some("Twin"));
+                assert!(!parts.memory && parts.chat && parts.avatar && parts.routines);
             }
             other => panic!("unexpected {other:?}"),
         }
         let back: Request = serde_json::from_str(r#"{"type":"clone_agent","id":"grok"}"#).unwrap();
         match back {
-            Request::CloneAgent { id, name } => {
+            Request::CloneAgent { id, name, parts } => {
                 assert_eq!(id, "grok");
                 assert!(name.is_none());
+                assert_eq!(
+                    parts,
+                    CloneParts::default(),
+                    "an old caller clones as before"
+                );
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let back: Request = serde_json::from_str(
+            r#"{"type":"clone_agent","id":"grok","parts":{"routines":false}}"#,
+        )
+        .unwrap();
+        match back {
+            Request::CloneAgent { parts, .. } => {
+                assert!(!parts.routines, "{parts:?}");
+                assert!(
+                    parts.avatar && parts.memory && !parts.chat,
+                    "the rest stay as before"
+                );
             }
             other => panic!("unexpected {other:?}"),
         }

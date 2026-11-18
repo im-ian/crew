@@ -4,6 +4,9 @@ import { ChatHeader } from "./components/ChatHeader";
 import { ChatThread, sideOnlyPeer } from "./components/ChatThread";
 import { PeekRoom } from "./components/PeekRoom";
 import { Composer, type ComposerHandle } from "./components/Composer";
+import { CloneBotModal } from "./components/CloneBotModal";
+import { canCarryChat } from "./cloneParts";
+import { itemKey } from "./groups";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ContextMenu, type MenuEntry } from "./components/ContextMenu";
 import { AgentPane } from "./components/AgentPane";
@@ -197,6 +200,9 @@ export function App() {
       return next;
     });
   }, [openId]);
+  const cloneSource = crew.cloneId
+    ? crew.agents.find((a) => a.id === crew.cloneId) ?? null
+    : null;
   const slotIds: [string | null, string | null] = view ? view.panes : [openId, null];
   const slotAgents = slotIds.map((id) =>
     id ? crew.agents.find((a) => a.id === id) ?? null : null,
@@ -1014,6 +1020,19 @@ export function App() {
         onClose={crew.closeNewBot}
         onCreate={crew.createBot}
       />
+      <CloneBotModal
+        open={!!cloneSource}
+        sourceName={cloneSource?.name ?? ""}
+        inGroup={
+          !!cloneSource &&
+          crew.groups.some((g) => g.items.includes(itemKey("agent", cloneSource.id)))
+        }
+        carriesChat={!!cloneSource && canCarryChat(cloneSource)}
+        onClose={crew.closeClone}
+        onClone={(name, pick) => {
+          if (cloneSource) void crew.cloneBot(cloneSource.id, name, pick);
+        }}
+      />
       <NewGroupModal
         open={crew.newGroupOpen}
         onClose={crew.closeNewGroup}
@@ -1298,7 +1317,7 @@ function menuItems(
       label: t("menu.cloneBot"),
       onClick: () => {
         crew.hideCtx();
-        if (id) void crew.cloneBot(id);
+        if (id) crew.openClone(id);
       },
     },
     { type: "sep" },

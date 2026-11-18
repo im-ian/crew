@@ -1162,7 +1162,9 @@ pub fn new_bot_ask(english: bool) -> String {
 
 /// One-shot note for a bot that was just duplicated. It greets, says it is the
 /// copy, and asks what to take on. `source_name` is the original's display name.
-pub fn cloned_bot_ask(source_name: &str, english: bool) -> String {
+/// `memory` and `chat` say what came along, so the greeting does not claim a
+/// memory the copy does not have or call a carried-over chat empty.
+pub fn cloned_bot_ask(source_name: &str, english: bool, memory: bool, chat: bool) -> String {
     let lang = if english {
         "Write in English."
     } else {
@@ -1174,8 +1176,14 @@ pub fn cloned_bot_ask(source_name: &str, english: bool) -> String {
     } else {
         who
     };
+    let copied = match (memory, chat) {
+        (true, true) => "Your role, memory, and the conversation so far were copied; read that conversation for context only.",
+        (true, false) => "Your role and memory were copied, and this chat is empty.",
+        (false, true) => "Your role and the conversation so far were copied, but not the memory; read that conversation for context only.",
+        (false, false) => "Your role was copied, but not the memory, and this chat is empty.",
+    };
     format!(
-        "You were just duplicated from {who}. Your role and memory were copied, and this chat is empty. Greet the user in one short message, say you are that copy, and ask what work they want you to take. Do not ask permission to proceed, do not start other work, and do not use tools. {lang}"
+        "You were just duplicated from {who}. {copied} Greet the user in one short message, say you are that copy, and ask what work they want you to take. Do not ask permission to proceed, do not start other work, and do not use tools. {lang}"
     )
 }
 
@@ -2902,16 +2910,24 @@ mod tests {
 
     #[test]
     fn cloned_bot_ask_greets_as_the_copy() {
-        let ko = cloned_bot_ask("리뷰어", false);
+        let ko = cloned_bot_ask("리뷰어", false, true, false);
         assert!(ko.contains("duplicated from 리뷰어"));
+        assert!(ko.contains("Your role and memory were copied, and this chat is empty."));
         assert!(ko.contains("one short message"));
         assert!(ko.contains("say you are that copy"));
         assert!(ko.contains("Do not ask permission"));
         assert!(ko.contains("do not use tools"));
         assert!(ko.contains("Write in Korean."));
-        assert!(cloned_bot_ask("리뷰어", true).contains("Write in English."));
-        assert!(cloned_bot_ask("  \n", false).contains("another bot"));
-        assert!(!cloned_bot_ask("a\nb", false).contains('\n'));
+        assert!(cloned_bot_ask("리뷰어", true, true, false).contains("Write in English."));
+        assert!(cloned_bot_ask("  \n", false, true, false).contains("another bot"));
+        assert!(!cloned_bot_ask("a\nb", false, true, false).contains('\n'));
+        let carried = cloned_bot_ask("리뷰어", false, false, true);
+        assert!(
+            carried.contains("conversation so far were copied"),
+            "{carried}"
+        );
+        assert!(carried.contains("not the memory"), "{carried}");
+        assert!(!carried.contains("chat is empty"), "{carried}");
     }
 
     #[test]

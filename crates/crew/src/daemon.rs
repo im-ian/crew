@@ -4040,7 +4040,7 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
                 message: err.to_string(),
             }],
         },
-        Request::CloneAgent { id, name } => match clone_agent(&id, name) {
+        Request::CloneAgent { id, name, parts } => match clone_agent(&id, name, parts) {
             Ok(new_id) => vec![Event::Cloned { id: new_id }, snapshot_event()],
             Err(err) => vec![Event::Error {
                 message: err.to_string(),
@@ -5100,10 +5100,10 @@ fn ask_new_bot(id: &str) {
 
 /// A cloned headless bot speaks first: a short hello, then what to take on.
 /// A shell stub has nothing to say it with. A failed turn still leaves the copy.
-fn greet_clone(id: &str, source_name: &str) {
+fn greet_clone(id: &str, source_name: &str, memory: bool, chat: bool) {
     ask_once(
         id,
-        &cloned_bot_ask(source_name, crate::paths::locale() == "en"),
+        &cloned_bot_ask(source_name, crate::paths::locale() == "en", memory, chat),
     );
 }
 
@@ -5121,7 +5121,11 @@ fn ask_once(id: &str, note: &str) {
     }
 }
 
-fn clone_agent(src_id: &str, name: Option<String>) -> anyhow::Result<String> {
+fn clone_agent(
+    src_id: &str,
+    name: Option<String>,
+    parts: crate::protocol::CloneParts,
+) -> anyhow::Result<String> {
     let src = clone_agent_cfg(src_id)?;
     let source_name = src.display_name().to_string();
     let existing: Vec<String> = roster_vec().into_iter().map(|a| a.id).collect();
@@ -5130,12 +5134,42 @@ fn clone_agent(src_id: &str, name: Option<String>) -> anyhow::Result<String> {
         existing.iter().map(|s| s.as_str()),
         crate::worktree::isolates,
     );
-    cfg.avatar = crate::avatar::copy_for(src.avatar.as_deref(), &cfg.id);
-    crate::memory::copy(src_id, &cfg.id)?;
+    if !parts.routines {
+        cfg.routines.clear();
+    }
+    if parts.avatar {
+        cfg.avatar = crate::avatar::copy_for(src.avatar.as_deref(), &cfg.id);
+    }
+    if parts.memory {
+        crate::memory::copy(src_id, &cfg.id)?;
+    }
+    // A terminal's chat is read off its screen. The copy's terminal would
+    // show none of it, so it starts empty.
+    let chat = parts.chat && !src.uses_pty();
     let new_id = cfg.id.clone();
+    let prompt_mode = cfg.prompt_mode();
     insert_spawned_agent(cfg)?;
-    greet_clone(&new_id, &source_name);
+    if chat {
+        carry_chat(src_id, &new_id, prompt_mode);
+    }
+    greet_clone(&new_id, &source_name, parts.memory, chat);
     Ok(new_id)
+}
+
+/// The copy starts with the original's chat, and its CLI hears it too: the
+/// copy has no CLI session yet, so its first one reads the chat once as a
+/// recap. That session is the copy's own; the original's is never resumed. A
+/// prompt-mode CLI reads the chat on every turn anyway.
+fn carry_chat(src_id: &str, new_id: &str, prompt_mode: bool) {
+    crate::transcript::copy_chat(src_id, new_id);
+    if prompt_mode {
+        return;
+    }
+    if let Some(recap) = crate::transcript::recap(new_id) {
+        if let Err(err) = crate::headless::save_recap(new_id, &recap) {
+            eprintln!("[crew] {new_id}: recap for the copied chat: {err:#}");
+        }
+    }
 }
 
 fn insert_spawned_agent(mut cfg: AgentConfig) -> anyhow::Result<()> {
@@ -9551,7 +9585,7 @@ exec sleep 1"#,
             );
             cfg.headless = true;
             insert_spawned_agent(cfg).unwrap();
-            let new_id = clone_agent(&src, None).unwrap();
+            let new_id = clone_agent(&src, None, Default::default()).unwrap();
             let check = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
                 while !headless_child_started(&new_id) {
@@ -9593,11 +9627,164 @@ exec sleep 1"#,
                 None,
             ))
             .unwrap();
-            let new_id = clone_agent(&src, None).unwrap();
+            let new_id = clone_agent(&src, None, Default::default()).unwrap();
             assert!(prompts().lock().unwrap().get(&new_id).is_none());
             assert_eq!(live_status(&new_id).unwrap(), AgentStatus::Idle);
             remove_agent(&new_id).unwrap();
             remove_agent(&src).unwrap();
+        });
+    }
+
+    /// Without a choice a clone takes what it always took: face, routines and
+    /// memory, not the chat. Each part turned off is the only one left out.
+    #[test]
+    fn a_clone_leaves_out_only_the_parts_turned_off() {
+        use crate::protocol::CloneParts;
+        paths::testing::with_home("clone-parts", || {
+            let src = test_id("src");
+            let face = paths::home_dir().join("face.png");
+            fs::write(&face, b"\x89PNG\r\n\x1a\n0000").unwrap();
+            let mut cfg = AgentConfig::new(src.clone(), "원본".into(), vec!["cat".into()], None);
+            cfg.avatar = Some(face.display().to_string());
+            cfg.routines =
+                vec![Routine::new("아침".into(), "0 8 * * *".into(), "보고해".into()).unwrap()];
+            insert_spawned_agent(cfg).unwrap();
+            crate::memory::write(&src, "배포는 금요일").unwrap();
+            crate::transcript::push_user(&src, "user", "어제 시킨 일");
+
+            let check = |parts: CloneParts| {
+                let id = clone_agent(&src, None, parts).unwrap();
+                let cfg = clone_agent_cfg(&id).unwrap();
+                assert_eq!(cfg.avatar.is_some(), parts.avatar, "avatar {parts:?}");
+                assert_eq!(
+                    cfg.routines.len(),
+                    usize::from(parts.routines),
+                    "routines {parts:?}"
+                );
+                let memory = crate::memory::read(&id);
+                assert_eq!(
+                    memory.contains("배포는 금요일"),
+                    parts.memory,
+                    "memory {parts:?}"
+                );
+                assert!(
+                    crate::transcript::messages(&id).is_empty(),
+                    "a terminal's chat stays behind {parts:?}"
+                );
+                id
+            };
+            let all = check(CloneParts::default());
+            let routines = clone_agent_cfg(&all).unwrap().routines;
+            let original = clone_agent_cfg(&src).unwrap().routines;
+            assert_ne!(
+                routines[0].id, original[0].id,
+                "a copied routine is its own"
+            );
+            let mut made = vec![all];
+            for parts in [
+                CloneParts {
+                    avatar: false,
+                    ..CloneParts::default()
+                },
+                CloneParts {
+                    routines: false,
+                    ..CloneParts::default()
+                },
+                CloneParts {
+                    memory: false,
+                    ..CloneParts::default()
+                },
+                // A terminal has no CLI to tell, so its chat never comes along.
+                CloneParts {
+                    chat: true,
+                    ..CloneParts::default()
+                },
+            ] {
+                made.push(check(parts));
+            }
+            for id in made.iter().chain([&src]) {
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// A clone that brings the chat shows it, minus what still waits on the
+    /// original, and its first CLI session reads it. That session is its own.
+    #[test]
+    fn a_clone_with_the_chat_tells_its_cli() {
+        use crate::protocol::CloneParts;
+        paths::testing::with_home("clone-chat", || {
+            let src = test_id("src");
+            fake_bot(&src, "안녕하세요");
+            crate::headless::save_session(&src, "original-session", &paths::home_dir()).unwrap();
+            crate::transcript::push_user(&src, "user", "배포는 금요일에 해요");
+            let queued = crate::transcript::push_user(&src, "user", "아직 안 보낸 말");
+            crate::transcript::set_queued(&src, &queued.id, true);
+
+            // One stand-in CLI keeps the last prompt, so the copies take turns.
+            let prompt_file = paths::home_dir().join("prompt");
+            let plain = clone_agent(&src, None, CloneParts::default()).unwrap();
+            eventually(
+                Duration::from_secs(5),
+                "the plain copy never greeted",
+                || prompt_file.exists(),
+            );
+            wait_idle(&plain);
+            let first = fs::read_to_string(&prompt_file).unwrap();
+            assert!(!first.contains("[crew recap]"), "{first}");
+            assert!(first.contains("this chat is empty"), "{first}");
+            fs::remove_file(&prompt_file).unwrap();
+            let carried = clone_agent(
+                &src,
+                None,
+                CloneParts {
+                    chat: true,
+                    ..CloneParts::default()
+                },
+            )
+            .unwrap();
+            let check = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let texts = |id: &str| -> Vec<String> {
+                    crate::transcript::messages(id)
+                        .into_iter()
+                        .map(|m| m.text)
+                        .collect()
+                };
+                assert!(
+                    !texts(&plain).iter().any(|t| t.contains("배포는")),
+                    "default stays empty"
+                );
+                let rows = texts(&carried);
+                assert!(rows.iter().any(|t| t == "배포는 금요일에 해요"), "{rows:?}");
+                assert!(!rows.iter().any(|t| t.contains("아직 안 보낸")), "{rows:?}");
+
+                let heard =
+                    || fs::read_to_string(&prompt_file).is_ok_and(|p| p.contains("[crew recap]"));
+                eventually(
+                    Duration::from_secs(5),
+                    "the copy's CLI never got the chat",
+                    heard,
+                );
+                let prompt = fs::read_to_string(&prompt_file).unwrap();
+                assert!(prompt.contains("배포는 금요일에 해요"), "{prompt}");
+                assert!(!prompt.contains("아직 안 보낸"), "{prompt}");
+                assert!(
+                    prompt.contains("conversation so far were copied"),
+                    "{prompt}"
+                );
+                wait_idle(&carried);
+                assert_ne!(
+                    crate::headless::load_session(&carried).as_deref(),
+                    Some("original-session"),
+                    "the copy never resumes the original's session"
+                );
+            }));
+            for id in [&carried, &plain, &src] {
+                let _ = remove_agent(id);
+            }
+            if let Err(payload) = check {
+                std::panic::resume_unwind(payload);
+            }
         });
     }
 
