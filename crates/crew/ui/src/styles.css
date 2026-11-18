@@ -8112,6 +8112,7 @@ button.wait-chip:focus-visible {
   .rail-lists .group-head {
     -webkit-touch-callout: none;
   }
+}
 
 /* A file that could not be attached, above the files that were. */
 .attach-error {
