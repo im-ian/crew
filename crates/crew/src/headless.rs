@@ -2356,6 +2356,8 @@ fn show_watch(session: &HeadlessSession, generation: u64, watch: Vec<Watch>) {
     };
     if changed {
         crate::daemon::emit_agent_frame(&session.id);
+        // A bot that asked for this work waits while it runs.
+        crate::daemon::sync_waiting();
     }
 }
 

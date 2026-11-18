@@ -1194,7 +1194,7 @@ pub fn cloned_bot_ask(source_name: &str, english: bool, memory: bool, chat: bool
 /// the command item ending stops the work.
 fn background_note(agent: &AgentConfig) -> Option<&'static str> {
     if !agent.stays_up() {
-        Some("A program that should keep running after your reply, such as a dev server or an app you opened for the user, must not run as your CLI's background task: your CLI then stays up waiting for it, and the user's next message cannot reach you until it ends. Start it on its own instead, for example `nohup <command> > /tmp/<name>.log 2>&1 &` or `open -a <App>`, and tell the user where its log is. Keep your CLI's background tasks for work you will report on when it ends, like watching CI.")
+        Some("A program that should keep running after your reply, such as a dev server or an app you opened for the user, must not run as your CLI's background task: your CLI then stays up waiting for it, and the user's next message cannot reach you until it ends. Start it on its own instead, for example `nohup <command> > /tmp/<name>.log 2>&1 &` or `open -a <App>`, and tell the user where its log is. Keep your CLI's background tasks for work you will report on when it ends, like watching CI. When you end a turn with such work still running, say in one line what you are waiting for and when you will report again.")
     } else if agent.binary_name() == "codex" {
         Some("A program that should keep running after your command finishes, such as a dev server or an app you opened for the user, does not: Codex ends that work when the command item completes. Start it on its own instead, for example `nohup <command> > /tmp/<name>.log 2>&1 &` or `open -a <App>`, and tell the user where its log is.")
     } else {
