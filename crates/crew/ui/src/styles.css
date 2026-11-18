@@ -2834,7 +2834,8 @@ button.sys-note:focus-visible {
 }
 /* The message a reply answers, at the top of the reply's balloon: who it went
    to, then up to two lines of its words a step smaller and fainter than the
-   reply, and a gap instead of a rule. Colours come from the balloon's ink. */
+   reply, and a faint rule across the balloon before the reply. Colours come
+   from the balloon's ink. */
 .reply-quote {
   display: flex;
   flex-direction: column;
@@ -2842,10 +2843,11 @@ button.sys-note:focus-visible {
   gap: 2px;
   width: 100%;
   min-width: 0;
-  margin: 0 0 var(--space-10);
-  padding: 0;
+  margin: 0 0 var(--space-8);
+  padding: 0 0 var(--space-8);
   border: 0;
-  border-radius: var(--radius-sm);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   background: none;
   color: inherit;
   font: inherit;
@@ -2904,8 +2906,9 @@ button.sys-note:focus-visible {
   outline-offset: 3px;
 }
 /* With no balloon to open (above a picture, or in a note between bots) the
-   quote draws a small balloon of its own. */
+   quote draws a small balloon of its own, with no reply under it to rule off. */
 .reply-quote.is-alone {
+  border-bottom: 0;
   width: auto;
   max-width: 100%;
   margin-bottom: var(--space-4);
