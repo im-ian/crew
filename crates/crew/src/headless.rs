@@ -1215,9 +1215,13 @@ fn run_turn(
     // stale too, and marks its own failure.
     let failed;
     let mut hold_subagent = false;
+    // A compact this turn, and nothing said after it: cut off, not finished.
+    let mut cut_by_compact = false;
     match result {
         Ok(outcome) => {
             failed = outcome.error.is_some() && !outcome.got_text;
+            cut_by_compact =
+                outcome.compacted && !slash && !crate::transcript::said_since_compact(&session.id);
             hold_subagent = outcome.subagents;
             let dead = session_is_dead(
                 outcome.got_text,
@@ -1325,7 +1329,11 @@ fn run_turn(
         }
     }
 
+    let carry = cut_by_compact.then(|| crate::daemon::turn_origin(&session.id));
     close_turn(&session, generation, turn, failed, hold_subagent);
+    if let Some(before) = carry {
+        crate::daemon::wake_after_compact(&session.id, before);
+    }
 }
 
 fn unix_now() -> i64 {
