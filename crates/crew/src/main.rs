@@ -33,6 +33,8 @@ mod search;
 mod skills;
 mod targeting;
 mod templates;
+mod web;
+mod web_dispatch;
 mod tool_card;
 mod transcript;
 mod usage;

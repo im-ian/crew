@@ -24,7 +24,8 @@ import type { NoticeKeep } from "../island";
 import type { ThemePref } from "../theme";
 import type { UpdaterApi } from "../updater";
 import type { AgentInfo, RemoteInfo } from "../types";
-import { Globe, Info, Keyboard, MessageSquare, Monitor, SlidersHorizontal } from "../icons";
+import { Globe, Info, Keyboard, MessageSquare, Monitor, SlidersHorizontal, Smartphone } from "../icons";
+import { MobileSettings } from "./MobileSettings";
 import { Field } from "./Field";
 import { Modal } from "./Modal";
 import { AiList } from "./AiList";
@@ -53,7 +54,7 @@ type Props = {
   onAddRemote: () => void;
 };
 
-type Section = "general" | "display" | "chat" | "remote" | "shortcuts" | "about";
+type Section = "general" | "display" | "chat" | "remote" | "mobile" | "shortcuts" | "about";
 
 const LANGS: { value: Locale; label: string }[] = [
   { value: "ko", label: "한글" },
@@ -156,6 +157,10 @@ export function SettingsPane({
     { id: "display", label: t("settings.group.display"), icon: <Monitor /> },
     { id: "chat", label: t("settings.group.chat"), icon: <MessageSquare /> },
     { id: "remote", label: t("settings.group.remote"), icon: <Globe /> },
+    // The phone does not hand out access to itself.
+    ...(isWeb()
+      ? []
+      : [{ id: "mobile" as Section, label: t("settings.group.mobile"), icon: <Smartphone /> }]),
     { id: "shortcuts", label: t("settings.shortcuts"), icon: <Keyboard /> },
     { id: "about", label: t("settings.group.about"), icon: <Info /> },
   ];
@@ -404,6 +409,8 @@ export function SettingsPane({
               onLeave={onLeaveRemote}
               onAdd={onAddRemote}
             />
+          ) : section === "mobile" ? (
+            <MobileSettings active={open && section === "mobile"} />
           ) : section === "shortcuts" ? (
             <>
               <ShortcutList />

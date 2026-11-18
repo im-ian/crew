@@ -68,6 +68,13 @@ pub enum Request {
     RemoveAgent {
         id: String,
     },
+    /// Mobile access: `status`, `on`, `off`, `pair` (a new code), or
+    /// `revoke` with the device id in `arg`.
+    Mobile {
+        action: String,
+        #[serde(default)]
+        arg: Option<String>,
+    },
     CloneAgent {
         id: String,
         #[serde(default)]
@@ -294,6 +301,10 @@ pub enum Event {
     Ok,
     Cloned {
         id: String,
+    },
+    /// What `Request::Mobile` answered.
+    Mobile {
+        info: serde_json::Value,
     },
     Error {
         message: String,

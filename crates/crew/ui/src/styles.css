@@ -8123,3 +8123,16 @@ button.wait-chip:focus-visible {
     opacity: 1;
   }
 }
+/* Settings › Mobile. */
+.mobile-urls { display: flex; flex-direction: column; gap: 4px; }
+.mobile-urls code { font-size: var(--text-sm); user-select: all; word-break: break-all; }
+.mobile-pair { display: flex; align-items: center; gap: var(--space-16); }
+.mobile-qr { width: 168px; height: 168px; padding: 8px; border-radius: var(--radius-md); background: #fff; flex-shrink: 0; }
+.mobile-qr svg { width: 100%; height: 100%; display: block; }
+.mobile-code { display: flex; flex-direction: column; gap: 4px; }
+.mobile-code b { font-size: 28px; letter-spacing: 0.12em; font-variant-numeric: tabular-nums; }
+.mobile-code small { color: var(--muted); font-size: var(--text-xs); }
+.mobile-devices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.mobile-devices li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; }
+.mobile-devices small { color: var(--muted); font-size: var(--text-xs); }
+.mobile-error { color: var(--blocked); }

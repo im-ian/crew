@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-mobile-revoke"
+description = "Enables the mobile_revoke command without any pre-configured scope."
+commands.allow = ["mobile_revoke"]
+
+[[permission]]
+identifier = "deny-mobile-revoke"
+description = "Denies the mobile_revoke command without any pre-configured scope."
+commands.deny = ["mobile_revoke"]

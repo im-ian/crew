@@ -3501,6 +3501,9 @@ pub async fn run() -> anyhow::Result<()> {
     spawn_transcript_ticker();
     spawn_routine_ticker();
     spawn_build_cache_ticker();
+    // Mobile access, off unless the user turned it on. Its requests come back
+    // through this socket, so it starts once the socket is there.
+    std::thread::spawn(crate::web::start_if_enabled);
 
     // Another daemon can unlink this socket and bind its own at the same path
     // (issue #25). The daemon that was unlinked has no other way to find out:
@@ -4159,6 +4162,22 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
                 message: err.to_string(),
             }],
         },
+        Request::Mobile { action, arg } => {
+            let done = match action.as_str() {
+                "status" => Ok(crate::web::status()),
+                "on" => crate::web::set_enabled(true),
+                "off" => crate::web::set_enabled(false),
+                "pair" => crate::web::new_pair_code(),
+                "revoke" => crate::web::revoke(arg.as_deref().unwrap_or_default()),
+                other => Err(anyhow::anyhow!("unknown mobile action {other}")),
+            };
+            match done {
+                Ok(info) => vec![Event::Mobile { info }],
+                Err(err) => vec![Event::Error {
+                    message: err.to_string(),
+                }],
+            }
+        }
         Request::CloneAgent { id, name, parts } => match clone_agent(&id, name, parts) {
             Ok(new_id) => vec![Event::Cloned { id: new_id }, snapshot_event()],
             Err(err) => vec![Event::Error {
