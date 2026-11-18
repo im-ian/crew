@@ -5334,6 +5334,7 @@ html[data-theme="light"] .file-src span {
   align-items: center;
   gap: 5px;
   max-width: min(100%, 18em);
+  /* `--chip-h` below. A wrapped row measures the gap from this height. */
   height: 24px;
   padding: var(--space-2) var(--space-8) var(--space-2) var(--space-4);
   margin: 0 1px;
@@ -5351,6 +5352,61 @@ html[data-theme="light"] .file-src span {
   white-space: nowrap;
   user-select: none;
   overflow: hidden;
+}
+/* A chip is taller than a line of body text and has no leading of its own,
+   so a wrapped row sits on the one above. Half of `--chip-gap` goes above
+   and below the chip. `--chip-cancel` is that half when it sticks out of
+   the line, and 0 when the line is already taller (large chat text). The
+   blocks below give `--chip-cancel` back, so one line keeps its height. */
+@property --md-line {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+.md :is(p, li, td, th, h1, h2, h3, h4, h5, h6, blockquote) {
+  --md-line: 1lh;
+  --chip-h: 24px;
+  --chip-gap: var(--space-4);
+  --chip-cancel: max(0px, calc((var(--chip-h) + var(--chip-gap) - max(var(--md-line), var(--chip-h))) / 2));
+}
+.md .mention-chip {
+  margin-top: calc(var(--chip-gap) / 2);
+  margin-bottom: calc(var(--chip-gap) / 2);
+}
+.bubble.md p:has(.mention-chip) {
+  margin-top: calc(0px - var(--chip-cancel));
+  margin-bottom: calc(0.55em - var(--chip-cancel));
+}
+.bubble.md p:last-child:has(.mention-chip),
+.bubble.md p.md-cmd:has(.mention-chip) {
+  margin-bottom: calc(0px - var(--chip-cancel));
+}
+.choice-hint.md p:has(.mention-chip),
+.msg-media .md p:has(.mention-chip) {
+  margin-top: calc(0px - var(--chip-cancel));
+  margin-bottom: calc(0px - var(--chip-cancel));
+}
+/* A tight item holds the chip itself. A loose one holds a paragraph, which
+   gives the margin back on its own. */
+.bubble.md li:has(.mention-chip):not(:has(p, ul, ol, blockquote, table, h1, h2, h3, h4, h5, h6, div)) {
+  margin-top: calc(0.15em - var(--chip-cancel));
+  margin-bottom: calc(0.15em - var(--chip-cancel));
+}
+.bubble.md :is(h1, h2, h3, h4, h5, h6):has(.mention-chip) {
+  margin-top: calc(0.55em - var(--chip-cancel));
+  margin-bottom: calc(0.3em - var(--chip-cancel));
+}
+.bubble.md :is(h1, h2, h3, h4, h5, h6):first-child:has(.mention-chip) {
+  margin-top: calc(0px - var(--chip-cancel));
+}
+.md blockquote:has(.mention-chip):not(:has(p)) {
+  margin-top: calc(0.45em - var(--chip-cancel));
+  margin-bottom: calc(0.45em - var(--chip-cancel));
+}
+/* Cell margins do nothing, so the padding gives the gap back. */
+.md :is(th, td):has(.mention-chip):not(:has(p)) {
+  padding-top: calc(var(--space-6) - var(--chip-cancel));
+  padding-bottom: calc(var(--space-6) - var(--chip-cancel));
 }
 button.mention-chip {
   cursor: pointer;
