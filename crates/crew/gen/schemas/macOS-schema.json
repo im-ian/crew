@@ -297,6 +297,12 @@
           "markdownDescription": "Enables the list_skills command without any pre-configured scope."
         },
         {
+          "description": "Enables the list_templates command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-templates",
+          "markdownDescription": "Enables the list_templates command without any pre-configured scope."
+        },
+        {
           "description": "Enables the lookup_skill command without any pre-configured scope.",
           "type": "string",
           "const": "allow-lookup-skill",
@@ -399,6 +405,12 @@
           "markdownDescription": "Enables the remove_skill command without any pre-configured scope."
         },
         {
+          "description": "Enables the remove_template command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remove-template",
+          "markdownDescription": "Enables the remove_template command without any pre-configured scope."
+        },
+        {
           "description": "Enables the reset_agent command without any pre-configured scope.",
           "type": "string",
           "const": "allow-reset-agent",
@@ -415,6 +427,12 @@
           "type": "string",
           "const": "allow-save-skill",
           "markdownDescription": "Enables the save_skill command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_template command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-save-template",
+          "markdownDescription": "Enables the save_template command without any pre-configured scope."
         },
         {
           "description": "Enables the save_upload command without any pre-configured scope.",
@@ -675,6 +693,12 @@
           "markdownDescription": "Denies the list_skills command without any pre-configured scope."
         },
         {
+          "description": "Denies the list_templates command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-templates",
+          "markdownDescription": "Denies the list_templates command without any pre-configured scope."
+        },
+        {
           "description": "Denies the lookup_skill command without any pre-configured scope.",
           "type": "string",
           "const": "deny-lookup-skill",
@@ -777,6 +801,12 @@
           "markdownDescription": "Denies the remove_skill command without any pre-configured scope."
         },
         {
+          "description": "Denies the remove_template command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remove-template",
+          "markdownDescription": "Denies the remove_template command without any pre-configured scope."
+        },
+        {
           "description": "Denies the reset_agent command without any pre-configured scope.",
           "type": "string",
           "const": "deny-reset-agent",
@@ -793,6 +823,12 @@
           "type": "string",
           "const": "deny-save-skill",
           "markdownDescription": "Denies the save_skill command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_template command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-save-template",
+          "markdownDescription": "Denies the save_template command without any pre-configured scope."
         },
         {
           "description": "Denies the save_upload command without any pre-configured scope.",

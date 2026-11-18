@@ -57,6 +57,25 @@ fn get_fallback_ais() -> Option<Vec<crate::fallback::Candidate>> {
     crate::fallback::load()
 }
 
+/// Crew's templates, then the user's, in the app's language.
+#[tauri::command]
+fn list_templates() -> Vec<crate::templates::Template> {
+    crate::templates::list(crate::paths::locale() == "en")
+}
+
+/// Returns it as saved, with its id when it is new.
+#[tauri::command]
+fn save_template(
+    template: crate::templates::Template,
+) -> Result<crate::templates::Template, String> {
+    crate::templates::save(template).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_template(id: String) -> Result<(), String> {
+    crate::templates::remove(id.trim()).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn set_fallback_ais(list: Vec<crate::fallback::Candidate>) -> Result<(), String> {
     crate::fallback::save(&list).map_err(|e| e.to_string())
@@ -1203,6 +1222,9 @@ pub fn run() -> anyhow::Result<()> {
             list_models,
             get_fallback_ais,
             set_fallback_ais,
+            list_templates,
+            save_template,
+            remove_template,
             search_crew,
             list_skills,
             lookup_skill,
