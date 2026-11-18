@@ -5987,6 +5987,7 @@ mod tests {
                 items: vec!["agent:bot-lead".into(), "agent:bot-member".into()],
                 path: None,
                 lead: lead_id.map(str::to_string),
+                worktree: crate::groups::WorktreeChoice::Inherit,
             };
             crate::groups::save(&[group(Some("bot-lead"))]).unwrap();
             let member_note = shared_note_for_turn("hi", &member, &roster).unwrap();

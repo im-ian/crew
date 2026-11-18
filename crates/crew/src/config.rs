@@ -3510,6 +3510,7 @@ mod tests {
             items: ids.iter().map(|id| format!("agent:{id}")).collect(),
             path: None,
             lead: lead.map(str::to_string),
+            worktree: crate::groups::WorktreeChoice::Inherit,
         };
         let led = group(&["bot-lead", "bot-member"], Some("bot-lead"));
         let member_note = shared_memory_note(&member, &roster, "", Some(&led));
