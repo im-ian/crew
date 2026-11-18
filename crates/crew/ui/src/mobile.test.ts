@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SWIPE_PX, railSwipe } from "./mobile";
+import { SWIPE_PX, isLongPress, railSwipe } from "./mobile";
 
 describe("railSwipe", () => {
   it("opens on a swipe right from the edge", () => {
@@ -16,5 +16,14 @@ describe("railSwipe", () => {
   it("leaves a scroll alone", () => {
     expect(railSwipe("open", 80, 120)).toBe(false);
     expect(railSwipe("close", -80, -90)).toBe(false);
+  });
+});
+
+describe("isLongPress", () => {
+  it("tells a held finger from a right click", () => {
+    const click = new Event("contextmenu");
+    const held = Object.assign(new Event("contextmenu"), { crewLongPress: true });
+    expect(isLongPress(click)).toBe(false);
+    expect(isLongPress(held)).toBe(true);
   });
 });
