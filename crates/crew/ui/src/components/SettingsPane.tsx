@@ -31,6 +31,7 @@ import { AiList } from "./AiList";
 import { RemoteSettings, type RemoteChange } from "./RemoteSettings";
 import { Seg } from "./Seg";
 import { ShortcutList } from "./ShortcutHelp";
+import { isWeb } from "../web";
 
 type Props = {
   open: boolean;
@@ -408,6 +409,12 @@ export function SettingsPane({
               <ShortcutList />
               <p className="apply-note">{t("shortcut.note")}</p>
             </>
+          ) : isWeb() ? (
+            <div className="form-stack">
+              <Field label={t("settings.update")}>
+                <p className="apply-note">{t("settings.update.web")}</p>
+              </Field>
+            </div>
           ) : (
             <div className="form-stack">
               <Field label={t("settings.update")}>

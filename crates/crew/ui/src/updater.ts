@@ -6,6 +6,7 @@ import {
   type DownloadEvent,
   type Update,
 } from "@tauri-apps/plugin-updater";
+import { isWeb } from "./web";
 
 export type { DownloadEvent, Update };
 
@@ -75,7 +76,9 @@ export function useUpdater() {
   );
   const busyRef = useRef(false);
 
+  // A phone shows the laptop's Crew, which updates itself on the laptop.
   const init = useCallback(async () => {
+    if (isWeb()) return;
     try {
       setCurrentVersion(await getCurrentVersion());
     } catch (err) {
@@ -84,7 +87,7 @@ export function useUpdater() {
   }, []);
 
   const checkNow = useCallback(async (manual = false) => {
-    if (busyRef.current) return;
+    if (busyRef.current || isWeb()) return;
     busyRef.current = true;
     setBusy(true);
     if (manual) setError(null);

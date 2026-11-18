@@ -7819,3 +7819,49 @@ button.wait-chip:focus-visible {
   .ng-dialog .ng-bots li { grid-template-columns: auto minmax(0, 1fr); }
   .ng-dialog .ng-bots .ng-ai { grid-column: 2; margin-top: -6px; }
 }
+
+/* Pairing a phone: the only screen before the app, on a phone only. */
+.pair-screen {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+  background: var(--bg);
+}
+.pair-card {
+  width: min(100%, 380px);
+  word-break: keep-all;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pair-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+.pair-note {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.pair-label {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.pair-input {
+  font-size: 20px;
+  letter-spacing: 0.08em;
+  text-align: center;
+  padding: 12px;
+}
+.pair-error {
+  margin: 0;
+  color: var(--blocked);
+  line-height: 1.5;
+}
+.pair-submit {
+  min-height: 44px;
+  font-size: 16px;
+}

@@ -11,6 +11,7 @@ import { stepQueuePick } from "../queuePick";
 import { oneLine, plainText, wrapReply, type ReplyTarget } from "../reply";
 import { caretClientPoint, type CaretPoint } from "../caretPoint";
 import { droppedAttaches, type PathKind } from "../dropAttach";
+import { isWeb, webUpload } from "../web";
 import type { AskPick } from "./AskHoldDialog";
 import { enterAction } from "../composerEnter";
 import { GroupChip, MentionChip } from "./MentionChip";
@@ -315,17 +316,21 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     const next: Attach[] = [];
     try {
       for (const file of Array.from(files)) {
-        const data = await readFileData(file);
-        const path = await api.saveUpload(file.name, data);
         const media = mediaKind(file.name, file.type) ?? undefined;
         const image = file.type.startsWith("image/") && !media;
+        // A phone sends the file itself, not a base64 copy of it, so a
+        // video off the camera roll does not sit in memory twice.
+        const web = isWeb();
+        const data = web ? null : await readFileData(file);
+        const path = data === null ? await webUpload(file, file.name) : await api.saveUpload(file.name, data);
+        const shown = image || media === "video";
         next.push({
           id: `${Date.now()}-${next.length}-${file.name}`,
           name: file.name,
           path,
           image,
           media,
-          preview: image ? data : media === "video" ? URL.createObjectURL(file) : undefined,
+          preview: !shown ? undefined : image && data !== null ? data : URL.createObjectURL(file),
         });
       }
     } catch (err) {
@@ -547,6 +552,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   // bot reads it where it sits. While one is dragged over the window the
   // field shows it takes it.
   useEffect(() => {
+    // A phone has no Finder to drop from; it attaches with the file picker.
+    if (isWeb()) return;
     let off: (() => void) | undefined;
     let gone = false;
     void (async () => {
