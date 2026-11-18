@@ -1,11 +1,11 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useT } from "../LocaleContext";
 import {
+  checkSession,
   getPairState,
   pairCodeFromUrl,
   pairDevice,
   subscribePair,
-  webInvoke,
   withoutPairCode,
   type PairResult,
 } from "../web";
@@ -30,11 +30,9 @@ export function PairGate({ children }: { children: ReactNode }) {
         const result = await pairDevice(code);
         if (!gone && result !== "paired") setFirst(result);
       }
-      if (getPairState() === "unknown") {
-        // A 401 marks this device unpaired. Anything else is the
-        // connection banner's to show, inside the app.
-        await webInvoke("daemon_ping").catch(() => undefined);
-      }
+      // A laptop that does not answer is the connection banner's to show,
+      // inside the app.
+      if (getPairState() === "unknown") await checkSession();
       if (!gone) setChecked(true);
     })();
     return () => {
@@ -66,7 +64,9 @@ function PairScreen({ first }: { first: PairResult | null }) {
   const message =
     result === "wrong"
       ? t("pair.wrong")
-      : result === "unreachable"
+      : result === "tooMany"
+        ? t("pair.tooMany")
+        : result === "unreachable"
         ? t("pair.unreachable")
         : result && typeof result === "object"
           ? t("pair.failed", { error: result.error })

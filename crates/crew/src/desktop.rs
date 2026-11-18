@@ -975,6 +975,20 @@ pub(crate) fn list_nerd_fonts() -> Vec<Vec<String>> {
     crate::nerd_font::installed_nerd_faces()
 }
 
+/// Mirror how the window shows chat, so a paired phone can show it the same.
+#[tauri::command]
+pub(crate) fn set_display_prefs(prefs: crate::paths::DisplayPrefs) -> Result<(), String> {
+    crate::paths::write_display_prefs(&prefs);
+    Ok(())
+}
+
+/// The window's fonts and text size, and the name the user goes by. A phone
+/// reads them; the laptop's window is where they change.
+#[tauri::command]
+pub(crate) fn get_display_prefs() -> Result<crate::paths::DisplayPrefs, String> {
+    Ok(crate::paths::display_prefs())
+}
+
 /// Mirror the name the user goes by, so a bot's next turn can call them by it.
 #[tauri::command]
 pub(crate) fn set_user_name(name: String) -> Result<(), String> {
@@ -1280,6 +1294,8 @@ pub fn run() -> anyhow::Result<()> {
             set_notifications,
             set_lead_only_notify,
             set_user_name,
+            set_display_prefs,
+            get_display_prefs,
             list_nerd_fonts,
             set_escape_layer,
             remote_probe,

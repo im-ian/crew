@@ -62,6 +62,8 @@ fn main() {
             "set_notifications",
             "set_lead_only_notify",
             "set_user_name",
+            "set_display_prefs",
+            "get_display_prefs",
             "list_nerd_fonts",
             "set_escape_layer",
             "remote_probe",

@@ -8114,6 +8114,30 @@ button.wait-chip:focus-visible {
   }
 }
 
+/* A file that could not be attached, above the files that were. */
+.attach-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--blocked) 12%, var(--bg));
+  color: var(--blocked);
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: keep-all;
+}
+.attach-error-lines {
+  flex: 1;
+  min-width: 0;
+}
+.attach-error-lines p {
+  margin: 0;
+}
+.attach-error-close {
+  flex: none;
+}
+
 /* A finger finds no hover: the buttons a mouse reveals stay shown. A
    message's own buttons come from holding it instead (mobile.ts). */
 @media (hover: none) {

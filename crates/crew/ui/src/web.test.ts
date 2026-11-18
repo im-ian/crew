@@ -8,14 +8,19 @@ vi.mock("@tauri-apps/api/core", () => tauri);
 
 import { fileSrc, invoke } from "./transport";
 import {
+  TOO_LARGE,
   UNPAIRED,
   UNREACHABLE,
+  UPLOAD_LIMIT,
+  checkSession,
+  deviceName,
   getPairState,
   isWeb,
   pairCodeFromUrl,
   pairDevice,
   setPairState,
   webInvoke,
+  uploadFailure,
   webUpload,
   withoutPairCode,
 } from "./web";
@@ -148,15 +153,22 @@ describe("transport", () => {
 });
 
 describe("webUpload", () => {
-  it("posts the file as multipart field `file` and returns its path on the laptop", async () => {
+  it("posts the bytes themselves under ?name= and returns the path on the laptop", async () => {
     const { fetch, calls } = fakeFetch(() => json(200, { path: "/crew/uploads/photo.jpg" }));
-    const path = await webUpload(new Blob(["jpg"]), "photo.jpg", fetch);
+    const blob = new Blob(["jpg"]);
+    const path = await webUpload(blob, "내 사진 1.jpg", fetch);
     expect(path).toBe("/crew/uploads/photo.jpg");
-    expect(calls[0].url).toBe("/api/upload");
-    const form = calls[0].init.body as FormData;
-    const file = form.get("file") as File;
-    expect(file.name).toBe("photo.jpg");
-    expect(await file.text()).toBe("jpg");
+    expect(calls[0].url).toBe("/api/upload?name=%EB%82%B4%20%EC%82%AC%EC%A7%84%201.jpg");
+    expect(calls[0].init.method).toBe("POST");
+    expect(calls[0].init.body).toBe(blob);
+  });
+
+  it("does not send a file over the limit, and reads 413 the same way", async () => {
+    const { fetch, calls } = fakeFetch(() => json(413, { error: "too large" }));
+    const big = { size: UPLOAD_LIMIT + 1 } as Blob;
+    await expect(webUpload(big, "big.mov", fetch)).rejects.toThrow(TOO_LARGE);
+    expect(calls).toHaveLength(0);
+    await expect(webUpload(new Blob(["x"]), "x", fetch)).rejects.toThrow(TOO_LARGE);
   });
 
   it("marks the device unpaired on 401", async () => {
@@ -166,8 +178,41 @@ describe("webUpload", () => {
   });
 
   it("rejects with the server's error text", async () => {
-    const { fetch } = fakeFetch(() => json(413, { error: "file too large" }));
-    await expect(webUpload(new Blob(["x"]), "x", fetch)).rejects.toBe("file too large");
+    const { fetch } = fakeFetch(() => json(500, { error: "disk full" }));
+    await expect(webUpload(new Blob(["x"]), "x", fetch)).rejects.toBe("disk full");
+  });
+});
+
+describe("uploadFailure", () => {
+  it("names what the attach row tells the person", async () => {
+    expect(uploadFailure(new Error(TOO_LARGE))).toBe("tooLarge");
+    expect(uploadFailure(new Error(UNREACHABLE))).toBe("unreachable");
+    expect(uploadFailure(new Error(UNPAIRED))).toBe("unpaired");
+    expect(uploadFailure("disk full")).toEqual({ error: "disk full" });
+    const offline = vi.fn(async () => {
+      throw new TypeError("Load failed");
+    }) as unknown as typeof globalThis.fetch;
+    const err = await webUpload(new Blob(["x"]), "x", offline).catch((e) => e);
+    expect(uploadFailure(err)).toBe("unreachable");
+  });
+});
+
+describe("checkSession", () => {
+  it("asks /api/session whether this device is paired", async () => {
+    const ok = fakeFetch(() => json(200, { device: "d1" }));
+    expect(await checkSession(ok.fetch)).toBe("paired");
+    expect(ok.calls[0].url).toBe("/api/session");
+    expect(ok.calls[0].init.method).toBe("GET");
+    const no = fakeFetch(() => json(401, {}));
+    expect(await checkSession(no.fetch)).toBe("unpaired");
+  });
+
+  it("leaves the state alone when the laptop does not answer", async () => {
+    const fetch = vi.fn(async () => {
+      throw new TypeError("Load failed");
+    }) as unknown as typeof globalThis.fetch;
+    expect(await checkSession(fetch)).toBe("unreachable");
+    expect(getPairState()).toBe("unknown");
   });
 });
 
@@ -177,7 +222,7 @@ describe("pairDevice", () => {
     const { fetch, calls } = fakeFetch(() => json(200, {}));
     expect(await pairDevice("  AB12 ", fetch)).toBe("paired");
     expect(calls[0].url).toBe("/api/pair");
-    expect(JSON.parse(String(calls[0].init.body))).toEqual({ code: "AB12" });
+    expect(JSON.parse(String(calls[0].init.body))).toMatchObject({ code: "AB12" });
     expect(getPairState()).toBe("paired");
   });
 
@@ -195,9 +240,20 @@ describe("pairDevice", () => {
     expect(await pairDevice("0000", fetch)).toBe("unreachable");
   });
 
-  it("passes on any other error", async () => {
+  it("tells too many tries from a wrong code", async () => {
     const { fetch } = fakeFetch(() => json(429, { error: "too many tries" }));
-    expect(await pairDevice("0000", fetch)).toEqual({ error: "too many tries" });
+    expect(await pairDevice("0000", fetch)).toBe("tooMany");
+  });
+
+  it("passes on any other error", async () => {
+    const { fetch } = fakeFetch(() => json(500, { error: "router down" }));
+    expect(await pairDevice("0000", fetch)).toEqual({ error: "router down" });
+  });
+
+  it("names the device for the laptop's list", () => {
+    expect(deviceName("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)")).toBe("iPhone");
+    expect(deviceName("Mozilla/5.0 (Linux; Android 15)")).toBe("Android");
+    expect(deviceName("Mozilla/5.0 (Macintosh)")).toBe("Browser");
   });
 });
 

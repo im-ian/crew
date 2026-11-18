@@ -237,6 +237,12 @@
           "markdownDescription": "Enables the edit_routine command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_display_prefs command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-display-prefs",
+          "markdownDescription": "Enables the get_display_prefs command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_fallback_ais command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-fallback-ais",
@@ -501,6 +507,12 @@
           "markdownDescription": "Enables the set_avatar command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_display_prefs command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-display-prefs",
+          "markdownDescription": "Enables the set_display_prefs command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_dock_badge command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-dock-badge",
@@ -649,6 +661,12 @@
           "type": "string",
           "const": "deny-edit-routine",
           "markdownDescription": "Denies the edit_routine command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_display_prefs command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-display-prefs",
+          "markdownDescription": "Denies the get_display_prefs command without any pre-configured scope."
         },
         {
           "description": "Denies the get_fallback_ais command without any pre-configured scope.",
@@ -913,6 +931,12 @@
           "type": "string",
           "const": "deny-set-avatar",
           "markdownDescription": "Denies the set_avatar command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_display_prefs command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-display-prefs",
+          "markdownDescription": "Denies the set_display_prefs command without any pre-configured scope."
         },
         {
           "description": "Denies the set_dock_badge command without any pre-configured scope.",

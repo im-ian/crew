@@ -19,6 +19,11 @@ export function isWeb(): boolean {
 export const UNREACHABLE = "crew-web: the laptop did not answer";
 /** This phone is not paired, or its pairing was removed on the laptop. */
 export const UNPAIRED = "crew-web: this device is not paired";
+/** The file is over what the laptop takes in one upload. */
+export const TOO_LARGE = "crew-web: the file is too large";
+
+/** What `/api/upload` takes in one file. */
+export const UPLOAD_LIMIT = 100 * 1024 * 1024;
 
 type Fetch = typeof fetch;
 
@@ -64,6 +69,7 @@ const LOCAL: Record<string, (args: Record<string, unknown>) => unknown> = {
   set_user_name: () => undefined,
   set_notifications: () => undefined,
   set_lead_only_notify: () => undefined,
+  set_display_prefs: () => undefined,
   set_dock_badge: () => undefined,
   set_escape_layer: () => undefined,
   list_nerd_fonts: () => [],
@@ -139,22 +145,65 @@ export async function webInvoke<T>(
   return (text ? JSON.parse(text) : null) as T;
 }
 
-/** Save a file the phone picked under the laptop's uploads. Its path there. */
+/**
+ * Save a file the phone picked under the laptop's uploads, as the bytes
+ * themselves. Its path there, the same shape `save_upload` gives.
+ */
 export async function webUpload(file: Blob, name: string, fetchFn: Fetch = fetch): Promise<string> {
-  const form = new FormData();
-  form.append("file", file, name);
-  const res = await send("/api/upload", { method: "POST", body: form }, CALL_WAIT_MS * 5, fetchFn);
+  if (file.size > UPLOAD_LIMIT) throw new Error(TOO_LARGE);
+  const res = await send(
+    `/api/upload?name=${encodeURIComponent(name)}`,
+    { method: "POST", headers: { "content-type": "application/octet-stream" }, body: file },
+    CALL_WAIT_MS * 5,
+    fetchFn,
+  );
   if (res.status === 401) {
     setPairState("unpaired");
     throw new Error(UNPAIRED);
   }
+  if (res.status === 413) throw new Error(TOO_LARGE);
   if (!res.ok) throw await failure(res);
   const body = (await res.json()) as { path?: unknown };
   if (typeof body?.path !== "string") throw new Error("upload answered without a path");
   return body.path;
 }
 
-export type PairResult = "paired" | "wrong" | "unreachable" | { error: string };
+export type UploadFailure = "tooLarge" | "unreachable" | "unpaired" | { error: string };
+
+/** Why an upload failed, in the words the attach row shows. */
+export function uploadFailure(err: unknown): UploadFailure {
+  const text = err instanceof Error ? err.message : String(err);
+  if (text === TOO_LARGE) return "tooLarge";
+  if (text === UNREACHABLE) return "unreachable";
+  if (text === UNPAIRED) return "unpaired";
+  return { error: text };
+}
+
+/**
+ * Whether this device is paired, from `GET /api/session`. A laptop that does
+ * not answer leaves it as it was: the app shows the connection banner.
+ */
+export async function checkSession(fetchFn: Fetch = fetch): Promise<PairState | "unreachable"> {
+  let res: Response;
+  try {
+    res = await send("/api/session", { method: "GET" }, PING_WAIT_MS, fetchFn);
+  } catch {
+    return "unreachable";
+  }
+  if (res.status === 401) setPairState("unpaired");
+  else if (res.ok) setPairState("paired");
+  return getPairState();
+}
+
+/** How the laptop's list of paired devices names this one. */
+export function deviceName(userAgent: string): string {
+  if (/iPhone/.test(userAgent)) return "iPhone";
+  if (/iPad/.test(userAgent)) return "iPad";
+  if (/Android/.test(userAgent)) return "Android";
+  return "Browser";
+}
+
+export type PairResult = "paired" | "wrong" | "tooMany" | "unreachable" | { error: string };
 
 /** Trade the code the laptop shows for this device's cookie. */
 export async function pairDevice(code: string, fetchFn: Fetch = fetch): Promise<PairResult> {
@@ -165,7 +214,10 @@ export async function pairDevice(code: string, fetchFn: Fetch = fetch): Promise<
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code: code.trim() }),
+        body: JSON.stringify({
+          code: code.trim(),
+          name: deviceName(typeof navigator === "undefined" ? "" : navigator.userAgent),
+        }),
       },
       CALL_WAIT_MS,
       fetchFn,
@@ -178,6 +230,7 @@ export async function pairDevice(code: string, fetchFn: Fetch = fetch): Promise<
     return "paired";
   }
   if (res.status === 400 || res.status === 401 || res.status === 403) return "wrong";
+  if (res.status === 429) return "tooMany";
   return { error: await failure(res) };
 }
 
