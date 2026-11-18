@@ -2832,68 +2832,97 @@ button.sys-note:focus-visible {
 .copy-btn:focus-visible {
   opacity: 1;
 }
+/* The message a reply answers, at the top of the reply's balloon: who it went
+   to, then up to two lines of its words a step smaller and fainter than the
+   reply, and a gap instead of a rule. Colours come from the balloon's ink. */
 .reply-quote {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  max-width: 100%;
-  margin: 0 0 4px;
-  padding: 6px 10px;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  margin: 0 0 var(--space-10);
+  padding: 0;
   border: 0;
-  border-left: 2px solid color-mix(in srgb, var(--muted) 70%, transparent);
-  border-radius: 4px 10px 10px 4px;
-  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  border-radius: var(--radius-sm);
+  background: none;
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
-.row.me .reply-quote {
-  align-self: flex-end;
-  background: color-mix(in srgb, var(--ink) 8%, transparent);
-  border-left-color: color-mix(in srgb, var(--ink) 28%, transparent);
+.bubble .reply-quote + * {
+  margin-top: 0;
 }
-.xfer .reply-quote {
-  align-self: center;
-  max-width: 28em;
+.reply-quote-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  min-width: 0;
 }
-.reply-quote:hover,
-.reply-quote:focus-visible {
-  background: color-mix(in srgb, var(--ink) 10%, transparent);
+.reply-quote-face {
+  width: 16px;
+  height: 16px;
+  font-size: 8px;
+  display: inline-grid;
+  flex: none;
+  overflow: visible;
 }
-.row.me .reply-quote:hover,
-.row.me .reply-quote:focus-visible {
-  background: color-mix(in srgb, var(--ink) 12%, transparent);
-}
-.reply-quote:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--working) 55%, transparent);
-  outline-offset: 2px;
-}
-.reply-quote-who {
-  color: var(--ink);
-  font-size: 11.5px;
-  font-weight: 650;
-  line-height: 1.25;
-  max-width: 100%;
+.reply-quote-to {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: color-mix(in srgb, currentColor 72%, transparent);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.35;
 }
-.row.me .reply-quote-who {
+.reply-quote-to b {
+  color: var(--ink);
+  font-weight: 650;
+}
+.row.me .reply-quote-to b {
   color: var(--bubble-me-ink);
 }
 .reply-quote-text {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.35;
-  max-width: 100%;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: color-mix(in srgb, currentColor 55%, transparent);
+  font-size: var(--text-md);
+  line-height: 1.45;
+  word-break: break-word;
 }
-.row.me .reply-quote-text {
-  color: color-mix(in srgb, var(--bubble-me-ink) 70%, transparent);
+.reply-quote:hover .reply-quote-text {
+  color: color-mix(in srgb, currentColor 75%, transparent);
+}
+.reply-quote:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--working) 55%, transparent);
+  outline-offset: 3px;
+}
+/* With no balloon to open (above a picture, or in a note between bots) the
+   quote draws a small balloon of its own. */
+.reply-quote.is-alone {
+  width: auto;
+  max-width: 100%;
+  margin-bottom: var(--space-4);
+  padding: var(--space-8) var(--space-12);
+  border-radius: var(--radius-xl);
+  background: var(--bubble-them);
+  color: var(--ink);
+}
+.row.me .reply-quote.is-alone {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--user) 60%, transparent);
+  color: var(--bubble-me-ink);
+}
+.xfer .reply-quote.is-alone {
+  align-self: center;
+  max-width: 28em;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
 }
 .code-wrap {
   position: relative;
