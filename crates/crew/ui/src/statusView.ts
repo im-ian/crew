@@ -1,5 +1,6 @@
+import { groupLead, parseItemKey } from "./groups";
 import type { TFn } from "./i18n";
-import type { AgentInfo } from "./types";
+import type { AgentInfo, Group } from "./types";
 import { showsWatch, watchLabel } from "./watchView";
 
 /** Which colour a status word takes: `.head-status.is-<tone>`. */
@@ -71,6 +72,40 @@ export function waitingUserPhrase(
 export function waitingFailed(agent: AgentInfo | null | undefined): string[] {
   const ids = waitingOn(agent);
   return (agent?.waiting_failed ?? []).filter((id) => ids.includes(id));
+}
+
+export type FoldMark = {
+  /** Attention wins over working, so the one dot is never both. */
+  tone: "blocked" | "working";
+  working: number;
+  attention: number;
+};
+
+/**
+ * The dot on a collapsed group that has no lead. Null when the group is
+ * open, a lead is still shown, or nobody is working or waiting on the user.
+ * Attention is a blocked bot (an approval waiting) or an open question card.
+ */
+export function collapsedGroupMark(
+  group: Group,
+  agents: readonly Pick<AgentInfo, "id" | "status" | "asking">[],
+): FoldMark | null {
+  if (!group.collapsed || groupLead(group)) return null;
+  const byId = new Map(agents.map((a) => [a.id, a]));
+  let working = 0;
+  let attention = 0;
+  const seen = new Set<string>();
+  for (const key of group.items) {
+    const parsed = parseItemKey(key);
+    if (!parsed || seen.has(parsed.id)) continue;
+    seen.add(parsed.id);
+    const agent = byId.get(parsed.id);
+    if (!agent) continue;
+    if (agent.status === "blocked" || agent.asking) attention += 1;
+    else if (agent.status === "working") working += 1;
+  }
+  if (!working && !attention) return null;
+  return { tone: attention > 0 ? "blocked" : "working", working, attention };
 }
 
 function wordFor(agent: AgentInfo, t: TFn): StatusView | null {

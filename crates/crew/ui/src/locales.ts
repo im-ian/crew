@@ -203,6 +203,7 @@ export const KO = {
   "sidebar.remoteDisconnected": "연결 끊김",
   "sidebar.represents": "{alias} 대표 봇",
   "sidebar.groupLead": "그룹 대표",
+  "sidebar.groupFold": "작업 중 {working} · 확인 필요 {attention}",
   "sidebar.online": "접속 중",
   "sidebar.offline": "접속 안 함",
 
@@ -746,6 +747,7 @@ export const EN: { [K in MessageKey]: string } = {
   "sidebar.remoteDisconnected": "Disconnected",
   "sidebar.represents": "Represents you on {alias}",
   "sidebar.groupLead": "Group lead",
+  "sidebar.groupFold": "Working {working} · Needs review {attention}",
   "sidebar.online": "Online",
   "sidebar.offline": "Offline",
 

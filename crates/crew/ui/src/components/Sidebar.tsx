@@ -44,6 +44,7 @@ import {
   type RemoteLayout,
   type RemoteSection,
 } from "../remote";
+import { collapsedGroupMark } from "../statusView";
 import { Avatar } from "./Avatar";
 import { watchCount } from "../watchView";
 import { RenameField } from "./RenameField";
@@ -1084,6 +1085,7 @@ export function Sidebar({
       >
         <GroupHead
           group={group}
+          agents={agents}
           focused={focusedGroup === group.id}
           compact={folded}
           renaming={renamingId === group.id}
@@ -1458,6 +1460,7 @@ export function Sidebar({
 
 function GroupHead({
   group,
+  agents,
   focused,
   compact,
   renaming,
@@ -1473,8 +1476,9 @@ function GroupHead({
   onPointerDown,
 }: {
   group: Group;
+  agents: AgentInfo[];
   focused?: boolean;
-  /** The folded rail: the chevron alone, the name on hover. */
+  /** The folded rail: the chevron, and the status dot when there is one. The name is on hover. */
   compact?: boolean;
   renaming: boolean;
   searching: boolean;
@@ -1489,6 +1493,11 @@ function GroupHead({
   onPointerDown?: (e: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
   const t = useT();
+  // Search opens the rows, so the dot would only repeat what is already listed.
+  const mark = searching ? null : collapsedGroupMark(group, agents);
+  const markTitle = mark
+    ? t("sidebar.groupFold", { working: mark.working, attention: mark.attention })
+    : "";
 
   return (
     <div
@@ -1542,6 +1551,14 @@ function GroupHead({
             }}
           >
             <span className="group-name-text">{group.name}</span>
+            {mark ? (
+              <span
+                className={"group-fold-dot is-" + mark.tone}
+                title={markTitle}
+                aria-label={markTitle}
+                role="img"
+              />
+            ) : null}
           </button>
           <button
             type="button"
