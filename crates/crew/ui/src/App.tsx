@@ -934,8 +934,16 @@ export function App() {
         }
         renamingId={renamingId}
         onQuery={crew.setQuery}
-        onSearchHit={crew.openSearchHit}
-        onSelectAgent={crew.selectAgent}
+        onSearchHit={(hit) => {
+          setRailOpen(false);
+          crew.openSearchHit(hit);
+        }}
+        onSelectAgent={(id) => {
+          // Picking a row shuts the drawer even when it is the chat already
+          // open, where the selection does not change.
+          setRailOpen(false);
+          crew.selectAgent(id);
+        }}
         onCreateMenu={crew.showCreateMenu}
         onSplitMenu={mobile ? undefined : crew.showSplitMenu}
         splitDir={view?.dir ?? null}
