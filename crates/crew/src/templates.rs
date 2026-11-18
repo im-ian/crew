@@ -326,55 +326,55 @@ static BUILTINS: std::sync::LazyLock<Vec<Builtin>> = std::sync::LazyLock::new(||
             id: "crew-ops",
             name: ("복잡한 업무", "Complex work"),
             description: (
-                "실제 서비스를 운영하듯 이슈 확인부터 구현·QA·배포까지 8명이 나눠 맡아요.",
-                "Eight bots run a live service: from triaging issues to building, QA and deploys.",
+                "여러 영역에 걸친 큰 일을 조사·설계·구현·검토·검증·배포로 나눠 8명이 맡아요.",
+                "Eight bots split large work across areas: research, design, build, review, QA and deploy.",
             ),
             bots: vec![
                 bot(
-                    ("PM", "PM"),
-                    ("기획·정책 문서를 근거로 일을 나눠 맡기고, 팀원의 질문을 모아 사용자에게 물어요. 결과는 근거를 보고 확인해요.", "Hands out the work based on the planning and policy docs, gathers the team's questions for the user, and checks results against their evidence."),
+                    ("리드", "Lead"),
+                    ("목표와 범위를 쪼개 팀원에게 맡기고, 팀원의 질문을 모아 사용자에게 물어요. 결과를 합쳐 최종 확인해요.", "Breaks the goal and scope into work for the team, gathers the team's questions for the user, and puts the results together for a final check."),
                     "claude", Strong, "high", S::Crown,
                 ),
                 bot(
-                    ("이슈 담당", "Issue triage"),
-                    ("이슈 트래커와 제보를 확인해 재현하고 분류해요. 맡을 봇을 정해 PM에게 올려요.", "Reads the issue tracker and reports, reproduces and sorts them, and brings them to the PM with who should take each."),
-                    "grok", Normal, "medium", S::Bell,
-                ),
-                bot(
-                    ("프론트엔드 개발자", "Frontend developer"),
-                    ("사용자 화면을 구현하고 PR·리뷰 반영·CI 통과까지 맡아요.", "Builds the user-facing screens and sees each PR through review and CI."),
-                    "claude", Strong, "high", S::RoundedSquare,
-                ),
-                bot(
-                    ("백엔드 개발자", "Backend developer"),
-                    ("API·데이터·서버 로직을 구현하고 PR·리뷰 반영·CI 통과까지 맡아요.", "Builds the APIs, data and server logic and sees each PR through review and CI."),
-                    "codex", Strong, "high", S::Hexagon,
-                ),
-                bot(
-                    ("백오피스 개발자", "Back-office developer"),
-                    ("관리자 화면을 구현하고 PR·리뷰 반영·CI 통과까지 맡아요.", "Builds the admin screens and sees each PR through review and CI."),
-                    "codex", Normal, "medium", S::Octagon,
+                    ("리서처", "Researcher"),
+                    ("착수 전에 기존 코드·문서·자료를 조사해 근거와 선택지를 정리해요.", "Before work starts, looks through the existing code, docs and material, and lays out the evidence and the options."),
+                    "grok", Normal, "medium", S::Bulb,
                 ),
                 bot(
                     ("디자이너", "Designer"),
-                    ("화면 시안을 만들고, 구현 전에 HTML 미리보기로 맞춰요.", "Draws the screens and settles them in an HTML preview before they are built."),
-                    "claude", Normal, "medium", S::Palette,
+                    ("화면과 흐름의 시안을 만들고, 구현 전에 HTML 미리보기로 맞춰요.", "Draws the screens and flows and settles them in an HTML preview before they are built."),
+                    "claude", Normal, "high", S::Palette,
+                ),
+                bot(
+                    ("프론트엔드 개발자", "Frontend developer"),
+                    ("화면을 구현하고 테스트까지 돌려요.", "Builds the screens and runs the tests."),
+                    "claude", Strong, "medium", S::RoundedSquare,
+                ),
+                bot(
+                    ("백엔드 개발자", "Backend developer"),
+                    ("서버와 데이터 쪽을 구현하고 테스트까지 돌려요.", "Builds the server and data side and runs the tests."),
+                    "codex", Strong, "medium", S::Hexagon,
+                ),
+                bot(
+                    ("리뷰어", "Reviewer"),
+                    ("다른 팀원의 변경을 독립된 눈으로 검토해 버그와 위험을 짚어요. 직접 고치지 않고 근거와 함께 돌려줘요.", "Reviews the others' changes with fresh eyes and points out bugs and risks. It does not fix them itself; it hands them back with the evidence."),
+                    "claude", Strong, "high", S::Gem,
                 ),
                 bot(
                     ("QA", "QA"),
-                    ("테스트 데이터를 준비하고 시나리오대로 검증해요. 결과는 근거와 함께 보고해요.", "Prepares test data, checks each scenario, and reports the result with the evidence."),
+                    ("시나리오를 세워 실제 동작을 검증하고, 재현 방법과 결과를 근거와 함께 보고해요.", "Sets up scenarios, checks how things really behave, and reports the steps and results with the evidence."),
                     "grok", Normal, "medium", S::Shield,
                 ),
                 bot(
                     ("인프라·배포 담당", "Infra & deploys"),
-                    ("서버·배포·환경 설정을 맡고, 배포 뒤 상태를 확인해요.", "Looks after servers, deploys and environment settings, and checks the service after each deploy."),
-                    "codex", Strong, "high", S::Cloud,
+                    ("빌드·배포·환경 설정을 맡고, 배포 뒤 상태를 확인해요.", "Looks after builds, deploys and environment settings, and checks things after each deploy."),
+                    "codex", Fast, "medium", S::Cloud,
                 ),
             ],
             lead: 0,
             memory: (
-                "작업은 헤드리스로 한다. 앱·창은 띄우지 않고 확인이 필요하면 '앱 확인 필요'로 남긴다.\n보고에는 근거(문서·로그·PR 링크)를 같이 붙인다.\n배포와 DB 변경은 PM이 확인한 뒤에 한다.\n기획·정책 문서가 있으면 그것을 근거로 일하고, 문서와 다르게 해야 하면 PM에게 먼저 알린다.",
-                "Work headless. Do not open apps or windows; when something needs a look in the app, say \"needs a check in the app\".\nEvery report carries its evidence: docs, logs, PR links.\nDeploys and database changes wait for the PM's go.\nWork from the planning and policy docs where they exist; tell the PM first before doing anything they do not say.",
+                "작업은 헤드리스로 한다. 앱·창은 띄우지 않고 확인이 필요하면 '앱 확인 필요'로 남긴다.\n보고에는 근거(파일·로그·PR)를 함께 단다.\n구현이 끝나면 리뷰어 검토와 QA 검증을 거쳐 리드에게 보고한다.\n배포와 데이터 변경은 리드가 확인한 뒤에 한다.",
+                "Work headless. Do not open apps or windows; when something needs a look in the app, say \"needs a check in the app\".\nEvery report carries its evidence: files, logs, PRs.\nFinished work goes through the reviewer and QA before it is reported to the lead.\nDeploys and data changes wait for the lead's go.",
             ),
             worktree: true,
         },
@@ -451,7 +451,20 @@ mod tests {
             let ops = &ko[3];
             assert_eq!(ops.bots.len(), 8);
             assert_eq!(ops.lead, Some(0));
-            assert_eq!(ops.bots[0].name, "PM");
+            let names: Vec<&str> = ops.bots.iter().map(|b| b.name.as_str()).collect();
+            assert_eq!(
+                names,
+                [
+                    "리드",
+                    "리서처",
+                    "디자이너",
+                    "프론트엔드 개발자",
+                    "백엔드 개발자",
+                    "리뷰어",
+                    "QA",
+                    "인프라·배포 담당"
+                ]
+            );
             assert!(ops.worktree);
             assert!(!ko[2].worktree, "research works in one folder");
             for t in &ko {
