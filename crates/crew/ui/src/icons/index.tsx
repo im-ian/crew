@@ -474,3 +474,13 @@ export function Trash2(props: Props) {
     </Icon>
   );
 }
+
+/** Lucide `smartphone` (from Feather): mobile access in Settings. */
+export function Smartphone(props: Props) {
+  return (
+    <Icon {...props}>
+      <rect width="14" height="20" x="5" y="2" rx="2" ry="2" />
+      <path d="M12 18h.01" />
+    </Icon>
+  );
+}

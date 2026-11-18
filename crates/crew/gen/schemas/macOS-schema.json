@@ -309,6 +309,30 @@
           "markdownDescription": "Enables the lookup_skill command without any pre-configured scope."
         },
         {
+          "description": "Enables the mobile_pair command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mobile-pair",
+          "markdownDescription": "Enables the mobile_pair command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mobile_revoke command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mobile-revoke",
+          "markdownDescription": "Enables the mobile_revoke command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mobile_set command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mobile-set",
+          "markdownDescription": "Enables the mobile_set command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mobile_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mobile-status",
+          "markdownDescription": "Enables the mobile_status command without any pre-configured scope."
+        },
+        {
           "description": "Enables the open_path command without any pre-configured scope.",
           "type": "string",
           "const": "allow-open-path",
@@ -697,6 +721,30 @@
           "type": "string",
           "const": "deny-lookup-skill",
           "markdownDescription": "Denies the lookup_skill command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mobile_pair command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mobile-pair",
+          "markdownDescription": "Denies the mobile_pair command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mobile_revoke command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mobile-revoke",
+          "markdownDescription": "Denies the mobile_revoke command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mobile_set command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mobile-set",
+          "markdownDescription": "Denies the mobile_set command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mobile_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mobile-status",
+          "markdownDescription": "Denies the mobile_status command without any pre-configured scope."
         },
         {
           "description": "Denies the open_path command without any pre-configured scope.",

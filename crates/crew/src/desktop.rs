@@ -39,7 +39,7 @@ fn parse_shape(shape: Option<String>) -> Result<Option<AvatarShape>, String> {
 // Off the main thread: `grok models` is a subprocess, and the picker asks
 // for every CLI each time it opens.
 #[tauri::command(async)]
-fn list_models(cli: String) -> Result<crate::models::ModelList, String> {
+pub(crate) fn list_models(cli: String) -> Result<crate::models::ModelList, String> {
     if cli.trim().eq_ignore_ascii_case("custom") {
         return Ok(crate::models::ModelList {
             installed: true,
@@ -53,36 +53,36 @@ fn list_models(cli: String) -> Result<crate::models::ModelList, String> {
 /// The default AI and the ones a turn falls back to, in order. None until
 /// the window first saves it, so the old single default can move in.
 #[tauri::command]
-fn get_fallback_ais() -> Option<Vec<crate::fallback::Candidate>> {
+pub(crate) fn get_fallback_ais() -> Option<Vec<crate::fallback::Candidate>> {
     crate::fallback::load()
 }
 
 /// Crew's templates, then the user's, in the app's language.
 #[tauri::command]
-fn list_templates() -> Vec<crate::templates::Template> {
+pub(crate) fn list_templates() -> Vec<crate::templates::Template> {
     crate::templates::list(crate::paths::locale() == "en")
 }
 
 /// Returns it as saved, with its id when it is new.
 #[tauri::command]
-fn save_template(
+pub(crate) fn save_template(
     template: crate::templates::Template,
 ) -> Result<crate::templates::Template, String> {
     crate::templates::save(template).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn remove_template(id: String) -> Result<(), String> {
+pub(crate) fn remove_template(id: String) -> Result<(), String> {
     crate::templates::remove(id.trim()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn set_fallback_ais(list: Vec<crate::fallback::Candidate>) -> Result<(), String> {
+pub(crate) fn set_fallback_ais(list: Vec<crate::fallback::Candidate>) -> Result<(), String> {
     crate::fallback::save(&list).map_err(|e| e.to_string())
 }
 
 #[tauri::command(async)]
-fn list_agents() -> Result<Vec<AgentInfo>, String> {
+pub(crate) fn list_agents() -> Result<Vec<AgentInfo>, String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     match client::rpc(Request::List) {
         Ok(Event::Agents { mut agents, .. }) => {
@@ -98,7 +98,7 @@ fn list_agents() -> Result<Vec<AgentInfo>, String> {
 }
 
 #[tauri::command(async)]
-fn send_message(
+pub(crate) fn send_message(
     agent: String,
     text: String,
     steer: bool,
@@ -118,7 +118,7 @@ fn send_message(
 }
 
 #[tauri::command(async)]
-fn stop_agent(agent: String) -> Result<(), String> {
+pub(crate) fn stop_agent(agent: String) -> Result<(), String> {
     match client::rpc(Request::Interrupt { agent }) {
         Ok(Event::Ok) => Ok(()),
         Ok(Event::Error { message }) => Err(message),
@@ -128,7 +128,7 @@ fn stop_agent(agent: String) -> Result<(), String> {
 }
 
 #[tauri::command(async)]
-fn cancel_queued(agent: String, message_id: String) -> Result<(), String> {
+pub(crate) fn cancel_queued(agent: String, message_id: String) -> Result<(), String> {
     match client::rpc(Request::CancelQueued { agent, message_id }) {
         Ok(Event::Ok) => Ok(()),
         Ok(Event::Error { message }) => Err(message),
@@ -138,7 +138,7 @@ fn cancel_queued(agent: String, message_id: String) -> Result<(), String> {
 }
 
 #[tauri::command(async)]
-fn send_queued(agent: String, message_id: String) -> Result<(), String> {
+pub(crate) fn send_queued(agent: String, message_id: String) -> Result<(), String> {
     match client::rpc(Request::SendQueued { agent, message_id }) {
         Ok(Event::Ok) => Ok(()),
         Ok(Event::Error { message }) => Err(message),
@@ -148,7 +148,7 @@ fn send_queued(agent: String, message_id: String) -> Result<(), String> {
 }
 
 #[tauri::command(async)]
-fn edit_queued(agent: String, message_id: String, text: String) -> Result<(), String> {
+pub(crate) fn edit_queued(agent: String, message_id: String, text: String) -> Result<(), String> {
     match client::rpc(Request::EditQueued {
         agent,
         message_id,
@@ -162,7 +162,7 @@ fn edit_queued(agent: String, message_id: String, text: String) -> Result<(), St
 }
 
 #[tauri::command(async)]
-fn approve_agent(agent: String, allow: bool, always: bool) -> Result<(), String> {
+pub(crate) fn approve_agent(agent: String, allow: bool, always: bool) -> Result<(), String> {
     match client::rpc(Request::Approve {
         agent,
         allow,
@@ -176,7 +176,7 @@ fn approve_agent(agent: String, allow: bool, always: bool) -> Result<(), String>
 }
 
 #[tauri::command(async)]
-fn answer_choice(
+pub(crate) fn answer_choice(
     agent: String,
     message_id: String,
     answers: Vec<Vec<String>>,
@@ -200,7 +200,7 @@ fn answer_choice(
 }
 
 #[tauri::command(async)]
-fn tell_message(from: Option<String>, to: String, text: String) -> Result<(), String> {
+pub(crate) fn tell_message(from: Option<String>, to: String, text: String) -> Result<(), String> {
     let from = client::tell_from(from);
     match client::rpc(Request::Tell {
         from,
@@ -217,14 +217,14 @@ fn tell_message(from: Option<String>, to: String, text: String) -> Result<(), St
 }
 
 #[derive(Clone, serde::Serialize)]
-struct SnapshotView {
+pub(crate) struct SnapshotView {
     agent: String,
     text: String,
     status: crate::protocol::AgentStatus,
 }
 
 #[tauri::command(async)]
-fn get_snapshot(agent: String) -> Result<SnapshotView, String> {
+pub(crate) fn get_snapshot(agent: String) -> Result<SnapshotView, String> {
     match client::rpc(Request::Snapshot { agent }) {
         Ok(Event::Snapshot {
             agent,
@@ -244,22 +244,22 @@ fn get_snapshot(agent: String) -> Result<SnapshotView, String> {
 
 /// How much of each named CLI's plan is used. Reads files, so off the main thread.
 #[tauri::command(async)]
-fn plan_usage(clis: Vec<String>) -> Vec<crate::usage::PlanUsage> {
+pub(crate) fn plan_usage(clis: Vec<String>) -> Vec<crate::usage::PlanUsage> {
     crate::usage::snapshot(&clis)
 }
 
 #[tauri::command]
-fn list_groups() -> Result<Vec<SidebarGroup>, String> {
+pub(crate) fn list_groups() -> Result<Vec<SidebarGroup>, String> {
     crate::groups::load().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn set_groups(groups: Vec<SidebarGroup>) -> Result<(), String> {
+pub(crate) fn set_groups(groups: Vec<SidebarGroup>) -> Result<(), String> {
     crate::groups::save(&groups).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn get_group_memory(group: String) -> Result<String, String> {
+pub(crate) fn get_group_memory(group: String) -> Result<String, String> {
     let group = group.trim();
     if group.is_empty() {
         return Err("group is required".into());
@@ -270,7 +270,7 @@ fn get_group_memory(group: String) -> Result<String, String> {
 /// `base` is the notes the dialog loaded. False means a bot changed them since
 /// and nothing was written.
 #[tauri::command]
-fn set_group_memory(group: String, text: String, base: String) -> Result<bool, String> {
+pub(crate) fn set_group_memory(group: String, text: String, base: String) -> Result<bool, String> {
     let group = group.trim();
     if group.is_empty() {
         return Err("group is required".into());
@@ -281,7 +281,7 @@ fn set_group_memory(group: String, text: String, base: String) -> Result<bool, S
 /// Only an explicit delete drops the notes. A layout saved without a group,
 /// say before the window loaded the file, must not take them along.
 #[tauri::command]
-fn remove_group_memory(group: String) -> Result<(), String> {
+pub(crate) fn remove_group_memory(group: String) -> Result<(), String> {
     let group = group.trim();
     if group.is_empty() {
         return Err("group is required".into());
@@ -291,7 +291,7 @@ fn remove_group_memory(group: String) -> Result<(), String> {
 }
 
 #[tauri::command(async)]
-fn get_messages(agent: String) -> Result<Vec<ChatMessage>, String> {
+pub(crate) fn get_messages(agent: String) -> Result<Vec<ChatMessage>, String> {
     match client::rpc(Request::Messages { agent }) {
         Ok(Event::Messages { messages, .. }) => Ok(messages),
         Ok(Event::Error { message }) => Err(message),
@@ -329,7 +329,7 @@ fn ping_failure(err: String) -> String {
 // polls, and it is the call that brings a dead daemon back. `get_messages`
 // polls faster and must keep failing without spawning.
 #[tauri::command(async)]
-fn daemon_ping() -> Result<(), String> {
+pub(crate) fn daemon_ping() -> Result<(), String> {
     match client::rpc_connected(Request::Ping) {
         Ok(Event::Pong) => {
             set_start_error(None);
@@ -342,7 +342,7 @@ fn daemon_ping() -> Result<(), String> {
 }
 
 #[tauri::command(async)]
-fn reset_agent(agent: String, drop_routines: bool) -> Result<String, String> {
+pub(crate) fn reset_agent(agent: String, drop_routines: bool) -> Result<String, String> {
     match client::rpc(Request::Reset {
         agent,
         drop_routines,
@@ -356,7 +356,7 @@ fn reset_agent(agent: String, drop_routines: bool) -> Result<String, String> {
 }
 
 #[tauri::command(async)]
-fn set_agent(
+pub(crate) fn set_agent(
     id: String,
     model: Option<String>,
     effort: Option<String>,
@@ -405,7 +405,7 @@ fn set_agent(
 }
 
 #[tauri::command(async)]
-fn set_agent_cli(id: String, cli: String, cmd: Option<String>) -> Result<(), String> {
+pub(crate) fn set_agent_cli(id: String, cli: String, cmd: Option<String>) -> Result<(), String> {
     let cmd = match cmd.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(raw) => crate::config::split_cmd(raw).map_err(|e| e.to_string())?,
         None => Vec::new(),
@@ -419,7 +419,7 @@ fn set_agent_cli(id: String, cli: String, cmd: Option<String>) -> Result<(), Str
 }
 
 #[tauri::command(async)]
-fn add_agent(
+pub(crate) fn add_agent(
     name: String,
     cli: String,
     model: Option<String>,
@@ -497,7 +497,7 @@ fn add_agent(
 }
 
 #[tauri::command(async)]
-fn clone_agent(
+pub(crate) fn clone_agent(
     id: String,
     name: Option<String>,
     parts: Option<CloneParts>,
@@ -519,7 +519,7 @@ fn clone_agent(
 }
 
 #[tauri::command(async)]
-fn remove_agent(id: String) -> Result<(), String> {
+pub(crate) fn remove_agent(id: String) -> Result<(), String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     match client::rpc(Request::RemoveAgent { id }) {
         Ok(Event::Ok) | Ok(Event::Agents { .. }) => Ok(()),
@@ -568,7 +568,7 @@ fn remote_rpc(req: Request) -> Result<Event, String> {
 
 /// The health check of 원격 봇 추가. See `docs/router.md`.
 #[tauri::command(async)]
-fn remote_probe(url: String) -> Result<crate::remote::RemoteServer, String> {
+pub(crate) fn remote_probe(url: String) -> Result<crate::remote::RemoteServer, String> {
     match remote_rpc(Request::RemoteProbe { url })? {
         Event::RemoteServer { server } => Ok(server),
         _ => Err("unexpected daemon response".into()),
@@ -579,7 +579,7 @@ fn remote_probe(url: String) -> Result<crate::remote::RemoteServer, String> {
 /// bot back, so a taken name leaves nothing behind.
 #[tauri::command(async)]
 #[allow(clippy::too_many_arguments)]
-fn remote_join(
+pub(crate) fn remote_join(
     url: String,
     alias: String,
     name: String,
@@ -662,7 +662,7 @@ fn remote_join(
 }
 
 #[tauri::command(async)]
-fn remote_list() -> Result<Vec<crate::remote::RemoteInfo>, String> {
+pub(crate) fn remote_list() -> Result<Vec<crate::remote::RemoteInfo>, String> {
     match remote_rpc(Request::RemoteList)? {
         Event::Remotes { mut remotes } => {
             for r in &mut remotes {
@@ -677,7 +677,7 @@ fn remote_list() -> Result<Vec<crate::remote::RemoteInfo>, String> {
 }
 
 #[tauri::command(async)]
-fn remote_set(
+pub(crate) fn remote_set(
     alias: String,
     trusted: Option<Vec<String>>,
     blocked: Option<Vec<String>>,
@@ -691,18 +691,18 @@ fn remote_set(
 }
 
 #[tauri::command(async)]
-fn remote_leave(alias: String) -> Result<(), String> {
+pub(crate) fn remote_leave(alias: String) -> Result<(), String> {
     remote_rpc(Request::RemoteLeave { alias }).map(|_| ())
 }
 
 #[derive(serde::Serialize)]
-struct TeamMemory {
+pub(crate) struct TeamMemory {
     text: String,
     version: u64,
 }
 
 #[tauri::command(async)]
-fn team_memory_get(alias: String) -> Result<TeamMemory, String> {
+pub(crate) fn team_memory_get(alias: String) -> Result<TeamMemory, String> {
     match remote_rpc(Request::TeamMemory {
         alias: Some(alias),
         bot: None,
@@ -714,7 +714,7 @@ fn team_memory_get(alias: String) -> Result<TeamMemory, String> {
 
 /// `false`: someone changed the notes first, and nothing was written.
 #[tauri::command(async)]
-fn team_memory_set(alias: String, text: String, version: u64) -> Result<bool, String> {
+pub(crate) fn team_memory_set(alias: String, text: String, version: u64) -> Result<bool, String> {
     match remote_rpc(Request::TeamMemorySet {
         alias: Some(alias),
         bot: None,
@@ -728,7 +728,7 @@ fn team_memory_set(alias: String, text: String, version: u64) -> Result<bool, St
 }
 
 #[tauri::command(async)]
-fn set_avatar(id: String, data: String, name: Option<String>) -> Result<(), String> {
+pub(crate) fn set_avatar(id: String, data: String, name: Option<String>) -> Result<(), String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     let id = id.trim().to_string();
     if id.is_empty() {
@@ -741,7 +741,7 @@ fn set_avatar(id: String, data: String, name: Option<String>) -> Result<(), Stri
 }
 
 #[tauri::command(async)]
-fn clear_avatar(id: String) -> Result<(), String> {
+pub(crate) fn clear_avatar(id: String) -> Result<(), String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     let id = id.trim().to_string();
     if id.is_empty() {
@@ -751,7 +751,7 @@ fn clear_avatar(id: String) -> Result<(), String> {
 }
 
 #[tauri::command(async)]
-fn add_routine(
+pub(crate) fn add_routine(
     agent: String,
     name: String,
     schedule: String,
@@ -771,7 +771,7 @@ fn add_routine(
 }
 
 #[tauri::command(async)]
-fn remove_routine(agent: String, key: String) -> Result<(), String> {
+pub(crate) fn remove_routine(agent: String, key: String) -> Result<(), String> {
     match client::rpc(Request::RemoveRoutine { agent, key }) {
         Ok(Event::Ok) | Ok(Event::Agents { .. }) => Ok(()),
         Ok(Event::Error { message }) => Err(message),
@@ -781,7 +781,7 @@ fn remove_routine(agent: String, key: String) -> Result<(), String> {
 }
 
 #[tauri::command(async)]
-fn set_routine_enabled(agent: String, key: String, enabled: bool) -> Result<(), String> {
+pub(crate) fn set_routine_enabled(agent: String, key: String, enabled: bool) -> Result<(), String> {
     match client::rpc(Request::SetRoutineEnabled {
         agent,
         key,
@@ -796,7 +796,7 @@ fn set_routine_enabled(agent: String, key: String, enabled: bool) -> Result<(), 
 }
 
 #[tauri::command(async)]
-fn run_routine(agent: String, key: String) -> Result<(), String> {
+pub(crate) fn run_routine(agent: String, key: String) -> Result<(), String> {
     match client::rpc(Request::RunRoutine { agent, key }) {
         Ok(Event::Ok) | Ok(Event::Agents { .. }) => Ok(()),
         Ok(Event::Error { message }) => Err(message),
@@ -806,7 +806,7 @@ fn run_routine(agent: String, key: String) -> Result<(), String> {
 }
 
 #[tauri::command(async)]
-fn edit_routine(
+pub(crate) fn edit_routine(
     agent: String,
     key: String,
     name: Option<String>,
@@ -828,7 +828,7 @@ fn edit_routine(
 }
 
 #[tauri::command(async)]
-fn list_routine_runs(
+pub(crate) fn list_routine_runs(
     agent: String,
     key: String,
 ) -> Result<Vec<crate::routine_log::RoutineRun>, String> {
@@ -841,7 +841,7 @@ fn list_routine_runs(
 }
 
 #[tauri::command(async)]
-fn search_crew(query: String) -> Result<Vec<crate::search::SearchHit>, String> {
+pub(crate) fn search_crew(query: String) -> Result<Vec<crate::search::SearchHit>, String> {
     match client::rpc(Request::Search { query }) {
         Ok(Event::Search { hits }) => Ok(hits),
         Ok(Event::Error { message }) => Err(message),
@@ -851,17 +851,17 @@ fn search_crew(query: String) -> Result<Vec<crate::search::SearchHit>, String> {
 }
 
 #[tauri::command]
-fn list_skills() -> Result<Vec<crate::skills::Skill>, String> {
+pub(crate) fn list_skills() -> Result<Vec<crate::skills::Skill>, String> {
     Ok(crate::skills::list())
 }
 
 #[tauri::command]
-fn lookup_skill(query: String) -> Result<Option<crate::skills::Skill>, String> {
+pub(crate) fn lookup_skill(query: String) -> Result<Option<crate::skills::Skill>, String> {
     Ok(crate::skills::lookup(&query))
 }
 
 #[tauri::command]
-fn save_skill(
+pub(crate) fn save_skill(
     name: String,
     body: String,
     previous: Option<String>,
@@ -872,22 +872,22 @@ fn save_skill(
 }
 
 #[tauri::command]
-fn remove_skill(name: String) -> Result<(), String> {
+pub(crate) fn remove_skill(name: String) -> Result<(), String> {
     crate::skills::remove(&name).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn peek_pending_focus() -> Result<Option<crate::notify::FocusTarget>, String> {
+pub(crate) fn peek_pending_focus() -> Result<Option<crate::notify::FocusTarget>, String> {
     Ok(crate::notify::peek_focus())
 }
 
 #[tauri::command]
-fn take_pending_focus() -> Result<Option<crate::notify::FocusTarget>, String> {
+pub(crate) fn take_pending_focus() -> Result<Option<crate::notify::FocusTarget>, String> {
     Ok(crate::notify::take_focus())
 }
 
 #[tauri::command]
-fn set_dock_badge(app: tauri::AppHandle, count: i32) -> Result<(), String> {
+pub(crate) fn set_dock_badge(app: tauri::AppHandle, count: i32) -> Result<(), String> {
     let Some(win) = app.get_webview_window("main") else {
         return Ok(());
     };
@@ -897,7 +897,7 @@ fn set_dock_badge(app: tauri::AppHandle, count: i32) -> Result<(), String> {
 
 /// Mirror the UI language so daemon-side strings (notifications, CLI) match it.
 #[tauri::command]
-fn set_locale(app: tauri::AppHandle, locale: String) -> Result<(), String> {
+pub(crate) fn set_locale(app: tauri::AppHandle, locale: String) -> Result<(), String> {
     crate::paths::write_locale(&locale);
     relabel_split_menu(&app);
     Ok(())
@@ -956,14 +956,14 @@ fn relabel_split_menu(app: &tauri::AppHandle) {
 
 /// Mirror the settings switch so alerts still respect it after the window closes.
 #[tauri::command]
-fn set_notifications(enabled: bool) -> Result<(), String> {
+pub(crate) fn set_notifications(enabled: bool) -> Result<(), String> {
     crate::paths::write_notifications_enabled(enabled);
     Ok(())
 }
 
 /// Mirror the lead-only switch: the daemon sends the alerts, window or not.
 #[tauri::command]
-fn set_lead_only_notify(enabled: bool) -> Result<(), String> {
+pub(crate) fn set_lead_only_notify(enabled: bool) -> Result<(), String> {
     crate::paths::write_lead_only_notify(enabled);
     Ok(())
 }
@@ -971,20 +971,20 @@ fn set_lead_only_notify(enabled: bool) -> Result<(), String> {
 /// Installed Nerd Fonts for private-use icons, preferred names first.
 /// Each entry is the `local()` names of one family (full, PostScript, family).
 #[tauri::command]
-fn list_nerd_fonts() -> Vec<Vec<String>> {
+pub(crate) fn list_nerd_fonts() -> Vec<Vec<String>> {
     crate::nerd_font::installed_nerd_faces()
 }
 
 /// Mirror the name the user goes by, so a bot's next turn can call them by it.
 #[tauri::command]
-fn set_user_name(name: String) -> Result<(), String> {
+pub(crate) fn set_user_name(name: String) -> Result<(), String> {
     crate::paths::write_user_name(&name);
     Ok(())
 }
 
 /// An open sheet, preview, or menu is using Escape. macOS then keeps fullscreen.
 #[tauri::command]
-fn set_escape_layer(open: bool) {
+pub(crate) fn set_escape_layer(open: bool) {
     crate::escape_layer::set_layer_open(open);
 }
 
@@ -1010,7 +1010,7 @@ fn choose_folder_script(prompt: &str) -> String {
 
 /// Native folder chooser. Cancel is `Ok(None)`, not an error.
 #[tauri::command(async)]
-fn pick_folder() -> Result<Option<String>, String> {
+pub(crate) fn pick_folder() -> Result<Option<String>, String> {
     let prompt = if crate::paths::locale() == "en" {
         "Group folder"
     } else {
@@ -1043,7 +1043,7 @@ fn pick_folder() -> Result<Option<String>, String> {
 /// `rel` is how the bot wrote a relative path and `base` the folder it works
 /// in; when `path` is not there, the file is looked for under `base`.
 #[tauri::command(async)]
-fn read_text_file(
+pub(crate) fn read_text_file(
     path: String,
     base: Option<String>,
     rel: Option<String>,
@@ -1052,7 +1052,7 @@ fn read_text_file(
 }
 
 #[tauri::command(async)]
-fn open_path(path: String) -> Result<(), String> {
+pub(crate) fn open_path(path: String) -> Result<(), String> {
     let raw = path.trim();
     if raw.is_empty() {
         return Err("path is empty".into());
@@ -1070,7 +1070,7 @@ fn open_path(path: String) -> Result<(), String> {
 
 /// The webview drops `target=_blank`. Hand a web or mail link to `open`.
 #[tauri::command(async)]
-fn open_url(url: String) -> Result<(), String> {
+pub(crate) fn open_url(url: String) -> Result<(), String> {
     let raw = web_url(&url)?;
     std::process::Command::new("open")
         .arg(raw)
@@ -1103,7 +1103,7 @@ fn web_url(url: &str) -> Result<&str, String> {
 /// What each dropped path is: "dir", "file", or "missing". The composer
 /// attaches a folder as a folder.
 #[tauri::command(async)]
-fn path_kinds(paths: Vec<String>) -> Vec<&'static str> {
+pub(crate) fn path_kinds(paths: Vec<String>) -> Vec<&'static str> {
     paths.iter().map(|p| path_kind(std::path::Path::new(p))).collect()
 }
 
@@ -1116,7 +1116,7 @@ fn path_kind(path: &std::path::Path) -> &'static str {
 }
 
 #[tauri::command]
-fn save_upload(name: String, data: String) -> Result<String, String> {
+pub(crate) fn save_upload(name: String, data: String) -> Result<String, String> {
     let bytes = crate::avatar::decode_input(&data).map_err(|e| e.to_string())?;
     let dir = crate::paths::home_dir().join("uploads");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -1125,6 +1125,47 @@ fn save_upload(name: String, data: String) -> Result<String, String> {
     let path =
         crate::paths::write_new_file(&dir, &stamp, &safe, &bytes).map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// The app's config and its built UI. The daemon reads the same UI from here
+/// to serve it to a phone (`web.rs`), so it is embedded once.
+pub(crate) fn context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}
+
+fn mobile(action: &str, arg: Option<String>) -> Result<serde_json::Value, String> {
+    client::ensure_daemon().map_err(|e| e.to_string())?;
+    match client::rpc(Request::Mobile {
+        action: action.to_string(),
+        arg,
+    }) {
+        Ok(Event::Mobile { info }) => Ok(info),
+        Ok(Event::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected daemon response".into()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+/// Mobile access as it stands: on or off, its addresses, paired devices.
+#[tauri::command(async)]
+fn mobile_status() -> Result<serde_json::Value, String> {
+    mobile("status", None)
+}
+
+#[tauri::command(async)]
+fn mobile_set(enabled: bool) -> Result<serde_json::Value, String> {
+    mobile(if enabled { "on" } else { "off" }, None)
+}
+
+/// A new pairing code with its address and QR code.
+#[tauri::command(async)]
+fn mobile_pair() -> Result<serde_json::Value, String> {
+    mobile("pair", None)
+}
+
+#[tauri::command(async)]
+fn mobile_revoke(id: String) -> Result<serde_json::Value, String> {
+    mobile("revoke", Some(id))
 }
 
 pub fn run() -> anyhow::Result<()> {
@@ -1247,9 +1288,13 @@ pub fn run() -> anyhow::Result<()> {
             remote_set,
             remote_leave,
             team_memory_get,
-            team_memory_set
+            team_memory_set,
+            mobile_status,
+            mobile_set,
+            mobile_pair,
+            mobile_revoke
         ])
-        .run(tauri::generate_context!())
+        .run(context())
         .map_err(|e| anyhow::anyhow!(e))?;
     Ok(())
 }

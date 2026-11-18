@@ -71,6 +71,10 @@ fn main() {
             "remote_leave",
             "team_memory_get",
             "team_memory_set",
+            "mobile_status",
+            "mobile_set",
+            "mobile_pair",
+            "mobile_revoke",
         ])),
     )
     .expect("failed to run tauri build");

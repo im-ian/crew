@@ -16,12 +16,14 @@ clap = { version = "4", features = ["derive"] }
 futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
 libc = "0.2"
 portable-pty = "0.9"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 tauri = { version = "2", features = ["protocol-asset", "macos-private-api"] }
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
+tiny_http = "0.12"
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"] }
 vt100 = "0.15"

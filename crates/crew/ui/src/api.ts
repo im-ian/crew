@@ -1,5 +1,6 @@
 import { invoke } from "./transport";
 import type { CloneParts } from "./cloneParts";
+import type { MobilePair, MobileStatus } from "./mobileAccess";
 import type { Template } from "./templates";
 import type { PathKind } from "./dropAttach";
 import type {
@@ -247,6 +248,12 @@ export const api = {
   /** False when a teammate changed it after `version` was read. */
   setTeamMemory: (alias: string, text: string, version: number) =>
     invoke<boolean>("team_memory_set", { alias, text, version }),
+  /** Mobile access: on or off, its addresses and paired devices. */
+  mobileStatus: () => invoke<MobileStatus>("mobile_status"),
+  mobileSet: (enabled: boolean) => invoke<MobileStatus>("mobile_set", { enabled }),
+  /** A new pairing code, good for a few minutes, with its QR code. */
+  mobilePair: () => invoke<MobilePair>("mobile_pair"),
+  mobileRevoke: (id: string) => invoke<MobileStatus>("mobile_revoke", { id }),
   /** Crew's templates, then the user's. */
   listTemplates: () => invoke<Template[]>("list_templates"),
   /** Returns it as saved: a new one comes back with its id. */
