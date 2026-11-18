@@ -133,7 +133,9 @@ export const api = {
     description: string | null;
     cmd?: string | null;
     cwd?: string | null;
-  }) => invoke<string>("add_agent", { ...args, cwd: args.cwd ?? null }),
+    /** No first turn asking what to take on. */
+    quiet?: boolean;
+  }) => invoke<string>("add_agent", { ...args, cwd: args.cwd ?? null, quiet: args.quiet ?? null }),
   /** Display name only. The other set_agent fields stay as they are. */
   setName: (id: string, name: string) =>
     invoke<void>("set_agent", {

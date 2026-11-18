@@ -60,6 +60,10 @@ pub enum Request {
         /// Unknown command: each message is appended as its last argument.
         #[serde(default)]
         headless: bool,
+        /// No first turn asking what to take on: a bot made from a template
+        /// already has its role, and its first turn waits for its group.
+        #[serde(default)]
+        quiet: bool,
     },
     RemoveAgent {
         id: String,

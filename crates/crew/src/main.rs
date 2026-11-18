@@ -533,6 +533,7 @@ fn run() -> anyhow::Result<()> {
                     model,
                     effort,
                     headless,
+                    quiet: false,
                 })? {
                     Event::Error { message } => anyhow::bail!("{message}"),
                     Event::Ok => {
