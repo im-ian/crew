@@ -1739,8 +1739,8 @@ fn cli_command(session: &HeadlessSession, argv: &[String], cwd: &Path) -> Comman
     cmd.env("GROK_CLAUDE_AGENTS_ENABLED", "false");
     cmd.env("TERM", "dumb");
     cmd.env("NO_COLOR", "1");
-    // One target dir per repository. Cargo locks it, so bots of the same repo
-    // build one at a time instead of each keeping a copy.
+    // Each worktree builds into its own target. A private directory is set
+    // only while `target` is still a symlink into the old shared cache.
     if let Some(dir) = crate::worktree::cargo_target_for_cwd(cwd) {
         cmd.env("CARGO_TARGET_DIR", dir);
     }
