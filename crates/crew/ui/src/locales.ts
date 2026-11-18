@@ -484,6 +484,11 @@ export const KO = {
   "groupSettings.memoryNote": "그룹 안 봇이 매 턴 읽고, 직접 고치기도 합니다.",
   "groupSettings.changed": "봇이 먼저 고쳐서 저장하지 않았습니다. 내용을 복사한 뒤 다시 여세요.",
   "groupSettings.memoryPh": "이 그룹의 규칙, 경로, 결정",
+  "groupSettings.worktree": "작업 폴더 분리",
+  "groupSettings.worktree.app": "앱 설정 따름",
+  "groupSettings.worktree.on": "켬",
+  "groupSettings.worktree.off": "끔",
+  "groupSettings.worktree.hint": "이 그룹의 봇만 적용합니다. 다음 턴부터 바뀌고, 꺼도 이미 만든 작업 폴더는 그대로 둡니다.",
 
   "face.group.shapes": "도형",
   "face.group.things": "사물",
@@ -1032,6 +1037,11 @@ export const EN: { [K in MessageKey]: string } = {
   "groupSettings.memoryNote": "Bots in the group read this every turn and can edit it.",
   "groupSettings.changed": "A bot edited it first, so this wasn’t saved. Copy your text and reopen.",
   "groupSettings.memoryPh": "Rules, paths, and decisions for this group",
+  "groupSettings.worktree": "Separate working folder",
+  "groupSettings.worktree.app": "Follow the app",
+  "groupSettings.worktree.on": "On",
+  "groupSettings.worktree.off": "Off",
+  "groupSettings.worktree.hint": "Applies only to bots in this group, starting on the next turn. Turning it off leaves a folder that was already made.",
 
   "face.group.shapes": "Shapes",
   "face.group.things": "Things",

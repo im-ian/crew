@@ -60,6 +60,8 @@ import {
   pruneLayout,
   setGroupFolder,
   setGroupLead,
+  setGroupWorktree,
+  groupWorktree,
   settleLeads,
   toPersist,
   UNGROUPED_ID,
@@ -634,7 +636,7 @@ export function useCrew() {
       if each had just moved in. Clearing it leaves their folders alone. */
   async function saveGroupSettings(
     id: string,
-    fields: { path: string; memory: string; base: string },
+    fields: { path: string; memory: string; base: string; worktree: "on" | "off" | "app" },
   ): Promise<boolean> {
     const before = groupsRef.current.groups.find((g) => g.id === id);
     if (!before) return false;
@@ -651,8 +653,11 @@ export function useCrew() {
       return false;
     }
     const folder = fields.path.trim();
+    let layout = groupsRef.current;
+    let changed = false;
     if (folder !== (groupCwd(before) ?? "")) {
-      persistLayout(setGroupFolder(groupsRef.current, id, folder));
+      layout = setGroupFolder(layout, id, folder);
+      changed = true;
       if (folder) {
         for (const key of before.items) {
           const item = parseItemKey(key);
@@ -660,6 +665,11 @@ export function useCrew() {
         }
       }
     }
+    if (fields.worktree !== groupWorktree(before)) {
+      layout = setGroupWorktree(layout, id, fields.worktree);
+      changed = true;
+    }
+    if (changed) persistLayout(layout);
     showToast(t("memory.saved"), "ok", true);
     return true;
   }

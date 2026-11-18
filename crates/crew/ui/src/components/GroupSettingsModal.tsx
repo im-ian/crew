@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useT } from "../LocaleContext";
 import type { Group } from "../types";
+import type { GroupWorktree } from "../groups";
 import { Field } from "./Field";
 import { FolderPick } from "./FolderPick";
 import { Modal } from "./Modal";
+import { Seg } from "./Seg";
 
 type Props = {
   open: boolean;
@@ -13,7 +15,7 @@ type Props = {
   onLoad: (id: string) => Promise<string>;
   onSave: (
     id: string,
-    fields: { path: string; memory: string; base: string },
+    fields: { path: string; memory: string; base: string; worktree: GroupWorktree },
   ) => Promise<boolean>;
 };
 
@@ -27,6 +29,7 @@ export function GroupSettingsModal({
 }: Props) {
   const t = useT();
   const [path, setPath] = useState("");
+  const [worktree, setWorktree] = useState<GroupWorktree>("app");
   const [memory, setMemory] = useState("");
   const [busy, setBusy] = useState(false);
   const edited = useRef(false);
@@ -36,6 +39,7 @@ export function GroupSettingsModal({
   useEffect(() => {
     if (!open || !group) return;
     setPath(group.path ?? "");
+    setWorktree(group.worktree ?? "app");
     setMemory("");
     setBusy(false);
     edited.current = false;
@@ -51,7 +55,7 @@ export function GroupSettingsModal({
     if (!group || busy) return;
     setBusy(true);
     try {
-      if (await onSave(group.id, { path, memory, base: base.current })) onClose();
+      if (await onSave(group.id, { path, memory, base: base.current, worktree })) onClose();
     } finally {
       setBusy(false);
     }
@@ -63,6 +67,17 @@ export function GroupSettingsModal({
         <p className="apply-note">{group?.name}</p>
         <Field label={t("group.folderLabel")} htmlFor="group-path" hint={t("group.folderHint")}>
           <FolderPick id="group-path" path={path} onPick={onPickFolder} onChange={setPath} />
+        </Field>
+        <Field label={t("groupSettings.worktree")} hint={t("groupSettings.worktree.hint")}>
+          <Seg
+            value={worktree}
+            options={[
+              { value: "app", label: t("groupSettings.worktree.app") },
+              { value: "on", label: t("groupSettings.worktree.on") },
+              { value: "off", label: t("groupSettings.worktree.off") },
+            ]}
+            onChange={setWorktree}
+          />
         </Field>
         <Field
           label={t("groupSettings.memoryLabel")}
