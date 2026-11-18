@@ -8090,6 +8090,20 @@ button.wait-chip:focus-visible {
     overflow-y: auto;
   }
 
+  /* A message's time, copy and reply chip floats beside the balloon on
+     hover, past a phone's edge. Holding the message gives the same reply and
+     copy (mobile.ts), and the thread's time dividers keep the time, so the
+     chip and the strip that bridges the pointer to it are not drawn. */
+  .msg-actions {
+    display: none;
+  }
+  .bubble-row.has-actions::after,
+  .xfer-chip::after,
+  .xfer::after,
+  .me-msg::after {
+    content: none;
+  }
+
   /* A held message opens its menu (reply, copy, select text) instead of the
      system's selection; "Select text" lets that one message be selected. */
   .bubble-row,
