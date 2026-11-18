@@ -11,7 +11,7 @@ import { stepQueuePick } from "../queuePick";
 import { oneLine, plainText, wrapReply, type ReplyTarget } from "../reply";
 import { caretClientPoint, type CaretPoint } from "../caretPoint";
 import { droppedAttaches, type PathKind } from "../dropAttach";
-import { isWeb, webUpload } from "../web";
+import { isWeb, uploadFailure, webUpload } from "../web";
 import type { AskPick } from "./AskHoldDialog";
 import { enterAction } from "../composerEnter";
 import { GroupChip, MentionChip } from "./MentionChip";
@@ -312,17 +312,29 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
     fit();
   }
 
+  /** A file that could not be attached, as the line the attach row shows. */
+  function uploadMessage(name: string, err: unknown): string {
+    const why = uploadFailure(err);
+    if (why === "tooLarge") return t("composer.uploadTooLarge", { name });
+    if (why === "unreachable") return t("composer.uploadOffline", { name });
+    if (why === "unpaired") return t("composer.uploadUnpaired", { name });
+    return t("composer.uploadFailed", { name, error: why.error });
+  }
+
   async function attachFiles(files: FileList | File[]) {
     const next: Attach[] = [];
-    try {
-      for (const file of Array.from(files)) {
+    const failed: string[] = [];
+    setUploadErrors([]);
+    // Each file on its own: one too large does not drop the rest.
+    for (const file of Array.from(files)) {
+      try {
         const media = mediaKind(file.name, file.type) ?? undefined;
         const image = file.type.startsWith("image/") && !media;
         // A phone sends the file itself, not a base64 copy of it, so a
         // video off the camera roll does not sit in memory twice.
-        const web = isWeb();
-        const data = web ? null : await readFileData(file);
-        const path = data === null ? await webUpload(file, file.name) : await api.saveUpload(file.name, data);
+        const data = isWeb() ? null : await readFileData(file);
+        const path =
+          data === null ? await webUpload(file, file.name) : await api.saveUpload(file.name, data);
         const shown = image || media === "video";
         next.push({
           id: `${Date.now()}-${next.length}-${file.name}`,
@@ -332,11 +344,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           media,
           preview: !shown ? undefined : image && data !== null ? data : URL.createObjectURL(file),
         });
+      } catch (err) {
+        failed.push(uploadMessage(file.name, err));
       }
-    } catch (err) {
-      for (const a of next) revokePreview(a);
-      throw err;
     }
+    setUploadErrors(failed);
     if (next.length) setAttaches((prev) => [...prev, ...next]);
     refreshEmpty();
     fit();
@@ -527,6 +539,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   // A dialog over the chat keeps its focus. A drop is not for the field under it.
   const dialogOpen = () => !!document.querySelector(".modal.open, [aria-modal='true']");
   const [dropHover, setDropHover] = useState(false);
+  const [uploadErrors, setUploadErrors] = useState<string[]>([]);
   const dropRef = useRef<(paths: string[]) => void>(() => {});
   dropRef.current = (paths) => {
     if (dialogOpen() || !paths.length) return;
@@ -666,6 +679,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
         drafts.current.delete(key);
         setMention(null);
         setAttaches([]);
+        setUploadErrors([]);
         setReply(null);
         setEmpty(true);
         fit();
@@ -761,6 +775,24 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
               onClick={() => setReply(null)}
             >
               <X size={14} />
+            </button>
+          </div>
+        ) : null}
+        {uploadErrors.length ? (
+          <div className="attach-error" role="alert">
+            <div className="attach-error-lines">
+              {uploadErrors.map((line, i) => (
+                <p key={i}>{line}</p>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="attach-remove attach-error-close"
+              title={t("composer.uploadDismiss")}
+              aria-label={t("composer.uploadDismiss")}
+              onClick={() => setUploadErrors([])}
+            >
+              <X size={12} />
             </button>
           </div>
         ) : null}
