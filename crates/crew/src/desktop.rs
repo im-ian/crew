@@ -428,6 +428,7 @@ fn add_agent(
     description: Option<String>,
     cmd: Option<String>,
     cwd: Option<String>,
+    quiet: Option<bool>,
 ) -> Result<String, String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     let name = name.trim().to_string();
@@ -458,6 +459,7 @@ fn add_agent(
         model,
         effort,
         headless,
+        quiet: quiet.unwrap_or(false),
     }) {
         Ok(Event::Ok) | Ok(Event::Agents { .. }) => {}
         Ok(Event::Error { message }) => return Err(message),
@@ -613,6 +615,7 @@ fn remote_join(
         None,
         None,
         Some(cwd.display().to_string()),
+        None,
     )?;
     let joined = (|| {
         if avatar_shape.is_some() || avatar_color.is_some() {

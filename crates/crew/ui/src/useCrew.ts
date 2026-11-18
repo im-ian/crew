@@ -20,6 +20,7 @@ import {
 import { randomFace } from "./avatar";
 import { freeBotName, loadBotDefault } from "./botDefault";
 import { canCarryChat, partsOf, type ClonePick } from "./cloneParts";
+import type { NewGroup } from "./components/NewGroupModal";
 import { openPendingOnFocus } from "./focusChat";
 import { useT } from "./LocaleContext";
 import { loadLastChat, pickOpenAgent, saveLastChat } from "./lastChat";
@@ -589,8 +590,15 @@ export function useCrew() {
   }
 
   /** A folder is optional. With one, it becomes the working folder of the group's bots. */
-  function createNamedGroup(name: string, path: string, memory = "") {
-    const trimmed = name.trim();
+  /**
+   * A group from the New group dialog, with the bots its template gives it.
+   * The group comes first, then each bot quietly (no first turn asking what
+   * to do: it has its role, and that turn would run before it sits in the
+   * group), then they go in with the lead. Each bot keeps its template's face
+   * shape and gets a color of its own.
+   */
+  async function createNamedGroup(made: NewGroup) {
+    const trimmed = made.name.trim();
     if (!trimmed) return;
     const current = groupsRef.current;
     const id = newGroupId(current.groups.map((g) => g.id));
@@ -599,9 +607,9 @@ export function useCrew() {
       name: uniqueGroupName(current.groups, trimmed),
       collapsed: false,
       items: [],
-      worktree: "on",
+      worktree: made.worktree ? "on" : "off",
     };
-    const folder = path.trim();
+    const folder = made.path.trim();
     if (folder) created.path = folder;
     persistLayout({
       groups: [...current.groups, created],
@@ -611,8 +619,70 @@ export function useCrew() {
     setNewGroupOpen(false);
     // The group is there either way; a memory that fails to save can be
     // written again from its settings.
-    if (memory.trim()) {
-      void api.setGroupMemory(id, memory, "").catch((err) => showError(err));
+    if (made.memory.trim()) {
+      void api.setGroupMemory(id, made.memory, "").catch((err) => showError(err));
+    }
+    if (!made.team.length) return;
+    const ids: (string | null)[] = [];
+    for (const bot of made.team) {
+      try {
+        const botId = await api.addAgent({
+          name: bot.name,
+          cli: bot.ai.cli,
+          model: bot.ai.model || null,
+          effort: bot.ai.effort || null,
+          role: bot.role || null,
+          description: null,
+          cmd: null,
+          cwd: folder || null,
+          quiet: true,
+        });
+        ids.push(botId);
+        const face = randomFace();
+        try {
+          await api.setAgent({
+            id: botId,
+            model: null,
+            effort: null,
+            unsetModel: false,
+            unsetEffort: false,
+            title: null,
+            role: null,
+            description: null,
+            unsetTitle: false,
+            unsetRole: false,
+            unsetDescription: false,
+            shape: bot.shape || face.shape,
+            color: face.color,
+            cwd: null,
+            unsetCwd: false,
+          });
+        } catch (err) {
+          showError(err);
+        }
+      } catch (err) {
+        ids.push(null);
+        showError(err);
+      }
+    }
+    await refreshList();
+    if (!groupsRef.current.groups.some((g) => g.id === id)) return;
+    for (const botId of ids) {
+      if (botId) moveToGroup("agent", botId, id);
+    }
+    const lead = made.team.findIndex((b) => b.lead);
+    const leadId = lead >= 0 ? ids[lead] : null;
+    if (leadId) setLead(id, leadId);
+    const first = leadId ?? ids.find((x): x is string => !!x);
+    if (first) {
+      selectedRef.current = { id: first, kind: "agent" };
+      setSelected(first);
+      setSelectedKind("agent");
+      setStick(true);
+      setMessages([]);
+      closePane();
+      focusComposer();
+      await refreshMessages();
     }
   }
 

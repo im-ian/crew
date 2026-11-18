@@ -4034,7 +4034,8 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             model,
             effort,
             headless,
-        } => match add_agent(id, name, cmd, cwd, model, effort, headless) {
+            quiet,
+        } => match add_agent(id, name, cmd, cwd, model, effort, headless, quiet) {
             Ok(()) => vec![Event::Ok, snapshot_event()],
             Err(err) => vec![Event::Error {
                 message: err.to_string(),
@@ -5073,6 +5074,7 @@ fn add_agent(
     model: Option<String>,
     effort: Option<crate::config::Effort>,
     headless: bool,
+    quiet: bool,
 ) -> anyhow::Result<()> {
     let cwd = cwd
         .filter(|s| !s.trim().is_empty())
@@ -5088,7 +5090,9 @@ fn add_agent(
     cfg.effort = effort;
     cfg.headless = headless;
     insert_spawned_agent(cfg)?;
-    ask_new_bot(&ask_id);
+    if !quiet {
+        ask_new_bot(&ask_id);
+    }
     Ok(())
 }
 
@@ -9785,6 +9789,65 @@ exec sleep 1"#,
             }
             if let Err(payload) = check {
                 std::panic::resume_unwind(payload);
+            }
+        });
+    }
+
+    /// A new bot asks what to take on, unless it is made quiet: a bot from a
+    /// template has its role, and its first turn waits for its group.
+    #[test]
+    fn a_quiet_new_bot_does_not_ask() {
+        use std::os::unix::fs::PermissionsExt;
+        paths::testing::with_home("add-quiet", || {
+            paths::write_notifications_enabled(false);
+            let home = paths::home_dir();
+            let calls = home.join("calls");
+            let bin = home.join("oneshot");
+            fs::write(
+                &bin,
+                format!(
+                    "#!/bin/sh\nfor a; do last=$a; done\nprintf '%s\\n' \"$last\" >> '{}'\necho 네\n",
+                    calls.display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+            let cmd = vec![bin.display().to_string()];
+            let cwd = Some(home.display().to_string());
+            let quiet = test_id("quiet");
+            add_agent(
+                quiet.clone(),
+                "조용".into(),
+                cmd.clone(),
+                cwd.clone(),
+                None,
+                None,
+                true,
+                true,
+            )
+            .unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+            assert!(!calls.exists(), "a quiet bot ran a turn");
+            assert!(inbox_is_empty(&quiet));
+
+            let asks = test_id("asks");
+            add_agent(
+                asks.clone(),
+                "묻는 봇".into(),
+                cmd,
+                cwd,
+                None,
+                None,
+                true,
+                false,
+            )
+            .unwrap();
+            eventually(Duration::from_secs(5), "a new bot never asked", || {
+                fs::read_to_string(&calls).is_ok_and(|c| c.contains("just created"))
+            });
+            wait_idle(&asks);
+            for id in [&quiet, &asks] {
+                remove_agent(id).unwrap();
             }
         });
     }
