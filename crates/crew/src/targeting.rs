@@ -32,6 +32,9 @@ pub struct TurnOrigin {
     /// Crew started this turn after grok stopped the watch the last one left.
     /// A watch this turn leaves gets no second such turn.
     pub watch_wake: bool,
+    /// Crew started this turn because a compact cut the last one short. A
+    /// compact that cuts this one short too gets no second such turn.
+    pub compact_wake: bool,
     /// The user message this turn goes back to (`relay::new_chain`). Every
     /// tell and wake under it keeps it. 0 until the turn starts.
     pub chain: u64,

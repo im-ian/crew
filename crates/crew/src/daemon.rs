@@ -3230,6 +3230,7 @@ fn restore_waiting(cfg: &Config) {
                     wake_spent: meta.wake_spent,
                     skip_judgment: meta.skip_judgment,
                     watch_wake: meta.watch_wake,
+                    compact_wake: false,
                     chain: meta.chain,
                 },
                 then: VecDeque::new(),
@@ -5580,6 +5581,30 @@ pub(crate) fn wake_after_watch(id: &str, watched: &[String], row: String) {
     };
     if let Err(err) = submit_delivery(id, &note, true, Some(row), origin) {
         eprintln!("[crew] watch wake for {id}: {err:#}");
+    }
+}
+
+/// A compact folded the session during `id`'s last turn, and the turn ended
+/// without a word after it: cut off before it finished, maybe before a
+/// `crew tell` it meant to send. It gets one turn to carry on, answering
+/// whoever gave the cut-off turn its work (`before`). A turn this wake
+/// starts gets no second one, so compacts in a row cannot keep it going.
+pub(crate) fn wake_after_compact(id: &str, before: Option<TurnOrigin>) {
+    if before.as_ref().is_some_and(|o| o.compact_wake) {
+        return;
+    }
+    let note = crate::protocol::system_envelope(
+        "The conversation was compacted during your last turn, and that turn ended before you finished it. Check where the work stands and finish it. If you meant to send a `crew tell` or a report, send it now. Do not redo steps that are already done.",
+    );
+    let origin = TurnOrigin {
+        compact_wake: true,
+        ..before
+            .as_ref()
+            .and_then(|o| continued_origin(o, id))
+            .unwrap_or_else(TurnOrigin::user)
+    };
+    if let Err(err) = submit_delivery(id, &note, true, None, origin) {
+        eprintln!("[crew] compact wake for {id}: {err:#}");
     }
 }
 
@@ -12200,6 +12225,102 @@ esac"#,
             );
             assert!(prompts(&other).is_empty());
             for id in [&lead, &worker, &other] {
+                wait_idle(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// A compact that cuts a turn short, with nothing said after it, gets one
+    /// turn to carry on. That turn answers whoever gave the cut-off one its
+    /// work. A turn the wake starts that is cut short too gets no second one,
+    /// and a turn that answered after its compact is left alone.
+    #[test]
+    fn a_turn_a_compact_cut_short_carries_on_once() {
+        paths::testing::with_home("compact-wake", || {
+            crate::transcript::set_seal_hook(on_assistant_sealed);
+            let [lead, worker, again, fine] = ["lead", "worker", "again", "fine"].map(test_id);
+            let logs = paths::home_dir().join("logs");
+            fs::create_dir_all(&logs).unwrap();
+            let cut = r#"printf '%s\n' '{"type":"system","subtype":"init","session_id":"s1"}' '{"type":"system","subtype":"compact_boundary"}' '{"type":"result","subtype":"success","result":""}'"#;
+            let say = |text: &str| {
+                format!(
+                    r#"printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"{text}"}}]}}}}' '{{"type":"result","subtype":"success","result":"{text}"}}'"#
+                )
+            };
+            let body = format!(
+                r#"printf '%s\n---\n' "$last" >> '{logs}'/"$CREW_AGENT_ID"
+case "$last" in
+*"compacted during your last turn"*)
+case "$CREW_AGENT_ID" in *again*) {cut} ;; *) {done} ;; esac
+;;
+*cut-me*) {cut} ;;
+*fine-work*)
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"system","subtype":"compact_boundary"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"다 했어요"}}]}}}}' '{{"type":"result","subtype":"success","result":"다 했어요"}}'
+;;
+*) {ok} ;;
+esac"#,
+                logs = logs.display(),
+                cut = cut,
+                done = say("이어서 끝냈어요"),
+                ok = say("확인했어요"),
+            );
+            for id in [&lead, &worker, &again, &fine] {
+                fake_bot_running(id, &body);
+                wait_idle(id);
+            }
+            let prompts = |id: &str| -> Vec<String> {
+                fs::read_to_string(logs.join(id))
+                    .unwrap_or_default()
+                    .split("\n---\n")
+                    .filter(|p| !p.trim().is_empty())
+                    .map(str::to_string)
+                    .collect()
+            };
+
+            tell_agent(&lead, &worker, "cut-me 해 주세요").unwrap();
+            eventually(
+                Duration::from_secs(8),
+                "the carried-on answer never reached the lead",
+                || prompts(&lead).iter().any(|p| p.contains("이어서 끝냈어요")),
+            );
+            let woken = prompts(&worker);
+            assert_eq!(woken.len(), 2, "{woken:?}");
+            assert!(woken[1].contains("[crew system]"), "{}", woken[1]);
+            let row = crate::transcript::messages(&worker)
+                .into_iter()
+                .find(|m| m.role == Role::Assistant && m.text == "이어서 끝냈어요")
+                .expect("the carried-on answer");
+            assert_eq!(
+                row.peer.as_deref(),
+                Some(lead.as_str()),
+                "it answers the lead"
+            );
+
+            send_agent(&again, "cut-me").unwrap();
+            eventually(
+                Duration::from_secs(8),
+                "the cut turn was not carried on",
+                || prompts(&again).len() == 2,
+            );
+            send_agent(&fine, "fine-work").unwrap();
+            eventually(Duration::from_secs(5), "the fine turn never ran", || {
+                told(&fine, "다 했어요")
+            });
+            for id in [&lead, &worker, &again, &fine] {
+                wait_idle(id);
+            }
+            std::thread::sleep(Duration::from_millis(800));
+            assert_eq!(prompts(&again).len(), 2, "a second compact wake");
+            assert_eq!(prompts(&fine).len(), 1, "a turn that answered was woken");
+            assert_eq!(
+                prompts(&lead)
+                    .iter()
+                    .filter(|p| p.contains("이어서 끝냈어요"))
+                    .count(),
+                1
+            );
+            for id in [&lead, &worker, &again, &fine] {
                 wait_idle(id);
                 remove_agent(id).unwrap();
             }

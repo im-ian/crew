@@ -969,6 +969,21 @@ fn insert_in_turn(chat: &mut AgentChat, msg: ChatMessage) {
 /// Crew's line where the CLI folded the earlier conversation into a summary.
 /// It sits in the turn like a tool row, but with no peer: the whole session
 /// was folded, so it stays in the main chat even on a side chat's turn.
+/// The bot said something after the latest compact in its chat. True when
+/// there is no compact to go by, so a caller does not act on a guess.
+pub fn said_since_compact(agent: &str) -> bool {
+    let msgs = messages(agent);
+    let Some(at) = msgs
+        .iter()
+        .rposition(|m| m.kind == Some(MessageKind::Compact))
+    else {
+        return true;
+    };
+    msgs[at + 1..]
+        .iter()
+        .any(|m| m.role == Role::Assistant && !m.text.trim().is_empty())
+}
+
 pub fn push_compact_note(agent: &str) -> ChatMessage {
     let text = if crate::paths::locale() == "en" {
         "The earlier conversation was compacted."
