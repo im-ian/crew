@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { oneLine, replyBody, splitReply, wrapReply } from "./reply";
+import { oneLine, plainText, replyBody, splitReply, wrapReply } from "./reply";
 
 describe("oneLine", () => {
   it("collapses whitespace and clips", () => {
@@ -58,5 +58,45 @@ describe("wrapReply / splitReply", () => {
       from: "to:beta",
       snippet: "ping",
     });
+  });
+});
+
+describe("plainText", () => {
+  it("drops markdown marks and joins list items with a dot", () => {
+    expect(
+      plainText(
+        "**다음 할 일**\n- 던전 층을 열지만 남았어요.\n- `queue`에 넣을게요. [보드](https://x.dev)에서 봐요.",
+      ),
+    ).toBe("다음 할 일 · 던전 층을 열지만 남았어요. · queue에 넣을게요. 보드에서 봐요.");
+  });
+
+  it("keeps a heading apart and a paragraph's lines together", () => {
+    expect(plainText("## Plan\nfirst line\nsecond line\n\n1. one\n2) two")).toBe(
+      "Plan · first line second line · one · two",
+    );
+  });
+
+  it("leaves words with underscores, hyphens and lone stars alone", () => {
+    expect(plainText("snake_case_name stays, 1 - 2 = -1, 3 * 4")).toBe(
+      "snake_case_name stays, 1 - 2 = -1, 3 * 4",
+    );
+    expect(plainText("an *em* word and _this_ one, ~~gone~~ \\*kept\\*")).toBe(
+      "an em word and this one, gone *kept*",
+    );
+  });
+
+  it("skips code fences and quote marks", () => {
+    expect(plainText("> quoted\n```ts\nconst a = 1;\n```")).toBe("quoted const a = 1;");
+  });
+
+  it("only loses the marks of a snippet stored on one line", () => {
+    expect(plainText("**다음 할 일** - 던전 층")).toBe("다음 할 일 - 던전 층");
+  });
+});
+
+describe("wrapReply snippet", () => {
+  it("stores the plain words of the quoted message", () => {
+    const raw = wrapReply("ok", { id: "1-1", from: "bob", snippet: "**Next**\n- ship it" });
+    expect(splitReply(raw).reply?.snippet).toBe("Next · ship it");
   });
 });
