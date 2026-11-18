@@ -69,7 +69,6 @@
     "allow-set-locale",
     "allow-set-notifications",
     "allow-set-lead-only-notify",
-    "allow-set-worktree",
     "allow-set-user-name",
     "allow-list-nerd-fonts",
     "allow-set-escape-layer",

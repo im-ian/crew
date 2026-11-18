@@ -3111,7 +3111,7 @@ mod tests {
                 items: items.iter().map(|id| format!("agent:{id}")).collect(),
                 path: None,
                 lead: None,
-                worktree: crate::groups::WorktreeChoice::Inherit,
+                worktree: crate::groups::WorktreeChoice::On,
             };
             crate::groups::save(&[folder(&["rep", "helper", "other-rep"])]).unwrap();
             let rep = ids(roster_for("rep", roster.clone()));

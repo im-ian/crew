@@ -972,13 +972,6 @@ fn list_nerd_fonts() -> Vec<Vec<String>> {
     crate::nerd_font::installed_nerd_faces()
 }
 
-/// Mirror the worktree switch so bots started by the daemon use the same choice.
-#[tauri::command]
-fn set_worktree(enabled: bool) -> Result<(), String> {
-    crate::paths::write_worktrees_enabled(enabled);
-    Ok(())
-}
-
 /// Mirror the name the user goes by, so a bot's next turn can call them by it.
 #[tauri::command]
 fn set_user_name(name: String) -> Result<(), String> {
@@ -1242,7 +1235,6 @@ pub fn run() -> anyhow::Result<()> {
             set_locale,
             set_notifications,
             set_lead_only_notify,
-            set_worktree,
             set_user_name,
             list_nerd_fonts,
             set_escape_layer,

@@ -216,7 +216,7 @@ mod tests {
                 items: vec!["agent:alpha".into()],
                 path: None,
                 lead: None,
-                worktree: crate::groups::WorktreeChoice::Inherit,
+                worktree: crate::groups::WorktreeChoice::On,
             }];
             crate::groups::save(&groups).unwrap();
             assert_eq!(

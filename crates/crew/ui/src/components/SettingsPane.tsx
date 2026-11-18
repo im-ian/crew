@@ -21,7 +21,6 @@ import { applyFontSize, FONT_SIZES, loadFontSize, saveFontSize, type FontSize } 
 import { loadLeadOnlyNotify, loadNotify, saveLeadOnlyNotify, saveNotify } from "../notifyPref";
 import { loadNoticeKeep, saveNoticeKeep } from "../noticeKeepPref";
 import type { NoticeKeep } from "../island";
-import { loadWorktree, saveWorktree } from "../worktreePref";
 import type { ThemePref } from "../theme";
 import type { UpdaterApi } from "../updater";
 import type { AgentInfo, RemoteInfo } from "../types";
@@ -89,7 +88,6 @@ export function SettingsPane({
     setNoticeKeep(next);
     saveNoticeKeep(next);
   }
-  const [worktree, setWorktree] = useState(loadWorktree);
   const [font, setFont] = useState(loadFont);
   const [codeFont, setCodeFont] = useState(loadCodeFont);
   const [fontSize, setFontSize] = useState(loadFontSize);
@@ -136,12 +134,6 @@ export function SettingsPane({
     // The daemon decides which bot's finish notifies, window or not.
     void api.setLeadOnlyNotify(leadOnly).catch(() => {});
   }, [leadOnly]);
-
-  useEffect(() => {
-    saveWorktree(worktree);
-    // The daemon reads this when it starts the next turn.
-    void api.setWorktree(worktree).catch(() => {});
-  }, [worktree]);
 
   const themes: { value: ThemePref; label: string }[] = [
     { value: "dark", label: t("settings.theme.dark") },
@@ -271,25 +263,6 @@ export function SettingsPane({
                 {noticeKeep === "keep"
                   ? t("settings.noticeKeep.note.keep")
                   : t("settings.noticeKeep.note.auto")}
-              </p>
-              <div className="settings-notify">
-                <label className="field" htmlFor="settings-worktree">
-                  {t("settings.worktree")}
-                </label>
-                <input
-                  id="settings-worktree"
-                  type="checkbox"
-                  role="switch"
-                  className="switch"
-                  checked={worktree}
-                  title={worktree ? t("common.on") : t("common.off")}
-                  onChange={(e) => setWorktree(e.target.checked)}
-                />
-              </div>
-              <p className="apply-note">
-                {worktree
-                  ? t("settings.worktree.note.on")
-                  : t("settings.worktree.note.off")}
               </p>
               <Field label={t("settings.botDefault")}>
                 <AiList

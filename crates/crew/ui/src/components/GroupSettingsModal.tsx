@@ -29,7 +29,7 @@ export function GroupSettingsModal({
 }: Props) {
   const t = useT();
   const [path, setPath] = useState("");
-  const [worktree, setWorktree] = useState<GroupWorktree>("app");
+  const [worktree, setWorktree] = useState<GroupWorktree>("on");
   const [memory, setMemory] = useState("");
   const [busy, setBusy] = useState(false);
   const edited = useRef(false);
@@ -39,7 +39,7 @@ export function GroupSettingsModal({
   useEffect(() => {
     if (!open || !group) return;
     setPath(group.path ?? "");
-    setWorktree(group.worktree ?? "app");
+    setWorktree(group.worktree === "off" ? "off" : "on");
     setMemory("");
     setBusy(false);
     edited.current = false;
@@ -72,7 +72,6 @@ export function GroupSettingsModal({
           <Seg
             value={worktree}
             options={[
-              { value: "app", label: t("groupSettings.worktree.app") },
               { value: "on", label: t("groupSettings.worktree.on") },
               { value: "off", label: t("groupSettings.worktree.off") },
             ]}
