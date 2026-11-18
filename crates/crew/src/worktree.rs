@@ -1,8 +1,10 @@
 //! One git worktree per bot, so bots do not edit the shared checkout together.
 //!
-//! The setting defaults off. While it is on, a bot whose folder is a git
-//! repository gets a worktree under `$CREW_HOME/worktrees` and every later
-//! turn of that bot reuses it. A folder that is not a repository stays put.
+//! A group's own choice is on or off. A new group starts on. A bot in no
+//! group follows the legacy `$CREW_HOME/worktree` file when that file exists,
+//! and is on when it does not. While the choice is on, a bot whose folder is
+//! a git repository gets a worktree under `$CREW_HOME/worktrees` and every
+//! later turn of that bot reuses it. A folder that is not a repository stays put.
 //!
 //! Bots of one repository share `$CREW_HOME/cargo-target/<repo>`. Cargo's
 //! target lock is exclusive, so two builds of the same repo wait their turn.
@@ -38,20 +40,27 @@ const BUILD_CACHE_STALE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 static SWEEP_NONCE: AtomicU64 = AtomicU64::new(0);
 
-/// A bot in `dir` edits a worktree of its own when the app setting is on and
-/// `dir` is a git repository with a commit to branch from. A group's own
-/// choice is applied in `place_for`, per bot.
+/// A bot in no group edits a worktree of its own when its choice is on and
+/// `dir` is a git repository with a commit to branch from. A clone is not in
+/// a group yet, so it uses that same rule and may share the folder only then.
 pub fn isolates(dir: &Path) -> bool {
     // Fails outside a repository too, so one call answers both.
-    paths::worktrees_enabled() && run_git(dir, &["rev-parse", "--verify", "-q", "HEAD"]).status
+    loose_enabled() && run_git(dir, &["rev-parse", "--verify", "-q", "HEAD"]).status
 }
 
-/// The app setting, unless this bot's group named `on` or `off`.
+/// The legacy app file, when it exists. A home that never wrote one is on.
+fn loose_enabled() -> bool {
+    paths::legacy_worktree_setting().unwrap_or(true)
+}
+
+/// A group's on or off wins. A group not yet copied follows the old file
+/// (missing counts as off). A bot in no group follows `loose_enabled`.
 fn enabled_for(agent_id: &str) -> bool {
     match crate::groups::folder_of(agent_id).map(|group| group.worktree) {
         Some(crate::groups::WorktreeChoice::On) => true,
         Some(crate::groups::WorktreeChoice::Off) => false,
-        _ => paths::worktrees_enabled(),
+        Some(crate::groups::WorktreeChoice::Unset) => paths::worktrees_enabled(),
+        None => loose_enabled(),
     }
 }
 
@@ -787,6 +796,8 @@ mod tests {
             assert!(!isolates(&plain));
             paths::write_worktrees_enabled(false);
             assert!(!isolates(&repo));
+            std::fs::remove_file(paths::worktree_path()).unwrap();
+            assert!(isolates(&repo), "no legacy file means a loose bot is on");
         });
     }
 
@@ -1081,7 +1092,7 @@ mod tests {
     }
 
     #[test]
-    fn a_groups_choice_overrides_the_app_setting() {
+    fn a_group_is_on_or_off_and_a_loose_bot_keeps_the_old_file() {
         if Command::new("git").arg("--version").output().is_err() {
             return;
         }
@@ -1099,22 +1110,19 @@ mod tests {
                     worktree: choice,
                 }
             };
-            use crate::groups::WorktreeChoice::{Inherit, Off, On};
+            use crate::groups::WorktreeChoice::{Off, On};
             let save = |rows: Vec<crate::groups::SidebarGroup>| {
                 crate::groups::save(&rows).unwrap();
             };
             save(vec![
                 group("on", "bot-on", On),
                 group("off", "bot-off", Off),
-                group("app", "bot-app", Inherit),
             ]);
             let uses = |bot: &str| place_for(bot, &root).isolated.is_some();
 
-            paths::write_worktrees_enabled(false);
             assert!(uses("bot-on"), "a group can turn worktrees on");
             assert!(!uses("bot-off"));
-            assert!(!uses("bot-app"), "inherit follows an app that is off");
-            assert!(!uses("bot-loose"), "a bot in no group follows the app");
+            assert!(uses("bot-loose"), "no legacy file means a loose bot is on");
 
             let made = place_for("bot-on", &root);
             let dir = made.cwd.clone();
@@ -1123,11 +1131,12 @@ mod tests {
             assert_eq!(shared, cargo_target_dir(&root));
             assert!(cargo_target_for_cwd(&root).is_none());
 
-            paths::write_worktrees_enabled(true);
+            paths::write_worktrees_enabled(false);
             assert!(uses("bot-on"));
             assert!(!uses("bot-off"), "a group can turn worktrees off");
-            assert!(uses("bot-app"), "inherit follows an app that is on");
-            assert!(uses("bot-loose"));
+            assert!(!uses("bot-loose"), "a loose bot keeps an old file that is off");
+            paths::write_worktrees_enabled(true);
+            assert!(uses("bot-loose"), "a loose bot keeps an old file that is on");
             let off = place_for("bot-off", &root);
             assert!(cargo_target_for_cwd(&off.cwd).is_none());
 

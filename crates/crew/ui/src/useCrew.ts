@@ -547,7 +547,7 @@ export function useCrew() {
       persistLayout({
         groups: [
           ...current.groups,
-          { id, name, collapsed: false, items: [] },
+          { id, name, collapsed: false, items: [], worktree: "on" },
         ],
         ungrouped: current.ungrouped,
         order: current.order,
@@ -562,7 +562,7 @@ export function useCrew() {
       persistLayout({
         groups: [
           ...stripped.groups,
-          { id, name, collapsed: false, items: [key] },
+          { id, name, collapsed: false, items: [key], worktree: "on" },
         ],
         ungrouped: stripped.ungrouped.filter((k) => k !== key),
         order: stripped.order,
@@ -599,6 +599,7 @@ export function useCrew() {
       name: uniqueGroupName(current.groups, trimmed),
       collapsed: false,
       items: [],
+      worktree: "on",
     };
     const folder = path.trim();
     if (folder) created.path = folder;
@@ -636,7 +637,7 @@ export function useCrew() {
       if each had just moved in. Clearing it leaves their folders alone. */
   async function saveGroupSettings(
     id: string,
-    fields: { path: string; memory: string; base: string; worktree: "on" | "off" | "app" },
+    fields: { path: string; memory: string; base: string; worktree: "on" | "off" },
   ): Promise<boolean> {
     const before = groupsRef.current.groups.find((g) => g.id === id);
     if (!before) return false;

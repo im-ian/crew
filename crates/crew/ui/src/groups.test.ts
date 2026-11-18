@@ -129,19 +129,18 @@ describe("setGroupWorktree", () => {
     ungrouped: ["agent:a2"],
   };
 
-  it("stores on or off and clears back to the app setting", () => {
-    expect(groupWorktree(layout.groups[0])).toBe("app");
-    const on = setGroupWorktree(layout, "g1", "on");
-    expect(on.groups[0].worktree).toBe("on");
-    expect(on.groups[1].worktree).toBeUndefined();
-    const off = setGroupWorktree(on, "g1", "off");
+  it("stores on or off, and a new choice stays on", () => {
+    expect(groupWorktree(layout.groups[0])).toBe("on");
+    const off = setGroupWorktree(layout, "g1", "off");
     expect(off.groups[0].worktree).toBe("off");
-    const cleared = setGroupWorktree(off, "g1", "app");
-    expect("worktree" in cleared.groups[0]).toBe(false);
+    expect(off.groups[1].worktree).toBeUndefined();
+    const on = setGroupWorktree(off, "g1", "on");
+    expect(on.groups[0].worktree).toBe("on");
     expect(normalizeGroups(toPersist(on)).groups[0].worktree).toBe("on");
-    expect(normalizeGroups(toPersist(cleared)).groups[0].worktree).toBeUndefined();
+    expect(normalizeGroups(toPersist(off)).groups[0].worktree).toBe("off");
     const odd = normalizeGroups([{ id: "g1", name: "g1", items: [], worktree: "later" }]);
     expect(odd.groups[0].worktree).toBeUndefined();
+    expect(groupWorktree(odd.groups[0])).toBe("on");
   });
 });
 

@@ -90,13 +90,19 @@ pub fn worktree_path() -> PathBuf {
     home_dir().join("worktree")
 }
 
-/// Bots work in their own git worktree. Off when unset, so an older install
-/// keeps editing the folder it was given.
-pub fn worktrees_enabled() -> bool {
+/// The old app-wide switch, when `$CREW_HOME/worktree` is still there.
+/// `None` on an install that never wrote one.
+pub fn legacy_worktree_setting() -> Option<bool> {
     match fs::read_to_string(worktree_path()) {
-        Ok(s) if s.trim() == "on" => true,
-        _ => false,
+        Ok(s) => Some(s.trim() == "on"),
+        Err(_) => None,
     }
+}
+
+/// What a group with no choice was following. Off when the file is missing,
+/// so the one-time copy does not turn an older install on.
+pub fn worktrees_enabled() -> bool {
+    legacy_worktree_setting().unwrap_or(false)
 }
 
 pub fn write_worktrees_enabled(on: bool) {
@@ -789,10 +795,13 @@ mod tests {
     #[test]
     fn worktrees_default_off_and_only_on_enables_them() {
         testing::with_home("worktree", || {
+            assert_eq!(legacy_worktree_setting(), None);
             assert!(!worktrees_enabled());
             write_worktrees_enabled(true);
+            assert_eq!(legacy_worktree_setting(), Some(true));
             assert!(worktrees_enabled());
             write_worktrees_enabled(false);
+            assert_eq!(legacy_worktree_setting(), Some(false));
             assert!(!worktrees_enabled());
             fs::write(worktree_path(), "on\n").unwrap();
             assert!(worktrees_enabled());

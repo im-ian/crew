@@ -18,7 +18,7 @@ export type Group = {
   /** The bot id that leads the group: still shown while it is collapsed.
       Not a router representative. */
   lead?: string;
-  /** `on` or `off` overrides the app worktree setting. Absent follows the app. */
+  /** `on` or `off`. A new group is `on`. Absent is an old group not copied yet. */
   worktree?: "on" | "off";
 };
 export type CliKind =

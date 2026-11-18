@@ -11,18 +11,19 @@ use crate::paths;
 pub const UNGROUPED_ID: &str = "__ungrouped";
 
 /// Whether bots in a group work in a git worktree.
-/// Absent on an old group, and `Inherit`, follow the app setting.
+/// `Unset` is an old group with no value yet. The first load writes `On` or
+/// `Off` from the legacy app file and does not follow that file again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WorktreeChoice {
     On,
     Off,
     #[default]
-    Inherit,
+    Unset,
 }
 
 impl WorktreeChoice {
-    fn is_inherit(&self) -> bool {
-        *self == Self::Inherit
+    fn is_unset(&self) -> bool {
+        *self == Self::Unset
     }
 }
 
@@ -31,7 +32,8 @@ impl Serialize for WorktreeChoice {
         serializer.serialize_str(match self {
             Self::On => "on",
             Self::Off => "off",
-            Self::Inherit => "inherit",
+            // Not written on a group: `is_unset` skips the field.
+            Self::Unset => "unset",
         })
     }
 }
@@ -42,7 +44,7 @@ impl<'de> Deserialize<'de> for WorktreeChoice {
         Ok(match raw.as_str() {
             "on" => Self::On,
             "off" => Self::Off,
-            _ => Self::Inherit,
+            _ => Self::Unset,
         })
     }
 }
@@ -62,13 +64,38 @@ pub struct SidebarGroup {
     /// is collapsed. Not the router "representative", which is per router.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lead: Option<String>,
-    /// `On` or `Off` wins over the app setting. `Inherit` leaves the app setting.
-    #[serde(default, skip_serializing_if = "WorktreeChoice::is_inherit")]
+    /// `On` or `Off`. `Unset` is filled in once from the legacy app file.
+    #[serde(default, skip_serializing_if = "WorktreeChoice::is_unset")]
     pub worktree: WorktreeChoice,
 }
 
 pub fn load() -> anyhow::Result<Vec<SidebarGroup>> {
-    load_from(&paths::groups_path())
+    let path = paths::groups_path();
+    let mut groups = load_from(&path)?;
+    if stamp_unset_worktrees(&mut groups) {
+        save_to(&path, &groups)?;
+    }
+    Ok(groups)
+}
+
+/// The first time a group is read with no choice, write the app setting it
+/// was following. `$CREW_HOME/worktree` of `on` is on. A missing file, or
+/// any other contents, is off. A group that already says on or off stays.
+fn stamp_unset_worktrees(groups: &mut [SidebarGroup]) -> bool {
+    let choice = if paths::worktrees_enabled() {
+        WorktreeChoice::On
+    } else {
+        WorktreeChoice::Off
+    };
+    let mut changed = false;
+    for group in groups.iter_mut() {
+        if group.id == UNGROUPED_ID || group.worktree != WorktreeChoice::Unset {
+            continue;
+        }
+        group.worktree = choice;
+        changed = true;
+    }
+    changed
 }
 
 pub fn save(groups: &[SidebarGroup]) -> anyhow::Result<()> {
@@ -146,7 +173,7 @@ pub fn add_group(
         items,
         path: None,
         lead: None,
-        worktree: WorktreeChoice::Inherit,
+        worktree: WorktreeChoice::On,
     };
     groups.push(created.clone());
     drop_stray_leads(groups);
@@ -248,7 +275,7 @@ mod tests {
             items: vec!["agent:grok".into(), "channel:room".into()],
             path: None,
             lead: None,
-            worktree: WorktreeChoice::Inherit,
+            worktree: WorktreeChoice::On,
         }];
         save_to(&path, &groups).unwrap();
         let loaded = load_from(&path).unwrap();
@@ -276,7 +303,7 @@ mod tests {
                 items: vec!["agent:a2".into()],
                 path: None,
                 lead: None,
-                worktree: WorktreeChoice::Inherit,
+                worktree: WorktreeChoice::On,
             },
             SidebarGroup {
                 id: "g1".into(),
@@ -285,7 +312,7 @@ mod tests {
                 items: vec!["agent:a1".into(), "channel:room".into()],
                 path: None,
                 lead: None,
-                worktree: WorktreeChoice::Inherit,
+                worktree: WorktreeChoice::On,
             },
         ];
         let created = add_group(
@@ -315,7 +342,7 @@ mod tests {
             items: vec![],
             path: None,
             lead: None,
-            worktree: WorktreeChoice::Inherit,
+            worktree: WorktreeChoice::On,
         }];
         assert!(add_group(&mut groups, "  ", &[], 1).is_err());
         assert_eq!(groups.len(), 1);
@@ -339,7 +366,7 @@ mod tests {
             items: vec![],
             path: Some("/tmp/app".into()),
             lead: None,
-            worktree: WorktreeChoice::Inherit,
+            worktree: WorktreeChoice::On,
         }];
         save_to(&path, &groups).unwrap();
         let loaded = load_from(&path).unwrap();
@@ -360,7 +387,7 @@ mod tests {
                 items: vec!["agent:loose".into()],
                 path: None,
                 lead: None,
-                worktree: WorktreeChoice::Inherit,
+                worktree: WorktreeChoice::On,
             },
             SidebarGroup {
                 id: "g1".into(),
@@ -369,7 +396,7 @@ mod tests {
                 items: vec!["agent:a1".into()],
                 path: Some("/tmp/app".into()),
                 lead: None,
-                worktree: WorktreeChoice::Inherit,
+                worktree: WorktreeChoice::On,
             },
         ];
         assert_eq!(group_of(&groups, "a1").map(|g| g.id.as_str()), Some("g1"));
@@ -401,7 +428,7 @@ mod tests {
                 items: vec!["agent:a1".into(), "agent:a2".into()],
                 path: None,
                 lead: Some("a2".into()),
-                worktree: WorktreeChoice::Inherit,
+                worktree: WorktreeChoice::On,
             },
             SidebarGroup {
                 id: "g2".into(),
@@ -410,7 +437,7 @@ mod tests {
                 items: vec!["agent:b1".into()],
                 path: None,
                 lead: Some("gone".into()),
-                worktree: WorktreeChoice::Inherit,
+                worktree: WorktreeChoice::On,
             },
         ];
         save_to(&path, &groups).unwrap();
@@ -432,7 +459,7 @@ mod tests {
             items: items.iter().map(|b| format!("agent:{b}")).collect(),
             path: None,
             lead: lead.map(Into::into),
-            worktree: WorktreeChoice::Inherit,
+            worktree: WorktreeChoice::On,
         };
         let groups = vec![
             group("g1", &["a1", "a2"], Some("a2")),
@@ -447,57 +474,51 @@ mod tests {
     }
 
     #[test]
-    fn worktree_choice_follows_the_app_until_a_group_says_otherwise() {
+    fn an_unset_group_copies_the_old_app_setting_once() {
         let plain: Vec<SidebarGroup> =
             serde_json::from_str(r#"[{"id":"g1","name":"개인"}]"#).unwrap();
-        assert_eq!(plain[0].worktree, WorktreeChoice::Inherit);
+        assert_eq!(plain[0].worktree, WorktreeChoice::Unset);
         let unknown: Vec<SidebarGroup> =
             serde_json::from_str(r#"[{"id":"g1","name":"개인","worktree":"later"}]"#).unwrap();
-        assert_eq!(unknown[0].worktree, WorktreeChoice::Inherit);
+        assert_eq!(unknown[0].worktree, WorktreeChoice::Unset);
 
-        let dir = std::env::temp_dir().join(format!("crew-groups-wt-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("groups.json");
-        let groups = vec![
-            SidebarGroup {
-                id: "on".into(),
-                name: "on".into(),
-                collapsed: false,
-                items: vec![],
-                path: None,
-                lead: None,
-                worktree: WorktreeChoice::On,
-            },
-            SidebarGroup {
-                id: "off".into(),
-                name: "off".into(),
-                collapsed: false,
-                items: vec![],
-                path: None,
-                lead: None,
-                worktree: WorktreeChoice::Off,
-            },
-            SidebarGroup {
-                id: "app".into(),
-                name: "app".into(),
-                collapsed: false,
-                items: vec![],
-                path: None,
-                lead: None,
-                worktree: WorktreeChoice::Inherit,
-            },
-        ];
-        save_to(&path, &groups).unwrap();
-        let loaded = load_from(&path).unwrap();
-        assert_eq!(loaded[0].worktree, WorktreeChoice::On);
-        assert_eq!(loaded[1].worktree, WorktreeChoice::Off);
-        assert_eq!(loaded[2].worktree, WorktreeChoice::Inherit);
-        let raw = fs::read_to_string(&path).unwrap();
-        assert!(raw.contains("\"worktree\": \"on\""));
-        assert!(raw.contains("\"worktree\": \"off\""));
-        assert!(!raw.contains("inherit"));
-        let _ = fs::remove_file(&path);
-        let _ = fs::remove_dir(&dir);
+        crate::paths::testing::with_home("wt-migrate", || {
+            let path = crate::paths::groups_path();
+            let write = |body: &str| fs::write(&path, body).unwrap();
+            let has = |want: &str| {
+                let raw = fs::read_to_string(&path).unwrap();
+                assert!(raw.contains(&format!("\"worktree\": \"{want}\"")), "{raw}");
+                assert!(!raw.contains("unset"), "{raw}");
+            };
+
+            write(
+                r#"[{"id":"__ungrouped","name":"","items":["agent:loose"]},{"id":"g1","name":"개인"},{"id":"kept","name":"유지","worktree":"off"}]"#,
+            );
+            crate::paths::write_worktrees_enabled(true);
+            let loaded = load().unwrap();
+            assert_eq!(loaded[0].worktree, WorktreeChoice::Unset, "loose rows are not a group");
+            assert_eq!(loaded[1].worktree, WorktreeChoice::On);
+            assert_eq!(loaded[2].worktree, WorktreeChoice::Off, "a set group stays");
+            has("on");
+            crate::paths::write_worktrees_enabled(false);
+            assert_eq!(load().unwrap()[1].worktree, WorktreeChoice::On, "already copied");
+
+            write(r#"[{"id":"g1","name":"개인"}]"#);
+            assert_eq!(load().unwrap()[0].worktree, WorktreeChoice::Off);
+            has("off");
+
+            write(r#"[{"id":"g1","name":"개인"}]"#);
+            fs::remove_file(crate::paths::worktree_path()).unwrap();
+            assert_eq!(load().unwrap()[0].worktree, WorktreeChoice::Off, "no file is off");
+            has("off");
+        });
+    }
+
+    #[test]
+    fn a_new_group_starts_with_worktrees_on() {
+        let mut groups = Vec::new();
+        let created = add_group(&mut groups, "새", &[], 1).unwrap();
+        assert_eq!(created.worktree, WorktreeChoice::On);
     }
 
     #[test]
@@ -516,7 +537,7 @@ mod tests {
             items: vec!["agent:a1".into(), "agent:a2".into()],
             path: None,
             lead: Some("a1".into()),
-            worktree: WorktreeChoice::Inherit,
+            worktree: WorktreeChoice::On,
         }];
         add_group(&mut groups, "새", &["a1".into()], 1).unwrap();
         assert_eq!(groups[0].lead, None);

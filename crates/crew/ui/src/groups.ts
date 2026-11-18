@@ -83,15 +83,14 @@ export function groupCwd(
   return path || null;
 }
 
-export type GroupWorktree = "on" | "off" | "app";
+export type GroupWorktree = "on" | "off";
 
-/** How this group separates working folders. `app` follows the app setting. */
+/** How this group separates working folders. A group with no value yet reads as on. */
 export function groupWorktree(group: Group | null | undefined): GroupWorktree {
-  const choice = group?.worktree;
-  return choice === "on" || choice === "off" ? choice : "app";
+  return group?.worktree === "off" ? "off" : "on";
 }
 
-/** Set whether a group's bots use a worktree. `app` clears the group's choice. */
+/** Set whether a group's bots use a worktree. */
 export function setGroupWorktree(
   layout: RailLayout,
   id: string,
@@ -100,9 +99,7 @@ export function setGroupWorktree(
   return {
     groups: layout.groups.map((g) => {
       if (g.id !== id) return g;
-      if (choice === "on" || choice === "off") return { ...g, worktree: choice };
-      const { worktree: _gone, ...rest } = g;
-      return rest;
+      return { ...g, worktree: choice };
     }),
     ungrouped: layout.ungrouped,
     ...(layout.order ? { order: layout.order } : {}),

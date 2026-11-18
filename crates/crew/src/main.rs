@@ -1722,7 +1722,7 @@ mod tests {
                 items: vec!["agent:review".into()],
                 path: None,
                 lead: None,
-                worktree: crate::groups::WorktreeChoice::Inherit,
+                worktree: crate::groups::WorktreeChoice::On,
             }])
             .unwrap();
             let append = |text: &str| GroupMemoryCmd::Append {
