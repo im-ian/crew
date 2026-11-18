@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { CloneParts } from "./cloneParts";
 import type { PathKind } from "./dropAttach";
 import type {
   AgentInfo,
@@ -167,8 +168,9 @@ export const api = {
       unsetCwd: false,
     }),
   pickFolder: () => invoke<string | null>("pick_folder"),
-  cloneAgent: (id: string, name: string | null = null) =>
-    invoke<string>("clone_agent", { id, name }),
+  /** Without `parts` the daemon clones as it always did. */
+  cloneAgent: (id: string, name: string | null = null, parts: CloneParts | null = null) =>
+    invoke<string>("clone_agent", { id, name, parts }),
   removeAgent: (id: string) => invoke<void>("remove_agent", { id }),
   setAvatar: (id: string, data: string, name?: string | null) =>
     invoke<void>("set_avatar", { id, data, name: name ?? null }),

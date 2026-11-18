@@ -19,6 +19,7 @@ import {
 } from "./sendGate";
 import { randomFace } from "./avatar";
 import { freeBotName, loadBotDefault } from "./botDefault";
+import { canCarryChat, partsOf, type ClonePick } from "./cloneParts";
 import { openPendingOnFocus } from "./focusChat";
 import { useT } from "./LocaleContext";
 import { loadLastChat, pickOpenAgent, saveLastChat } from "./lastChat";
@@ -110,6 +111,8 @@ export function useCrew() {
   const [newBotOpen, setNewBotOpen] = useState(false);
   const [newBotPlace, setNewBotPlace] = useState<string | null>(null);
   const [newGroupOpen, setNewGroupOpen] = useState(false);
+  /** The bot the duplicate dialog is open for. */
+  const [cloneId, setCloneId] = useState<string | null>(null);
   const [remoteAddOpen, setRemoteAddOpen] = useState(false);
   const { remotes, refreshRemotes } = useRemotes();
   const [groupSettingsId, setGroupSettingsId] = useState<string | null>(null);
@@ -141,6 +144,8 @@ export function useCrew() {
   paneOpenRef.current = paneOpen;
   const newGroupOpenRef = useRef(newGroupOpen);
   newGroupOpenRef.current = newGroupOpen;
+  const cloneIdRef = useRef(cloneId);
+  cloneIdRef.current = cloneId;
   const remoteAddOpenRef = useRef(remoteAddOpen);
   remoteAddOpenRef.current = remoteAddOpen;
   const groupSettingsRef = useRef(groupSettingsId);
@@ -1156,11 +1161,22 @@ export function useCrew() {
     }
   }
 
-  async function cloneBot(id: string) {
+  function openClone(id: string) {
+    setCloneId(id);
+  }
+
+  function closeClone() {
+    setCloneId(null);
+  }
+
+  async function cloneBot(id: string, name: string, pick: ClonePick) {
+    setCloneId(null);
+    const source = agentsRef.current.find((a) => a.id === id);
+    const parts = partsOf(pick, !!source && canCarryChat(source));
     try {
-      const newId = await api.cloneAgent(id, null);
-      // Read before the list refresh: the copy lands in the original's group,
-      // right after it.
+      const newId = await api.cloneAgent(id, name, parts);
+      // Read before the list refresh: when asked, the copy lands in the
+      // original's group, right after it.
       const fromGroup = groupsRef.current.groups.find((g) =>
         g.items.includes(itemKey("agent", id)),
       );
@@ -1173,7 +1189,11 @@ export function useCrew() {
       closePane();
       focusComposer();
       await refreshList();
-      if (fromGroup && groupsRef.current.groups.some((g) => g.id === fromGroup.id)) {
+      if (
+        pick.group &&
+        fromGroup &&
+        groupsRef.current.groups.some((g) => g.id === fromGroup.id)
+      ) {
         moveToGroup("agent", newId, fromGroup.id, after);
       }
       await refreshMessages();
@@ -1503,6 +1523,11 @@ export function useCrew() {
         setNewGroupOpen(false);
         return;
       }
+      if (cloneIdRef.current) {
+        e.preventDefault();
+        setCloneId(null);
+        return;
+      }
       if (remoteAddOpenRef.current) {
         e.preventDefault();
         setRemoteAddOpen(false);
@@ -1686,6 +1711,9 @@ export function useCrew() {
     loadGroupMemory,
     saveGroupSettings,
     cloneBot,
+    cloneId,
+    openClone,
+    closeClone,
     showCtx,
     showCreateMenu,
     showSplitMenu,
