@@ -80,7 +80,7 @@ export function SettingsPane({
   onAddRemote,
 }: Props) {
   const t = useT();
-  const { locale, setLocale } = useLocale();
+  const { locale, setLocale, userName, setUserName } = useLocale();
   const [notify, setNotify] = useState(loadNotify);
   const [leadOnly, setLeadOnly] = useState(loadLeadOnlyNotify);
   const [noticeKeep, setNoticeKeep] = useState(loadNoticeKeep);
@@ -302,6 +302,19 @@ export function SettingsPane({
             </div>
           ) : section === "display" ? (
             <div className="form-stack">
+              <Field label={t("settings.userName")} htmlFor="settings-user-name">
+                <input
+                  id="settings-user-name"
+                  className="textin"
+                  placeholder={t("settings.userName.placeholder")}
+                  autoComplete="off"
+                  spellCheck={false}
+                  maxLength={80}
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                />
+              </Field>
+              <p className="apply-note">{t("settings.userName.note")}</p>
               <Field label={t("settings.appearance")}>
                 <Seg value={theme} options={themes} onChange={onTheme} />
               </Field>

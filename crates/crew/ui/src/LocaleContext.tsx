@@ -11,17 +11,19 @@ import { api } from "./api";
 import {
   applyLocale,
   loadLocale,
+  makeT,
   saveLocale,
-  translate,
   type Locale,
-  type MessageKey,
   type TFn,
-  type Vars,
 } from "./i18n";
+import { cleanUserName, loadUserName, saveUserName } from "./userName";
 
 type LocaleCtx = {
   locale: Locale;
   setLocale: (locale: Locale) => void;
+  /** The name field as typed. Empty means "나" / "You". */
+  userName: string;
+  setUserName: (name: string) => void;
   t: TFn;
 };
 
@@ -38,18 +40,31 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     void api.setLocale(locale).catch(() => {});
   }, [locale]);
 
-  const t = useCallback<TFn>(
-    (key: MessageKey, vars?: Vars) => translate(locale, key, vars),
-    [locale],
-  );
+  const [userName, setUserNameState] = useState(loadUserName);
+  const name = cleanUserName(userName);
+
+  useEffect(() => {
+    saveUserName(userName);
+  }, [userName]);
+
+  useEffect(() => {
+    // Bots read it from the daemon, so their next turn can call the user by it.
+    void api.setUserName(name).catch(() => {});
+  }, [name]);
+
+  const t = useMemo<TFn>(() => makeT(locale, name), [locale, name]);
 
   const setLocale = useCallback((next: Locale) => {
     setLocaleState(next);
   }, []);
 
+  const setUserName = useCallback((next: string) => {
+    setUserNameState(next);
+  }, []);
+
   const value = useMemo(
-    () => ({ locale, setLocale, t }),
-    [locale, setLocale, t],
+    () => ({ locale, setLocale, userName, setUserName, t }),
+    [locale, setLocale, userName, setUserName, t],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

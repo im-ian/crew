@@ -960,6 +960,13 @@ fn set_worktree(enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Mirror the name the user goes by, so a bot's next turn can call them by it.
+#[tauri::command]
+fn set_user_name(name: String) -> Result<(), String> {
+    crate::paths::write_user_name(&name);
+    Ok(())
+}
+
 /// An open sheet, preview, or menu is using Escape. macOS then keeps fullscreen.
 #[tauri::command]
 fn set_escape_layer(open: bool) {
@@ -1214,6 +1221,7 @@ pub fn run() -> anyhow::Result<()> {
             set_notifications,
             set_lead_only_notify,
             set_worktree,
+            set_user_name,
             list_nerd_fonts,
             set_escape_layer,
             remote_probe,

@@ -215,6 +215,8 @@ export const api = {
   setLeadOnlyNotify: (enabled: boolean) =>
     invoke<void>("set_lead_only_notify", { enabled }),
   setWorktree: (enabled: boolean) => invoke<void>("set_worktree", { enabled }),
+  /** Empty clears it, so bots go back to "the user". */
+  setUserName: (name: string) => invoke<void>("set_user_name", { name }),
   /** Installed Nerd Fonts. Each entry is the `local()` names of one family. */
   listNerdFonts: () => invoke<string[][]>("list_nerd_fonts"),
   setEscapeLayer: (open: boolean) => invoke<void>("set_escape_layer", { open }),

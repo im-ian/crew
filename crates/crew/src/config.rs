@@ -1254,6 +1254,7 @@ pub fn team_rules_for(
     s.push_str(
         "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew system]` / `[crew handoff from:…]` / `[crew reply:…]` are real messages. A `[crew reply:…]` line is the user answering an earlier message; the next line is the quote, then their new text. A handoff is a teammate's finished reply; do not crew tell them that same text back. A `[crew fyi from:…]` is a note a teammate passed on: read it and keep it in mind, but do not answer it or crew tell about it.\n",
     );
+    s.push_str(&user_name_line(crate::paths::user_name().as_deref()));
     s.push_str(&format!(
         "To ask the human user in this chat to pick, actually run `crew ask --question \"어느 쪽을 고를래?\" --option A --option B --option C`; add `--multi` when they may pick more than one. A yes/no question to the user (머지할까요? 푸시할까요?) is a pick too: when your reply would end with one, run `crew ask --question \"머지할까요?\" --option 네 --option 아니요` instead of writing it in the reply; only a card tells Crew you are waiting for an answer. To ask them to type a value, run `crew ask --question \"로그인\" --input 아이디 --input 비밀번호`. The card must make sense on its own. Before you run `crew ask`, say in your reply, in one or two sentences, what is being decided and why. If you were asked to do something and are asking instead, first say what stopped you: what you found, what blocks you, or a cost or risk bigger than expected. If you add an option the user did not ask for, such as leaving it as it is or not doing it, say why it is there. Say this in your reply, and keep the gist in `--hint` so the card alone shows why you ask. Put the background in `--hint` (what the problem is, what the pick changes), and write each option as `\"label: what it leads to\"` (`crew ask -q \"입력칸의 AI 멘션 표시는?\" --hint \"요청대로 칩으로 바꾸려면 입력칸 편집기를 갈아야 해서 하루쯤 걸려요. 색만 바꾸는 방법이 있고, 지금도 멘션은 잘 보내져서 그대로 두기도 넣었어요.\" -o \"그대로 두기: 손댈 것 없음, 계속 놓칠 수 있음\" -o \"가볍게: 색만 바꿈, 금방 끝남\" -o \"제대로: 칩으로 바꿈, 하루쯤 걸림\"`). A plain yes/no question can skip the hint and the option notes. When you need the user to decide more than one thing, do not list the questions in your reply for them to answer one by one: repeat `--question` in one `crew ask`, and each `--option`, `--input`, `--hint`, and `--multi` belongs to the `--question` before it (`crew ask -q \"머지할까요?\" -o 네 -o 아니요 -q \"#125는?\" -o \"이대로 머지\" -o \"규칙 추정\"`). They answer them all on one card. Crew shows a card and prints their answer. `crew ask` waits up to {ask_minutes} minutes; if your shell tool lets you set a time limit on the command, give it more than that; `crew ask` itself has no timeout flag. If it ends without an answer, or your CLI stops it, the card is still open: the answer comes to you later as a message, so do not ask again and do not tell the user the card closed. Never send this to a teammate. Do not crew tell the options. Do not ask the user to type the letter. This is not a substitute for `crew tell`, `crew agent set`, or `crew routine add`.\n",
         ask_minutes = crate::client::ASK_WAIT.as_secs() / 60
@@ -1275,6 +1276,15 @@ pub fn team_rules_for(
 }
 
 const MEMORY_HEADING: &str = "# Your memory";
+
+/// What the user set in Settings › Display as their name, as a line of the
+/// instructions. Empty when unset, so the instructions stay as they were.
+pub fn user_name_line(name: Option<&str>) -> String {
+    match name {
+        Some(name) => format!("The human user goes by {name}. You may call them that.\n"),
+        None => String::new(),
+    }
+}
 
 /// The other bots as `id — name`, in id order, or `(none)` when this bot is
 /// alone. A bot in a `folder` with others sees that group first and the rest
@@ -1399,8 +1409,11 @@ pub fn shared_memory_note(
     notes: &str,
     folder: Option<&crate::groups::SidebarGroup>,
 ) -> String {
+    // The session keeps the instructions it started with, so a name set
+    // later reaches the bot here.
     format!(
-        "[crew system] Shared memory. This is current and replaces the teammate list and your name in your instructions. Do not answer this note.\n{}",
+        "[crew system] Shared memory. This is current and replaces the teammate list and your name in your instructions. Do not answer this note.\n{}{}",
+        user_name_line(crate::paths::user_name().as_deref()),
         shared_memory_body(Some(agent), roster, notes, folder)
     )
 }
@@ -3601,6 +3614,33 @@ mod tests {
         assert!(rules.contains("Do not cd to the shared checkout"));
         let plain = team_rules(&alpha, &[alpha.clone()]);
         assert!(!plain.contains("Worktree mode"));
+    }
+
+    /// The name set in Settings reaches the bot's instructions and, since a
+    /// resumed session keeps the instructions it started with, the shared
+    /// memory note too. Unset, neither says anything about it.
+    #[test]
+    fn the_user_name_is_one_line_when_set_and_absent_when_not() {
+        crate::paths::testing::with_home("username-rules", || {
+            let alpha =
+                AgentConfig::new("alpha".into(), "Alpha".into(), vec!["claude".into()], None);
+            let roster = [alpha.clone()];
+            let rules = team_rules(&alpha, &roster);
+            let note = shared_memory_note(&alpha, &roster, "", None);
+            assert!(!rules.contains("goes by"));
+            assert!(!note.contains("goes by"));
+
+            crate::paths::write_user_name("대호");
+            let line = "The human user goes by 대호. You may call them that.\n";
+            assert_eq!(team_rules(&alpha, &roster).matches(line).count(), 1);
+            let named = shared_memory_note(&alpha, &roster, "", None);
+            assert!(named.contains(&format!("Do not answer this note.\n{line}You are `alpha`")));
+            assert_ne!(named, note, "a new name makes the note new, so it is sent again");
+
+            crate::paths::write_user_name("");
+            assert_eq!(team_rules(&alpha, &roster), rules);
+            assert_eq!(shared_memory_note(&alpha, &roster, "", None), note);
+        });
     }
 
     /// Several independent jobs in one message go to the CLI's own subagents,

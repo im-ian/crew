@@ -513,6 +513,12 @@
           "markdownDescription": "Enables the set_routine_enabled command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_user_name command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-user-name",
+          "markdownDescription": "Enables the set_user_name command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_worktree command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-worktree",
@@ -883,6 +889,12 @@
           "type": "string",
           "const": "deny-set-routine-enabled",
           "markdownDescription": "Denies the set_routine_enabled command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_user_name command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-user-name",
+          "markdownDescription": "Denies the set_user_name command without any pre-configured scope."
         },
         {
           "description": "Denies the set_worktree command without any pre-configured scope.",

@@ -59,6 +59,7 @@ fn main() {
             "set_notifications",
             "set_lead_only_notify",
             "set_worktree",
+            "set_user_name",
             "list_nerd_fonts",
             "set_escape_layer",
             "remote_probe",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { stepQueuePick, waitingEdit, waitingIds } from "./queuePick";
-import type { TFn } from "./i18n";
+import { makeT, type TFn } from "./i18n";
 
 const ids = ["a", "b", "c"];
 
@@ -48,6 +48,12 @@ describe("waitingEdit", () => {
       body: "고친 문장",
       reply: { id: "m1", from: "bot-a", who: "에이", text: "앞서 한 말" },
     });
+  });
+
+  it("names the user's own quoted line by the name they set", () => {
+    const text = "[crew reply:m2 from:user]\n내가 한 말\n\n고친 문장";
+    expect(waitingEdit(text, [], makeT("ko")).reply?.who).toBe("나");
+    expect(waitingEdit(text, [], makeT("ko", "대호")).reply?.who).toBe("대호");
   });
 
   it("leaves a line with no quote as its own text", () => {

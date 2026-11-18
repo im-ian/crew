@@ -104,6 +104,44 @@ pub fn write_worktrees_enabled(on: bool) {
     let _ = fs::write(worktree_path(), if on { "on" } else { "off" });
 }
 
+pub fn user_name_path() -> PathBuf {
+    home_dir().join("user-name")
+}
+
+/// Longest name kept, in characters. A name is a word or two, not a note.
+const USER_NAME_MAX: usize = 40;
+
+/// What the user is called, as one trimmed line, or `None` when unset.
+pub fn clean_user_name(name: &str) -> Option<String> {
+    let line = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    let line: String = line
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(USER_NAME_MAX)
+        .collect();
+    let line = line.trim();
+    (!line.is_empty()).then(|| line.to_string())
+}
+
+/// The name the user set in Settings › Display. The desktop app mirrors it
+/// here so a bot's instructions can call the user by it. `None` when unset.
+pub fn user_name() -> Option<String> {
+    clean_user_name(&fs::read_to_string(user_name_path()).ok()?)
+}
+
+/// An empty name removes the file, so bots go back to "the user".
+pub fn write_user_name(name: &str) {
+    match clean_user_name(name) {
+        Some(name) => {
+            let _ = fs::create_dir_all(home_dir());
+            let _ = fs::write(user_name_path(), name);
+        }
+        None => {
+            let _ = fs::remove_file(user_name_path());
+        }
+    }
+}
+
 pub fn pid_path() -> PathBuf {
     home_dir().join("crew.pid")
 }
@@ -699,6 +737,22 @@ mod tests {
             );
             fs::write(locale_path(), "en").unwrap();
             assert_eq!(locale(), "en");
+        });
+    }
+
+    #[test]
+    fn user_name_is_one_trimmed_line_and_empty_removes_it() {
+        testing::with_home("username", || {
+            assert_eq!(user_name(), None);
+            write_user_name("  대호 \n");
+            assert_eq!(user_name().as_deref(), Some("대호"));
+            write_user_name("Dae\nHo\t Im");
+            assert_eq!(user_name().as_deref(), Some("Dae Ho Im"));
+            write_user_name(&"가".repeat(100));
+            assert_eq!(user_name().map(|n| n.chars().count()), Some(USER_NAME_MAX));
+            write_user_name("   ");
+            assert_eq!(user_name(), None);
+            assert!(!user_name_path().exists(), "an empty name leaves no file");
         });
     }
 
