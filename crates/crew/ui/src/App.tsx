@@ -93,6 +93,7 @@ import {
   type SplitDir,
 } from "./split";
 import { usePaneMessages } from "./usePaneMessages";
+import { EDGE_PX, installLongPress, railSwipe, useMobile, watchViewport } from "./mobile";
 import type { AgentInfo } from "./types";
 
 export function App() {
@@ -100,6 +101,45 @@ export function App() {
   const crew = useCrew();
   const crewRef = useRef(crew);
   crewRef.current = crew;
+  // A phone: the rail is a drawer over the chat, and a chosen chat shuts it.
+  const mobile = useMobile();
+  const [railOpen, setRailOpen] = useState(false);
+  const railOpenRef = useRef(railOpen);
+  railOpenRef.current = railOpen;
+  useEffect(() => {
+    if (mobile) setRailOpen(!crew.selected);
+  }, [mobile, crew.selected]);
+  useEffect(() => {
+    if (!mobile) return;
+    const unwatch = watchViewport();
+    const unpress = installLongPress();
+    // A swipe right from the left edge opens the rail; left on it shuts it.
+    let swipe: { kind: "open" | "close"; x: number; y: number } | null = null;
+    const onStart = (e: TouchEvent) => {
+      const t = e.touches[0];
+      swipe = null;
+      if (!t || e.touches.length !== 1) return;
+      const onRail = e.target instanceof Element && !!e.target.closest(".app > aside");
+      if (railOpenRef.current && onRail) swipe = { kind: "close", x: t.clientX, y: t.clientY };
+      else if (!railOpenRef.current && t.clientX <= EDGE_PX) swipe = { kind: "open", x: t.clientX, y: t.clientY };
+    };
+    const onEnd = (e: TouchEvent) => {
+      const t = e.changedTouches[0];
+      if (!swipe || !t) return;
+      if (railSwipe(swipe.kind, t.clientX - swipe.x, t.clientY - swipe.y)) {
+        setRailOpen(swipe.kind === "open");
+      }
+      swipe = null;
+    };
+    document.addEventListener("touchstart", onStart, { passive: true });
+    document.addEventListener("touchend", onEnd, { passive: true });
+    return () => {
+      unwatch();
+      unpress();
+      document.removeEventListener("touchstart", onStart);
+      document.removeEventListener("touchend", onEnd);
+    };
+  }, [mobile]);
   const [renameId, setRenameId] = useState<string | null>(null);
   const [drafting, setDrafting] = useState<string[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -180,7 +220,11 @@ export function App() {
   const [split, setSplit] = useState<Split | null>(null);
   const openId = crew.selectedKind === "agent" ? crew.selected : null;
   // What the effect below is about to store, so no frame shows the old half.
-  const view = useMemo(() => placeOpen(split, openId), [split, openId]);
+  // A phone has room for one chat: the split stays stored, not shown.
+  const view = useMemo(
+    () => (mobile ? null : placeOpen(split, openId)),
+    [split, openId, mobile],
+  );
   const viewRef = useRef(view);
   viewRef.current = view;
   useEffect(() => {
@@ -774,6 +818,7 @@ export function App() {
           onRenameAgent={(id, name) => void crew.renameAgent(id, name)}
           onSelectAgent={(id) => crew.selectAgent(id)}
           onClose={onClose}
+          onOpenRail={mobile ? () => setRailOpen(true) : undefined}
         />
         <ChatThread
           messages={liveRows ?? rows ?? crew.messages}
@@ -831,7 +876,10 @@ export function App() {
   }
 
   const app = (
-    <div className="app">
+    <div className={mobile && railOpen ? "app rail-open" : "app"}>
+      {mobile ? (
+        <div className="rail-scrim" aria-hidden="true" onClick={() => setRailOpen(false)} />
+      ) : null}
       <Sidebar
         agents={crew.agents}
         remotes={crew.remotes}
@@ -851,7 +899,7 @@ export function App() {
         onSearchHit={crew.openSearchHit}
         onSelectAgent={crew.selectAgent}
         onCreateMenu={crew.showCreateMenu}
-        onSplitMenu={crew.showSplitMenu}
+        onSplitMenu={mobile ? undefined : crew.showSplitMenu}
         splitDir={view?.dir ?? null}
         splitShown={splitShown}
         onChatDrag={onChatDrag}
@@ -877,6 +925,7 @@ export function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenTemplates={() => setTemplatesOpen(true)}
         templatesOpen={templatesOpen}
+        drawer={mobile}
       />
       <main
         ref={mainRef}

@@ -431,6 +431,8 @@ type Props = {
   onOpenTemplates?: () => void;
   /** The templates window is up: its button shows pressed. */
   templatesOpen?: boolean;
+  /** Drawn as a phone's drawer: never folded, never dragged wider. */
+  drawer?: boolean;
 };
 
 function matches(parts: Array<string | null | undefined>, query: string): boolean {
@@ -508,6 +510,7 @@ export function Sidebar({
   onOpenSettings,
   onOpenTemplates,
   templatesOpen = false,
+  drawer = false,
 }: Props) {
   const t = useT();
   const { locale } = useLocale();
@@ -613,7 +616,9 @@ export function Sidebar({
   }
 
   // Folding keeps the open width, so opening the rail again lands where it was.
-  const [folded, setFoldedState] = useState(loadFolded);
+  const [foldedPref, setFoldedState] = useState(loadFolded);
+  // A drawer on a phone is always open wide; the fold is kept for the desktop.
+  const folded = foldedPref && !drawer;
   const [preferredRail, setPreferredRail] = useState(loadRail);
   const [viewW, setViewW] = useState(() => window.innerWidth);
   const railW = clampRail(preferredRail, viewW);
@@ -861,6 +866,8 @@ export function Sidebar({
     locate: (x: number, y: number) => RailDrop | null,
   ) {
     if (e.button !== 0 || searching) return;
+    // A finger on the rail scrolls it; rows are moved with a mouse.
+    if (e.pointerType === "touch") return;
     // A press on the label hits the text node, which has no closest().
     const hit = e.target instanceof Element ? e.target : e.currentTarget;
     if (hit.closest("input, textarea, a")) return;

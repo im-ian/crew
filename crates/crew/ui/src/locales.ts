@@ -257,6 +257,7 @@ export const KO = {
 
   "header.pickChat": "대화를 선택하세요",
   "header.botInfo": "봇 정보 ⌘I",
+  "header.openRail": "대화 목록",
   "header.statusWorking": "작업 중",
   "header.statusWatching": "감시 중 · {minutes}분째",
   "header.statusWatchingNew": "감시 중",
@@ -883,6 +884,7 @@ export const EN: { [K in MessageKey]: string } = {
 
   "header.pickChat": "Select a chat",
   "header.botInfo": "Bot info ⌘I",
+  "header.openRail": "Chats",
   "header.statusWorking": "Working",
   "header.statusWatching": "Watching · {minutes} min",
   "header.statusWatchingNew": "Watching",
