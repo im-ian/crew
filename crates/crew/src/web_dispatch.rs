@@ -282,6 +282,13 @@ pub fn dispatch(name: &str, args: Value) -> Option<Result<Value, String>> {
             let name: String = arg(&args, "name")?;
             ok(crate::desktop::set_user_name(name)?)
         }
+        "set_display_prefs" => {
+            let prefs: crate::paths::DisplayPrefs = arg(&args, "prefs")?;
+            ok(crate::desktop::set_display_prefs(prefs)?)
+        }
+        "get_display_prefs" => {
+            ok(crate::desktop::get_display_prefs()?)
+        }
         "list_nerd_fonts" => {
             ok(crate::desktop::list_nerd_fonts())
         }
@@ -385,6 +392,8 @@ pub const NAMES: &[&str] = &[
     "set_notifications",
     "set_lead_only_notify",
     "set_user_name",
+    "set_display_prefs",
+    "get_display_prefs",
     "list_nerd_fonts",
     "remote_probe",
     "remote_join",
