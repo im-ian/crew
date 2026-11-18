@@ -38,11 +38,21 @@ const BUILD_CACHE_STALE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 static SWEEP_NONCE: AtomicU64 = AtomicU64::new(0);
 
-/// A bot in `dir` edits a worktree of its own: worktrees are on and `dir` is
-/// in a git repository with a commit to branch from.
+/// A bot in `dir` edits a worktree of its own when the app setting is on and
+/// `dir` is a git repository with a commit to branch from. A group's own
+/// choice is applied in `place_for`, per bot.
 pub fn isolates(dir: &Path) -> bool {
     // Fails outside a repository too, so one call answers both.
     paths::worktrees_enabled() && run_git(dir, &["rev-parse", "--verify", "-q", "HEAD"]).status
+}
+
+/// The app setting, unless this bot's group named `on` or `off`.
+fn enabled_for(agent_id: &str) -> bool {
+    match crate::groups::folder_of(agent_id).map(|group| group.worktree) {
+        Some(crate::groups::WorktreeChoice::On) => true,
+        Some(crate::groups::WorktreeChoice::Off) => false,
+        _ => paths::worktrees_enabled(),
+    }
 }
 
 /// Where this turn actually runs, and the shared checkout when that place is a worktree.
@@ -58,9 +68,11 @@ pub struct Place {
 }
 
 /// The directory a bot's process should start in.
+/// Read at the start of a turn. A change while a turn is running waits
+/// until the next one, and turning it off leaves a worktree that exists.
 pub fn place_for(agent_id: &str, base: &Path) -> Place {
     let cwd = base.to_path_buf();
-    if !paths::worktrees_enabled() {
+    if !enabled_for(agent_id) {
         return Place {
             cwd,
             isolated: None,
@@ -1065,6 +1077,81 @@ mod tests {
 
             let _ = std::fs::remove_dir_all(&kept);
             let _ = std::fs::remove_dir_all(&other);
+        });
+    }
+
+    #[test]
+    fn a_groups_choice_overrides_the_app_setting() {
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        paths::testing::with_home("wt-group", || {
+            let _env = PutBack(restore_cargo_env());
+            let root = temp_repo("group");
+            let group = |id: &str, bot: &str, choice: crate::groups::WorktreeChoice| {
+                crate::groups::SidebarGroup {
+                    id: id.into(),
+                    name: id.into(),
+                    collapsed: false,
+                    items: vec![format!("agent:{bot}")],
+                    path: None,
+                    lead: None,
+                    worktree: choice,
+                }
+            };
+            use crate::groups::WorktreeChoice::{Inherit, Off, On};
+            let save = |rows: Vec<crate::groups::SidebarGroup>| {
+                crate::groups::save(&rows).unwrap();
+            };
+            save(vec![
+                group("on", "bot-on", On),
+                group("off", "bot-off", Off),
+                group("app", "bot-app", Inherit),
+            ]);
+            let uses = |bot: &str| place_for(bot, &root).isolated.is_some();
+
+            paths::write_worktrees_enabled(false);
+            assert!(uses("bot-on"), "a group can turn worktrees on");
+            assert!(!uses("bot-off"));
+            assert!(!uses("bot-app"), "inherit follows an app that is off");
+            assert!(!uses("bot-loose"), "a bot in no group follows the app");
+
+            let made = place_for("bot-on", &root);
+            let dir = made.cwd.clone();
+            std::fs::write(dir.join("keep.txt"), "mine\n").unwrap();
+            let shared = cargo_target_for_cwd(&dir).expect("a worktree shares a cargo target");
+            assert_eq!(shared, cargo_target_dir(&root));
+            assert!(cargo_target_for_cwd(&root).is_none());
+
+            paths::write_worktrees_enabled(true);
+            assert!(uses("bot-on"));
+            assert!(!uses("bot-off"), "a group can turn worktrees off");
+            assert!(uses("bot-app"), "inherit follows an app that is on");
+            assert!(uses("bot-loose"));
+            let off = place_for("bot-off", &root);
+            assert!(cargo_target_for_cwd(&off.cwd).is_none());
+
+            save(vec![group("on", "bot-on", Off)]);
+            let back = place_for("bot-on", &root);
+            assert!(back.isolated.is_none());
+            assert_eq!(back.cwd, root);
+            assert_eq!(
+                std::fs::read_to_string(dir.join("keep.txt")).unwrap(),
+                "mine\n",
+                "turning it off leaves the worktree"
+            );
+
+            save(vec![group("on", "bot-on", On)]);
+            std::fs::write(
+                paths::home_dir().join("cargo-target-skip"),
+                format!("{}\n", root.display()),
+            )
+            .unwrap();
+            let skipped = place_for("bot-on", &root);
+            assert!(skipped.isolated.is_some());
+            assert!(cargo_target_for_cwd(&skipped.cwd).is_none());
+
+            let _ = std::fs::remove_dir_all(&root);
         });
     }
 

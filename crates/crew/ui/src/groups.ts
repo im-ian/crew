@@ -59,6 +59,7 @@ export function normalizeGroups(raw: unknown): RailLayout {
       items: uniqueKeys(items),
     };
     if (path) next.path = path;
+    if (g.worktree === "on" || g.worktree === "off") next.worktree = g.worktree;
     const lead = typeof g.lead === "string" ? g.lead.trim() : "";
     if (lead && next.items.includes(itemKey("agent", lead))) next.lead = lead;
     out.push(next);
@@ -82,6 +83,32 @@ export function groupCwd(
   return path || null;
 }
 
+export type GroupWorktree = "on" | "off" | "app";
+
+/** How this group separates working folders. `app` follows the app setting. */
+export function groupWorktree(group: Group | null | undefined): GroupWorktree {
+  const choice = group?.worktree;
+  return choice === "on" || choice === "off" ? choice : "app";
+}
+
+/** Set whether a group's bots use a worktree. `app` clears the group's choice. */
+export function setGroupWorktree(
+  layout: RailLayout,
+  id: string,
+  choice: GroupWorktree,
+): RailLayout {
+  return {
+    groups: layout.groups.map((g) => {
+      if (g.id !== id) return g;
+      if (choice === "on" || choice === "off") return { ...g, worktree: choice };
+      const { worktree: _gone, ...rest } = g;
+      return rest;
+    }),
+    ungrouped: layout.ungrouped,
+    ...(layout.order ? { order: layout.order } : {}),
+  };
+}
+
 /** Give a group a working folder, or take it away with a blank one. */
 export function setGroupFolder(layout: RailLayout, id: string, path: string): RailLayout {
   const folder = path.trim();
@@ -98,13 +125,18 @@ export function setGroupFolder(layout: RailLayout, id: string, path: string): Ra
 }
 
 function persistedGroup(g: Group): Group {
+  let next = g;
   const path = groupCwd(g);
-  if (!path) {
-    if (g.path == null) return g;
-    const { path: _gone, ...rest } = g;
-    return rest;
+  if (!path && g.path != null) {
+    const { path: _gone, ...rest } = next;
+    next = rest;
+  } else if (path) {
+    next = { ...next, path };
   }
-  return { ...g, path };
+  if (next.worktree === "on" || next.worktree === "off") return next;
+  if (next.worktree == null) return next;
+  const { worktree: _gone, ...rest } = next;
+  return rest;
 }
 
 /** The bot that leads `group`, while it still sits there. */

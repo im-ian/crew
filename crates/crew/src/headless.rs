@@ -5954,6 +5954,7 @@ mod tests {
                 items: vec!["agent:alpha".into()],
                 path: Some("/tmp/app".into()),
                 lead: None,
+                worktree: crate::groups::WorktreeChoice::Inherit,
             }])
             .unwrap();
             let empty = shared_note_for_turn("hi", &alpha, &roster).unwrap();

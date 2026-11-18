@@ -6208,6 +6208,7 @@ mod daemon_tests {
                 items: vec![format!("agent:{lead}"), format!("agent:{member}")],
                 path: None,
                 lead: Some(lead.clone()),
+                worktree: crate::groups::WorktreeChoice::Inherit,
             }])
             .unwrap();
             let quiet = |id: &str| {

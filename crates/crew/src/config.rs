@@ -3468,6 +3468,7 @@ mod tests {
             items: ids.iter().map(|id| format!("agent:{id}")).collect(),
             path: None,
             lead: None,
+            worktree: crate::groups::WorktreeChoice::Inherit,
         };
         let group = folder("Crew", &["me", "mate"]);
         let s = teammates_sentence(&me, &roster, Some(&group));
@@ -3665,6 +3666,7 @@ mod tests {
                 items: vec!["agent:alpha".into(), "agent:gone".into(), "agent:beta".into()],
                 path: Some("/work/crew".into()),
                 lead: None,
+                worktree: crate::groups::WorktreeChoice::Inherit,
             },
             crate::groups::SidebarGroup {
                 id: crate::groups::UNGROUPED_ID.into(),
@@ -3673,6 +3675,7 @@ mod tests {
                 items: vec![],
                 path: None,
                 lead: None,
+                worktree: crate::groups::WorktreeChoice::Inherit,
             },
         ];
         let memory = |id: &str| if id == "g1" { "ship on Friday\n".to_string() } else { String::new() };
