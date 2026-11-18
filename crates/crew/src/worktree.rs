@@ -10,6 +10,8 @@
 //! is removed once that bot is idle and nothing is compiling into it. The
 //! shared directory goes when that repo has no worktree left, or when no bot
 //! has used it for a week. A directory a build still holds is left alone.
+//! A shared checkout listed in `$CREW_HOME/cargo-target-skip` is left out of
+//! all of this: its worktrees keep the target Cargo chooses.
 
 use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
@@ -368,16 +370,58 @@ fn sweep_at(
     stale: Duration,
 ) -> Vec<RemovedCache> {
     let busy_dirs: HashSet<String> = busy.iter().map(|id| paths::safe_agent_id(id)).collect();
+    let skipped = skipped_repo_keys();
     let mut removed = Vec::new();
     let worktrees = paths::home_dir().join("worktrees");
-    reclaim_per_bot(&worktrees, &busy_dirs, now, grace, &mut removed);
-    reclaim_shared(&worktrees, &busy_dirs, now, stale, &mut removed);
+    reclaim_per_bot(&worktrees, &busy_dirs, &skipped, now, grace, &mut removed);
+    reclaim_shared(&worktrees, &busy_dirs, &skipped, now, stale, &mut removed);
     removed
 }
 
 fn shared_cargo_dir(cwd: &Path) -> Option<PathBuf> {
     let key = repo_key_of_cwd(cwd)?;
+    if skipped_repo_keys().contains(&key) {
+        return None;
+    }
     Some(paths::home_dir().join("cargo-target").join(key))
+}
+
+/// Repo keys for the shared checkouts named in `$CREW_HOME/cargo-target-skip`.
+/// One path per line. A blank line, or a line whose first character is `#`,
+/// is a note. A leading `~` is the user's home directory. A missing file
+/// skips nothing.
+fn skipped_repo_keys() -> HashSet<String> {
+    let path = paths::home_dir().join("cargo-target-skip");
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == ErrorKind::NotFound => return HashSet::new(),
+        Err(err) => {
+            eprintln!("[crew] cargo target skip {}: {err}", path.display());
+            return HashSet::new();
+        }
+    };
+    let mut keys = HashSet::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        keys.insert(repo_key(&expand_user_path(line)));
+    }
+    keys
+}
+
+fn expand_user_path(line: &str) -> PathBuf {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return PathBuf::from(line);
+    };
+    if line == "~" {
+        return home;
+    }
+    if let Some(rest) = line.strip_prefix("~/") {
+        return home.join(rest);
+    }
+    PathBuf::from(line)
 }
 
 fn repo_key_of_cwd(cwd: &Path) -> Option<String> {
@@ -421,6 +465,7 @@ fn stamp_mtime(dir: &Path) -> Option<SystemTime> {
 fn reclaim_per_bot(
     worktrees: &Path,
     busy_dirs: &HashSet<String>,
+    skipped: &HashSet<String>,
     now: SystemTime,
     grace: Duration,
     removed: &mut Vec<RemovedCache>,
@@ -430,6 +475,13 @@ fn reclaim_per_bot(
     };
     for repo in repos.flatten() {
         if !is_real_dir(&repo.path()) {
+            continue;
+        }
+        if repo
+            .file_name()
+            .to_str()
+            .is_some_and(|key| skipped.contains(key))
+        {
             continue;
         }
         reap_leftovers(&repo.path(), removed);
@@ -463,6 +515,7 @@ fn reclaim_per_bot(
 fn reclaim_shared(
     worktrees: &Path,
     busy_dirs: &HashSet<String>,
+    skipped: &HashSet<String>,
     now: SystemTime,
     stale: Duration,
     removed: &mut Vec<RemovedCache>,
@@ -480,7 +533,7 @@ fn reclaim_shared(
         let Some(key) = repo.file_name().to_str().map(str::to_string) else {
             continue;
         };
-        if key.starts_with('.') {
+        if key.starts_with('.') || skipped.contains(&key) {
             continue;
         }
         let bots = worktrees.join(&key);
@@ -938,6 +991,80 @@ mod tests {
             std::env::set_var("CARGO_TARGET_DIR", "/tmp/crew-chosen-target");
             assert!(cargo_target_for_cwd(&first.cwd).is_none());
             let _ = std::fs::remove_dir_all(&root);
+        });
+    }
+
+    #[test]
+    fn a_skipped_checkout_keeps_its_own_target() {
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        paths::testing::with_home("wt-skip", || {
+            let _env = PutBack(restore_cargo_env());
+            let kept = temp_repo("kept");
+            let other = temp_repo("other");
+            paths::write_worktrees_enabled(true);
+            let home = std::env::var("HOME").expect("HOME");
+            let tilde_root = PathBuf::from(&home).join("crew-skip-tilde-not-created");
+            std::fs::write(
+                paths::home_dir().join("cargo-target-skip"),
+                format!(
+                    "# leave this checkout alone\n\n~/crew-skip-tilde-not-created\n{}\n",
+                    kept.display()
+                ),
+            )
+            .unwrap();
+            assert!(
+                skipped_repo_keys().contains(&repo_key(&tilde_root)),
+                "a leading ~ is the home directory"
+            );
+
+            let idle = place_for("bot-kept", &kept);
+            assert!(cargo_target_for_cwd(&idle.cwd).is_none());
+            note_build_use(&idle.cwd);
+            let key = repo_key(&kept);
+            let shared_cache = paths::home_dir().join("cargo-target").join(&key);
+            assert!(!shared_cache.exists(), "a skipped repo grows no shared cache");
+
+            let target = idle.cwd.join("target");
+            std::fs::create_dir_all(target.join("debug")).unwrap();
+            std::fs::write(target.join("debug").join("lib.rlib"), vec![7u8; 64]).unwrap();
+            age(&target, 3600);
+            age(&target.join("debug"), 3600);
+            std::fs::create_dir_all(&shared_cache).unwrap();
+            std::fs::write(shared_cache.join("lib.rlib"), b"stay").unwrap();
+            touch_stamp(&shared_cache);
+            age(&stamp_path(&shared_cache), 30 * 24 * 60 * 60);
+
+            let elsewhere = place_for("bot-other", &other);
+            let other_target = elsewhere.cwd.join("target");
+            std::fs::create_dir_all(other_target.join("debug")).unwrap();
+            std::fs::write(other_target.join("debug").join("lib.rlib"), vec![7u8; 32]).unwrap();
+            age(&other_target, 3600);
+            age(&other_target.join("debug"), 3600);
+
+            let removed = sweep_at(
+                &HashSet::new(),
+                SystemTime::now(),
+                Duration::from_secs(60),
+                Duration::from_secs(60),
+            );
+            assert!(
+                removed.iter().all(|item| item.path != target),
+                "an idle skipped target stays"
+            );
+            assert!(target.join("debug").join("lib.rlib").is_file());
+            assert_eq!(std::fs::read(shared_cache.join("lib.rlib")).unwrap(), b"stay");
+            assert!(
+                removed.iter().any(|item| item.path == other_target),
+                "another repo is still swept"
+            );
+            assert!(!other_target.exists());
+            let shared = cargo_target_for_cwd(&elsewhere.cwd).expect("not skipped");
+            assert_eq!(shared, cargo_target_dir(&other));
+
+            let _ = std::fs::remove_dir_all(&kept);
+            let _ = std::fs::remove_dir_all(&other);
         });
     }
 
