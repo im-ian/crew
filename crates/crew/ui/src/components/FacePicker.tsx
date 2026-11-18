@@ -35,6 +35,11 @@ type Props = {
   onShape: (shape: AvatarShape) => void;
   onColor: (color: string) => void;
   onFace?: (shape: AvatarShape, color: string) => void;
+  /**
+   * Shapes only, drawn in `color`: a template keeps no color, each bot gets
+   * one when it is made. Random picks a shape.
+   */
+  shapeOnly?: boolean;
 };
 
 export function FacePicker({
@@ -44,6 +49,7 @@ export function FacePicker({
   onShape,
   onColor,
   onFace,
+  shapeOnly = false,
 }: Props) {
   const t = useT();
   const groupId = useId();
@@ -169,6 +175,10 @@ export function FacePicker({
 
   function shuffle() {
     const next = randomFace(resolved);
+    if (shapeOnly) {
+      onShape(next.shape);
+      return;
+    }
     setHex(next.color);
     queuedColor.current = null;
     clearColorTimer();
@@ -182,7 +192,7 @@ export function FacePicker({
   }
 
   return (
-    <div className="face-pick-cols">
+    <div className={"face-pick-cols" + (shapeOnly ? " shape-only" : "")}>
       <div className="field-head">
         <label className="field">{t("field.shape")}</label>
         <button
@@ -194,7 +204,7 @@ export function FacePicker({
           {t("face.random")}
         </button>
       </div>
-      <label className="field">{t("field.color")}</label>
+      {shapeOnly ? null : <label className="field">{t("field.color")}</label>}
       <div
         className="shape-picker"
         role="listbox"
@@ -229,6 +239,7 @@ export function FacePicker({
           </div>
         ))}
       </div>
+      {shapeOnly ? null : (
       <div className="color-pane">
         <div className="color-swatches">
           {AVATAR_SWATCHES.map((c) => (
@@ -297,6 +308,7 @@ export function FacePicker({
           />
         </div>
       </div>
+      )}
     </div>
   );
 }

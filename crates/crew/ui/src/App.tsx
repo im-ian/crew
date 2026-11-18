@@ -5,6 +5,7 @@ import { ChatThread, sideOnlyPeer } from "./components/ChatThread";
 import { PeekRoom } from "./components/PeekRoom";
 import { Composer, type ComposerHandle } from "./components/Composer";
 import { CloneBotModal } from "./components/CloneBotModal";
+import { TemplatesHost } from "./components/TemplatesHost";
 import { canCarryChat } from "./cloneParts";
 import { itemKey } from "./groups";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -106,6 +107,7 @@ export function App() {
   const [switchOpen, setSwitchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   // Asked from settings, so it is drawn over them and Escape shuts it first.
   // The alias outlives the dialog, so its title holds while it fades out.
   const [leaveOpen, setLeaveOpen] = useState(false);
@@ -216,6 +218,7 @@ export function App() {
       return next;
     });
   }, [openId]);
+  const closeTemplates = useCallback(() => setTemplatesOpen(false), []);
   const cloneSource = crew.cloneId
     ? crew.agents.find((a) => a.id === crew.cloneId) ?? null
     : null;
@@ -528,7 +531,7 @@ export function App() {
       if (e.isComposing) return;
       // The skills window handles its own Escape, and no shortcut should act
       // on the app hidden behind it. The question dialog takes its own keys too.
-      if (skillsOpen || askHoldRef.current) return;
+      if (skillsOpen || templatesOpen || askHoldRef.current) return;
       // The switcher takes its own keys. ⌘K again shuts it.
       if (switchOpen) {
         if (shortcutId(e, true) === "quick-switch") {
@@ -657,7 +660,7 @@ export function App() {
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [helpOpen, settingsOpen, skillsOpen, switchOpen, peek, file, leadPane, leaveOpen]);
+  }, [helpOpen, settingsOpen, skillsOpen, templatesOpen, switchOpen, peek, file, leadPane, leaveOpen]);
 
   function toggleLeadPane(id: string) {
     setPeek(null);
@@ -872,6 +875,8 @@ export function App() {
         drafting={drafting}
         searchRef={searchRef}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenTemplates={() => setTemplatesOpen(true)}
+        templatesOpen={templatesOpen}
       />
       <main
         ref={mainRef}
@@ -1137,6 +1142,18 @@ export function App() {
         }}
       />
       <SkillsPane open={skillsOpen} onClose={() => setSkillsOpen(false)} />
+      <TemplatesHost
+        open={templatesOpen}
+        onClose={closeTemplates}
+        groups={crew.groups}
+        agents={crew.agents}
+        currentGroupId={
+          crew.selected
+            ? crew.groups.find((g) => g.items.includes(itemKey("agent", crew.selected ?? "")))?.id ?? null
+            : null
+        }
+        onError={crew.showError}
+      />
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
       {switchOpen ? (
         <QuickSwitcher

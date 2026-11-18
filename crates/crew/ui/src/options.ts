@@ -87,7 +87,7 @@ function quoteArg(arg: string): string {
   return arg;
 }
 
-const EFFORT_LABEL: Record<string, MessageKey> = {
+export const EFFORT_LABEL: Record<string, MessageKey> = {
   low: "effort.low",
   medium: "effort.medium",
   high: "effort.high",

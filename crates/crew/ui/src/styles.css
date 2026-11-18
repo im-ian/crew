@@ -7640,3 +7640,66 @@ button.wait-chip:focus-visible {
   .head-status.is-waiting.is-ending,
   .wait-cluster.is-side.is-ending .wait-relay { transition: none; }
 }
+
+/* Templates: the window, the editor, and white faces (a template keeps no color). */
+.primary.sm, .ghost.sm { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; font-size: var(--text-md); }
+.icon-btn.sm { width: 26px; height: 26px; background: transparent; color: var(--muted); }
+.icon-btn.sm:hover { background: var(--field); color: var(--ink); }
+.icon-btn.sm:disabled { opacity: 0.4; cursor: default; }
+.dialog.tpl-dialog { width: min(540px, 100%); }
+.dialog.tpl-dialog.narrow { width: min(460px, 100%); }
+.tpl-lede { margin: 6px 0 0; }
+.tpl-sec { display: flex; align-items: baseline; gap: 8px; margin: 18px 0 8px; font-size: var(--text-sm); font-weight: 650; color: var(--muted); }
+.tpl-sec span { font-weight: 400; color: var(--faint); font-size: var(--text-xs); }
+.tpl-list { display: flex; flex-direction: column; gap: 8px; }
+.tpl-card { padding: 12px 14px 11px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg); }
+.tpl-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tpl-card-name { display: flex; align-items: center; gap: 7px; font-size: var(--text-lg); font-weight: 650; }
+.tpl-card-acts { display: flex; align-items: center; gap: 2px; }
+.tpl-card-acts .ghost.sm { background: transparent; color: var(--muted); }
+.tpl-card-acts .ghost.sm:hover { background: var(--field); color: var(--ink); }
+.tpl-chip { padding: 1px 6px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--working) 16%, transparent); color: var(--working); font-size: 10.5px; font-weight: 650; letter-spacing: 0.01em; }
+.tpl-card-desc { margin: 3px 0 10px; color: var(--muted); font-size: var(--text-md); line-height: 1.45; }
+.tpl-faces { display: flex; gap: 8px; align-items: center; }
+.tpl-faces.sm { gap: 5px; }
+.tpl-face { width: 28px; height: 28px; font-size: 11px; display: inline-grid; overflow: visible; }
+.tpl-face.md { width: 30px; height: 30px; }
+.tpl-face.sm { width: 20px; height: 20px; font-size: 9px; }
+.tpl-face.sm .lead-star { width: 10px; height: 10px; right: -3px; bottom: -3px; }
+.tpl-face.sm .lead-star svg { width: 10px; height: 10px; }
+.tpl-card-meta { display: flex; align-items: center; margin: 9px 0 0; color: var(--faint); font-size: var(--text-xs); }
+.tpl-card-meta .lead-mark { margin: 0 2px 0 4px; }
+.tpl-card-meta .lead-mark svg { width: 10px; height: 10px; }
+.tpl-from-group { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 14px; border: 1px dashed color-mix(in srgb, var(--muted) 45%, transparent); border-radius: var(--radius-lg); background: transparent; color: var(--muted); font: inherit; text-align: left; cursor: pointer; }
+.tpl-from-group:hover { background: var(--field); color: var(--ink); }
+.tpl-from-group .tfg-text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.tpl-from-group b { color: var(--ink); font-size: var(--text-md); font-weight: 600; }
+.tpl-from-group small { font-size: var(--text-xs); line-height: 1.4; }
+.tpl-fill { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 12px; border-radius: var(--radius-md); background: var(--field); font-size: var(--text-md); color: var(--muted); }
+.tpl-fill > span { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.tpl-fill select { flex: 1; background: var(--elevated); }
+.tpl-bots { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; background: var(--bg); }
+.tpl-bot { display: flex; align-items: center; gap: 9px; padding: 8px 8px 8px 6px; }
+.tpl-bot + .tpl-bot, .tpl-bot-edit + .tpl-bot { border-top: 1px solid var(--line); }
+.tpl-bot.open { background: var(--hover); }
+.tpl-grip { color: var(--faint); cursor: grab; display: grid; }
+.tpl-bot-text { flex: 1; min-width: 0; }
+.tpl-bot-name { font-size: var(--text-lg); font-weight: 600; }
+.tpl-bot-meta { font-size: var(--text-xs); color: var(--muted); margin-top: 1px; }
+.tpl-lead-btn { color: var(--faint); }
+.tpl-lead-btn svg { fill: none; }
+.tpl-lead-btn.is-lead { color: var(--lead); }
+.tpl-lead-btn.is-lead svg { fill: currentColor; stroke: none; }
+.tpl-bot-edit { display: flex; flex-direction: column; gap: 12px; padding: 4px 14px 14px 36px; background: var(--hover); }
+.tpl-bot-edit .info-hero { justify-content: flex-start; padding: 6px 0 0; }
+.tpl-add { display: inline-flex; align-items: center; gap: 5px; align-self: flex-start; margin-top: 2px; }
+.tpl-bot.dragging { opacity: 0.6; }
+.tpl-grip { cursor: grab; }
+.tpl-grip:disabled { cursor: default; }
+.tpl-role { min-height: 64px; }
+.tpl-from-group:disabled { cursor: default; opacity: 0.6; }
+.tpl-from-group:disabled:hover { background: transparent; color: var(--muted); }
+/* A white face has white eyes: they go dark, and a faint edge keeps the shape on a light page. */
+.tpl-face .avatar-gaze { fill: #2b2b30; }
+.tpl-face .avatar-face { filter: drop-shadow(0 0 0.6px color-mix(in srgb, var(--ink) 45%, transparent)); }
+.tpl-faces.md .tpl-face { width: 28px; height: 28px; }
