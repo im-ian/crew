@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-remove-template"
+description = "Enables the remove_template command without any pre-configured scope."
+commands.allow = ["remove_template"]
+
+[[permission]]
+identifier = "deny-remove-template"
+description = "Denies the remove_template command without any pre-configured scope."
+commands.deny = ["remove_template"]

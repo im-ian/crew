@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { CloneParts } from "./cloneParts";
+import type { Template } from "./templates";
 import type { PathKind } from "./dropAttach";
 import type {
   AgentInfo,
@@ -245,6 +246,11 @@ export const api = {
   /** False when a teammate changed it after `version` was read. */
   setTeamMemory: (alias: string, text: string, version: number) =>
     invoke<boolean>("team_memory_set", { alias, text, version }),
+  /** Crew's templates, then the user's. */
+  listTemplates: () => invoke<Template[]>("list_templates"),
+  /** Returns it as saved: a new one comes back with its id. */
+  saveTemplate: (template: Template) => invoke<Template>("save_template", { template }),
+  removeTemplate: (id: string) => invoke<void>("remove_template", { id }),
   /** The default AI and the ones a turn falls back to. Null until first saved. */
   getFallbackAis: () => invoke<unknown>("get_fallback_ais"),
   setFallbackAis: (list: { cli: string; model: string; effort: string; cmd: string }[]) =>

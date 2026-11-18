@@ -32,6 +32,7 @@ mod rows;
 mod search;
 mod skills;
 mod targeting;
+mod templates;
 mod tool_card;
 mod transcript;
 mod usage;
