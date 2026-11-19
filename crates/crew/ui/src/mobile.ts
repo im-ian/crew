@@ -107,12 +107,21 @@ export function watchViewport(root: HTMLElement = document.documentElement): () 
     apply();
     settle();
   };
+  // Back from the background or from the page cache: iOS may have put the
+  // view right while the page slept, with no event for it.
+  const onShown = () => {
+    if (document.visibilityState === "hidden") return;
+    apply();
+    settle();
+  };
   apply();
   vv.addEventListener("resize", apply);
   vv.addEventListener("scroll", apply);
   window.addEventListener("scroll", apply);
   document.addEventListener("focusin", onFocusIn);
   document.addEventListener("focusout", onFocusOut);
+  document.addEventListener("visibilitychange", onShown);
+  window.addEventListener("pageshow", onShown);
   return () => {
     for (const t of timers) window.clearTimeout(t);
     vv.removeEventListener("resize", apply);
@@ -120,6 +129,8 @@ export function watchViewport(root: HTMLElement = document.documentElement): () 
     window.removeEventListener("scroll", apply);
     document.removeEventListener("focusin", onFocusIn);
     document.removeEventListener("focusout", onFocusOut);
+    document.removeEventListener("visibilitychange", onShown);
+    window.removeEventListener("pageshow", onShown);
     root.style.removeProperty("--vvh");
     root.style.removeProperty("--vv-top");
     root.classList.remove("kb-open");
