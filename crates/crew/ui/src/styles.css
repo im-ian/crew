@@ -7915,14 +7915,60 @@ button.wait-chip:focus-visible {
 .head-rail {
   display: none;
 }
+/* What the screen's edges take: a notch, a camera, rounded corners, the
+   home indicator. index.html asks to draw edge to edge (viewport-fit=cover),
+   so these are what the layout keeps clear of. A desktop window has none:
+   every one is 0 there and changes nothing. */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+/* With the keyboard up the home indicator is under it: the composer sits
+   right on the keyboard (mobile.ts sets the class). */
+html.kb-open {
+  --safe-bottom: 0px;
+}
+/* A browser at a wide width (an unfolded phone, a tablet, a phone on its
+   side) gets the desktop layout; it keeps clear of the edges too. Below
+   640px the phone block further down does it. */
+@media not all and (max-width: 640px) {
+  html.is-web .app > aside {
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+    padding-left: var(--safe-left);
+  }
+  html.is-web main {
+    padding-top: var(--safe-top);
+    padding-right: var(--safe-right);
+  }
+  /* The side panel reaches the edge and keeps clear of it itself. */
+  html.is-web main.has-peek {
+    padding-right: var(--peek-w);
+  }
+  html.is-web .composer {
+    padding-bottom: calc(var(--space-22) + var(--safe-bottom));
+  }
+  html.is-web .peek-room {
+    padding: var(--safe-top) var(--safe-right) var(--safe-bottom) 0;
+  }
+  html.is-web .sheet {
+    padding-top: calc(var(--space-22) + var(--safe-top));
+    padding-right: calc(var(--space-24) + var(--safe-right));
+    padding-bottom: calc(var(--space-24) + var(--safe-bottom));
+  }
+  html.is-web .modal {
+    padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+  }
+  html.is-web .island-stack {
+    top: calc(var(--titlebar) + 8px + var(--safe-top));
+  }
+}
 @media (max-width: 640px) {
   :root {
     --titlebar: 0px;
     --content-pad: 14px;
-    --safe-top: env(safe-area-inset-top, 0px);
-    --safe-bottom: env(safe-area-inset-bottom, 0px);
-    --safe-left: env(safe-area-inset-left, 0px);
-    --safe-right: env(safe-area-inset-right, 0px);
     --phone-h: var(--vvh, 100dvh);
   }
   html,

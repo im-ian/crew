@@ -28,25 +28,61 @@ export function useMobile(): boolean {
   return useSyncExternalStore(subscribe, isMobile, () => false);
 }
 
+/** How much of the screen a keyboard takes before it counts as up. */
+export const KEYBOARD_PX = 120;
+
+/**
+ * Whether the on-screen keyboard is up: something takes text, and the
+ * visible height is well short of the tallest seen at this width (the
+ * screen without a keyboard).
+ */
+export function keyboardOpen(height: number, tallest: number, typing: boolean): boolean {
+  return typing && tallest - height > KEYBOARD_PX;
+}
+
+function takesText(el: Element | null): boolean {
+  if (!el) return false;
+  if (el instanceof HTMLTextAreaElement) return true;
+  if (el instanceof HTMLInputElement) return !["button", "checkbox", "radio", "range", "submit", "file", "color"].includes(el.type);
+  return el instanceof HTMLElement && el.isContentEditable;
+}
+
 /**
  * Keeps `--vvh` and `--vv-top` on the root in step with the visual viewport,
- * so the phone layout sizes itself to what the keyboard leaves showing.
+ * so the phone layout sizes itself to what the keyboard leaves showing, and
+ * marks the root `kb-open` while the keyboard is up: the home indicator is
+ * under the keyboard then, so nothing has to keep clear of it.
  */
 export function watchViewport(root: HTMLElement = document.documentElement): () => void {
   const vv = window.visualViewport;
   if (!vv) return () => {};
+  let width = 0;
+  let tallest = 0;
   const apply = () => {
     root.style.setProperty("--vvh", `${Math.round(vv.height)}px`);
     root.style.setProperty("--vv-top", `${Math.round(vv.offsetTop)}px`);
+    // Turning or unfolding the phone makes a new screen, with a new tallest.
+    if (Math.round(vv.width) !== width) {
+      width = Math.round(vv.width);
+      tallest = 0;
+    }
+    tallest = Math.max(tallest, vv.height);
+    root.classList.toggle("kb-open", keyboardOpen(vv.height, tallest, takesText(document.activeElement)));
   };
+  const onFocus = () => apply();
   apply();
   vv.addEventListener("resize", apply);
   vv.addEventListener("scroll", apply);
+  document.addEventListener("focusin", onFocus);
+  document.addEventListener("focusout", onFocus);
   return () => {
     vv.removeEventListener("resize", apply);
     vv.removeEventListener("scroll", apply);
+    document.removeEventListener("focusin", onFocus);
+    document.removeEventListener("focusout", onFocus);
     root.style.removeProperty("--vvh");
     root.style.removeProperty("--vv-top");
+    root.classList.remove("kb-open");
   };
 }
 

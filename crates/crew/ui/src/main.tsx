@@ -11,6 +11,7 @@ import { applyLocale, loadLocale } from "./i18n";
 import { blockNativeMenu } from "./nativeMenu";
 import { applyTheme, loadThemePref } from "./theme";
 import { isWeb } from "./web";
+import { watchViewport } from "./mobile";
 import { followLaptopPrefs, mirrorDisplayPrefs } from "./displayPrefs";
 import "./styles.css";
 
@@ -25,6 +26,13 @@ installAppZoom();
 // The laptop's window tells the daemon how it shows chat; a phone follows it.
 mirrorDisplayPrefs();
 followLaptopPrefs();
+// A phone or tablet browser draws edge to edge (viewport-fit=cover) at any
+// width: the safe-area rules in styles.css key off this class, and the
+// viewport watch tells them when the keyboard is up.
+if (isWeb()) {
+  document.documentElement.classList.add("is-web");
+  watchViewport();
+}
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
