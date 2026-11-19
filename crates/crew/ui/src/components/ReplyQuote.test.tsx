@@ -31,9 +31,9 @@ describe("ReplyQuote", () => {
   });
 
   it("has no face for the user's own message", () => {
-    const html = draw(null, "대호", "내가 한 말");
+    const html = draw(null, "민수", "내가 한 말");
     expect(html).not.toContain("reply-quote-face");
-    expect(html).toContain("<b>대호</b>에게 답장");
+    expect(html).toContain("<b>민수</b>에게 답장");
   });
 });
 

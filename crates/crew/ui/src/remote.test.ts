@@ -51,7 +51,7 @@ function router(alias: string, bot = "rep"): RemoteInfo {
   return {
     alias,
     url: "wss://r.example.com:7420",
-    name: "ian",
+    name: "ada",
     bot,
     connected: true,
     members: [],
@@ -91,15 +91,15 @@ describe("portOk", () => {
 
 describe("nameError", () => {
   it("follows the router's rule", () => {
-    expect(nameError("ian")).toBeNull();
+    expect(nameError("ada")).toBeNull();
     expect(nameError("춘식이_2")).toBeNull();
     expect(nameError("a-b")).toBeNull();
     expect(nameError("  ")).toBe("empty");
     expect(nameError("a".repeat(33))).toBe("long");
     expect(nameError("가".repeat(32))).toBeNull();
-    expect(nameError("ian park")).toBe("bad");
-    expect(nameError("ian/park")).toBe("bad");
-    expect(nameError("ian.park")).toBe("bad");
+    expect(nameError("ada park")).toBe("bad");
+    expect(nameError("ada/park")).toBe("bad");
+    expect(nameError("ada.park")).toBe("bad");
   });
 });
 

@@ -309,7 +309,7 @@ pub fn is_remote(id: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// `team/acc_x`, or `team/이안` by name.
+/// `team/acc_x`, or `team/민수` by name.
 /// The id a remote bot's chat has here, for any way of naming it.
 pub fn canonical_id(id: &str) -> Option<String> {
     resolve(id).map(|(alias, account)| remote_id(&alias, &account))
@@ -2956,7 +2956,7 @@ mod tests {
             a
         };
         let roster = vec![
-            bot("rep", "이안", None),
+            bot("rep", "민수", None),
             bot("impl", "구현", None),
             bot("review", "리뷰어", Some("코드 리뷰")),
             bot("design", "디자이너", None),
@@ -2972,7 +2972,7 @@ mod tests {
 
         let offered = hand_on_candidates("rep", "impl", "리뷰어 확인", &roster);
         let others = vec![("notes".to_string(), "메모".to_string())];
-        let q = "이안이(가) 팀원이 맡긴 일을 이 PC의 봇에게 넘기려 해요. 어느 봇에게 맡길까요?";
+        let q = "민수이(가) 팀원이 맡긴 일을 이 PC의 봇에게 넘기려 해요. 어느 봇에게 맡길까요?";
         assert_eq!(picked_bot(&format!("{q} → 리뷰어"), &offered, &others), Some("review".into()));
         assert_eq!(picked_bot(&format!("{q} → 구현"), &offered, &others), Some("impl".into()));
         assert_eq!(picked_bot(&format!("{q} → 메모"), &offered, &others), Some("notes".into()));
@@ -3221,15 +3221,15 @@ mod tests {
 
     #[tokio::test]
     async fn signup_returns_the_token_or_why_not() {
-        let url = fake_router(json!({"type": "signed_up", "account": "acc_abc123def456", "name": "이안", "token": "crt_x"})).await;
-        let (account, name, token) = signup(&url, "이안", None, json!({})).await.unwrap();
+        let url = fake_router(json!({"type": "signed_up", "account": "acc_abc123def456", "name": "민수", "token": "crt_x"})).await;
+        let (account, name, token) = signup(&url, "민수", None, json!({})).await.unwrap();
         assert_eq!(
             (account.as_str(), name.as_str(), token.as_str()),
-            ("acc_abc123def456", "이안", "crt_x")
+            ("acc_abc123def456", "민수", "crt_x")
         );
 
         let url = fake_router(json!({"type": "error", "code": "name_taken", "message": ""})).await;
-        let err = signup(&url, "이안", None, json!({}))
+        let err = signup(&url, "민수", None, json!({}))
             .await
             .unwrap_err()
             .to_string();

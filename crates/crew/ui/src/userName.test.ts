@@ -8,8 +8,8 @@ describe("cleanUserName", () => {
   });
 
   it("keeps one trimmed line", () => {
-    expect(cleanUserName("  대호 ")).toBe("대호");
-    expect(cleanUserName("Dae\nHo\t Im")).toBe("Dae Ho Im");
+    expect(cleanUserName("  민수 ")).toBe("민수");
+    expect(cleanUserName("Kim\nLee\t Park")).toBe("Kim Lee Park");
   });
 
   it("stops at 40 letters, as the daemon does", () => {

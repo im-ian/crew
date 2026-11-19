@@ -49,7 +49,7 @@ describe("loadLaptopPrefs", () => {
       font: "Pretendard",
       codeFont: "D2Coding",
       fontSize: "large",
-      userName: "대호",
+      userName: "민수",
     };
     await loadLaptopPrefs(async () => laptop);
     expect(getLaptopPrefs()).toEqual(laptop);

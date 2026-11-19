@@ -53,7 +53,7 @@ describe("waitingEdit", () => {
   it("names the user's own quoted line by the name they set", () => {
     const text = "[crew reply:m2 from:user]\n내가 한 말\n\n고친 문장";
     expect(waitingEdit(text, [], makeT("ko")).reply?.who).toBe("나");
-    expect(waitingEdit(text, [], makeT("ko", "대호")).reply?.who).toBe("대호");
+    expect(waitingEdit(text, [], makeT("ko", "민수")).reply?.who).toBe("민수");
   });
 
   it("leaves a line with no quote as its own text", () => {

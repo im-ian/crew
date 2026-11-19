@@ -72,7 +72,7 @@ describe("questionDone", () => {
   it("counts any filled box, since none is required", () => {
     expect(questionDone(form)).toBe(false);
     expect(questionDone(form, [], ["", "메모만"])).toBe(true);
-    expect(questionDone(form, [], ["ian", ""])).toBe(true);
+    expect(questionDone(form, [], ["ada", ""])).toBe(true);
   });
 });
 
@@ -92,20 +92,20 @@ describe("answerSummary", () => {
         { id: "b", label: "비밀번호", value: "", secret: true },
       ],
     };
-    expect(answerSummary(login, [], ["ian", "pw"])).toBe("아이디: ian, 비밀번호: ••••••");
+    expect(answerSummary(login, [], ["ada", "pw"])).toBe("아이디: ada, 비밀번호: ••••••");
   });
 });
 
 describe("choice drafts", () => {
   const questions: ChoiceQuestion[] = [
     { question: "어느 쪽?", options },
-    { question: "로그인", options: [], fields: [{ id: "u", label: "아이디", value: "ian" }] },
+    { question: "로그인", options: [], fields: [{ id: "u", label: "아이디", value: "ada" }] },
   ];
 
   it("starts from what the bot sent", () => {
     expect(blankDraft(questions)).toEqual({
       picks: [[], []],
-      values: [[], ["ian"]],
+      values: [[], ["ada"]],
       others: ["", ""],
       step: 0,
     });
