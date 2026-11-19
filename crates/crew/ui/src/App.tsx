@@ -151,7 +151,8 @@ export function App() {
   }, [mobile, crew.selected]);
   useEffect(() => {
     if (!mobile) return;
-    const unwatch = watchViewport();
+    // The web page watches the viewport from main.tsx at any width.
+    const unwatch = isWeb() ? () => {} : watchViewport();
     const unpress = installLongPress();
     // A swipe right from the left edge opens the rail; left on it shuts it.
     let swipe: { kind: "open" | "close"; x: number; y: number } | null = null;

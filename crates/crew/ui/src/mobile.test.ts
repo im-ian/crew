@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SWIPE_PX, isLongPress, railSwipe } from "./mobile";
+import { KEYBOARD_PX, SWIPE_PX, isLongPress, keyboardOpen, railSwipe } from "./mobile";
 
 describe("railSwipe", () => {
   it("opens on a swipe right from the edge", () => {
@@ -25,5 +25,16 @@ describe("isLongPress", () => {
     const held = Object.assign(new Event("contextmenu"), { crewLongPress: true });
     expect(isLongPress(click)).toBe(false);
     expect(isLongPress(held)).toBe(true);
+  });
+});
+
+describe("keyboardOpen", () => {
+  it("sees the keyboard when text is being typed and the screen is well short", () => {
+    expect(keyboardOpen(500, 800, true)).toBe(true);
+    expect(keyboardOpen(800 - KEYBOARD_PX, 800, true)).toBe(false);
+  });
+
+  it("does not take a short screen with nothing typed for a keyboard", () => {
+    expect(keyboardOpen(500, 800, false)).toBe(false);
   });
 });
