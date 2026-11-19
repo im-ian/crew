@@ -7476,15 +7476,15 @@ mod daemon_tests {
         });
     }
 
-    /// Two bots tell each other with new work, without the user. They go on
-    /// for `MAX_ROUND_TRIPS` round trips; the tell that would start one more
-    /// stops, both chats say so, and the sender's command fails.
+    /// Two bots tell each other new work and reports without the user, far
+    /// past the five round trips that used to stop them: all of it goes. Only
+    /// the cap stops the chain; both chats say so, and the command fails.
     #[test]
-    fn two_bots_telling_each_other_still_hit_the_relay_limit() {
-        paths::testing::with_home("relay-pingpong", || {
+    fn two_bots_telling_each_other_go_on_until_the_cap() {
+        paths::testing::with_home("relay-back-and-forth", || {
             paths::write_notifications_enabled(false);
-            let a = test_id("ping");
-            let b = test_id("pong");
+            let a = test_id("lead");
+            let b = test_id("dev");
             for id in [&a, &b] {
                 claude_bot(id);
                 headless_status(id, AgentStatus::Working);
@@ -7496,17 +7496,16 @@ mod daemon_tests {
                 chain: crate::relay::new_chain(),
                 ..TurnOrigin::user()
             };
-            let allowed = 2 * crate::relay::MAX_ROUND_TRIPS + 1;
-            for hop in 1..=allowed as u32 {
+            for hop in 1..=20u32 {
                 tell_agent_origin(
                     &from,
                     &to,
-                    &format!("ping {hop}"),
+                    &format!("{hop}단계 넘겨요"),
                     Some(parent),
                     false,
                     &mut VecDeque::new(),
                 )
-                .unwrap_or_else(|err| panic!("tell {hop} hit the limit early: {err}"));
+                .unwrap_or_else(|err| panic!("tell {hop} was stopped: {err}"));
                 let item = inbox()
                     .lock()
                     .unwrap()
@@ -7518,22 +7517,24 @@ mod daemon_tests {
                 std::mem::swap(&mut from, &mut to);
             }
 
+            // The chain at the cap: the next tell is one too many.
+            parent.hops = targeting::MAX_RELAY_HOPS;
             let err = tell_agent_origin(
                 &from,
                 &to,
-                "one more",
+                "한 번 더",
                 Some(parent),
                 false,
                 &mut VecDeque::new(),
             )
-            .expect_err("another round trip must stop");
+            .expect_err("a tell past the cap must stop");
             assert!(err.to_string().contains("relay limit"), "{err}");
-            assert!(inbox_is_empty(&to), "the tell past the limit does not start");
+            assert!(inbox_is_empty(&to), "the tell past the cap does not start");
             for chat in [&from, &to] {
                 assert!(
                     crate::transcript::messages(chat)
                         .iter()
-                        .any(|m| m.from == "crew" && m.text.contains("핑퐁") && m.text.contains("one more")),
+                        .any(|m| m.from == "crew" && m.text.contains("상한") && m.text.contains("한 번 더")),
                     "{chat} hears why and what did not go"
                 );
             }
