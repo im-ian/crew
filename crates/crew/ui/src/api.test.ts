@@ -100,7 +100,7 @@ describe("remote router commands", () => {
     const args = {
       url: "wss://router.example.com:7420",
       alias: "team",
-      name: "ian",
+      name: "ada",
       invite: null,
       cli: "claude",
       avatar: null,

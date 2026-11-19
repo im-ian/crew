@@ -30,9 +30,9 @@ describe("the user's name", () => {
   });
 
   it("replaces 나 / You in both languages and nothing else", () => {
-    expect(makeT("ko", "대호")("thread.you")).toBe("대호");
-    expect(makeT("en", "대호")("thread.you")).toBe("대호");
-    expect(makeT("ko", "대호")("settings.title")).toBe("설정");
+    expect(makeT("ko", "민수")("thread.you")).toBe("민수");
+    expect(makeT("en", "민수")("thread.you")).toBe("민수");
+    expect(makeT("ko", "민수")("settings.title")).toBe("설정");
   });
 });
 

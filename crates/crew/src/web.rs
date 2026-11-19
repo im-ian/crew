@@ -1219,12 +1219,12 @@ mod tests {
     fn tailscale_status_names_the_owner() {
         let v: Value = serde_json::from_str(
             r#"{"Self":{"DNSName":"mac.tail1.ts.net.","TailscaleIPs":["100.111.145.71","fd7a:115c:a1e0::1"],"UserID":7},
-                "User":{"7":{"LoginName":"ian@example.com"}}}"#,
+                "User":{"7":{"LoginName":"ada@example.com"}}}"#,
         )
         .unwrap();
         let t = parse_status(&v);
         assert_eq!(t.dns.as_deref(), Some("mac.tail1.ts.net"));
-        assert_eq!(t.owner.as_deref(), Some("ian@example.com"));
+        assert_eq!(t.owner.as_deref(), Some("ada@example.com"));
         assert_eq!(t.ips.len(), 2);
     }
 

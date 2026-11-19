@@ -3752,8 +3752,8 @@ mod tests {
             assert!(!rules.contains("goes by"));
             assert!(!note.contains("goes by"));
 
-            crate::paths::write_user_name("대호");
-            let line = "The human user goes by 대호. You may call them that.\n";
+            crate::paths::write_user_name("민수");
+            let line = "The human user goes by 민수. You may call them that.\n";
             assert_eq!(team_rules(&alpha, &roster).matches(line).count(), 1);
             let named = shared_memory_note(&alpha, &roster, "", None);
             assert!(named.contains(&format!("Do not answer this note.\n{line}You are `alpha`")));

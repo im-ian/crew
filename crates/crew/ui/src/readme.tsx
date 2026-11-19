@@ -102,7 +102,7 @@ const remotes: RemoteInfo[] = [];
 if (remoteShot) {
   agents.push(
     {
-      id: "rep", name: "이안", status: "idle", cmd: ["claude"], cwd: "~", avatar_shape: "flower",
+      id: "rep", name: "민수", status: "idle", cmd: ["claude"], cwd: "~", avatar_shape: "flower",
       avatar_color: "#3fbf7f", routines: [], preview: "민지 님 요청은 리뷰어에게 맡겼어요.", last_ts: at(4),
     },
     {
@@ -121,7 +121,7 @@ if (remoteShot) {
   // `&folder=1` puts the representative in the Crew folder, whose bots it hands work to.
   groups[params.get("folder") === "1" ? 0 : 1].items.unshift("agent:rep");
   remotes.push({
-    alias: "acme", url: "wss://router.acme.dev:7420", name: "ian", bot: "rep", connected: true,
+    alias: "acme", url: "wss://router.acme.dev:7420", name: "ada", bot: "rep", connected: true,
     members: [],
     trusted: [{ account: "acc_k3j9x0", name: "민지" }],
     blocked: [{ account: "acc_zz01", name: "spam-bot" }],
@@ -134,7 +134,7 @@ if (remoteShot) {
     });
     groups[1].items.push("agent:rep-lab");
     remotes.push({
-      alias: "lab", url: "ws://10.0.0.7:7420", name: "ian-lab", bot: "rep-lab", connected: false,
+      alias: "lab", url: "ws://10.0.0.7:7420", name: "ada-lab", bot: "rep-lab", connected: false,
       members: [], trusted: [], blocked: [],
     });
   }
@@ -148,7 +148,7 @@ if (remoteShot) {
       choice: {
         id: "h3:q", state: "pending",
         questions: [{
-          question: "이안이(가) 팀원이 맡긴 일을 이 PC의 봇에게 넘기려 해요. 어느 봇에게 맡길까요?",
+          question: "민수이(가) 팀원이 맡긴 일을 이 PC의 봇에게 넘기려 해요. 어느 봇에게 맡길까요?",
           hint: "주문 API에 discount 필드를 넣고 마이그레이션까지 만들어 주세요. 화면 문구는 @design 에게 확인",
           options: [
             { id: "A", label: "구현" },
@@ -170,7 +170,7 @@ if (remoteShot) {
 // a moment after the chat opens, so the panel opens the way it does live.
 // `?shot=files` shows three, the last one open. `&theme=light` shows the
 // light colors.
-const UI_SRC = "/Users/ian/Projects/crew/crates/crew/ui/src";
+const UI_SRC = "/Users/ada/Projects/crew/crates/crew/ui/src";
 const SHOWN_FILE = `${UI_SRC}/fontPref.ts`;
 const sources: Record<string, string> = {
   "fontPref.ts": fontPrefSource,
@@ -257,7 +257,7 @@ mockIPC(
         const path = String(a.path);
         if (!path.endsWith(".ts") && !path.endsWith(".tsx")) throw `not found: ${path}`;
         const text = sources[path.split("/").pop() ?? ""] ?? fontPrefSource;
-        return { path: path.startsWith("~") ? path.replace("~", "/Users/ian") : path, text, size: text.length, truncated: false };
+        return { path: path.startsWith("~") ? path.replace("~", "/Users/ada") : path, text, size: text.length, truncated: false };
       }
       case "peek_pending_focus":
       case "take_pending_focus": return null;

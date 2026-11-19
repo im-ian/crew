@@ -798,10 +798,10 @@ mod tests {
     fn user_name_is_one_trimmed_line_and_empty_removes_it() {
         testing::with_home("username", || {
             assert_eq!(user_name(), None);
-            write_user_name("  대호 \n");
-            assert_eq!(user_name().as_deref(), Some("대호"));
-            write_user_name("Dae\nHo\t Im");
-            assert_eq!(user_name().as_deref(), Some("Dae Ho Im"));
+            write_user_name("  민수 \n");
+            assert_eq!(user_name().as_deref(), Some("민수"));
+            write_user_name("Kim\nLee\t Park");
+            assert_eq!(user_name().as_deref(), Some("Kim Lee Park"));
             write_user_name(&"가".repeat(100));
             assert_eq!(user_name().map(|n| n.chars().count()), Some(USER_NAME_MAX));
             write_user_name("   ");
@@ -814,7 +814,7 @@ mod tests {
     fn display_prefs_round_trip_with_the_name_from_its_own_file() {
         testing::with_home("display", || {
             assert_eq!(display_prefs(), DisplayPrefs::default());
-            write_user_name("대호");
+            write_user_name("민수");
             write_display_prefs(&DisplayPrefs {
                 font: "Pretendard".into(),
                 code_font: "D2Coding,\nJetBrains Mono".into(),
@@ -825,7 +825,7 @@ mod tests {
             assert_eq!(prefs.font, "Pretendard");
             assert_eq!(prefs.code_font, "D2Coding,JetBrains Mono");
             assert_eq!(prefs.font_size, "large");
-            assert_eq!(prefs.user_name.as_deref(), Some("대호"));
+            assert_eq!(prefs.user_name.as_deref(), Some("민수"));
             let raw = fs::read_to_string(display_prefs_path()).unwrap();
             assert!(!raw.contains("userName"), "{raw}");
             fs::write(display_prefs_path(), "not json").unwrap();
