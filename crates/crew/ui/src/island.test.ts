@@ -4,8 +4,10 @@ import {
   botNotices,
   koSubject,
   lifeAfterHover,
+  ERROR_LIFE_MS,
   noticeLife,
   noticeStays,
+  withoutAppPile,
   byRank,
   mostPressing,
   pilePreview,
@@ -186,26 +188,44 @@ describe("pushNotice", () => {
 });
 
 describe("notice timing", () => {
-  it("keeps what needs the user and lets the rest go", () => {
+  it("keeps a bot notice that waits, and lets app phrases go", () => {
     expect(noticeStays("question")).toBe(true);
-    expect(noticeStays("error")).toBe(true);
+    expect(noticeStays("blocked")).toBe(true);
+    expect(noticeStays("failure")).toBe(true);
     expect(noticeStays("success")).toBe(false);
+    expect(noticeStays("error")).toBe(false);
+    expect(noticeStays("warn")).toBe(false);
     expect(noticeStays("ok")).toBe(false);
   });
 
-  it("gives a brief confirmation 3 seconds and the rest 5", () => {
+  it("gives a brief confirmation 3 seconds, an error 7, and the rest 5", () => {
     expect(noticeLife("ok", "auto", true)).toBe(3000);
     expect(noticeLife("ok", "auto")).toBe(5000);
     expect(noticeLife("warn", "auto")).toBe(5000);
     expect(noticeLife("success", "auto")).toBe(5000);
+    expect(noticeLife("error", "auto")).toBe(ERROR_LIFE_MS);
+    expect(ERROR_LIFE_MS).toBe(7000);
   });
 
-  it("keeps what waits on the user, and everything but a brief word when Settings say so", () => {
+  it("holds bot notices when Settings say so, and never an app phrase", () => {
     expect(noticeLife("question", "auto")).toBeNull();
-    expect(noticeLife("error", "auto")).toBeNull();
+    expect(noticeLife("blocked", "auto")).toBeNull();
+    expect(noticeLife("failure", "auto")).toBeNull();
+    expect(noticeLife("failure", "keep")).toBeNull();
     expect(noticeLife("success", "keep")).toBeNull();
-    expect(noticeLife("ok", "keep")).toBeNull();
+    expect(noticeLife("error", "keep")).toBe(ERROR_LIFE_MS);
+    expect(noticeLife("ok", "keep")).toBe(5000);
+    expect(noticeLife("warn", "keep")).toBe(5000);
     expect(noticeLife("ok", "keep", true)).toBe(3000);
+    expect(noticeLife("error", "keep", true)).toBe(3000);
+  });
+
+  it("drops an app phrase already in the pile, and leaves a bot notice", () => {
+    const err: IslandNotice = { seq: 1, stays: true, piled: true, kind: "error", text: "이름을 입력하세요" };
+    const ok: IslandNotice = { seq: 2, stays: true, piled: true, kind: "ok", text: "저장됨" };
+    const live: IslandNotice = { seq: 3, stays: false, piled: false, kind: "warn", text: "잠깐" };
+    const asked: IslandNotice = { seq: 4, stays: true, piled: true, kind: "question", botId: "q" };
+    expect(withoutAppPile([err, ok, live, asked])).toEqual([live, asked]);
   });
 
   it("goes on where it stopped once the pointer leaves, with a beat to spare", () => {

@@ -25,6 +25,8 @@ type Props = {
   onEffort: (effort: string) => void;
   /** Set when the CLI is "custom". The message is appended as the last argument. */
   command?: string;
+  /** A blank command, shown under the command field. Opens that field. */
+  commandError?: string;
   onCommand?: (command: string) => void;
   /** Enter or leaving the field. An empty command is the caller's to ignore. */
   onCommandCommit?: (command: string) => void;
@@ -43,6 +45,7 @@ export function ModelPicker({
   onModel,
   onEffort,
   command = "",
+  commandError,
   onCommand,
   onCommandCommit,
 }: Props) {
@@ -51,7 +54,16 @@ export function ModelPicker({
   // A click on another CLI blurs the command field first. That blur must not
   // save the command and swallow the click.
   const skipCommit = useRef(false);
+  const commandRef = useRef<HTMLInputElement>(null);
   const [lists, setLists] = useState<Partial<Record<CliKind, ModelList>>>({});
+
+  // The command lives inside the card, so a missing one opens the card onto it.
+  useEffect(() => {
+    if (!commandError || cli !== "custom") return;
+    setOpen(true);
+    const timer = window.setTimeout(() => commandRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [commandError, cli, setOpen]);
 
   useEffect(() => {
     if (!active) return;
@@ -170,12 +182,14 @@ export function ModelPicker({
               {cli === "custom" ? (
                 <>
                   <input
+                    ref={commandRef}
                     className="textin"
                     value={command}
                     placeholder={t("command.placeholder")}
                     autoComplete="off"
                     spellCheck={false}
                     aria-label={t("cli.custom")}
+                    aria-invalid={commandError ? true : undefined}
                     onChange={(e) => onCommand?.(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key !== "Enter") return;

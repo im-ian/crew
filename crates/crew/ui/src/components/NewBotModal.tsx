@@ -9,6 +9,9 @@ import { Field } from "./Field";
 import { Modal } from "./Modal";
 import { ModelPicker } from "./ModelPicker";
 
+/** A blank name or command, shown under that field instead of a titlebar notice. */
+export type NewBotProblem = { field: "name" | "cmd"; message: string };
+
 type Props = {
   open: boolean;
   groups: Group[];
@@ -24,7 +27,7 @@ type Props = {
     shape: string | null;
     color: string | null;
     groupId: string | null;
-  }) => Promise<void>;
+  }) => Promise<NewBotProblem | null>;
 };
 
 export function NewBotModal({
@@ -44,6 +47,7 @@ export function NewBotModal({
   const [color, setColor] = useState("");
   const [groupId, setGroupId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<NewBotProblem | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
@@ -65,6 +69,7 @@ export function NewBotModal({
     setShape(face.shape);
     setColor(face.color);
     setBusy(false);
+    setProblem(null);
     const t = window.setTimeout(() => nameRef.current?.focus(), 0);
     return () => window.clearTimeout(t);
   }, [open, placeId]);
@@ -84,16 +89,12 @@ export function NewBotModal({
 
   async function submit() {
     const trimmed = name.trim();
-    if (!trimmed) {
-      nameRef.current?.focus();
-      await onCreate(payload(""));
-      return;
-    }
-    setBusy(true);
+    if (!trimmed) nameRef.current?.focus();
+    else setBusy(true);
     try {
-      await onCreate(payload(trimmed));
+      setProblem(await onCreate(payload(trimmed)));
     } finally {
-      setBusy(false);
+      if (trimmed) setBusy(false);
     }
   }
 
@@ -122,7 +123,15 @@ export function NewBotModal({
             />
           </FacePop>
         </div>
-        <Field label={t("field.name")} htmlFor="new-name">
+        <Field
+          label={t("field.name")}
+          htmlFor="new-name"
+          hint={
+            problem?.field === "name" ? (
+              <span className="field-error">{problem.message}</span>
+            ) : undefined
+          }
+        >
           <input
             id="new-name"
             ref={nameRef}
@@ -130,7 +139,10 @@ export function NewBotModal({
             placeholder={t("info.namePh")}
             autoComplete="off"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              setName(e.target.value);
+              setProblem((p) => (p?.field === "name" ? null : p));
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -139,7 +151,14 @@ export function NewBotModal({
             }}
           />
         </Field>
-        <Field label={t("field.ai")}>
+        <Field
+          label={t("field.ai")}
+          hint={
+            problem?.field === "cmd" ? (
+              <span className="field-error">{problem.message}</span>
+            ) : undefined
+          }
+        >
           <ModelPicker
             cli={cli}
             model={model}
@@ -147,14 +166,19 @@ export function NewBotModal({
             active={open}
             pickInstalled
             command={command}
+            commandError={problem?.field === "cmd" ? problem.message : undefined}
             onCli={(next) => {
               setCli(next);
               setModel("");
               if (next === "custom") setCommand("");
+              if (next !== "custom") setProblem((p) => (p?.field === "cmd" ? null : p));
             }}
             onModel={setModel}
             onEffort={setEffort}
-            onCommand={setCommand}
+            onCommand={(next) => {
+              setCommand(next);
+              setProblem((p) => (p?.field === "cmd" ? null : p));
+            }}
           />
         </Field>
         <Field label={t("field.group")} htmlFor="new-group" hint={t("newBot.placeHint")}>
