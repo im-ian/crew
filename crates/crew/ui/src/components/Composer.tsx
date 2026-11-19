@@ -8,9 +8,10 @@ import { groupCandidates, mentionIds } from "../mentions";
 import { sendSteers, type Delivery } from "../deliveryPref";
 import { composerAfterSend } from "../sendGate";
 import { stepQueuePick } from "../queuePick";
-import { oneLine, plainText, wrapReply, type ReplyTarget } from "../reply";
+import { oneLine, wrapReply, type ReplyTarget } from "../reply";
 import { caretClientPoint, type CaretPoint } from "../caretPoint";
 import { droppedAttaches, type PathKind } from "../dropAttach";
+import { ReplyQuote, quoteFrom } from "./ReplyQuote";
 import { isWeb, uploadFailure, webUpload } from "../web";
 import type { AskPick } from "./AskHoldDialog";
 import { enterAction } from "../composerEnter";
@@ -132,6 +133,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   const [plusOpen, setPlusOpen] = useState(false);
   const [plusSkills, setPlusSkills] = useState(false);
   const [reply, setReply] = useState<ReplyTarget | null>(null);
+  // The bot the quoted message was with, for its face. The user's own has none.
+  const replyFrom = reply ? quoteFrom(reply.from) : null;
+  const replyAgent = replyFrom ? agents.find((a) => a.id === replyFrom) ?? null : null;
   const [editing, setEditing] = useState<Editing | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const plusRef = useRef<HTMLDivElement>(null);
@@ -757,17 +761,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           </div>
         ) : null}
         {reply ? (
-          <div className="reply-bar">
-            <button
-              type="button"
-              className="reply-bar-main"
+          // Drawn as the quote at the top of the reply's balloon, so what is
+          // written here reads the same once it is sent.
+          <div className="reply-draft">
+            <ReplyQuote
+              agent={replyAgent}
+              who={reply.who}
+              snippet={reply.text}
+              title={t("thread.jumpToReply")}
               onClick={() => onJump?.(reply.id)}
-            >
-              <span className="reply-bar-who">
-                {t("composer.replyTo", { who: reply.who })}
-              </span>
-              <span className="reply-bar-snippet">{oneLine(plainText(reply.text))}</span>
-            </button>
+            />
             <button
               type="button"
               className="reply-bar-close"
