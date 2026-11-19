@@ -11,6 +11,7 @@ import { applyLocale, loadLocale } from "./i18n";
 import { blockNativeMenu } from "./nativeMenu";
 import { applyTheme, loadThemePref } from "./theme";
 import { isWeb } from "./web";
+import { loadHomeDir } from "./homeDir";
 import { watchViewport } from "./mobile";
 import { followLaptopPrefs, mirrorDisplayPrefs } from "./displayPrefs";
 import "./styles.css";
@@ -34,16 +35,19 @@ if (isWeb()) {
   watchViewport();
 }
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <LocaleProvider>
-      {isWeb() ? (
-        <PairGate>
+// `~/…` in a bot's answer needs the home folder before the first chat draws.
+void loadHomeDir().finally(() =>
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <LocaleProvider>
+        {isWeb() ? (
+          <PairGate>
+            <App />
+          </PairGate>
+        ) : (
           <App />
-        </PairGate>
-      ) : (
-        <App />
-      )}
-    </LocaleProvider>
-  </StrictMode>,
+        )}
+      </LocaleProvider>
+    </StrictMode>,
+  ),
 );
