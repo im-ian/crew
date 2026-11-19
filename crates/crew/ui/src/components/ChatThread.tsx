@@ -16,7 +16,7 @@ import { useLocale, useT } from "../LocaleContext";
 import { useBotLabel, useLabelGroups } from "../BotLabelContext";
 import type { TFn } from "../i18n";
 import type { ReplyTarget } from "../reply";
-import { plainText, splitReply } from "../reply";
+import { splitReply } from "../reply";
 import type {
   AgentInfo,
   ChatMessage,
@@ -27,7 +27,7 @@ import type {
 import { resolveFace } from "../avatar";
 import { isMediaBlock, splitBubbles } from "../bubbles";
 import { messageDefinitions } from "../markdown";
-import { displayWho, noteRef, sentTarget, subagentFace } from "../peek";
+import { displayWho, noteRef, subagentFace } from "../peek";
 import {
   dividerCandidates,
   dotsAfter,
@@ -94,6 +94,7 @@ import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, F
 import { parseFileRef, sameFile, useFileOpen, workDir } from "../fileRef";
 import { splitFilePath } from "./FileView";
 import { Avatar } from "./Avatar";
+import { ReplyQuote as SharedReplyQuote, quoteFrom } from "./ReplyQuote";
 import { CopyButton, copyText } from "./CopyButton";
 import type { MenuEntry } from "./ContextMenu";
 import { isLongPress, selectTextIn, TouchMenuContext } from "../mobile";
@@ -2840,11 +2841,6 @@ function makeReply(m: ChatMessage, agents: AgentInfo[], t: TFn): ReplyTarget {
   return { id: m.id, from: m.from || "user", who, text };
 }
 
-function quoteFrom(from: string): string | null {
-  if (from === "user") return null;
-  return sentTarget(from) ?? from;
-}
-
 function quoteWho(from: string, agents: AgentInfo[], t: TFn): string {
   const id = quoteFrom(from);
   if (!id) return t("thread.you");
@@ -2869,37 +2865,15 @@ function ReplyQuote({
 }) {
   const t = useT();
   const id = quoteFrom(reply.from);
-  const agent = id ? agents.find((a) => a.id === id) ?? null : null;
-  const who = quoteWho(reply.from, agents, t);
-  // The name is set in bold inside the sentence, in either word order.
-  const [before, after = ""] = t("thread.replyTo").split("{who}");
   return (
-    <button
-      type="button"
-      className={"reply-quote" + (alone ? " is-alone" : "")}
+    <SharedReplyQuote
+      agent={id ? agents.find((a) => a.id === id) ?? null : null}
+      who={quoteWho(reply.from, agents, t)}
+      snippet={reply.snippet}
       title={t("thread.jumpToReply")}
       onClick={() => onJump?.(reply.id)}
-    >
-      <span className="reply-quote-head">
-        {agent ? (
-          <Avatar
-            as="span"
-            className="reply-quote-face"
-            id={agent.id}
-            name={who}
-            src={agent.avatar}
-            shape={agent.avatar_shape}
-            color={agent.avatar_color}
-          />
-        ) : null}
-        <span className="reply-quote-to">
-          {before}
-          <b>{who}</b>
-          {after}
-        </span>
-      </span>
-      <span className="reply-quote-text">{plainText(reply.snippet)}</span>
-    </button>
+      alone={alone}
+    />
   );
 }
 

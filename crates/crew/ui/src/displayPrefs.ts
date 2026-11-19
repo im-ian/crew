@@ -48,7 +48,7 @@ function subscribe(fn: () => void): () => void {
 
 /** The laptop's settings on a phone; null on the laptop or until read. */
 export function useLaptopPrefs(): DisplayPrefs | null {
-  return useSyncExternalStore(subscribe, getLaptopPrefs);
+  return useSyncExternalStore(subscribe, getLaptopPrefs, getLaptopPrefs);
 }
 
 /** Read the laptop's settings and show chat by them. */

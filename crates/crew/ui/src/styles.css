@@ -5127,6 +5127,28 @@ html[data-theme="light"] .file-src span {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A reply being written: the quote a sent reply's balloon opens with (see
+   .reply-quote), at the top of the box and ruled off across it, so the draft
+   reads the same once it is sent. Attachments and the input line follow. */
+.reply-draft {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
+  min-width: 0;
+  margin: 0 var(--space-4) 0 var(--space-10);
+  padding-bottom: var(--space-8);
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
+}
+.reply-draft .reply-quote {
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+}
+.reply-draft .reply-bar-close {
+  margin-top: -3px;
+}
 .reply-bar-close {
   display: inline-flex;
   align-items: center;
