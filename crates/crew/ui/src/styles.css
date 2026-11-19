@@ -7128,6 +7128,21 @@ textarea.textin.skill-body {
   display: flex;
 }
 .island-faces > * + * { margin-left: -6px; }
+/* "+N more" beside the pile's notice: it keeps its width, the sentence before it is cut. */
+.island-more {
+  flex: none;
+  margin-left: calc(-1 * var(--space-4));
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: #2c2c2e;
+  color: #d0d0d6;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity 0.12s var(--ease);
+}
+.island.is-open .island-more { opacity: 1; transition: opacity 0.2s 0.22s var(--ease); }
+.island-words { white-space: nowrap; }
 .island-chev {
   display: inline-flex;
   padding: 0 var(--space-2);
@@ -7176,6 +7191,7 @@ html[data-theme="light"] .island-ghost-2 {
   .island-row,
   .island-words,
   .island-acts,
+  .island-more,
   .island-lead { transition-duration: 0.01ms; }
   .island.is-open .island-dot,
   .island.is-open .island-dot::after { animation: none; }
@@ -8119,6 +8135,12 @@ button.wait-chip:focus-visible {
     -webkit-user-select: text;
     user-select: text;
     -webkit-touch-callout: default;
+  }
+
+  /* A notice row may use the screen's width less a margin, so the pile's
+     sentence keeps some room beside its "+N more", Go and ✕. */
+  .island-row {
+    max-width: calc(100vw - 24px);
   }
 
   /* A held row opens its menu (mobile.ts), not the system's link preview. */

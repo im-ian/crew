@@ -1,7 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { resolveFace } from "../avatar";
 import { Check, ChevronDown, ChevronUp, X } from "../icons";
-import { koSubject, mostPressing, type IslandNotice } from "../island";
+import { koSubject, mostPressing, pilePreview, type IslandNotice } from "../island";
 import { useLocale } from "../LocaleContext";
 import { useBotLabel } from "../BotLabelContext";
 import type { AgentInfo } from "../types";
@@ -30,6 +37,59 @@ const TINT: Record<IslandNotice["kind"], string> = {
   warn: "#ffb340",
   error: "#ff453a",
 };
+
+/**
+ * What one notice shows: its lead (the bot's face with the matching mood, or
+ * a status dot), its words, and the whole sentence for the title.
+ */
+function noticeView(
+  notice: IslandNotice,
+  bot: AgentInfo | null,
+  name: string,
+  locale: string,
+  t: ReturnType<typeof useLocale>["t"],
+): { lead: ReactNode; words: ReactNode; full: string } {
+  if (bot && "botId" in notice) {
+    const said = t(`island.${notice.kind}`);
+    const face = resolveFace(bot.id, bot.avatar_shape, bot.avatar_color);
+    const who = locale === "ko" ? koSubject(name) : name;
+    return {
+      lead: bot.avatar ? (
+        <img className="island-img" src={bot.avatar} alt="" />
+      ) : (
+        <BotFace
+          id={bot.id}
+          shape={face.shape}
+          color={face.color}
+          className="island-face"
+          status={notice.kind === "blocked" ? "blocked" : "idle"}
+          mood={notice.kind === "blocked" ? null : notice.kind}
+        />
+      ),
+      words: (
+        <>
+          <b>{who}</b> <span>{said}</span>
+        </>
+      ),
+      full: `${who} ${said}`,
+    };
+  }
+  const text = "text" in notice ? notice.text : "";
+  return { lead: <span className="island-dot" />, words: text, full: text };
+}
+
+/**
+ * The pile's "Go" opens the bot its row shows, the way a notice's own row
+ * does, and keeps the click from also laying the pile out.
+ */
+export function goFromPile(
+  e: { stopPropagation: () => void },
+  botId: string,
+  onOpenBot: (id: string) => void,
+) {
+  e.stopPropagation();
+  onOpenBot(botId);
+}
 
 // Keep these in step with the transitions on .island and .island-slot in styles.css.
 const OPEN_DELAY_MS = 180;
@@ -96,6 +156,7 @@ export function Island({
         <IslandPile
           notices={piled}
           agents={agents}
+          onOpenBot={onOpenBot}
           open={pileOpen}
           onToggle={() => setPileOpen((o) => !o)}
           onClear={onClearPile}
@@ -113,41 +174,45 @@ export function Island({
 }
 
 /**
- * The pile: one pill that says how many notices folded into it, with the
- * faces of the bots they are about and two edges under it, like a stack of
- * cards. A click lays them out under it, and the ✕ clears them all.
+ * The pile: one pill that shows the notice in it that most needs the user,
+ * with "+N more" and that notice's Go, and two edges under it, like a stack
+ * of cards. Go opens that bot; anywhere else lays the pile out under it, and
+ * the ✕ clears them all.
  */
-function IslandPile({
+export function IslandPile({
   notices,
   agents,
+  onOpenBot,
   open,
   onToggle,
   onClear,
 }: {
   notices: IslandNotice[];
   agents: AgentInfo[];
+  onOpenBot: (id: string) => void;
   open: boolean;
   onToggle: () => void;
   onClear: () => void;
 }) {
   const { locale, t } = useLocale();
+  const labelOf = useBotLabel();
   const [width, setWidth] = useState(0);
   const rowRef = useRef<HTMLDivElement>(null);
-  const bots: AgentInfo[] = [];
-  for (const n of notices) {
-    if (!("botId" in n) || bots.some((b) => b.id === n.botId)) continue;
-    const bot = agents.find((a) => a.id === n.botId);
-    if (bot) bots.push(bot);
-    if (bots.length === 3) break;
-  }
+  const botOf = (n: IslandNotice) =>
+    "botId" in n ? (agents.find((a) => a.id === n.botId) ?? null) : null;
+  // A notice about a bot gone from the list has no face to show.
+  const preview = pilePreview(notices, (n) => !("botId" in n) || !!botOf(n));
+  const bot = preview ? botOf(preview.lead) : null;
+  const view = preview
+    ? noticeView(preview.lead, bot, bot ? labelOf(bot) : "", locale, t)
+    : null;
   // The most pressing kind in it tints the pile, so a waiting question shows through.
   const tint = TINT[mostPressing(notices)];
-  const label = t("island.pile", { n: notices.length });
 
   useLayoutEffect(() => {
     const row = rowRef.current;
     if (row) setWidth(row.offsetWidth);
-  }, [notices.length, bots.map((b) => b.id).join(), locale, open]);
+  }, [notices.length, preview?.lead.seq, bot?.id, bot?.avatar, locale, open]);
 
   return (
     <div
@@ -164,7 +229,7 @@ function IslandPile({
         title={open ? t("island.pileClose") : t("island.pileOpen")}
         onClick={onToggle}
         onKeyDown={(e) => {
-          // The ✕ inside handles its own keys.
+          // Go and the ✕ inside handle their own keys.
           if (e.target !== e.currentTarget) return;
           if (e.key !== "Enter" && e.key !== " ") return;
           e.preventDefault();
@@ -172,31 +237,25 @@ function IslandPile({
         }}
       >
         <div className="island-row" ref={rowRef}>
-          <span className="island-lead island-faces">
-            {bots.length ? (
-              bots.map((bot) => {
-                const face = resolveFace(bot.id, bot.avatar_shape, bot.avatar_color);
-                return bot.avatar ? (
-                  <img key={bot.id} className="island-img" src={bot.avatar} alt="" />
-                ) : (
-                  <BotFace
-                    key={bot.id}
-                    id={bot.id}
-                    shape={face.shape}
-                    color={face.color}
-                    className="island-face"
-                    status="idle"
-                  />
-                );
-              })
-            ) : (
-              <span className="island-dot" />
-            )}
+          <span className={"island-lead" + (bot ? "" : " is-dot")}>
+            {view ? view.lead : <span className="island-dot" />}
           </span>
-          <span className="island-words">
-            <b>{label}</b>
+          <span className="island-words" title={view?.full}>
+            {view ? view.words : <b>{t("island.pile", { n: notices.length })}</b>}
           </span>
+          {preview && preview.others > 0 ? (
+            <span className="island-more">{t("island.more", { n: preview.others })}</span>
+          ) : null}
           <span className="island-acts">
+            {bot ? (
+              <button
+                type="button"
+                className="island-go"
+                onClick={(e) => goFromPile(e, bot.id, onOpenBot)}
+              >
+                {t("island.go")}
+              </button>
+            ) : null}
             <span className="island-chev">{open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</span>
             <button
               type="button"
@@ -298,36 +357,7 @@ function IslandPill({
 
   const kind = notice.kind;
   const stays = notice.stays;
-  let lead;
-  let words;
-  let full: string;
-  if (bot && "botId" in notice) {
-    const said = t(`island.${notice.kind}`);
-    const face = resolveFace(bot.id, bot.avatar_shape, bot.avatar_color);
-    lead = bot.avatar ? (
-      <img className="island-img" src={bot.avatar} alt="" />
-    ) : (
-      <BotFace
-        id={bot.id}
-        shape={face.shape}
-        color={face.color}
-        className="island-face"
-        status={kind === "blocked" ? "blocked" : "idle"}
-        mood={notice.kind === "blocked" ? null : notice.kind}
-      />
-    );
-    const who = locale === "ko" ? koSubject(name) : name;
-    words = (
-      <>
-        <b>{who}</b> <span>{said}</span>
-      </>
-    );
-    full = `${who} ${said}`;
-  } else {
-    lead = <span className="island-dot" />;
-    words = "text" in notice ? notice.text : "";
-    full = words;
-  }
+  const { lead, words, full } = noticeView(notice, bot, name, locale, t);
 
   return (
     <div className={"island-slot" + (phase === "leave" ? " is-leaving" : "")}>

@@ -134,6 +134,24 @@ export function mostPressing(notices: readonly IslandNotice[]): IslandNotice["ki
   return top;
 }
 
+/**
+ * The notice a pile shows on its own row, and how many others it holds: the
+ * one that most needs the user, the newest of those that need it as much
+ * (the stack is newest first). `drawable` leaves out what cannot be drawn,
+ * such as a notice about a bot gone from the list. Null when nothing can.
+ */
+export function pilePreview(
+  notices: readonly IslandNotice[],
+  drawable: (n: IslandNotice) => boolean = () => true,
+): { lead: IslandNotice; others: number } | null {
+  let lead: IslandNotice | null = null;
+  for (const n of notices) {
+    if (!drawable(n)) continue;
+    if (!lead || URGENCY[n.kind] > URGENCY[lead.kind]) lead = n;
+  }
+  return lead ? { lead, others: notices.length - 1 } : null;
+}
+
 /** A notice the user has to act on stays until they do; the rest fade on their own. */
 export function noticeStays(kind: IslandNotice["kind"]): boolean {
   return kind === "question" || kind === "blocked" || kind === "failure" || kind === "error";

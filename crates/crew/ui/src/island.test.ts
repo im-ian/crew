@@ -8,6 +8,7 @@ import {
   noticeStays,
   byRank,
   mostPressing,
+  pilePreview,
   pushNotice,
   type IslandNotice,
   type BotSnap,
@@ -220,5 +221,40 @@ describe("koSubject", () => {
     expect(koSubject("민준")).toBe("민준이");
     expect(koSubject("Crew 개발자")).toBe("Crew 개발자가");
     expect(koSubject("grok")).toBe("grok이(가)");
+  });
+});
+
+describe("pilePreview", () => {
+  const about = (seq: number, botId: string, kind: IslandNotice["kind"]): IslandNotice =>
+    ({ seq, stays: true, piled: true, kind, botId }) as IslandNotice;
+
+  it("shows what most needs the user, the newest of equals", () => {
+    // Newest first, as the stack holds them.
+    const pile = [
+      about(9, "dev", "success"),
+      about(8, "arch", "question"),
+      about(7, "dbg", "blocked"),
+      about(6, "lead", "question"),
+      about(5, "des", "success"),
+    ];
+    expect(pilePreview(pile)).toEqual({ lead: pile[1], others: 4 });
+  });
+
+  it("counts no others for a pile of one", () => {
+    const one = [about(3, "dev", "success")];
+    expect(pilePreview(one)).toEqual({ lead: one[0], others: 0 });
+  });
+
+  it("passes over what cannot be drawn, and gives up when nothing can", () => {
+    const pile = [about(2, "gone", "question"), about(1, "dev", "success")];
+    const drawable = (n: IslandNotice) => !("botId" in n) || n.botId !== "gone";
+    expect(pilePreview(pile, drawable)).toEqual({ lead: pile[1], others: 1 });
+    expect(pilePreview([pile[0]], drawable)).toBeNull();
+  });
+
+  it("brings up the next most pressing once the shown one is closed", () => {
+    const pile = [about(3, "a", "success"), about(2, "b", "question"), about(1, "c", "blocked")];
+    const left = pile.filter((n) => n.seq !== 2);
+    expect(pilePreview(left)?.lead.seq).toBe(1);
   });
 });
