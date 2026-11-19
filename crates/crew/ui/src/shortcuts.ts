@@ -145,7 +145,9 @@ export function tabPlace(target: EventTarget | null): TabPlace {
   }
   const node = target as unknown as { closest?: (selector: string) => unknown };
   if (typeof node.closest !== "function") return "other";
-  return tabPlaceOf({ closest: node.closest });
+  // Called on the node itself: a browser's closest() taken off its element
+  // throws, and this runs on every key press.
+  return tabPlaceOf(node as { closest(selector: string): unknown });
 }
 
 /**
