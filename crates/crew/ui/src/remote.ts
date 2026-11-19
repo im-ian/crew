@@ -1,4 +1,5 @@
 import {
+  groupLead,
   groupOrderChanges,
   parseItemKey,
   railSlots,
@@ -355,16 +356,19 @@ export type ChatSlot = {
   /** Bots that belong to this section, top to bottom. */
   ids: readonly string[];
   /**
-   * A collapsed folder or a folded router is closed. Its bots are not steps.
-   * A chat open inside one jumps to the section beside it.
+   * Open sections are walked bot by bot. A closed one is not, except for
+   * `shown`, the one chat row it still draws.
    */
   open: boolean;
+  /** The chat row a closed section still shows, or none. */
+  shown: string | null;
 };
 
 /**
  * Sidebar sections top to bottom, as the rail stacks folders, loose bots
  * and routers. A closed section stays in the list so a chat open inside it
- * still has a place. It contributes no step.
+ * still has a place. A collapsed folder's `shown` is its lead. A folded
+ * router shows no bot row, so `shown` stays empty.
  */
 export function chatSlots(
   rail: RailLayout,
@@ -386,7 +390,7 @@ export function chatSlots(
     if (!group) {
       const parsed = parseItemKey(slot);
       if (parsed && here.has(parsed.id)) {
-        byKey.set(slot, { key: slot, ids: [parsed.id], open: true });
+        byKey.set(slot, { key: slot, ids: [parsed.id], open: true, shown: null });
       }
       continue;
     }
@@ -395,13 +399,21 @@ export function chatSlots(
       const parsed = parseItemKey(key);
       if (parsed && here.has(parsed.id)) ids.push(parsed.id);
     }
-    byKey.set(slot, { key: slot, ids, open: !group.collapsed });
+    const open = !group.collapsed;
+    const lead = groupLead(group);
+    byKey.set(slot, {
+      key: slot,
+      ids,
+      open,
+      shown: !open && lead && ids.includes(lead) ? lead : null,
+    });
   }
   for (const s of sections) {
     byKey.set(remoteKey(s.alias), {
       key: remoteKey(s.alias),
       ids: s.bots.map((b) => b.id),
       open: !folded.includes(s.alias),
+      shown: null,
     });
   }
   return railSections(
@@ -432,10 +444,15 @@ export function chatOrder(
 
 /**
  * The chat ⌘⌥↓ (`next`) or ⌘⌥↑ (`prev`) opens.
- * Open sections are stepped through, and the ends wrap.
- * A chat inside a collapsed group or a folded router is not a step: next is
- * the first open chat below that section, prev the last one above it.
- * A run of closed sections is skipped. An unknown chat still wraps to an end.
+ * It follows the rows the sidebar shows, and the ends wrap.
+ * An open section contributes every bot. A closed section contributes
+ * `shown` when it has one: a collapsed folder's lead. A folder with no
+ * lead, and a folded router, contribute nothing.
+ * A chat hidden in a closed section is not a row. Next is the first row
+ * below that section. Prev is the section's own row when it has one, and
+ * otherwise the last row above it.
+ * ⌘K uses {@link chatOrder}, which still skips closed sections.
+ * An unknown chat still wraps to an end.
  */
 export function adjacentChat(
   slots: readonly ChatSlot[],
@@ -444,8 +461,9 @@ export function adjacentChat(
 ): string | null {
   const steps: { id: string; slot: number }[] = [];
   slots.forEach((slot, index) => {
-    if (!slot.open) return;
-    for (const id of slot.ids) steps.push({ id, slot: index });
+    const rows =
+      slot.open ? slot.ids : slot.shown && slot.ids.includes(slot.shown) ? [slot.shown] : [];
+    for (const id of rows) steps.push({ id, slot: index });
   });
   if (!steps.length) return null;
 
@@ -456,14 +474,14 @@ export function adjacentChat(
     return steps[i].id;
   }
 
-  const closed =
-    selectedId == null
-      ? -1
-      : slots.findIndex((slot) => !slot.open && slot.ids.includes(selectedId));
-  if (closed >= 0) {
-    if (dir === "next") return (steps.find((step) => step.slot > closed) ?? steps[0]).id;
+  const home =
+    selectedId == null ? -1 : slots.findIndex((slot) => slot.ids.includes(selectedId));
+  if (home >= 0) {
+    const slot = slots[home];
+    if (dir === "prev" && slot.shown && slot.ids.includes(slot.shown)) return slot.shown;
+    if (dir === "next") return (steps.find((step) => step.slot > home) ?? steps[0]).id;
     for (let i = steps.length - 1; i >= 0; i--) {
-      if (steps[i].slot < closed) return steps[i].id;
+      if (steps[i].slot < home) return steps[i].id;
     }
     return steps[steps.length - 1].id;
   }
