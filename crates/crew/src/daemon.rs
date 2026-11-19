@@ -468,12 +468,66 @@ fn render_handoffs(items: &[PendingHandoff]) -> String {
         }
     }
     for h in keep {
-        out.push_str(&crate::protocol::handoff_envelope(&h.from, &h.text));
+        out.push_str(&with_state(
+            &h.from,
+            crate::protocol::handoff_envelope(&h.from, &h.text),
+            false,
+        ));
         if !out.ends_with('\n') {
             out.push('\n');
         }
     }
     out
+}
+
+/// What the teammate that sent a reply is doing now, as one line for the bot
+/// that reads the reply. A report may end on "next I will…" while the bot
+/// that wrote it has stopped; this says which is true. None for a bot on
+/// another PC, whose state is not known here.
+///
+/// `turn_end`: read as the sender's turn ends. Its status may still say
+/// working for that turn then, so only the work it left running counts.
+fn teammate_state(id: &str, turn_end: bool) -> Option<String> {
+    if !known_agent(id) || crate::remote::split_id(id).is_some() {
+        return None;
+    }
+    let name = agent_config(id)
+        .map(|cfg| cfg.display_name().to_string())
+        .unwrap_or_else(|| id.to_string());
+    let watch: Vec<String> = match agents().lock().ok().and_then(|map| map.get(id).cloned()) {
+        Some(LiveAgent::Headless(session)) => headless::running_work(&session),
+        _ => Vec::new(),
+    }
+    .into_iter()
+    .map(|w| w.what)
+    .collect();
+    let line = if !watch.is_empty() {
+        let n = watch.len();
+        let tasks = if n == 1 { "task" } else { "tasks" };
+        format!(
+            "{name} is waiting on {n} background {tasks} it started ({}). Its result comes back to you when they finish.",
+            watch.join("; ")
+        )
+    } else {
+        match live_status(id) {
+            Ok(AgentStatus::Blocked) => {
+                format!("{name} is waiting for the user to allow or deny an action.")
+            }
+            Ok(AgentStatus::Working) if !turn_end => format!("{name} is working on a turn now."),
+            _ => format!(
+                "{name} is idle after this reply: no turn and no background work is running, so nothing goes on unless someone tells it to."
+            ),
+        }
+    };
+    Some(format!("[crew] {line}"))
+}
+
+/// A reply as the bot that asked reads it, with what its sender is doing.
+fn with_state(from: &str, envelope: String, turn_end: bool) -> String {
+    match teammate_state(from, turn_end) {
+        Some(line) => format!("{envelope}\n{line}"),
+        None => envelope,
+    }
 }
 
 fn origins() -> &'static Mutex<HashMap<String, TurnOrigin>> {
@@ -6170,7 +6224,7 @@ fn wake_asker_inner(id: &str) {
     // wakes it with those notes: once, either way.
     let (text, taken) = match take_handoff_from(&asker, id) {
         Some(reply) => (
-            crate::protocol::handoff_envelope(id, &reply.text),
+            with_state(id, crate::protocol::handoff_envelope(id, &reply.text), true),
             vec![reply],
         ),
         None => {
@@ -7701,7 +7755,19 @@ mod daemon_tests {
                 .get_mut(&asker)
                 .and_then(|q| q.pop_front())
                 .expect("woken once the turn is done");
-            assert_eq!(item.text, format!("[crew handoff from:{speaker}]\n보"));
+            assert!(
+                item.text
+                    .starts_with(&format!("[crew handoff from:{speaker}]\n보\n")),
+                "{}",
+                item.text
+            );
+            // What the teammate is doing now rides with its reply.
+            assert!(
+                item.text
+                    .ends_with("so nothing goes on unless someone tells it to."),
+                "{}",
+                item.text
+            );
 
             take_origin(&speaker);
             for id in [&asker, &speaker] {
@@ -12966,6 +13032,92 @@ esac"#,
             assert!(wake.text.contains("Watch CI"), "{}", wake.text);
             crate::transcript::drop_agent(&bot);
             drop_waits(&bot);
+        });
+    }
+
+    /// A reply that reaches the bot that asked says what its sender is doing
+    /// then: waiting on background work it started, or idle with nothing
+    /// going on. A report can end on "next I will…" either way; this is the
+    /// fact. The user's own turn hands nothing to a bot.
+    #[test]
+    fn a_handoff_says_whether_the_teammate_is_idle_or_waiting() {
+        paths::testing::with_home("handoff-state", || {
+            crate::transcript::set_seal_hook(on_assistant_sealed);
+            let [lead, worker] = ["lead", "worker"].map(test_id);
+            let logs = paths::home_dir().join("logs");
+            fs::create_dir_all(&logs).unwrap();
+            let body = format!(
+                r#"printf '%s\n---\n' "$last" >> '{logs}'/"$CREW_AGENT_ID"
+case "$last" in
+*bg-work*)
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"CI 끝나면 다음 단계 할게요"}}]}}}}' '{{"type":"system","subtype":"background_tasks_changed","tasks":[{{"task_id":"t1","description":"Watch CI"}}]}}' '{{"type":"result","subtype":"success","result":"CI 끝나면 다음 단계 할게요"}}'
+sleep 2
+printf '%s\n' '{{"type":"system","subtype":"background_tasks_changed","tasks":[]}}' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"CI 통과. 다음 할 일: 3단계"}}]}}}}' '{{"type":"result","subtype":"success","result":"CI 통과. 다음 할 일: 3단계"}}'
+;;
+*)
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s2"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"확인했어요"}}]}}}}' '{{"type":"result","subtype":"success","result":"확인했어요"}}'
+;;
+esac"#,
+                logs = logs.display()
+            );
+            for id in [&lead, &worker] {
+                fake_bot_running(id, &body);
+                wait_idle(id);
+            }
+            let prompts = |id: &str| -> Vec<String> {
+                fs::read_to_string(logs.join(id))
+                    .unwrap_or_default()
+                    .split("\n---\n")
+                    .filter(|p| !p.trim().is_empty())
+                    .map(str::to_string)
+                    .collect()
+            };
+            tell_agent(&lead, &worker, "bg-work 해 주세요").unwrap();
+            eventually(
+                Duration::from_secs(8),
+                "the lead never heard both replies",
+                || prompts(&lead).len() == 2,
+            );
+            wait_idle(&worker);
+            wait_idle(&lead);
+            let heard = prompts(&lead);
+            assert!(
+                heard[0].contains("CI 끝나면 다음 단계 할게요"),
+                "{}",
+                heard[0]
+            );
+            assert!(
+                heard[0].contains(&format!(
+                    "[crew] {worker} is waiting on 1 background task it started (Watch CI)."
+                )),
+                "{}",
+                heard[0]
+            );
+            assert!(heard[1].contains("다음 할 일: 3단계"), "{}", heard[1]);
+            assert!(
+                heard[1].contains(&format!("[crew] {worker} is idle after this reply")),
+                "{}",
+                heard[1]
+            );
+
+            // The user's own turn: no bot asked, so no line goes anywhere.
+            send_agent(&worker, "직접 시킨 일").unwrap();
+            eventually(Duration::from_secs(5), "the user's turn never ran", || {
+                told(&worker, "확인했어요")
+            });
+            wait_idle(&worker);
+            std::thread::sleep(Duration::from_millis(300));
+            assert_eq!(prompts(&lead).len(), 2, "the user's turn reached the lead");
+            assert!(
+                !crate::transcript::messages(&worker)
+                    .iter()
+                    .any(|m| m.text.contains("is idle after this reply")),
+                "the line is for the asker's prompt, not a chat"
+            );
+            for id in [&lead, &worker] {
+                wait_idle(id);
+                remove_agent(id).unwrap();
+            }
         });
     }
 
