@@ -128,7 +128,7 @@ export function ChatHeader({
         {status && status.tone !== "waiting" ? (
           <span
             className={"head-status is-" + status.tone}
-            title={status.tone === "watching" ? status.text : undefined}
+            title={status.text}
           >
             <span className="head-status-text">{status.text}</span>
           </span>

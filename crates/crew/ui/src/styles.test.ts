@@ -27,6 +27,26 @@ describe("styles.css", () => {
     expect(depth, "a block is left open").toBe(0);
   });
 
+  it("keeps the model line on a phone, under the name, off the header buttons", () => {
+    const phone = source.slice(source.lastIndexOf("@media (max-width: 640px)"));
+    const run = phone.match(/header \.head-run\s*\{[^}]*\}/);
+    expect(run, "the phone rule for .head-run").not.toBeNull();
+    expect(run![0]).not.toMatch(/display:\s*none/);
+    expect(run![0]).toMatch(/order:\s*2/);
+    expect(run![0]).toMatch(/flex:\s*1 0 100%/);
+    expect(run![0]).toMatch(/max-width:\s*100%/);
+    // The name and the status share the first line; the run line takes the next.
+    // Scoped to the chat header, so a lead row's status is left alone.
+    expect(phone).toMatch(/header \.head-identity\s*\{[^}]*flex-wrap:\s*wrap/);
+    const status = phone.match(/header \.head-status\s*\{[^}]*\}/);
+    expect(status, "the phone rule for .head-status").not.toBeNull();
+    expect(status![0]).toMatch(/order:\s*1/);
+    expect(status![0]).toMatch(/flex:\s*1 1 0/);
+    expect(phone).toMatch(/header \.head-identity:has\(\.head-status\) \.who-btn\s*\{[^}]*max-width:\s*calc\(100% - 4\.5em\)/);
+    // Header padding is the safe-area inset's neighbor. This change does not touch it.
+    expect(phone).toMatch(/header\s*\{[^}]*padding:\s*var\(--space-6\) var\(--space-8\) 0 var\(--space-6\)/);
+  });
+
   it("gives the picture overlay a full screen and a finger-sized close on a phone", () => {
     const phone = source.slice(source.lastIndexOf("@media (max-width: 640px)"));
     expect(phone).toMatch(/\.img-preview\s*\{[^}]*height:\s*var\(--phone-h\)/);
