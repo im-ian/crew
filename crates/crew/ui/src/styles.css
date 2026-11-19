@@ -8123,25 +8123,42 @@ html.kb-open {
     text-overflow: ellipsis;
   }
   .head-action {
-    width: 40px;
-    height: 40px;
+    width: 36px;
+    height: 36px;
   }
 
-  /* Composer: room for the home bar, and 44px to press. */
+  /* Phone buttons are drawn at 36px; a clear edge around each takes the
+     press out to about 42-44px, the size a finger needs. */
+  .head-action,
+  .composer-box button[type="submit"],
+  .composer-box .stop-btn,
+  .composer-row .attach-btn {
+    position: relative;
+  }
+  .head-action::after,
+  .composer-box button[type="submit"]::after,
+  .composer-box .stop-btn::after,
+  .composer-row .attach-btn::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+  }
+  .head-action::after {
+    inset: -3px;
+  }
+
+  /* Composer: room for the home bar. */
   .composer {
     padding: var(--space-6) var(--space-10) calc(var(--space-10) + var(--safe-bottom));
   }
   .composer-box {
-    min-height: 52px;
+    min-height: 48px;
   }
   .composer-box button[type="submit"],
-  .composer-box .stop-btn {
-    width: 44px;
-    height: 44px;
-  }
+  .composer-box .stop-btn,
   .attach-btn {
-    width: 40px;
-    height: 40px;
+    width: 36px;
+    height: 36px;
   }
   /* Below 16px iOS zooms the page into a field it focuses. */
   .composer-input,
@@ -8151,17 +8168,13 @@ html.kb-open {
     font-size: max(16px, 1em);
   }
   /* The row keeps its buttons at the bottom, so a taller message grows up.
-     One line has to be as tall as the 44px send button, the text in its
-     middle: the padding is what the line height leaves of 44px. The plus
-     (40px) sits 2px up, so the three share one centre. */
+     One line has to be as tall as the 36px buttons, the text in its middle:
+     the padding is what the line height leaves of 36px. */
   .composer-input {
     max-height: 30vh;
-    min-height: 44px;
-    padding-top: max(4px, calc((44px - 1.4em) / 2));
-    padding-bottom: max(4px, calc((44px - 1.4em) / 2));
-  }
-  .composer-row .plus-wrap > .attach-btn {
-    margin-bottom: 2px;
+    min-height: 36px;
+    padding-top: max(3px, calc((36px - 1.4em) / 2));
+    padding-bottom: max(3px, calc((36px - 1.4em) / 2));
   }
 
   /* Side panels (file view, peeked chat, a lead's group) fill the screen. */
@@ -8268,7 +8281,7 @@ html.kb-open {
   .actions > .ghost,
   .actions > .primary,
   .actions > .danger {
-    min-height: 44px;
+    min-height: 40px;
   }
 
   /* Menus open over everything and have rows a finger can hit. */
@@ -8277,7 +8290,7 @@ html.kb-open {
     max-width: calc(100vw - 16px);
   }
   .ctx button {
-    padding: var(--space-12) var(--space-14);
+    padding: var(--space-10) var(--space-12);
   }
 
   /* The pairing screen scrolls inside the app's height, so the keyboard
