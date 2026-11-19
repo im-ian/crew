@@ -8041,7 +8041,9 @@ html.kb-open {
     padding-right: var(--safe-right);
   }
 
-  /* The chat's header: the drawer button first, the run line folded away. */
+  /* The chat's header: the drawer button first. The model line (a remote
+     bot's connection line) sits under the name, small, on one line. The
+     name gives way before the status, so neither covers the 40px buttons. */
   header {
     padding: var(--space-6) var(--space-8) 0 var(--space-6);
     margin-bottom: var(--space-4);
@@ -8050,8 +8052,41 @@ html.kb-open {
   .head-rail {
     display: grid;
   }
-  .head-run {
-    display: none;
+  header .head-identity {
+    flex-wrap: wrap;
+    overflow: hidden;
+  }
+  /* A long name would otherwise be as wide as its text, and the status
+     would wrap under it. Leave 4.5em, enough for "작업 중" in full. A longer
+     word ellipsizes in that room; a short name stays beside its status. */
+  header .head-identity:has(.head-status) .who-btn {
+    max-width: calc(100% - 4.5em);
+  }
+  header .head-status {
+    order: 1;
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+  }
+  header .head-status .head-status-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  header .head-run {
+    order: 2;
+    flex: 1 0 100%;
+    max-width: 100%;
+    margin: var(--space-2) 0 0;
+    padding-left: var(--space-4);
+  }
+  /* A long "waiting" phrase would otherwise stay full width and shove the
+     chips off the row. It ellipsizes; the chips keep the rest and scroll. */
+  header .head-status.is-waiting .head-status-text {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .head-action {
     width: 40px;
