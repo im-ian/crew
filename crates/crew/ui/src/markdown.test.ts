@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isLocalHref, mediaKind, messageDefinitions, renderMarkdown, resolveLocalPath } from "./markdown";
+import { fileName, isLocalHref, mediaKind, messageDefinitions, missingReason, renderMarkdown, resolveLocalPath } from "./markdown";
+import { setHomeDir } from "./homeDir";
 
 /** The rendered html without the newlines markdown-it puts after tags. */
 const html = (text: string, source?: string) =>
@@ -268,6 +269,19 @@ describe("resolveLocalPath", () => {
     expect(resolveLocalPath("~/shots/a.png")).toBe("~/shots/a.png");
   });
 
+  it("puts a ~ path under the home folder once it is known, absolute paths as they are", () => {
+    setHomeDir("/Users/me");
+    try {
+      expect(resolveLocalPath("~/shots/a.png")).toBe("/Users/me/shots/a.png");
+      expect(resolveLocalPath("~")).toBe("/Users/me");
+      expect(resolveLocalPath("/tmp/bo-shots/handle.png")).toBe("/tmp/bo-shots/handle.png");
+      // `~user/…` is someone else's home, not this one.
+      expect(resolveLocalPath("~other/a.png")).toBe("~other/a.png");
+    } finally {
+      setHomeDir(null);
+    }
+  });
+
   it("reads a file:// url back into a path", () => {
     expect(resolveLocalPath("file:///tmp/a%20b.png")).toBe("/tmp/a b.png");
   });
@@ -367,5 +381,19 @@ describe("mediaKind", () => {
     expect(html(`[song.mp3](/tmp/1-songmp3 "audio")`)).toBe(
       '<p><a href="/tmp/1-songmp3" title="audio">song.mp3</a></p>',
     );
+  });
+});
+
+describe("missingReason", () => {
+  it("tells a hidden folder, which is never served, from a file that is not there", () => {
+    expect(missingReason("/Users/me/.grok/sessions/x/images/04-handle.png")).toBe("hidden");
+    expect(missingReason("~/.ssh/id_rsa")).toBe("hidden");
+    expect(missingReason("/Users/me/Documents/GitHub/images/04-handle.png")).toBe("missing");
+    expect(missingReason("/work/app/./out/a.png")).toBe("missing");
+  });
+
+  it("names the file at the end of the path", () => {
+    expect(fileName("/Users/me/Documents/GitHub/images/04-handle.png")).toBe("04-handle.png");
+    expect(fileName("/tmp/dir/")).toBe("dir");
   });
 });

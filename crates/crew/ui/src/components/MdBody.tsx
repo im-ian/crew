@@ -1,10 +1,20 @@
-import { createElement, useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  createElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import "katex/dist/katex.min.css";
 import { injectMentionChips, sameMentionAgents } from "../mentions";
 import {
+  fileName,
   isLocalHref,
   mediaKind,
   mediaSrc,
+  missingReason,
   renderMarkdown,
   resolveLocalPath,
   type MediaKind,
@@ -285,9 +295,12 @@ function nodeToReact(
     const open = () => {
       if (src) onOpen([{ src, alt, kind: "image" }], 0);
     };
+    const local = resolveLocalPath(raw, baseDir);
     return (
-      <img
+      <LocalImg
         key={key}
+        path={local}
+        name={alt || (local ? fileName(local) : raw)}
         alt={alt}
         aria-label={alt || zoomLabel}
         title={el.getAttribute("title") || undefined}
@@ -468,7 +481,8 @@ function galleryShots(el: HTMLElement, baseDir: string | undefined): Shot[] {
     const raw = child.getAttribute("src") || "";
     const src = mediaSrc(raw, baseDir);
     if (!src) continue;
-    shots.push({ src, alt: child.getAttribute("alt") || "", kind: "image" });
+    const path = resolveLocalPath(raw, baseDir) ?? undefined;
+    shots.push({ src, alt: child.getAttribute("alt") || "", kind: "image", path });
   }
   return shots;
 }
@@ -491,7 +505,9 @@ function AlbumImage({
   };
   return (
     <span className="md-shot">
-      <img
+      <LocalImg
+        path={shot.path ?? null}
+        name={shot.alt || (shot.path ? fileName(shot.path) : label)}
         alt={shot.alt}
         aria-label={more > 0 ? `${label}, +${more}` : label}
         src={shot.src}
@@ -514,6 +530,34 @@ function AlbumImage({
 
 
 /**
+ * A picture. One on this Mac that does not load becomes a note saying which
+ * file and where it was looked for, not a broken-image icon: a bot that wrote
+ * a path relative to another folder, or under a hidden one, then shows why.
+ */
+function LocalImg({
+  path,
+  name,
+  ...img
+}: { path: string | null; name: string } & React.ImgHTMLAttributes<HTMLImageElement>) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [img.src]);
+  if (failed && path) return <MissingNote path={path} name={name} />;
+  return <img {...img} onError={path ? () => setFailed(true) : undefined} />;
+}
+
+/** Where a file on this Mac was looked for, when it was not there. */
+function MissingNote({ path, name, inline = false }: { path: string; name?: string; inline?: boolean }) {
+  const t = useT();
+  const why = missingReason(path) === "hidden" ? t("file.hiddenAt", { path }) : t("file.missingAt", { path });
+  return (
+    <span className={"md-missing" + (inline ? " is-inline" : "")} role="note" title={path}>
+      {name ? <span className="md-missing-name">{name}</span> : null}
+      <span className="md-missing-why">{why}</span>
+    </span>
+  );
+}
+
+/**
  * A link to a file on this Mac. A text or code file opens beside the chat; a
  * folder, a picture or a document opens in its own app, as it always did.
  */
@@ -531,22 +575,26 @@ function LocalLink({
   children: ReactNode;
 }) {
   const openFile = useFileOpen();
+  const [missing, setMissing] = useState(false);
   return (
-    <a
-      href={href}
-      title={title}
-      onClick={(e) => {
-        e.preventDefault();
-        if (!path) return;
-        // A relative link keeps how it was written, for the search under the bot's folder.
-        const written = parseFileRef(href.replace(/^file:\/\//, ""));
-        const target = fileTarget(written, baseDir) ?? parseFileRef(path);
-        if (openFile && opensInPanel(target.path)) openFile.open(target);
-        else void api.openPath(path);
-      }}
-    >
-      {children}
-    </a>
+    <>
+      <a
+        href={href}
+        title={title}
+        onClick={(e) => {
+          e.preventDefault();
+          if (!path) return;
+          // A relative link keeps how it was written, for the search under the bot's folder.
+          const written = parseFileRef(href.replace(/^file:\/\//, ""));
+          const target = fileTarget(written, baseDir) ?? parseFileRef(path);
+          if (openFile && opensInPanel(target.path)) openFile.open(target);
+          else void api.openPath(path).then(() => setMissing(false), () => setMissing(true));
+        }}
+      >
+        {children}
+      </a>
+      {missing && path ? <MissingNote path={path} inline /> : null}
+    </>
   );
 }
 

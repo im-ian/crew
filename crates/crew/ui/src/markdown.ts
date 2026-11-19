@@ -1,3 +1,4 @@
+import { expandHome } from "./homeDir";
 import { fileSrc } from "./transport";
 import katex from "katex";
 import MarkdownIt, { type Env, type StateBlock, type StateInline, type Token } from "markdown-it";
@@ -396,7 +397,7 @@ export function resolveLocalPath(src: string, baseDir?: string): string | null {
     }
   }
   if (path.startsWith("~")) {
-    return path;
+    return expandHome(path);
   }
   if (path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)) {
     return path;
@@ -411,12 +412,27 @@ export function resolveLocalPath(src: string, baseDir?: string): string | null {
 export function mediaSrc(src: string, baseDir?: string): string {
   const local = resolveLocalPath(src, baseDir);
   if (!local) return src;
-  const path = local.startsWith("~") ? local : local;
   try {
-    return fileSrc(path);
+    return fileSrc(local);
   } catch {
     return src;
   }
+}
+
+/**
+ * Why a file on this Mac did not show. A folder whose name starts with a dot
+ * (`~/.grok/…`) is never served: the window's file scope and the phone's
+ * server both leave such folders out, wherever the file really is.
+ */
+export function missingReason(path: string): "hidden" | "missing" {
+  return path.split("/").some((part) => part.startsWith(".") && part !== "." && part !== "..")
+    ? "hidden"
+    : "missing";
+}
+
+/** The last part of a path, for the note shown where a file did not load. */
+export function fileName(path: string): string {
+  return path.replace(/\/+$/, "").split("/").pop() || path;
 }
 
 export function isLocalHref(href: string, baseDir?: string): boolean {
