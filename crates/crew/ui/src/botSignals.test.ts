@@ -4,6 +4,7 @@ import {
   LONG_RUN_MS,
   afterglowAt,
   afterglowOf,
+  DANCE_MS,
   onBotSignals,
   peekBotSignal,
   publishBotSignals,
@@ -246,9 +247,28 @@ describe("afterglowAt", () => {
     expect(afterglowAt("idle", seen, later)?.shown).toBe(false);
   });
 
+  it("dances for a few seconds after a long run, then holds still, read or not", () => {
+    const s = sig({ runMs: 90_000, held: true });
+    expect(afterglowAt("idle", s, 1_000 + DANCE_MS - 1)).toMatchObject({ kind: "success", shown: true });
+    expect(afterglowAt("idle", s, 1_000 + DANCE_MS)).toEqual({ kind: "calm", left: 0, shown: true });
+    expect(afterglowAt("idle", s, 1_000 + 3_600_000)).toMatchObject({ kind: "calm", shown: true });
+  });
+
+  it("lets a read dance go altogether once its moment has passed", () => {
+    const s = sig({ runMs: 90_000, held: false });
+    expect(afterglowAt("idle", s, 1_000 + DANCE_MS - 1)).toMatchObject({ kind: "success", shown: true });
+    expect(afterglowAt("idle", s, 1_000 + DANCE_MS)).toMatchObject({ shown: false });
+  });
+
+  it("still holds a failure until it is read, however late", () => {
+    const s = sig({ failed: true, runMs: 90_000, held: true });
+    expect(afterglowAt("idle", s, 1_000 + 3_600_000)).toMatchObject({ kind: "failure", shown: true });
+  });
+
   it("shows a reaction to a late-mounted face the same as to the first", () => {
     const s = sig({ runMs: 90_000, held: true });
-    expect(afterglowAt("idle", s, 50_000)).toMatchObject({ kind: "success", shown: true });
+    expect(afterglowAt("idle", s, 2_000)).toMatchObject({ kind: "success", shown: true });
+    expect(afterglowAt("idle", s, 50_000)).toMatchObject({ kind: "calm", shown: true });
   });
 
   it("shows nothing before a run has ended, or while the bot is busy", () => {

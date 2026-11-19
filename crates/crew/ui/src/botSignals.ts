@@ -146,10 +146,16 @@ export const LONG_RUN_MS = 30_000;
 
 export type Afterglow = { kind: "happy" | "success" | "failure"; ms: number };
 
+/**
+ * How long the success dance plays: three passes of the face's cheer (1.3s each,
+ * `avatar-cheer` in styles.css). After that it stops, read or not.
+ */
+export const DANCE_MS = 4000;
+
 /** How a face looks for a moment after a run ends. A failure outlasts the rest. */
 export function afterglowOf(signal: BotSignal | undefined): Afterglow {
   if (signal?.failed) return { kind: "failure", ms: 8000 };
-  if ((signal?.runMs ?? 0) >= LONG_RUN_MS) return { kind: "success", ms: 2600 };
+  if ((signal?.runMs ?? 0) >= LONG_RUN_MS) return { kind: "success", ms: DANCE_MS };
   return { kind: "happy", ms: 1600 };
 }
 
@@ -157,14 +163,16 @@ export function afterglowOf(signal: BotSignal | undefined): Afterglow {
  * The reaction a face shows right now, and how long its usual moment has left
  * (0 once spent, when only a held reaction keeps it up). Null when the bot is
  * not idle or no run of its has ended in idle since the app began.
+ * A dance never outlasts its moment: while the chat stays unseen it settles
+ * into `calm`, the same smile standing still. The unread dot says the rest.
  */
 export function afterglowAt(
   status: AgentStatus | null | undefined,
   signal: BotSignal | null | undefined,
   now: number,
-): { kind: Afterglow["kind"]; left: number; shown: boolean } | null {
+): { kind: Afterglow["kind"] | "calm"; left: number; shown: boolean } | null {
   if (status !== "idle" || !signal || signal.endedAt <= 0) return null;
   const { kind, ms } = afterglowOf(signal);
   const left = Math.max(0, signal.endedAt + ms - now);
-  return { kind, left, shown: signal.held || left > 0 };
+  return { kind: kind === "success" && left === 0 ? "calm" : kind, left, shown: signal.held || left > 0 };
 }

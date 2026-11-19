@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { DANCE_MS } from "./botSignals";
 
 // Vitest stubs a CSS import, so `?raw` arrives empty and the brace check
 // would pass on nothing. Read the file the build actually ships.
@@ -32,5 +33,26 @@ describe("styles.css", () => {
     expect(phone).toMatch(/\.img-preview-close\s*\{[^}]*top:\s*calc\(8px \+ var\(--safe-top\)\)/);
     expect(phone).toMatch(/\.img-preview-close\s*\{[^}]*width:\s*44px/);
     expect(phone).toMatch(/\.img-preview-close\s*\{[^}]*height:\s*44px/);
+  });
+  it("plays the success dance a few times, never as a loop, then stops for the calm smile", () => {
+    const dance = source.match(/\.avatar-face\.is-success\s*\{[^}]*animation:\s*avatar-cheer\s+([\d.]+)s[^}]*\}/);
+    expect(dance, "the success rule").not.toBeNull();
+    const rule = dance![0];
+    expect(rule).toContain("animation-iteration-count: var(--mood-count, 3)");
+    // The JS moment that swaps in calm has to match the passes the CSS plays.
+    expect(Math.round(Number(dance![1]) * 3 * 1000)).toBeLessThanOrEqual(DANCE_MS);
+    expect(DANCE_MS).toBeLessThan(Number(dance![1]) * 3 * 1000 + 300);
+    // Nothing else (the phone block included) makes the dance repeat again.
+    expect(source.match(/\.avatar-face\.is-success\s*\{[^}]*animation/g)).toHaveLength(1);
+    expect(source).not.toMatch(/is-success[^{]*\{[^}]*infinite/);
+    // Calm wears the same eyes and carries no animation of its own.
+    expect(source).toMatch(/\.avatar-face\.is-calm \.avatar-pill/);
+    expect(source).toMatch(/\.avatar-face\.is-calm \.avatar-arc/);
+    expect(source).not.toMatch(/\.avatar-face\.is-calm[^{]*\{[^}]*animation/);
+  });
+
+  it("keeps the success dance off for people who ask for less motion", () => {
+    const reduced = source.slice(source.indexOf("@media (prefers-reduced-motion: reduce)", source.indexOf("@keyframes avatar-snooze")));
+    expect(reduced.slice(0, reduced.indexOf("}"))).toContain(".avatar-face.is-success,");
   });
 });

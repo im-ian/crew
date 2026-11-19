@@ -947,27 +947,32 @@ button.avatar {
   animation-delay: calc(var(--avatar-phase, 0) * -0.4s - 1.8s);
 }
 .avatar-face.is-happy .avatar-pill,
+.avatar-face.is-calm .avatar-pill,
 .avatar-face.is-success .avatar-pill {
   transform: scaleY(0.14);
   opacity: 0;
 }
 .avatar-face.is-happy .avatar-arc,
+.avatar-face.is-calm .avatar-arc,
 .avatar-face.is-success .avatar-arc {
   transform: scaleY(1);
   opacity: 1;
 }
-/* Held expressions. `--mood-count` lets a caller play one pass instead of a loop. */
+/* Held expressions. `--mood-count` lets a caller play fewer passes. */
 .avatar-face.is-success,
 .avatar-face.is-failure,
 .avatar-face.is-question {
   transform-origin: 50% 88%;
 }
-/* Success: hops to the left, then rocks side to side like a little dance. */
+/* Success: hops to the left, then rocks side to side like a little dance. Three
+   passes (DANCE_MS in botSignals.ts), never a loop; BotFace then swaps in calm. */
 .avatar-face.is-success {
   animation: avatar-cheer 1.3s ease-in-out;
-  animation-iteration-count: var(--mood-count, infinite);
+  animation-iteration-count: var(--mood-count, 3);
 }
-.avatar-face.is-success .avatar-gaze {
+/* Calm: the dance's smile and eyes, standing still. */
+.avatar-face.is-success .avatar-gaze,
+.avatar-face.is-calm .avatar-gaze {
   transform: translate(0, -1.2px);
 }
 /* Failure: the head drops and stays down. The eyes shrink to dashes and sit low. */
