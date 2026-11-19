@@ -4,6 +4,7 @@ import {
   focusComposerOnTab,
   groupedShortcuts,
   shortcutId,
+  tabPlace,
   tabPlaceOf,
   type TabGate,
 } from "./shortcuts";
@@ -105,5 +106,21 @@ describe("Tab focuses the composer", () => {
     expect(shortcutId({ key: "Tab" }, false)).toBeNull();
     const go = groupedShortcuts().find((g) => g.group === "nav")!;
     expect(go.items.filter((s) => s.id === "composerTab").map((s) => s.combo)).toEqual(["Tab"]);
+  });
+});
+
+describe("tabPlace", () => {
+  it("asks the element itself, as a browser's closest() needs", () => {
+    // A browser's closest() throws when called on anything but the element:
+    // it ran on every key press and stopped the shortcuts after it.
+    class Node {
+      constructor(private readonly inside: string) {}
+      closest(sel: string) {
+        if (!(this instanceof Node)) throw new TypeError("Can only call Element.closest on instances of Element");
+        return sel.includes(this.inside) ? this : null;
+      }
+    }
+    expect(tabPlace(new Node(".bubble") as unknown as EventTarget)).toBe("chat");
+    expect(tabPlace(new Node("textarea") as unknown as EventTarget)).toBe("field");
   });
 });
