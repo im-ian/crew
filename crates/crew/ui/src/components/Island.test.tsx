@@ -18,13 +18,13 @@ const agents = [bot("arch", "설계자"), bot("dbg", "디버거"), bot("dev", "�
 const about = (seq: number, botId: string, kind: IslandNotice["kind"]): IslandNotice =>
   ({ seq, stays: true, piled: true, kind, botId }) as IslandNotice;
 
-function pile(notices: IslandNotice[]) {
+function pile(notices: IslandNotice[], open = false) {
   return renderToStaticMarkup(
     <IslandPile
       notices={notices}
       agents={agents}
       onOpenBot={() => {}}
-      open={false}
+      open={open}
       onToggle={() => {}}
       onClear={() => {}}
     />,
@@ -43,6 +43,19 @@ describe("IslandPile", () => {
     const html = pile([about(1, "dev", "success")]);
     expect(html).not.toContain("island-more");
     expect(html).toContain("island-go");
+  });
+});
+
+describe("IslandPile laid out", () => {
+  it("says how many it holds, so the list under it shows nothing twice", () => {
+    const html = pile(
+      [about(3, "dev", "success"), about(2, "arch", "question"), about(1, "dbg", "blocked")],
+      true,
+    );
+    expect(html).toContain("알림 3개");
+    expect(html).not.toContain("island-more");
+    expect(html).not.toContain("island-go");
+    expect(html).not.toContain("설계자가");
   });
 });
 
