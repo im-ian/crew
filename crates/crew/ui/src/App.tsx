@@ -57,7 +57,8 @@ import {
 } from "./leadGroup";
 import { X } from "./icons";
 import type { TFn } from "./i18n";
-import { isTypingTarget, shortcutId } from "./shortcuts";
+import { focusComposerOnTab, isTypingTarget, shortcutId, tabPlace } from "./shortcuts";
+import { isWeb } from "./web";
 import { popoverIsOpen } from "./usePopover";
 import {
   applyTheme,
@@ -658,6 +659,25 @@ export function App() {
       }
       const c = crewRef.current;
       if (c.confirmOpen) return;
+      // ⌘J focuses this same composer, caret at the end of the draft.
+      // The active split half is the open chat, so this is that half's field.
+      if (
+        focusComposerOnTab(
+          e,
+          tabPlace(e.target),
+          {
+            web: isWeb(),
+            composer:
+              c.selectedKind === "agent" && !!c.selected && c.currentAgent?.headless === true,
+            blocked: !!document.querySelector(
+              ".modal.open, .overlay.open, .ctx.open, [data-popover-open]",
+            ),
+          },
+          () => composerRef.current?.focus(),
+        )
+      ) {
+        return;
+      }
       const typing = isTypingTarget(e.target);
       if ((peek || file || leadPane) && e.key === "Escape") {
         if (typing) return;
