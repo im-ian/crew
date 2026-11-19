@@ -54,6 +54,10 @@ const WORKERS: usize = 4;
 pub struct Settings {
     pub enabled: bool,
     pub port: Option<u16>,
+    /// Listen on 127.0.0.1 alone, never on the Tailscale address: the phone
+    /// E2E's throwaway daemon, which no other device should reach.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub loopback: bool,
 }
 
 impl Settings {
@@ -336,25 +340,33 @@ fn stop_all() {
 /// address. Its IPv6 one is left out: the phone reaches the Mac over IPv4
 /// all the same, and a server there could not be shut down (it unblocks
 /// itself by connecting to its own address, which macOS does not route).
-fn wanted(port: u16) -> Vec<SocketAddr> {
+fn wanted(s: &Settings) -> Vec<SocketAddr> {
+    // A loopback-only daemon does not even ask Tailscale where it is.
+    let tailnet_ips = if s.loopback {
+        Vec::new()
+    } else {
+        tailnet().map(|t| t.ips).unwrap_or_default()
+    };
+    listen_addrs(s.port(), &tailnet_ips)
+}
+
+fn listen_addrs(port: u16, tailnet_ips: &[IpAddr]) -> Vec<SocketAddr> {
     let mut out = vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port)];
-    if let Some(t) = tailnet() {
-        out.extend(
-            t.ips
-                .into_iter()
-                .filter(IpAddr::is_ipv4)
-                .map(|ip| SocketAddr::new(ip, port)),
-        );
-    }
+    out.extend(
+        tailnet_ips
+            .iter()
+            .filter(|ip| ip.is_ipv4())
+            .map(|ip| SocketAddr::new(*ip, port)),
+    );
     out
 }
 
 /// Listen on each wanted address not listened on yet. Tailscale may connect
 /// after Crew starts; `status` calls this again.
 fn bind_all() -> anyhow::Result<()> {
-    let port = load_settings().port();
+    let settings = load_settings();
     let mut failed = Vec::new();
-    for addr in wanted(port) {
+    for addr in wanted(&settings) {
         let have = state()
             .lock()
             .map(|st| st.bound.contains(&addr))
@@ -1115,12 +1127,48 @@ mod tests {
     use super::*;
     use crate::paths;
 
+    /// The phone E2E's daemon is reached from this Mac alone. Mobile access
+    /// as the user turns it on also listens on the Tailscale IPv4 address.
+    #[test]
+    fn loopback_only_listens_on_127_0_0_1_alone() {
+        let ts: Vec<IpAddr> = vec!["100.111.145.71".parse().unwrap(), "fd7a::1".parse().unwrap()];
+        let lo = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 47899);
+        assert_eq!(listen_addrs(47899, &[]), [lo]);
+        assert_eq!(
+            listen_addrs(47899, &ts),
+            [lo, "100.111.145.71:47899".parse().unwrap()]
+        );
+        let on = Settings {
+            enabled: true,
+            port: Some(47899),
+            loopback: true,
+        };
+        assert_eq!(wanted(&on), [lo]);
+    }
+
+    #[test]
+    fn loopback_is_read_from_mobile_json_and_left_out_when_off() {
+        paths::testing::with_home("web-loopback", || {
+            fs::write(settings_path(), br#"{"enabled":true,"port":47899,"loopback":true}"#).unwrap();
+            assert!(load_settings().loopback);
+            save_settings(&Settings {
+                enabled: true,
+                port: None,
+                loopback: false,
+            })
+            .unwrap();
+            let raw = fs::read_to_string(settings_path()).unwrap();
+            assert!(!raw.contains("loopback"), "{raw}");
+        });
+    }
+
     #[test]
     fn a_code_pairs_once_and_wrong_codes_run_out() {
         paths::testing::with_home("web-pair", || {
             save_settings(&Settings {
                 enabled: true,
                 port: Some(0),
+                loopback: true,
             })
             .unwrap();
             let made = new_pair_code().unwrap();
@@ -1298,6 +1346,7 @@ mod tests {
             save_settings(&Settings {
                 enabled: true,
                 port: Some(0),
+                loopback: true,
             })
             .unwrap();
             bind_all().unwrap();
