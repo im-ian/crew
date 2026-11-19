@@ -1,6 +1,7 @@
 import { useT } from "../LocaleContext";
 import type { MessageKey } from "../locales";
 import { formatCombo, groupedShortcuts } from "../shortcuts";
+import { isWeb } from "../web";
 import { Modal } from "./Modal";
 
 type Props = {
@@ -27,18 +28,20 @@ export function ShortcutList() {
         <section key={g.group}>
           <h4>{t(`shortcut.group.${g.group}` as MessageKey)}</h4>
           <ul>
-            {g.items.map((s) => (
-              <li key={s.id}>
-                <span className="shortcut-label">
-                  {t(`shortcut.${s.id}` as MessageKey)}
-                </span>
-                <span className="shortcut-keys">
-                  {formatCombo(s.combo, t("key.space")).map((part, i) => (
-                    <kbd key={s.id + i}>{part}</kbd>
-                  ))}
-                </span>
-              </li>
-            ))}
+            {g.items
+              .filter((s) => !(s.showOnly && isWeb()))
+              .map((s) => (
+                <li key={s.id}>
+                  <span className="shortcut-label">
+                    {t(`shortcut.${s.id}` as MessageKey)}
+                  </span>
+                  <span className="shortcut-keys">
+                    {formatCombo(s.combo, t("key.space")).map((part, i) => (
+                      <kbd key={s.id + i}>{part}</kbd>
+                    ))}
+                  </span>
+                </li>
+              ))}
           </ul>
         </section>
       ))}
