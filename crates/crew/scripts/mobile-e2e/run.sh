@@ -31,7 +31,8 @@ cp -R "$DIST" "$E2E_DIR/dist"
 cat > "$E2E_DIR/home/agents.json" <<JSON
 {"agents":[{"id":"bot-echo","name":"에코","cmd":["$E2E_DIR/bin/fake-bot.sh"],"cwd":"$E2E_DIR/work","headless":true,"routines":[]}]}
 JSON
-echo "{\"enabled\":true,\"port\":$PORT}" > "$E2E_DIR/home/mobile.json"
+# Loopback only: the throwaway daemon is not reached over Tailscale.
+echo "{\"enabled\":true,\"port\":$PORT,\"loopback\":true}" > "$E2E_DIR/home/mobile.json"
 # The laptop's display settings the phone should follow.
 echo '{"font":"","codeFont":"","fontSize":"large"}' > "$E2E_DIR/home/display.json"
 printf '대호' > "$E2E_DIR/home/user-name"
