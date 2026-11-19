@@ -419,6 +419,7 @@ pub(crate) fn set_agent_cli(id: String, cli: String, cmd: Option<String>) -> Res
 }
 
 #[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn add_agent(
     name: String,
     cli: String,
@@ -429,6 +430,9 @@ pub(crate) fn add_agent(
     cmd: Option<String>,
     cwd: Option<String>,
     quiet: Option<bool>,
+    id: Option<String>,
+    shape: Option<String>,
+    color: Option<String>,
 ) -> Result<String, String> {
     client::ensure_daemon().map_err(|e| e.to_string())?;
     let name = name.trim().to_string();
@@ -449,8 +453,16 @@ pub(crate) fn add_agent(
     let model = model.and_then(empty_to_none);
     let role = role.and_then(empty_to_none);
     let description = description.and_then(empty_to_none);
-    let existing = list_agents()?;
-    let id = unique_agent_id(&name, existing.iter().map(|a| a.id.as_str()));
+    let avatar_shape = parse_shape(shape)?;
+    // An id from `reserve_agent_ids`: the window put it in its group first,
+    // so the bot is in that group from the moment it exists.
+    let id = match id.and_then(empty_to_none) {
+        Some(id) => id,
+        None => {
+            let existing = list_agents()?;
+            unique_agent_id(&name, existing.iter().map(|a| a.id.as_str()))
+        }
+    };
     match client::rpc(Request::AddAgent {
         id: id.clone(),
         name,
@@ -460,40 +472,37 @@ pub(crate) fn add_agent(
         effort,
         headless,
         quiet: quiet.unwrap_or(false),
+        role,
+        description,
+        avatar_shape,
+        avatar_color: color.and_then(empty_to_none),
     }) {
         Ok(Event::Ok) | Ok(Event::Agents { .. }) => {}
         Ok(Event::Error { message }) => return Err(message),
         Ok(_) => return Err("unexpected daemon response".into()),
         Err(err) => return Err(err.to_string()),
     }
-    if role.is_some() || description.is_some() {
-        match client::rpc(Request::SetAgent {
-            id: id.clone(),
-            model: None,
-            effort: None,
-            unset_model: false,
-            unset_effort: false,
-            title: None,
-            description,
-            role,
-            unset_title: false,
-            unset_description: false,
-            unset_role: false,
-            avatar: None,
-            unset_avatar: false,
-            shape: None,
-            color: None,
-            name: None,
-            cwd: None,
-            unset_cwd: false,
-        }) {
-            Ok(Event::Ok) | Ok(Event::Agents { .. }) => {}
-            Ok(Event::Error { message }) => return Err(message),
-            Ok(_) => return Err("unexpected daemon response".into()),
-            Err(err) => return Err(err.to_string()),
-        }
-    }
     Ok(id)
+}
+
+/// Ids for bots about to be made, one per name, unused by any bot now and by
+/// each other. The window puts them in a new group before it makes the bots.
+#[tauri::command(async)]
+pub(crate) fn reserve_agent_ids(names: Vec<String>) -> Result<Vec<String>, String> {
+    client::ensure_daemon().map_err(|e| e.to_string())?;
+    let mut taken: Vec<String> = list_agents()?.into_iter().map(|a| a.id).collect();
+    Ok(reserve_ids(&names, &mut taken))
+}
+
+fn reserve_ids(names: &[String], taken: &mut Vec<String>) -> Vec<String> {
+    names
+        .iter()
+        .map(|name| {
+            let id = unique_agent_id(name.trim(), taken.iter().map(String::as_str));
+            taken.push(id.clone());
+            id
+        })
+        .collect()
 }
 
 #[tauri::command(async)]
@@ -615,6 +624,9 @@ pub(crate) fn remote_join(
         None,
         None,
         Some(cwd.display().to_string()),
+        None,
+        None,
+        None,
         None,
     )?;
     let joined = (|| {
@@ -1305,6 +1317,7 @@ pub fn run() -> anyhow::Result<()> {
             remote_leave,
             team_memory_get,
             team_memory_set,
+            reserve_agent_ids,
             mobile_status,
             mobile_set,
             mobile_pair,
@@ -1348,6 +1361,21 @@ mod tests {
                 "{name} is missing from capabilities ({allow})"
             );
         }
+    }
+
+    /// Ids for a template's bots are free now and of each other, even when two
+    /// bots share a name.
+    #[test]
+    fn reserved_ids_do_not_collide() {
+        let mut taken = vec!["dev".to_string()];
+        let ids = reserve_ids(&["Dev".into(), "Dev".into(), "QA".into()], &mut taken);
+        assert_eq!(ids.len(), 3);
+        assert!(!ids.contains(&"dev".to_string()), "{ids:?}");
+        let mut seen = ids.clone();
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), 3, "{ids:?}");
+        assert!(ids.iter().all(|id| crate::config::valid_agent_id(id)), "{ids:?}");
     }
 
     #[test]

@@ -536,6 +536,10 @@ fn run() -> anyhow::Result<()> {
                     effort,
                     headless,
                     quiet: false,
+                    role: None,
+                    description: None,
+                    avatar_shape: None,
+                    avatar_color: None,
                 })? {
                     Event::Error { message } => anyhow::bail!("{message}"),
                     Event::Ok => {

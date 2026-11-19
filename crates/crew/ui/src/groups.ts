@@ -276,8 +276,17 @@ export function focusedGroupId(
   return id ? groupIdOf(groups, kind, id) : null;
 }
 
-export function pruneLayout(layout: RailLayout, agents: AgentInfo[]): RailLayout {
+/**
+ * The layout without bots that are gone. `keep` are bots being made right now:
+ * their group already holds them, and they are not in the list yet.
+ */
+export function pruneLayout(
+  layout: RailLayout,
+  agents: AgentInfo[],
+  keep: ReadonlySet<string> = new Set(),
+): RailLayout {
   const valid = validKeys(agents);
+  for (const k of keep) valid.add(k);
   const groups = layout.groups
     .filter((g) => g.id !== UNGROUPED_ID)
     .map((g) => ({

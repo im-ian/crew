@@ -4156,7 +4156,26 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
             effort,
             headless,
             quiet,
-        } => match add_agent(id, name, cmd, cwd, model, effort, headless, quiet) {
+            role,
+            description,
+            avatar_shape,
+            avatar_color,
+        } => match add_agent_with(
+            id,
+            name,
+            cmd,
+            cwd,
+            model,
+            effort,
+            headless,
+            quiet,
+            BotLook {
+                role,
+                description,
+                shape: avatar_shape,
+                color: avatar_color,
+            },
+        ) {
             Ok(()) => vec![Event::Ok, snapshot_event()],
             Err(err) => vec![Event::Error {
                 message: err.to_string(),
@@ -5205,6 +5224,7 @@ fn resize_agent(id: &str, cols: u16, rows: u16) -> anyhow::Result<()> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_agent(
     id: String,
     name: String,
@@ -5215,6 +5235,36 @@ fn add_agent(
     headless: bool,
     quiet: bool,
 ) -> anyhow::Result<()> {
+    add_agent_with(id, name, cmd, cwd, model, effort, headless, quiet, BotLook::default())
+}
+
+/// What a new bot is made with besides its AI: set before it is registered,
+/// so no list ever shows it without them.
+#[derive(Default)]
+struct BotLook {
+    role: Option<String>,
+    description: Option<String>,
+    shape: Option<AvatarShape>,
+    color: Option<String>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_agent_with(
+    id: String,
+    name: String,
+    cmd: Vec<String>,
+    cwd: Option<String>,
+    model: Option<String>,
+    effort: Option<crate::config::Effort>,
+    headless: bool,
+    quiet: bool,
+    look: BotLook,
+) -> anyhow::Result<()> {
+    let color = look
+        .color
+        .filter(|c| !c.trim().is_empty())
+        .map(|c| parse_hex_color(&c))
+        .transpose()?;
     let cwd = cwd
         .filter(|s| !s.trim().is_empty())
         .or_else(|| Some(crate::config::default_add_cwd(&id)));
@@ -5228,6 +5278,10 @@ fn add_agent(
     cfg.model = model.filter(|m| !m.is_empty());
     cfg.effort = effort;
     cfg.headless = headless;
+    cfg.role = look.role.filter(|s| !s.trim().is_empty());
+    cfg.description = look.description.filter(|s| !s.trim().is_empty());
+    cfg.avatar_shape = look.shape;
+    cfg.avatar_color = color;
     insert_spawned_agent(cfg)?;
     if !quiet {
         ask_new_bot(&ask_id);
@@ -10089,6 +10143,71 @@ exec sleep 1"#,
             if let Err(payload) = check {
                 std::panic::resume_unwind(payload);
             }
+        });
+    }
+
+    /// A template's bot: its id is in its group before the bot exists, and it
+    /// is registered with its role and face, so no list ever shows it outside
+    /// the group or without them. A bad color makes nothing.
+    #[test]
+    fn a_bot_made_into_its_group_belongs_to_it_from_the_start() {
+        paths::testing::with_home("made-into-group", || {
+            let id = test_id("lead");
+            crate::groups::save(&[crate::groups::SidebarGroup {
+                id: "g-team".into(),
+                name: "팀".into(),
+                collapsed: false,
+                items: vec![format!("agent:{id}")],
+                path: None,
+                lead: Some(id.clone()),
+                worktree: crate::groups::WorktreeChoice::Off,
+            }])
+            .unwrap();
+            add_agent_with(
+                id.clone(),
+                "리드".into(),
+                vec!["cat".into()],
+                None,
+                None,
+                None,
+                false,
+                true,
+                BotLook {
+                    role: Some("일을 나눠 맡겨요".into()),
+                    description: None,
+                    shape: Some(AvatarShape::Crown),
+                    color: Some("#FF6A00".into()),
+                },
+            )
+            .unwrap();
+            let info = list_agents().into_iter().find(|a| a.id == id).expect("listed");
+            assert_eq!(info.role.as_deref(), Some("일을 나눠 맡겨요"));
+            assert_eq!(info.avatar_shape, Some(AvatarShape::Crown));
+            assert_eq!(info.avatar_color.as_deref(), Some("#ff6a00"));
+            assert_eq!(
+                crate::groups::folder_of(&id).map(|g| g.id).as_deref(),
+                Some("g-team"),
+                "in its group from the start"
+            );
+
+            let bad = test_id("bad");
+            let made = add_agent_with(
+                bad.clone(),
+                "색 틀림".into(),
+                vec!["cat".into()],
+                None,
+                None,
+                None,
+                false,
+                true,
+                BotLook {
+                    color: Some("nope".into()),
+                    ..BotLook::default()
+                },
+            );
+            assert!(made.is_err());
+            assert!(!known_agent(&bad), "a bad color made a bot");
+            remove_agent(&id).unwrap();
         });
     }
 

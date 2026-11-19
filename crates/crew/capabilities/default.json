@@ -81,6 +81,7 @@
     "allow-remote-leave",
     "allow-team-memory-get",
     "allow-team-memory-set",
+    "allow-reserve-agent-ids",
     "allow-mobile-status",
     "allow-mobile-set",
     "allow-mobile-pair",

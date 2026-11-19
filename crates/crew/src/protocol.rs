@@ -64,6 +64,15 @@ pub enum Request {
         /// already has its role, and its first turn waits for its group.
         #[serde(default)]
         quiet: bool,
+        /// Set as the bot is made, so it never shows without them.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        avatar_shape: Option<AvatarShape>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        avatar_color: Option<String>,
     },
     RemoveAgent {
         id: String,
