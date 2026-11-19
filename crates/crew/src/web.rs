@@ -832,7 +832,7 @@ fn handle(mut req: Request) {
     if path.starts_with("/api/") {
         let device = cookie_token(&req).and_then(|t| device_for(&t));
         let Some(device) = device else {
-            let _ = req.respond(error(401, "pair this device first"));
+            let _ = req.respond(error(401, "connect this device first"));
             return;
         };
         if path == "/api/session" {

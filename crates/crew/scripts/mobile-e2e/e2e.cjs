@@ -29,7 +29,7 @@ const newCode = () => JSON.parse(execSync(`python3 ${JSON.stringify(__dirname + 
   page.setDefaultTimeout(15000);
   page.on("pageerror", (e) => log("pageerror", String(e).slice(0, 200)));
 
-  await step("짝짓기 화면이 뜬다", async () => {
+  await step("기기 연결 화면이 뜬다", async () => {
     await page.goto(`http://127.0.0.1:${PORT}/`);
     await page.waitForSelector("#pair-code");
     await shot(page, "01-pair");
@@ -40,7 +40,7 @@ const newCode = () => JSON.parse(execSync(`python3 ${JSON.stringify(__dirname + 
     await page.waitForSelector(".pair-error");
     await shot(page, "02-pair-wrong");
   });
-  await step("맞는 코드로 짝지으면 앱이 열린다", async () => {
+  await step("맞는 코드로 연결하면 앱이 열린다", async () => {
     await page.fill("#pair-code", newCode());
     await page.click(".pair-submit");
     await page.waitForSelector(".composer-input");
