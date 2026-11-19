@@ -8519,3 +8519,36 @@ html.kb-open {
     font-size: 20px !important;
   }
 }
+
+/* The home screen app runs under the status bar (black-translucent), whose
+   time and signal are always white. The dark theme's own colours sit behind
+   them. On the light theme white would vanish into the page, so the strip
+   the status bar takes, at the top or along a side when the phone lies on
+   it, is darkened. Bands with no inset are 0 wide and draw nothing. */
+html.is-web.is-standalone[data-theme="light"] body::before,
+html.is-web.is-standalone[data-theme="light"] body::after,
+html.is-web.is-standalone[data-theme="light"]::after {
+  content: "";
+  position: fixed;
+  z-index: 2147483000;
+  pointer-events: none;
+  background: #1d1d1f;
+}
+html.is-web.is-standalone[data-theme="light"] body::before {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--safe-top);
+}
+html.is-web.is-standalone[data-theme="light"] body::after {
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: var(--safe-right);
+}
+html.is-web.is-standalone[data-theme="light"]::after {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--safe-left);
+}
