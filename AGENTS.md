@@ -8,6 +8,7 @@
 | 할 일 | 먼저 읽을 것 |
 | --- | --- |
 | UI 아이콘을 넣거나 바꿈 | [`docs/icons.md`](docs/icons.md) |
+| 휴대폰(웹) 원격을 고침 | [`docs/mobile.md`](docs/mobile.md) |
 
 ## 코드가 있는 곳
 
