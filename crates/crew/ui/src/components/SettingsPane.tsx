@@ -48,6 +48,8 @@ type Props = {
   onClose: () => void;
   onOpenSkills: () => void;
   updater: UpdaterApi;
+  /** Install the update, asking first when bots are at work. */
+  onInstallUpdate: () => void;
   remotes: RemoteInfo[];
   agents: AgentInfo[];
   onSetRemote: (change: RemoteChange) => Promise<void>;
@@ -75,6 +77,7 @@ export function SettingsPane({
   onClose,
   onOpenSkills,
   updater,
+  onInstallUpdate,
   remotes,
   agents,
   onSetRemote,
@@ -461,7 +464,7 @@ export function SettingsPane({
                       type="button"
                       className="primary settings-action"
                       disabled={updater.busy}
-                      onClick={() => void updater.install()}
+                      onClick={onInstallUpdate}
                     >
                       {updater.busy
                         ? t("update.installing")

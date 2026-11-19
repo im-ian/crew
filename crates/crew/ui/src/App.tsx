@@ -6,6 +6,7 @@ import { PeekRoom } from "./components/PeekRoom";
 import { Composer, type ComposerHandle } from "./components/Composer";
 import { CloneBotModal } from "./components/CloneBotModal";
 import { TemplatesHost } from "./components/TemplatesHost";
+import { UpdateConfirm } from "./components/UpdateConfirm";
 import { canCarryChat } from "./cloneParts";
 import { itemKey } from "./groups";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -71,7 +72,7 @@ import { waitingEdit, waitingIds } from "./queuePick";
 import { publishCaret } from "./caretPoint";
 import { stopTurn } from "./sendGate";
 import { useCrew } from "./useCrew";
-import { useUpdater } from "./updater";
+import { botsAtWork, useUpdater } from "./updater";
 import { api } from "./api";
 import { escapeLayerOpen } from "./escapeLayer";
 import { watchHoldsSend } from "./watchView";
@@ -186,6 +187,8 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  /** Bots an update would cut short, while asking whether to go on. */
+  const [updateAsk, setUpdateAsk] = useState(0);
   // Asked from settings, so it is drawn over them and Escape shuts it first.
   // The alias outlives the dialog, so its title holds while it fades out.
   const [leaveOpen, setLeaveOpen] = useState(false);
@@ -301,6 +304,12 @@ export function App() {
     });
   }, [openId]);
   const closeTemplates = useCallback(() => setTemplatesOpen(false), []);
+  /** An update restarts Crew: with bots at work, ask once first. */
+  function askInstall() {
+    const bots = botsAtWork(crew.agents);
+    if (bots > 0) setUpdateAsk(bots);
+    else void updater.install();
+  }
   const cloneSource = crew.cloneId
     ? crew.agents.find((a) => a.id === crew.cloneId) ?? null
     : null;
@@ -622,6 +631,13 @@ export function App() {
         }
         return;
       }
+      if (updateAsk) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setUpdateAsk(0);
+        }
+        return;
+      }
       if (leaveOpen) {
         if (e.key === "Escape") {
           e.preventDefault();
@@ -742,7 +758,7 @@ export function App() {
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [helpOpen, settingsOpen, skillsOpen, templatesOpen, switchOpen, peek, file, leadPane, leaveOpen]);
+  }, [helpOpen, settingsOpen, skillsOpen, templatesOpen, switchOpen, peek, file, leadPane, leaveOpen, updateAsk]);
 
   function toggleLeadPane(id: string) {
     setPeek(null);
@@ -992,7 +1008,7 @@ export function App() {
           version={updater.available?.version}
           busy={updater.busy}
           error={updater.error}
-          onInstall={() => void updater.install()}
+          onInstall={askInstall}
           onLater={updater.dismiss}
           onClearError={updater.clearError}
         />
@@ -1214,6 +1230,7 @@ export function App() {
           setSkillsOpen(true);
         }}
         updater={updater}
+        onInstallUpdate={askInstall}
         remotes={crew.remotes}
         agents={crew.agents}
         onSetRemote={crew.setRemote}
@@ -1240,6 +1257,14 @@ export function App() {
         }}
       />
       <SkillsPane open={skillsOpen} onClose={() => setSkillsOpen(false)} />
+      <UpdateConfirm
+        bots={updateAsk}
+        onCancel={() => setUpdateAsk(0)}
+        onInstall={() => {
+          setUpdateAsk(0);
+          void updater.install();
+        }}
+      />
       <TemplatesHost
         open={templatesOpen}
         onClose={closeTemplates}
