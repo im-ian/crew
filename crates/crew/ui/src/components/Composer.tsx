@@ -948,9 +948,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           onKeyUp={scanMention}
           onCompositionStart={() => {
             composing.current = true;
+            // The placeholder goes as the first letter starts, not a frame
+            // after it shows, so the two never sit on top of each other.
+            setEmpty(false);
           }}
           onCompositionEnd={() => {
             composing.current = false;
+            refreshEmpty();
             scanMention();
           }}
           onPaste={(e) => {

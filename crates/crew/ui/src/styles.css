@@ -3502,14 +3502,30 @@ button.choice-option:active:not(:disabled) .choice-badge {
 }
 /* A typed answer that holds @mention chips, as the composer does. */
 .mention-field {
+  position: relative;
   white-space: pre-wrap;
   word-break: break-word;
   cursor: text;
 }
-/* The zero-width space keeps a line box when there is no placeholder, or an
-   empty field shrinks to its padding and the caret hangs below it. */
-.mention-field.is-empty::before {
-  content: attr(data-placeholder) "\200b";
+/* The zero-width space keeps a line box, or an empty field shrinks to its
+   padding and the caret hangs below it. */
+.mention-field.is-empty::before,
+.composer-input.is-empty::before {
+  content: "\200b";
+}
+/* The placeholder lies over the empty field on one line, where the first
+   typed letter goes, and ends in an ellipsis when it does not fit: a long
+   bot name or a narrow field never wraps it or makes the field taller. */
+.mention-field.is-empty::after,
+.composer-input.is-empty::after {
+  content: attr(data-placeholder);
+  position: absolute;
+  inset: 0;
+  padding: inherit;
+  line-height: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--faint);
   pointer-events: none;
 }
@@ -5491,6 +5507,7 @@ button.mention-chip:active {
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--working) 60%, transparent);
 }
 .composer-input {
+  position: relative;
   flex: 1;
   min-width: 0;
   background: transparent;
@@ -5506,11 +5523,6 @@ button.mention-chip:active {
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-}
-.composer-input.is-empty::before {
-  content: attr(data-placeholder);
-  color: var(--faint);
-  pointer-events: none;
 }
 .composer-box button[type="submit"] {
   width: var(--control-h);
