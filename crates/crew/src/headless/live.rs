@@ -2439,6 +2439,16 @@ fn take_and_kill(session: &HeadlessSession, serial: Option<u64>) {
     }
 }
 
+/// What a kept-up CLI has running in the background now, before `settle`
+/// copies it to the watch the header shows.
+pub(super) fn running(inner: &HeadlessInner) -> Vec<Watch> {
+    inner
+        .live
+        .as_ref()
+        .map(|live| watch_of(&live.background))
+        .unwrap_or_default()
+}
+
 fn watch_of(background: &[(String, Watch)]) -> Vec<Watch> {
     background.iter().map(|(_, w)| w.clone()).collect()
 }

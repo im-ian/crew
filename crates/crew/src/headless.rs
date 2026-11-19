@@ -134,6 +134,19 @@ pub fn open(
     }))
 }
 
+/// The background work `session` is running: the watch it shows, or, on a
+/// CLI kept up between turns, what it has started that the watch does not
+/// show yet.
+pub fn running_work(session: &HeadlessSession) -> Vec<Watch> {
+    let Ok(inner) = session.inner.lock() else {
+        return Vec::new();
+    };
+    if !inner.watch.is_empty() {
+        return inner.watch.clone();
+    }
+    live::running(&inner)
+}
+
 pub fn clear_session(agent_id: &str) {
     let _ = fs::remove_file(paths::cli_session_path(agent_id));
     let _ = fs::remove_file(paths::cli_memory_path(agent_id));
@@ -1851,8 +1864,10 @@ fn spawn_and_stream(
                 {
                     settle_grok_reply(session, &mut state);
                     if state.got_text {
-                        end_turn_early(session, generation, *turn, true);
+                        // The watch first: the reply wakes the bot that asked,
+                        // and that prompt says what this bot is still running.
                         show_watch(session, generation, watch_list(&state));
+                        end_turn_early(session, generation, *turn, true);
                         grok_watching = true;
                     }
                 }
@@ -1968,10 +1983,11 @@ fn spawn_and_stream(
             // A process that has only not exited yet does not count: a CLI
             // that stays up between turns is idle once this work is done.
             let running = turn_still_busy(&state);
-            end_turn_early(session, generation, *turn, running);
+            // Before the reply wakes the bot that asked, as above.
             if !state.background.is_empty() && cli == CliKind::Claude {
                 show_watch(session, generation, watch_list(&state));
             }
+            end_turn_early(session, generation, *turn, running);
             sealed = true;
         }
     }

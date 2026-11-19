@@ -1376,7 +1376,7 @@ fn lead_guidance(
     }
     if lead_id == agent.id {
         return Some(
-            "You are the lead of this group. You assign work to teammates and take their reports. When a teammate sends you a question with `crew tell`, ask the user with `crew ask`, then `crew tell` the answer back to that teammate.".to_string(),
+            "You are the lead of this group. You assign work to teammates and take their reports. When a teammate sends you a question with `crew tell`, ask the user with `crew ask`, then `crew tell` the answer back to that teammate. When a teammate's report names a next step but Crew notes that the teammate is idle, nothing goes on by itself: tell it to continue with `crew tell`, or ask the user.".to_string(),
         );
     }
     let raw = roster
@@ -1391,7 +1391,7 @@ fn lead_guidance(
         name
     };
     Some(format!(
-        "The lead of this group is `@{lead_id}` ({name}). On work the lead assigned with `crew tell`, report the result to the lead once. When that work needs a question for the user, do not run `crew ask`. Send the question, the background, and the options to the lead with `crew tell`, then end your turn. When the user tells you the work directly, answer the user as usual and use `crew ask`. Work assigned by a bot from another group follows the rules you already have."
+        "The lead of this group is `@{lead_id}` ({name}). On work the lead assigned with `crew tell`, report the result to the lead once. When that work needs a question for the user, do not run `crew ask`. Send the question, the background, and the options to the lead with `crew tell`, then end your turn. When the user tells you the work directly, answer the user as usual and use `crew ask`. Work assigned by a bot from another group follows the rules you already have. When that work has several steps, go on to the next step you can do in the same turn. When you stop before the end, say why, for example that it needs approval."
     ))
 }
 
@@ -3527,15 +3527,19 @@ mod tests {
         let lead_note = shared_memory_note(&lead, &roster, "", Some(&led));
         let lead_line = "You are the lead of this group. You assign work to teammates and take their reports. When a teammate sends you a question with `crew tell`, ask the user with `crew ask`, then `crew tell` the answer back to that teammate.";
         assert!(lead_note.contains(lead_line), "{lead_note}");
+        assert!(
+            lead_note.contains("When a teammate's report names a next step but Crew notes that the teammate is idle, nothing goes on by itself: tell it to continue with `crew tell`, or ask the user."),
+            "{lead_note}"
+        );
+        assert!(
+            member_note.contains("When that work has several steps, go on to the next step you can do in the same turn. When you stop before the end, say why, for example that it needs approval."),
+            "{member_note}"
+        );
         assert!(!lead_note.contains("The lead of this group is"));
         assert!(!lead_note.contains("do not run `crew ask`"));
 
         let plain = group(&["bot-lead", "bot-member"], None);
-        for (who, folder) in [
-            (&member, Some(&plain)),
-            (&outside, None),
-            (&member, None),
-        ] {
+        for (who, folder) in [(&member, Some(&plain)), (&outside, None), (&member, None)] {
             let note = shared_memory_note(who, &roster, "", folder);
             assert!(!note.contains("The lead of this group is"), "{note}");
             assert!(!note.contains("You are the lead of this group"), "{note}");
