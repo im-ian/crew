@@ -5,6 +5,7 @@ import {
   useState,
   type CSSProperties,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { resolveFace } from "../avatar";
 import { Check, ChevronDown, ChevronUp, X } from "../icons";
@@ -76,6 +77,28 @@ function noticeView(
   }
   const text = "text" in notice ? notice.text : "";
   return { lead: <span className="island-dot" />, words: text, full: text };
+}
+
+/**
+ * A pill opens exactly as wide as its row. The row is measured again when it
+ * changes size: a window made narrower caps the row (its max-width follows
+ * the window), and a pill left at its old width would spill past both edges.
+ */
+function useRowWidth(deps: unknown[]): [RefObject<HTMLDivElement | null>, number] {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const row = ref.current;
+    if (!row) return;
+    const measure = () => setWidth(row.offsetWidth);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(measure);
+    watch.observe(row);
+    return () => watch.disconnect();
+    // The caller's deps say when the row may be a new element or new words.
+  }, deps);
+  return [ref, width];
 }
 
 /**
@@ -173,11 +196,21 @@ export function Island({
   );
 }
 
+/** A bot's face in the pile's row, the way the notices draw it. */
+function PileFace({ bot }: { bot: AgentInfo }) {
+  const face = resolveFace(bot.id, bot.avatar_shape, bot.avatar_color);
+  return bot.avatar ? (
+    <img className="island-img" src={bot.avatar} alt="" />
+  ) : (
+    <BotFace id={bot.id} shape={face.shape} color={face.color} className="island-face" status="idle" />
+  );
+}
+
 /**
  * The pile: one pill that shows the notice in it that most needs the user,
  * with "+N more" and that notice's Go, and two edges under it, like a stack
  * of cards. Go opens that bot; anywhere else lays the pile out under it, and
- * the ✕ clears them all.
+ * the ✕ clears them all. Laid out, it says how many it holds instead.
  */
 export function IslandPile({
   notices,
@@ -196,23 +229,37 @@ export function IslandPile({
 }) {
   const { locale, t } = useLocale();
   const labelOf = useBotLabel();
-  const [width, setWidth] = useState(0);
-  const rowRef = useRef<HTMLDivElement>(null);
   const botOf = (n: IslandNotice) =>
     "botId" in n ? (agents.find((a) => a.id === n.botId) ?? null) : null;
   // A notice about a bot gone from the list has no face to show.
-  const preview = pilePreview(notices, (n) => !("botId" in n) || !!botOf(n));
+  // Laid out, the list under it holds every notice, the shown one too: the
+  // pile goes back to saying how many, so nothing shows twice.
+  const preview = open ? null : pilePreview(notices, (n) => !("botId" in n) || !!botOf(n));
   const bot = preview ? botOf(preview.lead) : null;
+  const faces: AgentInfo[] = [];
+  if (!preview) {
+    for (const n of notices) {
+      const b = botOf(n);
+      if (!b || faces.some((f) => f.id === b.id)) continue;
+      faces.push(b);
+      if (faces.length === 3) break;
+    }
+  }
   const view = preview
     ? noticeView(preview.lead, bot, bot ? labelOf(bot) : "", locale, t)
     : null;
   // The most pressing kind in it tints the pile, so a waiting question shows through.
   const tint = TINT[mostPressing(notices)];
 
-  useLayoutEffect(() => {
-    const row = rowRef.current;
-    if (row) setWidth(row.offsetWidth);
-  }, [notices.length, preview?.lead.seq, bot?.id, bot?.avatar, locale, open]);
+  const [rowRef, width] = useRowWidth([
+    notices.length,
+    preview?.lead.seq,
+    bot?.id,
+    bot?.avatar,
+    faces.map((f) => f.id).join(),
+    locale,
+    open,
+  ]);
 
   return (
     <div
@@ -237,9 +284,13 @@ export function IslandPile({
         }}
       >
         <div className="island-row" ref={rowRef}>
-          <span className={"island-lead" + (bot ? "" : " is-dot")}>
-            {view ? view.lead : <span className="island-dot" />}
-          </span>
+          {view ? (
+            <span className={"island-lead" + (bot ? "" : " is-dot")}>{view.lead}</span>
+          ) : (
+            <span className={"island-lead" + (faces.length ? " island-faces" : " is-dot")}>
+              {faces.length ? faces.map((f) => <PileFace key={f.id} bot={f} />) : <span className="island-dot" />}
+            </span>
+          )}
           <span className="island-words" title={view?.full}>
             {view ? view.words : <b>{t("island.pile", { n: notices.length })}</b>}
           </span>
@@ -303,8 +354,6 @@ function IslandPill({
   const { locale, t } = useLocale();
   const labelOf = useBotLabel();
   const [phase, setPhase] = useState<Phase>("show");
-  const [width, setWidth] = useState(0);
-  const rowRef = useRef<HTMLDivElement>(null);
   const hovered = useRef(false);
   const releaseRef = useRef(onRelease);
   releaseRef.current = onRelease;
@@ -326,10 +375,7 @@ function IslandPill({
   const name = bot ? labelOf(bot) : "";
 
   // Open exactly as wide as what it says.
-  useLayoutEffect(() => {
-    const row = rowRef.current;
-    if (row) setWidth(row.offsetWidth);
-  }, [notice, name, locale, bot?.avatar]);
+  const [rowRef, width] = useRowWidth([notice, name, locale, bot?.avatar, !!bot]);
 
   // The pointer only holds the island while it can be pointed at. Folding
   // away, gone, or the window put aside sends no mouseleave, so let go here.

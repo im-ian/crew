@@ -6903,6 +6903,10 @@ textarea.textin.skill-body {
    slot closes and the ones under it move up. Keep the timings in step with
    OPEN_DELAY_MS and CLOSE_MS in Island.tsx. */
 .island-stack {
+  /* The widest a notice may open, inside the window whatever its width.
+     Both the row and the pill around it keep to it, so a pill measured in
+     a wider window never spills past the edges. */
+  --island-max: min(600px, calc(100vw - 160px));
   position: fixed;
   top: calc(var(--titlebar) + 8px);
   left: 50%;
@@ -6965,7 +6969,7 @@ textarea.textin.skill-body {
   to { transform: scale(0.55); opacity: 0; }
 }
 .island.is-open {
-  width: var(--w);
+  width: min(var(--w), var(--island-max));
   height: 36px;
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--k) 38%, transparent),
@@ -6984,7 +6988,7 @@ textarea.textin.skill-body {
   gap: var(--space-10);
   width: max-content;
   /* A long error stays one line and ends in an ellipsis; the title holds it all. */
-  max-width: min(600px, calc(100vw - 160px));
+  max-width: var(--island-max);
   padding: 0 var(--space-6) 0 var(--space-10);
   white-space: nowrap;
   transition: left 0.5s var(--ease-out);
@@ -7120,8 +7124,8 @@ textarea.textin.skill-body {
 }
 /* Dark: the cards behind are a lighter grey than the black pill, so they
    read on the dark page. */
-.island-ghost-1 { z-index: 1; top: 5px; width: max(0px, calc(var(--w) - 20px)); background: #3a3a3c; }
-.island-ghost-2 { top: 10px; width: max(0px, calc(var(--w) - 40px)); background: #2c2c2e; }
+.island-ghost-1 { z-index: 1; top: 5px; width: max(0px, calc(min(var(--w), var(--island-max)) - 20px)); background: #3a3a3c; }
+.island-ghost-2 { top: 10px; width: max(0px, calc(min(var(--w), var(--island-max)) - 40px)); background: #2c2c2e; }
 .island-pile-slot.is-open .island-ghost { top: 0; opacity: 0; }
 .island-faces {
   width: auto;
@@ -8139,8 +8143,8 @@ button.wait-chip:focus-visible {
 
   /* A notice row may use the screen's width less a margin, so the pile's
      sentence keeps some room beside its "+N more", Go and ✕. */
-  .island-row {
-    max-width: calc(100vw - 24px);
+  .island-stack {
+    --island-max: calc(100vw - 24px);
   }
 
   /* A held row opens its menu (mobile.ts), not the system's link preview. */
