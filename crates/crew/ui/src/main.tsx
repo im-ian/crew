@@ -32,6 +32,12 @@ followLaptopPrefs();
 // viewport watch tells them when the keyboard is up.
 if (isWeb()) {
   document.documentElement.classList.add("is-web");
+  // Opened from the home screen: no browser bar, the page runs under the
+  // status bar (styles.css darkens its strip in the light theme).
+  const standalone =
+    matchMedia("(display-mode: standalone)").matches ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  document.documentElement.classList.toggle("is-standalone", standalone);
   watchViewport();
 }
 

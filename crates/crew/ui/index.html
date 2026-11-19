@@ -11,7 +11,10 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Crew" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <!-- The home screen app draws under the status bar, in the app's own
+         colour; the safe-area padding keeps everything clear of it. With
+         "default" iOS cut the status bar's strip out and painted it apart. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <script>
       (function () {
         try {
@@ -26,6 +29,9 @@
           if (resolved !== "light" && resolved !== "dark") resolved = "dark";
           document.documentElement.dataset.theme = resolved;
           document.documentElement.style.colorScheme = resolved;
+          // Safari's bar takes the theme's colour from the first paint on.
+          var bar = document.querySelector('meta[name="theme-color"]');
+          if (bar) bar.setAttribute("content", resolved === "light" ? "#ffffff" : "#19191b");
           var loc = localStorage.getItem("crew.locale") || "ko";
           document.documentElement.lang = loc === "en" ? "en" : "ko";
         } catch (e) {}
