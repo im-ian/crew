@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 import { api, errMsg } from "../api";
 import { useT } from "../LocaleContext";
-import { minutesSeconds, phoneUrl, type MobilePair, type MobileStatus } from "../mobileAccess";
+import {
+  minutesSeconds,
+  phoneAddresses,
+  type Address,
+  type MobilePair,
+  type MobileStatus,
+} from "../mobileAccess";
+import { CopyButton } from "./CopyButton";
 import { Field } from "./Field";
 import { Seg } from "./Seg";
 
@@ -63,7 +70,7 @@ export function MobileSettings({ active }: { active: boolean }) {
   }, [pair, left]);
 
   const on = !!status?.enabled;
-  const url = status ? phoneUrl(status) : null;
+  const { main, others } = phoneAddresses(status?.urls ?? []);
   const { m, s } = minutesSeconds(left);
 
   return (
@@ -84,13 +91,31 @@ export function MobileSettings({ active }: { active: boolean }) {
       {error ? <p className="field-hint mobile-error">{error}</p> : null}
       {on && status ? (
         <>
-          <Field label={t("mobile.address")} hint={url ? t("mobile.addressHint") : t("mobile.noTailscale")}>
-            <div className="mobile-urls">
-              {status.urls.map((u) => (
-                <code key={u}>{u}</code>
-              ))}
-            </div>
+          <Field label={t("mobile.address")} hint={main ? t("mobile.addressHint") : t("mobile.noTailscale")}>
+            {main ? (
+              <div className="mobile-main" title={main.url}>
+                <code className="mobile-main-url">{main.label}</code>
+                <span className="mobile-kind">{kindLabel(main, t)}</span>
+                <CopyButton text={main.url} className="mobile-copy" />
+              </div>
+            ) : (
+              <div className="mobile-main is-empty">{t("mobile.noPhoneAddress")}</div>
+            )}
           </Field>
+          {others.length ? (
+            <details className="mobile-others" open={!main}>
+              <summary>{t("mobile.otherAddresses", { n: others.length })}</summary>
+              <ul>
+                {others.map((a) => (
+                  <li key={a.url} className={a.kind === "local" ? "is-local" : undefined} title={a.url}>
+                    <span className="mobile-kind">{kindLabel(a, t)}</span>
+                    <code>{a.label}</code>
+                    <CopyButton text={a.url} className="mobile-copy" />
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
           {status.error ? <p className="field-hint mobile-error">{status.error}</p> : null}
           <Field label={t("mobile.pair")} hint={t("mobile.pairHint")}>
             {pair ? (
@@ -149,4 +174,11 @@ export function MobileSettings({ active }: { active: boolean }) {
       ) : null}
     </div>
   );
+}
+
+/** The tag beside an address: what it is, and for a loopback one that only this Mac opens it. */
+function kindLabel(a: Address, t: ReturnType<typeof useT>): string {
+  if (a.kind === "dns") return t("mobile.kindDns");
+  if (a.kind === "ip") return t("mobile.kindIp");
+  return t("mobile.kindLocal");
 }

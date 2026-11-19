@@ -22,7 +22,35 @@ export function minutesSeconds(left: number): { m: number; s: number } {
   return { m: Math.floor(n / 60), s: n % 60 };
 }
 
-/** The address to show first: one a phone on the tailnet can reach. */
-export function phoneUrl(status: MobileStatus): string | null {
-  return status.urls.find((u) => !u.includes("127.0.0.1") && !u.includes("[::1]")) ?? null;
+
+/** What an address is: the Mac's MagicDNS name, its Tailscale IP, or this Mac only. */
+export type AddressKind = "dns" | "ip" | "local";
+export type Address = { url: string; kind: AddressKind; /** Shown without the scheme. */ label: string };
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
+export function addressKind(url: string): AddressKind {
+  const host = hostOf(url).replace(/^\[|\]$/g, "");
+  if (host === "127.0.0.1" || host === "::1" || host === "localhost") return "local";
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":")) return "ip";
+  return "dns";
+}
+
+/**
+ * The address to open on the phone, and the rest: the MagicDNS name first,
+ * else the Tailscale IP. A loopback address only opens on this Mac, so it is
+ * never the main one and comes last among the others.
+ */
+export function phoneAddresses(urls: readonly string[]): { main: Address | null; others: Address[] } {
+  const all = urls.map((url) => ({ url, kind: addressKind(url), label: url.replace(/^https?:\/\//, "").replace(/\/$/, "") }));
+  const main = all.find((a) => a.kind === "dns") ?? all.find((a) => a.kind === "ip") ?? null;
+  const rank: Record<AddressKind, number> = { dns: 0, ip: 1, local: 2 };
+  const others = all.filter((a) => a !== main).sort((a, b) => rank[a.kind] - rank[b.kind]);
+  return { main, others };
 }
