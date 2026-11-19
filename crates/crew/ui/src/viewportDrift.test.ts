@@ -99,6 +99,24 @@ describe("the phone layout after the keyboard", () => {
     stop();
   });
 
+  it("reads the view again when the page comes back from the background", () => {
+    const { vv, doc, props, classes, stop } = setup();
+    doc.activeElement = new FakeInput();
+    doc.fire("focusin");
+    vv.height = 480;
+    vv.fire("resize");
+    vv.offsetTop = 290;
+    vv.fire("scroll");
+    // Away with the keyboard up. Back, iOS has put the view right while
+    // the page slept, and no viewport or focus event says so.
+    vv.height = 844;
+    vv.offsetTop = 0;
+    doc.fire("visibilitychange");
+    expect(props.get("--vv-top")).toBe("0px");
+    expect(classes.has("kb-open")).toBe(false);
+    stop();
+  });
+
   it("does not pin the app to a pinched-in page", () => {
     const { vv, props, stop } = setup();
     vv.scale = 2;
