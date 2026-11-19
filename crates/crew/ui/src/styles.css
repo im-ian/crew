@@ -8495,3 +8495,27 @@ html.kb-open {
   color: color-mix(in srgb, currentColor 62%, transparent);
   overflow-wrap: anywhere;
 }
+
+/* iOS zooms the page into a field it focuses when the field's text is under
+   16px. A browser on a touch screen (a phone at any width, unfolded or on its
+   side, a tablet) gets 16px text in every field, so a tap never zooms. The
+   desktop window and a mouse-driven browser keep their sizes. Pinch zoom is
+   left alone: the viewport does not set maximum-scale. */
+@media (pointer: coarse), (hover: none) {
+  html.is-web input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [type="button"], [type="submit"], [type="reset"], [type="image"], [type="hidden"]),
+  html.is-web textarea,
+  html.is-web select,
+  html.is-web [contenteditable]:not([contenteditable="false"]),
+  html.is-web [role="textbox"] {
+    font-size: max(16px, 1em) !important;
+  }
+  /* The composer keeps the chat's text size when that is larger. (The
+     selectors below outweigh the list above, whose :not() counts.) */
+  html.is-web .composer-box .composer-input[contenteditable] {
+    font-size: max(16px, calc(var(--text-xl) * var(--chat-scale, 1))) !important;
+  }
+  /* Fields drawn larger than 16px keep their size: the pairing code. */
+  html.is-web input.textin.pair-input[class] {
+    font-size: 20px !important;
+  }
+}
