@@ -8035,8 +8035,18 @@ button.wait-chip:focus-visible {
   .quick-switch-input {
     font-size: max(16px, 1em);
   }
+  /* The row keeps its buttons at the bottom, so a taller message grows up.
+     One line has to be as tall as the 44px send button, the text in its
+     middle: the padding is what the line height leaves of 44px. The plus
+     (40px) sits 2px up, so the three share one centre. */
   .composer-input {
     max-height: 30vh;
+    min-height: 44px;
+    padding-top: max(4px, calc((44px - 1.4em) / 2));
+    padding-bottom: max(4px, calc((44px - 1.4em) / 2));
+  }
+  .composer-row .plus-wrap > .attach-btn {
+    margin-bottom: 2px;
   }
 
   /* Side panels (file view, peeked chat, a lead's group) fill the screen. */
