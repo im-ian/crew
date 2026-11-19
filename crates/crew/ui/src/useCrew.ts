@@ -21,6 +21,7 @@ import { randomFace } from "./avatar";
 import { freeBotName, loadBotDefault } from "./botDefault";
 import { canCarryChat, partsOf, type ClonePick } from "./cloneParts";
 import type { NewGroup } from "./components/NewGroupModal";
+import { makeTeam, type GroupMade } from "./makeTeam";
 import { openPendingOnFocus } from "./focusChat";
 import { useT } from "./LocaleContext";
 import { loadLastChat, pickOpenAgent, saveLastChat } from "./lastChat";
@@ -114,6 +115,10 @@ export function useCrew() {
   const [newBotOpen, setNewBotOpen] = useState(false);
   const [newBotPlace, setNewBotPlace] = useState<string | null>(null);
   const [newGroupOpen, setNewGroupOpen] = useState(false);
+  /** Bots being made from a template: their group already holds them. */
+  const makingKeys = useRef(new Set<string>());
+  /** The New group dialog is making bots: it does not close until they are made. */
+  const newGroupBusy = useRef(false);
   /** The bot the duplicate dialog is open for. */
   const [cloneId, setCloneId] = useState<string | null>(null);
   const [remoteAddOpen, setRemoteAddOpen] = useState(false);
@@ -519,7 +524,8 @@ export function useCrew() {
     });
   }
 
-  function persistLayout(raw: RailLayout) {
+  /** Resolves once the file is written; most callers do not wait. */
+  function persistLayout(raw: RailLayout): Promise<void> {
     // A bot that moved out of its group no longer leads it.
     const next = settleLeads(raw);
     const groupsOnly = next.groups.filter((g) => g.id !== UNGROUPED_ID);
@@ -536,7 +542,7 @@ export function useCrew() {
     setGroups(layout.groups);
     setUngrouped(layout.ungrouped);
     setOrder(layout.order);
-    void api.setGroups(toPersist(layout)).catch((err) => showError(err));
+    return api.setGroups(toPersist(layout)).catch((err) => showError(err));
   }
 
   function createGroup(withItem?: { kind: Kind; id: string } | null) {
@@ -577,6 +583,7 @@ export function useCrew() {
   }
 
   function closeNewGroup() {
+    if (newGroupBusy.current) return;
     setNewGroupOpen(false);
   }
 
@@ -592,41 +599,71 @@ export function useCrew() {
   /** A folder is optional. With one, it becomes the working folder of the group's bots. */
   /**
    * A group from the New group dialog, with the bots its template gives it.
-   * The group comes first, then each bot quietly (no first turn asking what
-   * to do: it has its role, and that turn would run before it sits in the
-   * group), then they go in with the lead. Each bot keeps its template's face
-   * shape and gets a color of its own.
+   * The bots' ids are reserved and placed in the group first, so each bot is
+   * in it from the moment it exists; then each is made, quietly (it has its
+   * role, and eight bots asking what to do is noise), with its template's
+   * face shape, a color of its own, and its role. The dialog stays open
+   * through it and shows `progress`; it closes on success, and on failure it
+   * shows why and what was left.
    */
-  async function createNamedGroup(made: NewGroup) {
+  async function createNamedGroup(
+    made: NewGroup,
+    progress: (done: number, total: number) => void = () => {},
+  ): Promise<GroupMade> {
+    newGroupBusy.current = true;
+    try {
+      return await makeNamedGroup(made, progress);
+    } finally {
+      newGroupBusy.current = false;
+    }
+  }
+
+  async function makeNamedGroup(
+    made: NewGroup,
+    progress: (done: number, total: number) => void,
+  ): Promise<GroupMade> {
     const trimmed = made.name.trim();
-    if (!trimmed) return;
+    if (!trimmed) return { ok: false, stage: "reserve", error: t("error.nameRequired"), made: [], total: 0, groupName: "" };
     const current = groupsRef.current;
     const id = newGroupId(current.groups.map((g) => g.id));
+    const groupName = uniqueGroupName(current.groups, trimmed);
     const created: Group = {
       id,
-      name: uniqueGroupName(current.groups, trimmed),
+      name: groupName,
       collapsed: false,
       items: [],
       worktree: made.worktree ? "on" : "off",
     };
     const folder = made.path.trim();
     if (folder) created.path = folder;
-    persistLayout({
-      groups: [...current.groups, created],
-      ungrouped: current.ungrouped,
-      order: current.order,
-    });
-    setNewGroupOpen(false);
-    // The group is there either way; a memory that fails to save can be
-    // written again from its settings.
-    if (made.memory.trim()) {
-      void api.setGroupMemory(id, made.memory, "").catch((err) => showError(err));
+    const saveMemory = () => {
+      // A memory that fails to save can be written again from the settings.
+      if (made.memory.trim()) {
+        void api.setGroupMemory(id, made.memory, "").catch((err) => showError(err));
+      }
+    };
+    if (!made.team.length) {
+      persistLayout({ groups: [...current.groups, created], ungrouped: current.ungrouped, order: current.order });
+      saveMemory();
+      setNewGroupOpen(false);
+      return { ok: true, made: [] };
     }
-    if (!made.team.length) return;
-    const ids: (string | null)[] = [];
-    for (const bot of made.team) {
-      try {
-        const botId = await api.addAgent({
+    const lead = made.team.findIndex((b) => b.lead);
+    const result = await makeTeam(made.team, {
+      reserve: (names) => api.reserveAgentIds(names),
+      place: async (ids) => {
+        for (const botId of ids) makingKeys.current.add(itemKey("agent", botId));
+        const now = groupsRef.current;
+        const group: Group = { ...created, items: ids.map((botId) => itemKey("agent", botId)) };
+        if (lead >= 0) group.lead = ids[lead];
+        // Written before any bot exists: the daemon reads the group (its
+        // folder rule, its lead) from the file on the bots' first turn.
+        await persistLayout({ groups: [...now.groups, group], ungrouped: now.ungrouped, order: now.order });
+        saveMemory();
+      },
+      add: async (bot, botId) => {
+        await api.addAgent({
+          id: botId,
           name: bot.name,
           cli: bot.ai.cli,
           model: bot.ai.model || null,
@@ -636,44 +673,29 @@ export function useCrew() {
           cmd: null,
           cwd: folder || null,
           quiet: true,
+          shape: bot.shape || randomFace().shape,
+          color: randomFace().color,
         });
-        ids.push(botId);
-        const face = randomFace();
-        try {
-          await api.setAgent({
-            id: botId,
-            model: null,
-            effort: null,
-            unsetModel: false,
-            unsetEffort: false,
-            title: null,
-            role: null,
-            description: null,
-            unsetTitle: false,
-            unsetRole: false,
-            unsetDescription: false,
-            shape: bot.shape || face.shape,
-            color: face.color,
-            cwd: null,
-            unsetCwd: false,
-          });
-        } catch (err) {
-          showError(err);
-        }
-      } catch (err) {
-        ids.push(null);
-        showError(err);
-      }
-    }
+        makingKeys.current.delete(itemKey("agent", botId));
+      },
+      drop: (ids) => {
+        const gone = new Set(ids.map((botId) => itemKey("agent", botId)));
+        for (const k of gone) makingKeys.current.delete(k);
+        const now = groupsRef.current;
+        persistLayout({
+          groups: now.groups.map((g) =>
+            g.id === id ? { ...g, items: g.items.filter((k) => !gone.has(k)) } : g,
+          ),
+          ungrouped: now.ungrouped,
+          order: now.order,
+        });
+      },
+      progress,
+    });
     await refreshList();
-    if (!groupsRef.current.groups.some((g) => g.id === id)) return;
-    for (const botId of ids) {
-      if (botId) moveToGroup("agent", botId, id);
-    }
-    const lead = made.team.findIndex((b) => b.lead);
-    const leadId = lead >= 0 ? ids[lead] : null;
-    if (leadId) setLead(id, leadId);
-    const first = leadId ?? ids.find((x): x is string => !!x);
+    if (!result.ok) return { ...result, groupName };
+    setNewGroupOpen(false);
+    const first = (lead >= 0 ? result.made[lead] : null) ?? result.made[0];
     if (first) {
       selectedRef.current = { id: first, kind: "agent" };
       setSelected(first);
@@ -684,6 +706,7 @@ export function useCrew() {
       focusComposer();
       await refreshMessages();
     }
+    return result;
   }
 
   function openGroupSettings(id: string) {
@@ -895,7 +918,7 @@ export function useCrew() {
     // A bot at work is polled five times a second, mostly to the same answer.
     setAgents((prev) => keepSame(prev, list));
     if (groupsLoaded.current) {
-      const pruned = pruneLayout(groupsRef.current, localAgents(list));
+      const pruned = pruneLayout(groupsRef.current, localAgents(list), makingKeys.current);
       if (layoutChanged(pruned, groupsRef.current)) persistLayout(pruned);
     }
     applyOpenAgent(list);
@@ -1601,7 +1624,7 @@ export function useCrew() {
       if (e.key !== "Escape") return;
       if (newGroupOpenRef.current) {
         e.preventDefault();
-        setNewGroupOpen(false);
+        if (!newGroupBusy.current) setNewGroupOpen(false);
         return;
       }
       if (cloneIdRef.current) {

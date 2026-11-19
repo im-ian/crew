@@ -469,3 +469,17 @@ describe("focusedGroupId", () => {
     expect(focusedGroupId(groups, "gone", "agent", "a1")).toBe("g1");
   });
 });
+
+describe("pruneLayout while bots are being made", () => {
+  it("keeps the ids of bots not made yet in their group", () => {
+    const layout = {
+      groups: [{ id: "g", name: "팀", collapsed: false, items: ["agent:a", "agent:new"], lead: "new" }],
+      ungrouped: [],
+    };
+    const agents = [{ id: "a", name: "a", status: "idle", cmd: [], cwd: "", routines: [] }] as never;
+    const kept = pruneLayout(layout, agents, new Set(["agent:new"]));
+    expect(kept.groups[0].items).toEqual(["agent:a", "agent:new"]);
+    expect(kept.groups[0].lead).toBe("new");
+    expect(pruneLayout(layout, agents).groups[0].items).toEqual(["agent:a"]);
+  });
+});

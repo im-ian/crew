@@ -441,6 +441,12 @@
           "markdownDescription": "Enables the remove_template command without any pre-configured scope."
         },
         {
+          "description": "Enables the reserve_agent_ids command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-reserve-agent-ids",
+          "markdownDescription": "Enables the reserve_agent_ids command without any pre-configured scope."
+        },
+        {
           "description": "Enables the reset_agent command without any pre-configured scope.",
           "type": "string",
           "const": "allow-reset-agent",
@@ -865,6 +871,12 @@
           "type": "string",
           "const": "deny-remove-template",
           "markdownDescription": "Denies the remove_template command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the reserve_agent_ids command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-reserve-agent-ids",
+          "markdownDescription": "Denies the reserve_agent_ids command without any pre-configured scope."
         },
         {
           "description": "Denies the reset_agent command without any pre-configured scope.",

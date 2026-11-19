@@ -122,7 +122,10 @@ pub fn dispatch(name: &str, args: Value) -> Option<Result<Value, String>> {
             let cmd: Option<String> = arg(&args, "cmd")?;
             let cwd: Option<String> = arg(&args, "cwd")?;
             let quiet: Option<bool> = arg(&args, "quiet")?;
-            ok(crate::desktop::add_agent(name, cli, model, effort, role, description, cmd, cwd, quiet)?)
+            let id: Option<String> = arg(&args, "id")?;
+            let shape: Option<String> = arg(&args, "shape")?;
+            let color: Option<String> = arg(&args, "color")?;
+            ok(crate::desktop::add_agent(name, cli, model, effort, role, description, cmd, cwd, quiet, id, shape, color)?)
         }
         "clone_agent" => {
             let id: String = arg(&args, "id")?;
@@ -331,6 +334,10 @@ pub fn dispatch(name: &str, args: Value) -> Option<Result<Value, String>> {
             let version: u64 = arg(&args, "version")?;
             ok(crate::desktop::team_memory_set(alias, text, version)?)
         }
+        "reserve_agent_ids" => {
+            let names: Vec<String> = arg(&args, "names")?;
+            ok(crate::desktop::reserve_agent_ids(names)?)
+        }
             _ => unreachable!(),
         }
     };
@@ -402,6 +409,7 @@ pub const NAMES: &[&str] = &[
     "remote_leave",
     "team_memory_get",
     "team_memory_set",
+    "reserve_agent_ids",
 ];
 
 pub const SPECIAL: &[&str] = &[

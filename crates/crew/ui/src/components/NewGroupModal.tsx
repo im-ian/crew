@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../api";
 import { loadAiList } from "../aiListSync";
 import { folderName } from "../groups";
-import { Pencil } from "../icons";
+import type { TFn } from "../i18n";
+import { LoaderCircle, Pencil } from "../icons";
+import { api, errMsg } from "../api";
+import type { GroupMade } from "../makeTeam";
 import { useT } from "../LocaleContext";
 import {
   NO_TEMPLATE,
@@ -38,7 +40,9 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onPickFolder: () => Promise<string | null>;
-  onCreate: (group: NewGroup) => void;
+  /** Resolves when the bots are made or making them stopped. On success the
+      dialog is closed by the caller. */
+  onCreate: (group: NewGroup, progress: (done: number, total: number) => void) => Promise<GroupMade>;
 };
 
 const BLANK: GroupFields = { memory: "", worktree: true, memoryEdited: false, worktreeEdited: false };
@@ -74,11 +78,15 @@ export function NewGroupModal({ open, onClose, onPickFolder, onCreate }: Props) 
   const [aiOrder, setAiOrder] = useState<string[]>([]);
   const [picks, setPicks] = useState<Record<number, BotAi>>({});
   const [editing, setEditing] = useState<number | null>(null);
+  const [making, setMaking] = useState<{ done: number; total: number } | null>(null);
+  const [failure, setFailure] = useState<Extract<GroupMade, { ok: false }> | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const nameEdited = useRef(false);
 
   useEffect(() => {
     if (!open) return;
+    setMaking(null);
+    setFailure(null);
     setName("");
     setPath("");
     setFields(BLANK);
@@ -112,19 +120,38 @@ export function NewGroupModal({ open, onClose, onPickFolder, onCreate }: Props) 
     setFields((cur) => refill(cur, templates.find((x) => x.id === id) ?? null));
   }
 
-  function submit() {
+  async function submit() {
+    if (making) return;
     const trimmed = name.trim();
     if (!trimmed) {
       nameRef.current?.focus();
       return;
     }
-    onCreate({ name: trimmed, path: path.trim(), memory: fields.memory, worktree: fields.worktree, team });
+    setFailure(null);
+    setMaking({ done: 0, total: team.length });
+    try {
+      const result = await onCreate(
+        { name: trimmed, path: path.trim(), memory: fields.memory, worktree: fields.worktree, team },
+        (done, total) => setMaking({ done, total }),
+      );
+      if (!result.ok) setFailure(result);
+    } catch (err) {
+      setFailure({ ok: false, stage: "reserve", error: errMsg(err), made: [], total: team.length, groupName: trimmed });
+    } finally {
+      setMaking(null);
+    }
   }
+
+  // Some bots were made: the group is there, so making it again would make
+  // a second one. Only closing is left.
+  const stuck = failure?.stage === "add";
+  const locked = !!making || stuck;
 
   const from = template ? t("newGroup.fromTemplate", { name: template.name }) : null;
 
   return (
     <Modal open={open} title={t("newGroup.title")} onClose={onClose} className="ng-dialog">
+      <fieldset className="ng-fieldset" disabled={locked}>
       <div className="ng-cols">
         <div className="ng-col ng-info">
           <h4 className="ng-h">{t("newGroup.info")}</h4>
@@ -260,14 +287,79 @@ export function NewGroupModal({ open, onClose, onPickFolder, onCreate }: Props) 
           )}
         </div>
       </div>
-      <div className="actions spread">
-        <button type="button" className="ghost" onClick={onClose}>
-          {t("common.cancel")}
-        </button>
-        <button type="button" className="primary" disabled={!name.trim()} onClick={submit}>
-          {t("common.create")}
-        </button>
-      </div>
+      </fieldset>
+      <NewGroupFoot
+        t={t}
+        making={making}
+        failure={failure}
+        canCreate={!!name.trim()}
+        onClose={onClose}
+        onCreate={() => void submit()}
+      />
     </Modal>
+  );
+}
+
+/**
+ * The dialog's foot: the create button, its progress while the bots are made,
+ * and why making them stopped. After some bots were made only closing is
+ * left, since creating again would make a second group.
+ */
+export function NewGroupFoot({
+  t,
+  making,
+  failure,
+  canCreate,
+  onClose,
+  onCreate,
+}: {
+  t: TFn;
+  making: { done: number; total: number } | null;
+  failure: Extract<GroupMade, { ok: false }> | null;
+  canCreate: boolean;
+  onClose: () => void;
+  onCreate: () => void;
+}) {
+  const stuck = failure?.stage === "add";
+  return (
+    <>
+      {failure ? (
+        <p className="ng-error" role="alert">
+          {stuck
+            ? t("newGroup.failAdd", {
+                made: String(failure.made.length),
+                total: String(failure.total),
+                error: failure.error,
+                group: failure.groupName,
+              })
+            : t("newGroup.failReserve", { error: failure.error })}
+        </p>
+      ) : null}
+      <div className="actions spread">
+        <button type="button" className="ghost" disabled={!!making} onClick={onClose}>
+          {stuck ? t("common.close") : t("common.cancel")}
+        </button>
+        {stuck ? null : (
+          <button
+            type="button"
+            className="primary ng-create"
+            disabled={!canCreate || !!making}
+            aria-busy={!!making}
+            onClick={onCreate}
+          >
+            {making ? (
+              <>
+                <LoaderCircle className="spin" size={14} />
+                {making.total
+                  ? t("newGroup.making", { done: String(making.done), total: String(making.total) })
+                  : t("newGroup.makingGroup")}
+              </>
+            ) : (
+              t("common.create")
+            )}
+          </button>
+        )}
+      </div>
+    </>
   );
 }

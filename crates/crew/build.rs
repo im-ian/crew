@@ -73,6 +73,7 @@ fn main() {
             "remote_leave",
             "team_memory_get",
             "team_memory_set",
+            "reserve_agent_ids",
             "mobile_status",
             "mobile_set",
             "mobile_pair",

@@ -137,7 +137,22 @@ export const api = {
     cwd?: string | null;
     /** No first turn asking what to take on. */
     quiet?: boolean;
-  }) => invoke<string>("add_agent", { ...args, cwd: args.cwd ?? null, quiet: args.quiet ?? null }),
+    /** One from `reserveAgentIds`. Without it the daemon makes one up. */
+    id?: string | null;
+    /** The face, set as the bot is made. */
+    shape?: string | null;
+    color?: string | null;
+  }) =>
+    invoke<string>("add_agent", {
+      ...args,
+      cwd: args.cwd ?? null,
+      quiet: args.quiet ?? null,
+      id: args.id ?? null,
+      shape: args.shape ?? null,
+      color: args.color ?? null,
+    }),
+  /** Ids for bots about to be made, free now and of each other. */
+  reserveAgentIds: (names: string[]) => invoke<string[]>("reserve_agent_ids", { names }),
   /** Display name only. The other set_agent fields stay as they are. */
   setName: (id: string, name: string) =>
     invoke<void>("set_agent", {
