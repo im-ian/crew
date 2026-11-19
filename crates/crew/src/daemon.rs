@@ -8238,6 +8238,22 @@ printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s2"}}' '{{"type"
         });
     }
 
+    /// The first-output watch rung by the test, at the moment the stand-in
+    /// CLI shows where it is: its own timer is a day away. A 400 ms timer ran
+    /// out on a loaded machine before the shell had even started.
+    fn hold_output_watch(id: &str) {
+        set_output_wait(id, Duration::from_secs(86_400));
+    }
+
+    fn ring_output_watch(id: &str) {
+        // Out of the lock first: what the watch does next takes it again.
+        let session = match agents().lock().unwrap().get(id) {
+            Some(LiveAgent::Headless(session)) => Arc::clone(session),
+            _ => panic!("runs headless"),
+        };
+        headless::ring_first_output_watch(&session);
+    }
+
     fn set_output_wait(id: &str, wait: Duration) {
         match agents().lock().unwrap().get(id) {
             Some(LiveAgent::Headless(session)) => headless::set_first_output_timeout(session, wait),
@@ -8329,8 +8345,12 @@ printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s2"}}' '{{"type"
             let log = paths::home_dir().join("prompts");
             fake_bot_running(&bot, &hold_when(&log, "하나"));
             wait_idle(&bot);
-            set_output_wait(&bot, Duration::from_millis(400));
+            hold_output_watch(&bot);
             send_agent(&bot, "하나").unwrap();
+            eventually(Duration::from_secs(10), "the CLI never started", || {
+                fs::read_to_string(&log).is_ok_and(|s| s.contains("하나"))
+            });
+            ring_output_watch(&bot);
             eventually(Duration::from_secs(5), "the stall was not reported", || {
                 crate::transcript::messages(&bot)
                     .iter()
@@ -8364,6 +8384,12 @@ printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s2"}}' '{{"type"
              case \"$mode:$last\" in resume:*{needle}*) exec sleep 30 ;; fresh:*{needle}*) {fresh} ;; esac",
             log = log.display(),
         )
+    }
+
+    /// `hang_on_resume` logged a `mode` start of a prompt with `needle`.
+    fn tried(log: &std::path::Path, mode: &str, needle: &str) -> bool {
+        fs::read_to_string(log)
+            .is_ok_and(|s| s.split('|').any(|t| t.starts_with(mode) && t.contains(needle)))
     }
 
     fn resume_from(id: &str, session_id: &str) {
@@ -8534,10 +8560,14 @@ printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s2"}}' '{{"type"
             let log = paths::home_dir().join("prompts");
             fake_bot_running(&bot, &hang_on_resume(&log, "하나", false));
             wait_idle(&bot);
-            set_output_wait(&bot, Duration::from_millis(400));
+            hold_output_watch(&bot);
             resume_from(&bot, "stuck-session");
             send_agent(&bot, "하나").unwrap();
-            eventually(Duration::from_secs(5), "never sent again", || {
+            eventually(Duration::from_secs(10), "the resume never started", || {
+                tried(&log, "resume:", "하나")
+            });
+            ring_output_watch(&bot);
+            eventually(Duration::from_secs(10), "never sent again", || {
                 fs::read_to_string(&log).is_ok_and(|s| s.matches("하나").count() >= 2)
             });
             wait_idle(&bot);
@@ -8569,9 +8599,17 @@ printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s2"}}' '{{"type"
             let log = paths::home_dir().join("prompts");
             fake_bot_running(&bot, &hang_on_resume(&log, "하나", true));
             wait_idle(&bot);
-            set_output_wait(&bot, Duration::from_millis(400));
+            hold_output_watch(&bot);
             resume_from(&bot, "stuck-session");
             send_agent(&bot, "하나").unwrap();
+            eventually(Duration::from_secs(10), "the resume never started", || {
+                tried(&log, "resume:", "하나")
+            });
+            ring_output_watch(&bot);
+            eventually(Duration::from_secs(10), "the retry never started", || {
+                tried(&log, "fresh:", "하나")
+            });
+            ring_output_watch(&bot);
             eventually(
                 Duration::from_secs(5),
                 "the second stall was not reported",
@@ -8624,12 +8662,13 @@ printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s2"}}' '{{"type"
                 r#"case "$last" in *살았*) printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"alive"}]}}'; exec sleep 30 ;; esac"#,
             );
             wait_idle(&bot);
-            set_output_wait(&bot, Duration::from_millis(400));
+            hold_output_watch(&bot);
             send_agent(&bot, "살았니").unwrap();
-            eventually(Duration::from_secs(5), "the line never arrived", || {
+            eventually(Duration::from_secs(10), "the line never arrived", || {
                 told(&bot, "alive")
             });
-            std::thread::sleep(Duration::from_millis(700));
+            // The watch going off after a line is what must not stop the turn.
+            ring_output_watch(&bot);
             assert!(
                 agent_busy(&bot).unwrap(),
                 "silence after a line stopped the turn"

@@ -563,6 +563,17 @@ fn mark_resumed(session: &HeadlessSession, resumed: bool) {
     }
 }
 
+/// Tests ring the first-output watch when they choose: once the stand-in
+/// CLI has shown it started, so a slow start on a loaded machine is not
+/// taken for a stall. Its own timer is set far off by the test.
+#[cfg(test)]
+pub fn ring_first_output_watch(session: &Arc<HeadlessSession>) {
+    let Some(generation) = session.inner.lock().ok().map(|inner| inner.generation) else {
+        return;
+    };
+    give_back_if_unheard(Arc::clone(session), generation);
+}
+
 pub fn set_first_output_timeout(session: &HeadlessSession, wait: Duration) {
     if let Ok(mut inner) = session.inner.lock() {
         inner.first_output_timeout = Some(wait);
