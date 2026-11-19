@@ -7,10 +7,11 @@ pub fn one_on_one_tell_targets(text: &str, self_id: &str, roster: &[AgentConfig]
 
 /// How many `crew tell`s a single user message may set off, one after another.
 /// Each tell costs a real CLI turn, so this is the last stop on a chain that
-/// would run on forever. It is not what stops a loop: `relay` does that, from
-/// the tells themselves. The reply that wakes the bot waiting on a tell is not
-/// a hop.
-pub const MAX_RELAY_HOPS: u32 = 20;
+/// would run on forever; `relay` stops a bot repeating itself before that.
+/// The reply that wakes the bot waiting on a tell is not a hop. A team of
+/// eight working through ten rounds of hand-off and report is about 160
+/// tells, so 200 leaves real work room while a runaway chain still ends.
+pub const MAX_RELAY_HOPS: u32 = 200;
 
 /// Where a turn's reply should land after the speaker finishes. Saved with a
 /// turn in flight, so a restart can run that turn on with the same asker.

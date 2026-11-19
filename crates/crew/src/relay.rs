@@ -1,7 +1,7 @@
 //! When a bot's `crew tell` is stopped. Bots pass work along as long as they
-//! like; a tell stops only on a sign that they are going round without the
-//! user: two bots telling each other back and forth, a bot sending a teammate
-//! what it already sent, or a chain grown past a large cap.
+//! like, the same two back and forth included: a lead and a worker do that in
+//! real work. A tell stops only on a bot sending a teammate what it already
+//! sent in the chain, or on a chain grown past a large cap.
 //!
 //! A chain is what one user message set off. Each turn the user started gets
 //! a new chain id, and every tell and wake under it keeps that id. The tells
@@ -15,19 +15,11 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::targeting::{self, TurnOrigin};
 
-/// Round trips two bots may make with new tells between them in one chain.
-/// A report that wakes the asker is not a tell, so it is not counted. A lead
-/// and a worker who report with `crew tell` reached four in real work before,
-/// under the old hop limit, so this leaves room above that.
-pub const MAX_ROUND_TRIPS: usize = 5;
-
 /// Chains kept at once. The oldest goes first.
 const MAX_CHAINS: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stop {
-    /// The two bots already made `MAX_ROUND_TRIPS` round trips.
-    PingPong,
     /// The sender already sent the receiver this in the chain.
     Repeat,
     /// `targeting::MAX_RELAY_HOPS` tells since the user last spoke.
@@ -86,17 +78,6 @@ pub fn stop(origin: &TurnOrigin, from: &str, to: &str, text: &str) -> Option<Sto
                 {
                     return Some(Stop::Repeat);
                 }
-                let count = |a: &str, b: &str| {
-                    chain
-                        .sent
-                        .iter()
-                        .filter(|s| s.from == a && s.to == b)
-                        .count()
-                };
-                let trips = (count(from, to) + 1).min(count(to, from));
-                if trips > MAX_ROUND_TRIPS {
-                    return Some(Stop::PingPong);
-                }
             }
         }
     }
@@ -151,9 +132,6 @@ pub fn chat_line(locale: &str, stop: &Stop, from: &str, to: &str, text: &str) ->
     }
     if locale == "en" {
         let why = match stop {
-            Stop::PingPong => format!(
-                "the two bots told each other back and forth over {MAX_ROUND_TRIPS} times without you"
-            ),
             Stop::Repeat => "it was the same as one already sent in this exchange".to_string(),
             Stop::Cap => format!(
                 "bots passed this on over {} times since you last spoke",
@@ -163,9 +141,6 @@ pub fn chat_line(locale: &str, stop: &Stop, from: &str, to: &str, text: &str) ->
         format!("{from} → {to}: not sent, because {why}. It said: “{said}”")
     } else {
         let why = match stop {
-            Stop::PingPong => {
-                format!("두 봇이 사람 없이 서로 {MAX_ROUND_TRIPS}번 넘게 주고받았어요(핑퐁)")
-            }
             Stop::Repeat => "이 흐름에서 이미 보낸 글과 같아요(되풀이)".to_string(),
             Stop::Cap => format!(
                 "사람이 마지막으로 말한 뒤 봇끼리 {}번 넘게 넘겼어요(상한)",
@@ -180,9 +155,6 @@ pub fn chat_line(locale: &str, stop: &Stop, from: &str, to: &str, text: &str) ->
 /// which the router path reads as that error.
 pub fn error_text(stop: &Stop, to: &str) -> String {
     let why = match stop {
-        Stop::PingPong => format!(
-            "you and {to} already told each other back and forth {MAX_ROUND_TRIPS} times without the user"
-        ),
         Stop::Repeat => format!("you already told {to} the same thing since the user last spoke"),
         Stop::Cap => format!(
             "bots passed this on {} times since the user last spoke",
@@ -234,26 +206,31 @@ mod tests {
         }
     }
 
+    /// A lead and a worker telling each other new work and reports is real
+    /// work, however many times they go back and forth.
     #[test]
-    fn two_bots_going_back_and_forth_stop() {
+    fn two_bots_going_back_and_forth_go_on() {
         let chain = new_chain();
-        for n in 0..MAX_ROUND_TRIPS {
-            let ping = format!("ping {}", "a".repeat(n + 1));
-            let pong = format!("pong {}", "b".repeat(n + 1));
-            assert_eq!(stop(&told(chain, 1), "a", "b", &ping), None);
-            note(chain, "a", "b", &ping);
-            assert_eq!(stop(&told(chain, 1), "b", "a", &pong), None);
-            note(chain, "b", "a", &pong);
+        for n in 0..30 {
+            let ask = format!("{n}단계 맡아 주세요");
+            let report = format!("{n}단계 끝났어요");
+            assert_eq!(
+                stop(&told(chain, 1), "lead", "worker", &ask),
+                None,
+                "ask {n}"
+            );
+            note(chain, "lead", "worker", &ask);
+            assert_eq!(
+                stop(&told(chain, 1), "worker", "lead", &report),
+                None,
+                "report {n}"
+            );
+            note(chain, "worker", "lead", &report);
         }
-        note(chain, "a", "b", "one more from a");
+        // Saying the same thing again is still a loop.
         assert_eq!(
-            stop(&told(chain, 1), "b", "a", "one more from b"),
-            Some(Stop::PingPong)
-        );
-        // Another chain, one the user started since, starts over.
-        assert_eq!(
-            stop(&told(new_chain(), 1), "b", "a", "one more from b"),
-            None
+            stop(&told(chain, 1), "worker", "lead", "3단계 끝났어요"),
+            Some(Stop::Repeat)
         );
     }
 
