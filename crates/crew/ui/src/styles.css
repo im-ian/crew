@@ -4227,6 +4227,11 @@ button.choice-option:active:not(:disabled) .choice-badge {
   font-variant-numeric: tabular-nums;
   color: rgba(255, 255, 255, 0.8);
 }
+.img-preview-bar.is-count .img-preview-count {
+  margin-left: 0;
+  padding: 0 10px;
+  border-left: 0;
+}
 .img-preview img {
   max-width: min(1100px, calc(100vw - 56px));
   max-height: calc(100vh - 96px);
@@ -5143,9 +5148,18 @@ html[data-theme="light"] .file-src span {
   display: block;
   width: 100%;
   height: 100%;
+  padding: 0;
+  border: 0;
   border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--bg);
+  font: inherit;
+  color: inherit;
+  cursor: zoom-in;
+}
+.attach-photo-frame:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
 }
 .attach-photos.is-one .attach-photo {
   width: auto;
@@ -8050,6 +8064,40 @@ button.wait-chip:focus-visible {
     border-left: 0;
     padding-top: calc(var(--space-16) + var(--safe-top));
     padding-bottom: calc(var(--space-16) + var(--safe-bottom));
+  }
+
+  /* The picture overlay fills the visible screen. The close control sits
+     clear of the notch and is large enough for a finger. */
+  .img-preview {
+    top: 0;
+    bottom: auto;
+    height: var(--phone-h);
+    padding:
+      calc(56px + var(--safe-top))
+      calc(16px + var(--safe-right))
+      calc(76px + var(--safe-bottom))
+      calc(16px + var(--safe-left));
+  }
+  .img-preview-close {
+    top: calc(8px + var(--safe-top));
+    right: calc(8px + var(--safe-right));
+    width: 44px;
+    height: 44px;
+  }
+  .img-preview img,
+  .img-preview video {
+    max-width: calc(100vw - 32px - var(--safe-left) - var(--safe-right));
+    max-height: calc(var(--phone-h) - 140px - var(--safe-top) - var(--safe-bottom));
+  }
+  .img-preview audio {
+    width: min(480px, calc(100vw - 32px - var(--safe-left) - var(--safe-right)));
+  }
+  .img-preview-bar {
+    bottom: calc(12px + var(--safe-bottom));
+  }
+  .img-preview-bar button {
+    min-width: 44px;
+    height: 44px;
   }
 
   /* Dialogs rise from the bottom, as wide as the screen. */

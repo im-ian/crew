@@ -27,7 +27,8 @@ import {
   typedHandle,
   type MentionQuery,
 } from "./mentionEditor";
-import { ArrowUp, CircleDot, Folder, Paperclip, Play, Plus, StopSquare, X } from "../icons";
+import { ArrowUp, CircleDot, Folder, Paperclip, Plus, StopSquare, X } from "../icons";
+import { AttachPhotos } from "./AttachPhotos";
 
 export type ComposerHandle = {
   focus: () => void;
@@ -797,33 +798,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
           </div>
         ) : null}
         {photos.length ? (
-          <div className={"attach-photos" + (photos.length === 1 ? " is-one" : "")}>
-            {photos.map((a) => (
-              <div key={a.id} className="attach-photo">
-                <span className="attach-photo-frame">
-                  {a.media === "video" ? (
-                    <>
-                      <video src={`${a.preview}#t=0.1`} muted playsInline preload="metadata" />
-                      <span className="attach-play">
-                        <Play size={12} className="md-media-play" />
-                      </span>
-                    </>
-                  ) : (
-                    <img src={a.preview} alt="" />
-                  )}
-                </span>
-                <button
-                  type="button"
-                  className="attach-remove"
-                  title={t("composer.detach")}
-                  aria-label={t("composer.detachNamed", { name: a.name })}
-                  onClick={() => removeAttach(a.id)}
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            ))}
-          </div>
+          <AttachPhotos
+            photos={photos.map((a) => ({
+              id: a.id,
+              name: a.name,
+              path: a.path,
+              preview: a.preview || "",
+              ...(a.media === "video" ? { media: "video" as const } : null),
+            }))}
+            onRemove={removeAttach}
+          />
         ) : null}
         {files.length ? (
           <div className="attach-row">
@@ -1120,7 +1104,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
   );
 });
 
-function attachMarkdown(a: Attach): string {
+export function attachMarkdown(a: {
+  name: string;
+  path: string;
+  image: boolean;
+  media?: "video" | "audio";
+}): string {
   const alt = a.name.replace(/[\[\]\\]/g, " ");
   // Spaces and parentheses end a bare destination.
   const dest = /[\s()]/.test(a.path) ? `<${a.path.replaceAll("<", "%3C").replaceAll(">", "%3E")}>` : a.path;
