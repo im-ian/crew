@@ -48,38 +48,78 @@ function takesText(el: Element | null): boolean {
 }
 
 /**
+ * How long after a keyboard goes iOS may still be moving the view back. It
+ * can put the visual viewport's offset back to 0 with no `scroll` event, so
+ * the values are read again over that time rather than only on events.
+ */
+export const SETTLE_MS = [0, 120, 360, 720];
+
+/**
  * Keeps `--vvh` and `--vv-top` on the root in step with the visual viewport,
  * so the phone layout sizes itself to what the keyboard leaves showing, and
  * marks the root `kb-open` while the keyboard is up: the home indicator is
  * under the keyboard then, so nothing has to keep clear of it.
+ *
+ * When the keyboard goes, the page is put back at the top: iOS can leave the
+ * layout scrolled or the old offset in place, and the app then stayed pushed
+ * down. A page pinched in pans on its own, so it is not followed.
  */
 export function watchViewport(root: HTMLElement = document.documentElement): () => void {
   const vv = window.visualViewport;
   if (!vv) return () => {};
   let width = 0;
   let tallest = 0;
-  const apply = () => {
+  let wasOpen = false;
+  let timers: number[] = [];
+  const read = () => {
+    const zoomed = Math.abs((vv.scale || 1) - 1) > 0.01;
+    const top = zoomed ? 0 : Math.max(0, Math.round(vv.offsetTop));
     root.style.setProperty("--vvh", `${Math.round(vv.height)}px`);
-    root.style.setProperty("--vv-top", `${Math.round(vv.offsetTop)}px`);
+    root.style.setProperty("--vv-top", `${top}px`);
     // Turning or unfolding the phone makes a new screen, with a new tallest.
     if (Math.round(vv.width) !== width) {
       width = Math.round(vv.width);
       tallest = 0;
     }
     tallest = Math.max(tallest, vv.height);
-    root.classList.toggle("kb-open", keyboardOpen(vv.height, tallest, takesText(document.activeElement)));
+    const open = keyboardOpen(vv.height, tallest, takesText(document.activeElement));
+    root.classList.toggle("kb-open", open);
+    return open;
   };
-  const onFocus = () => apply();
+  // The keyboard went, or a field let go: read again while iOS settles.
+  const settle = () => {
+    for (const t of timers) window.clearTimeout(t);
+    timers = SETTLE_MS.map((ms) =>
+      window.setTimeout(() => {
+        if (takesText(document.activeElement)) return;
+        if (window.scrollY !== 0) window.scrollTo(0, 0);
+        wasOpen = read();
+      }, ms),
+    );
+  };
+  const apply = () => {
+    const open = read();
+    if (wasOpen && !open) settle();
+    wasOpen = open;
+  };
+  const onFocusIn = () => apply();
+  const onFocusOut = () => {
+    apply();
+    settle();
+  };
   apply();
   vv.addEventListener("resize", apply);
   vv.addEventListener("scroll", apply);
-  document.addEventListener("focusin", onFocus);
-  document.addEventListener("focusout", onFocus);
+  window.addEventListener("scroll", apply);
+  document.addEventListener("focusin", onFocusIn);
+  document.addEventListener("focusout", onFocusOut);
   return () => {
+    for (const t of timers) window.clearTimeout(t);
     vv.removeEventListener("resize", apply);
     vv.removeEventListener("scroll", apply);
-    document.removeEventListener("focusin", onFocus);
-    document.removeEventListener("focusout", onFocus);
+    window.removeEventListener("scroll", apply);
+    document.removeEventListener("focusin", onFocusIn);
+    document.removeEventListener("focusout", onFocusOut);
     root.style.removeProperty("--vvh");
     root.style.removeProperty("--vv-top");
     root.classList.remove("kb-open");
