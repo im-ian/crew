@@ -161,7 +161,8 @@ function Eyes({ cx, cy, dx = 7.2 }: { cx: number; cy: number; dx?: number }) {
 }
 
 /** Expressions a caller can hold on a face, apart from the four statuses. */
-export type FaceMood = "happy" | "success" | "failure" | "question";
+/** `calm` is the dance settled: the success eyes, standing still. */
+export type FaceMood = "happy" | "calm" | "success" | "failure" | "question";
 
 /** A mark over the head's upper right. Its halo keeps it readable where it crosses the body. */
 function QuestionMark({ color }: { color: string }) {
@@ -219,17 +220,19 @@ function liveMood(status?: AgentStatus | null): Mood | null {
  * The face a bot wears when a run ends: a smile for a quick one, a dance for a
  * long one, a droop for one that failed. It goes as soon as the bot starts
  * something else. When the run ended with its chat unseen the reaction keeps
- * going until the reader looks. A run that ends with the reader already in the
+ * going until the reader looks, except the dance: it plays a few times, then
+ * settles into a still smile. A run that ends with the reader already in the
  * chat plays for its usual moment.
  */
 function useAfterglow(
   status: AgentStatus | null | undefined,
   signal: BotSignal | null | undefined,
-): "happy" | "success" | "failure" | null {
+): "happy" | "calm" | "success" | "failure" | null {
   const [, wake] = useState(0);
   const endedAt = signal?.endedAt ?? 0;
   const glow = afterglowAt(status, signal, Date.now());
-  const waiting = !!glow && !signal?.held && glow.left > 0;
+  // Also while held: a dance has to stop when its moment ends.
+  const waiting = !!glow && glow.left > 0;
   const left = glow?.left ?? 0;
   const kind = glow?.kind;
   // The kind moves the moment's length (a failure outlasts the rest), so it re-arms.
@@ -397,7 +400,12 @@ export function BotFace({
     mood ?? (asking ? "question" : (glow ?? (waiting && resting === "idle" ? "waiting" : resting)));
   // A held face has its own eyes, so the caret does not steer them.
   const held =
-    !!mood || asking || glow === "success" || glow === "failure" || live === "waiting";
+    !!mood ||
+    asking ||
+    glow === "success" ||
+    glow === "calm" ||
+    glow === "failure" ||
+    live === "waiting";
   const svgRef = useRef<SVGSVGElement>(null);
   const gazeRef = useRef<{ x: number; y: number } | null>(null);
   const settledRef = useRef(false);

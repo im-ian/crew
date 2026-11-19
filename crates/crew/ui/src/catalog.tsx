@@ -26,7 +26,8 @@ const ENTRIES: Entry[] = [
   { key: "blocked", label: "Blocked · 승인 대기", note: "떨면서 눈썹이 처진 걱정스러운 눈이에요.", status: "blocked" },
   { key: "exited", label: "Exited · 종료 (잠)", note: "눈을 감고 몸을 천천히 부풀렸다 줄이며 자요. 머리 위로 Z가 떠올라요.", status: "exited" },
   { key: "happy", label: "Happy · 작업을 마침", note: "작업이 끝나면 1.6초 동안 ^ ^ 눈이 돼요. 지금 앱에 있는 표정이에요.", mood: "happy" },
-  { key: "success", label: "Success · 성공", note: "왼쪽으로 폴짝 뛰었다가 좌우로 흔들며 춤을 춰요. 눈은 ^ ^ 이에요.", mood: "success", once: true, fresh: true },
+  { key: "success", label: "Success · 성공", note: "왼쪽으로 폴짝 뛰었다가 좌우로 흔들며 세 번 춤을 춰요(4초). 눈은 ^ ^ 이에요.", mood: "success", once: true, fresh: true },
+  { key: "calm", label: "Calm · 춤 뒤 (안 읽음)", note: "춤이 끝나도 대화를 안 봤으면 같은 ^ ^ 눈으로 가만히 웃어요. 안 읽은 점은 줄에 남아요.", mood: "calm" },
   { key: "failure", label: "Failure · 실패", note: "고개를 푹 숙이고 눈이 - - 가 돼요. 숙인 채 느리게 숨을 쉬어요.", mood: "failure", once: true, fresh: true },
   { key: "question", label: "Question · 궁금", note: "오른쪽으로 갸우뚱하며 위를 보고, 머리 위에 물음표가 톡 튀어나와요.", mood: "question", once: true, fresh: true },
 ];
