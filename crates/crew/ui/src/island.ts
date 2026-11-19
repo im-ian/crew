@@ -152,9 +152,22 @@ export function pilePreview(
   return lead ? { lead, others: notices.length - 1 } : null;
 }
 
-/** A notice the user has to act on stays until they do; the rest fade on their own. */
+/** An app phrase (done, careful, broken). It is not a bot notice, so it never joins the pile. */
+export function isAppTone(kind: IslandNotice["kind"]): kind is PlainTone {
+  return kind === "ok" || kind === "warn" || kind === "error";
+}
+
+/**
+ * Drop app phrases that were already folded into the pile. A live app phrase
+ * (not piled yet) stays, so it can still finish fading on its own row.
+ */
+export function withoutAppPile(notices: readonly IslandNotice[]): IslandNotice[] {
+  return notices.filter((n) => !(n.piled && isAppTone(n.kind)));
+}
+
+/** A bot notice the user has to see stays until they close it. App phrases fade. */
 export function noticeStays(kind: IslandNotice["kind"]): boolean {
-  return kind === "question" || kind === "blocked" || kind === "failure" || kind === "error";
+  return kind === "question" || kind === "blocked" || kind === "failure";
 }
 
 /** How a passing notice leaves: on its own, or when the user closes it. A Settings choice. */
@@ -162,9 +175,11 @@ export type NoticeKeep = "auto" | "keep";
 
 /**
  * How long a passing notice stays, or null for until it is closed: such a
- * notice folds into the pile after `NOTICE_LIFE_MS` instead. A brief word like
- * "Copied" goes quickly whatever Settings say; it only confirms what the user
- * just did.
+ * notice folds into the pile after `NOTICE_LIFE_MS` instead. Only a bot
+ * notice can stay. "Keep until closed" holds bot notices (a success included)
+ * and never an app phrase. An error lasts a little longer than other app
+ * phrases, so it can be read. A brief word like "Copied" goes quickly
+ * whatever Settings say; it only confirms what the user just did.
  */
 export function noticeLife(
   kind: IslandNotice["kind"],
@@ -172,12 +187,15 @@ export function noticeLife(
   brief = false,
 ): number | null {
   if (brief) return BRIEF_LIFE_MS;
+  if (isAppTone(kind)) return kind === "error" ? ERROR_LIFE_MS : NOTICE_LIFE_MS;
   if (noticeStays(kind) || keep === "keep") return null;
   return NOTICE_LIFE_MS;
 }
 
 export const BRIEF_LIFE_MS = 3000;
 export const NOTICE_LIFE_MS = 5000;
+/** Long enough to read an app error, short of leaving it in the pile. */
+export const ERROR_LIFE_MS = 7000;
 
 /** What is left of a notice's life when the pointer leaves it: never less than a beat to go. */
 export function lifeAfterHover(left: number): number {

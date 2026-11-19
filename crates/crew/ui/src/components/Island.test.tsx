@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { translate } from "../i18n";
 import type { IslandNotice } from "../island";
 import type { AgentInfo } from "../types";
-import { goFromPile, IslandPile } from "./Island";
+import { goFromPile, Island, IslandPile } from "./Island";
 
 // The app's provider reads the laptop's settings, which a server render has not got.
 vi.mock("../LocaleContext", () => {
@@ -56,6 +56,32 @@ describe("IslandPile laid out", () => {
     expect(html).not.toContain("island-more");
     expect(html).not.toContain("island-go");
     expect(html).not.toContain("설계자가");
+  });
+});
+
+describe("Island pile", () => {
+  it("leaves an app phrase out, including one already folded in", () => {
+    const err: IslandNotice = {
+      seq: 1,
+      stays: true,
+      piled: true,
+      kind: "error",
+      text: "이름을 입력하세요",
+    };
+    const html = renderToStaticMarkup(
+      <Island
+        notices={[err, about(2, "arch", "question")]}
+        agents={agents}
+        onOpenBot={() => {}}
+        onClose={() => {}}
+        onClearPile={() => {}}
+        onHold={() => {}}
+        onRelease={() => {}}
+      />,
+    );
+    expect(html).not.toContain("이름을 입력하세요");
+    expect(html).toContain("설계자가");
+    expect(html).not.toContain("island-more");
   });
 });
 

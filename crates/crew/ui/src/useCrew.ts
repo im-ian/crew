@@ -20,6 +20,7 @@ import {
 import { randomFace } from "./avatar";
 import { freeBotName, loadBotDefault } from "./botDefault";
 import { canCarryChat, partsOf, type ClonePick } from "./cloneParts";
+import type { NewBotProblem } from "./components/NewBotModal";
 import type { NewGroup } from "./components/NewGroupModal";
 import { makeTeam, type GroupMade } from "./makeTeam";
 import { openPendingOnFocus } from "./focusChat";
@@ -31,10 +32,12 @@ import { publishBotSignals, publishBotUnread } from "./botSignals";
 import {
   botNotices,
   byRank,
+  isAppTone,
   lifeAfterHover,
   noticeLife,
   NOTICE_LIFE_MS,
   pushNotice,
+  withoutAppPile,
   type BotNoticeKind,
   type BotSnap,
   type IslandNotice,
@@ -297,8 +300,10 @@ export function useCrew() {
 
   // The notices under the titlebar, newest on top.
   function setStack(next: IslandNotice[]) {
-    islandsRef.current = next;
-    setIslands(next);
+    // App phrases already folded in leave on the next stack change too.
+    const kept = withoutAppPile(next);
+    islandsRef.current = kept;
+    setIslands(kept);
   }
 
   function raiseIsland(
@@ -335,7 +340,13 @@ export function useCrew() {
 
   function pileIsland(seq: number) {
     stopIslandClock(seq);
-    setStack(islandsRef.current.map((n) => (n.seq === seq ? { ...n, piled: true } : n)));
+    const n = islandsRef.current.find((x) => x.seq === seq);
+    // An app phrase fades off its row. It does not fold into the pile.
+    if (!n || isAppTone(n.kind)) {
+      closeIsland(seq);
+      return;
+    }
+    setStack(islandsRef.current.map((x) => (x.seq === seq ? { ...x, piled: true } : x)));
   }
 
   function clearPile() {
@@ -1316,17 +1327,11 @@ export function useCrew() {
     shape: string | null;
     color: string | null;
     groupId: string | null;
-  }) {
+  }): Promise<NewBotProblem | null> {
     const name = args.name.trim();
-    if (!name) {
-      showError(t("error.nameRequired"));
-      return;
-    }
+    if (!name) return { field: "name", message: t("error.nameRequired") };
     const cmd = args.cmd.trim();
-    if (args.cli === "custom" && !cmd) {
-      showError(t("error.cmdRequired"));
-      return;
-    }
+    if (args.cli === "custom" && !cmd) return { field: "cmd", message: t("error.cmdRequired") };
     const model = args.model.trim();
     const group = args.groupId
       ? groupsRef.current.groups.find((g) => g.id === args.groupId)
@@ -1387,6 +1392,7 @@ export function useCrew() {
       showError(err);
       await refreshList();
     }
+    return null;
   }
 
   function openRemoteAdd() {
@@ -1489,7 +1495,7 @@ export function useCrew() {
     try {
       const start = loadBotDefault();
       const face = randomFace();
-      await createBot({
+      const problem = await createBot({
         name: freeBotName(t("quickBot.name"), agentsRef.current.map((a) => a.name)),
         cli: start.cli,
         model: start.model,
@@ -1499,6 +1505,8 @@ export function useCrew() {
         color: face.color,
         groupId: focusedGroupRef.current,
       });
+      // No form here, so a field problem is said out loud. It still fades.
+      if (problem) showError(problem.message);
     } finally {
       quickBusy.current = false;
     }

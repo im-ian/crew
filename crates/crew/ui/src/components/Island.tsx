@@ -9,7 +9,7 @@ import {
 } from "react";
 import { resolveFace } from "../avatar";
 import { Check, ChevronDown, ChevronUp, X } from "../icons";
-import { koSubject, mostPressing, pilePreview, type IslandNotice } from "../island";
+import { isAppTone, koSubject, mostPressing, pilePreview, type IslandNotice } from "../island";
 import { useLocale } from "../LocaleContext";
 import { useBotLabel } from "../BotLabelContext";
 import type { AgentInfo } from "../types";
@@ -139,7 +139,8 @@ export function Island({
 }: Props) {
   const [shown, setShown] = useState<Shown[]>([]);
   const [pileOpen, setPileOpen] = useState(false);
-  const piled = notices.filter((n) => n.piled);
+  // An app phrase never sits in the pile, including one already folded in.
+  const piled = notices.filter((n) => n.piled && !isAppTone(n.kind));
 
   useEffect(() => {
     const rows = notices.filter((n) => !n.piled);
