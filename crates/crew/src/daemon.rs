@@ -2208,18 +2208,41 @@ pub fn emit_frame(session: &PtySession) {
 }
 
 pub fn emit_agent_frame(id: &str) {
-    let ev = {
+    let (ev, watch) = {
         let map = match agents().lock() {
             Ok(m) => m,
             Err(_) => return,
         };
         match map.get(id) {
-            Some(live) => live.frame_event(),
+            Some(live) => (live.frame_event(), live.watch()),
             None => return,
         }
     };
+    // Every change to what a bot watches is followed by a frame, from both
+    // the one-shot and the kept-up CLI paths, so it is kept on disk here.
+    let what: Vec<String> = watch.into_iter().map(|w| w.what).collect();
+    let changed = noted_watch()
+        .lock()
+        .map(|mut seen| {
+            let same = seen.get(id) == Some(&what);
+            if !same {
+                seen.insert(id.to_string(), what.clone());
+            }
+            !same
+        })
+        .unwrap_or(false);
+    if changed {
+        note_watch(id, &what);
+    }
     notify_from_frame(&ev);
     let _ = events().send(ev);
+}
+
+/// The watch last written for each bot, so a frame that changes nothing
+/// there writes nothing.
+fn noted_watch() -> &'static Mutex<HashMap<String, Vec<String>>> {
+    static SEEN: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+    SEEN.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn notify_from_frame(ev: &Event) {
@@ -2747,6 +2770,20 @@ struct AgentWaits {
     /// `crew tell --fyi` notes not read yet. They go on the next prompt.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     fyis: Vec<SavedFyi>,
+    /// Background work the bot's last turn left running after it answered.
+    /// A restart ends it with the CLI, so the next daemon wakes the bot once
+    /// to look at it (`restart_watch_wake`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    watch: Option<SavedWatch>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct SavedWatch {
+    /// What it was watching, as the header showed it.
+    what: Vec<String>,
+    /// The turn that started it: whoever asked hears the result.
+    #[serde(default)]
+    origin: Option<TurnOrigin>,
 }
 
 /// A note waiting for the bot's next prompt.
@@ -2871,7 +2908,8 @@ fn update_waits(id: &str, edit: impl FnOnce(&mut AgentWaits)) {
         && saved.tells.is_empty()
         && saved.named.is_empty()
         && saved.turn.is_none()
-        && saved.fyis.is_empty();
+        && saved.fyis.is_empty()
+        && saved.watch.is_none();
     if empty {
         let _ = fs::remove_file(&path);
         return;
@@ -3198,6 +3236,8 @@ fn restore_waiting(cfg: &Config) {
         let current = serial_epoch(id);
         // It was under way before anything that waited, so it goes first.
         let resumed = resumed_turn(id, agent_cfg, current);
+        // Or the bot had answered and was watching background work.
+        let watch_wake = restart_watch_wake(id, agent_cfg, resumed.is_some());
         restore_fyis(id, &saved.fyis);
         let msgs = crate::transcript::messages(id);
         let mut users = Vec::new();
@@ -3270,7 +3310,7 @@ fn restore_waiting(cfg: &Config) {
                 });
             }
             front.extend(existing);
-            if let Some(item) = resumed {
+            if let Some(item) = resumed.or(watch_wake) {
                 front.push_front(item);
             }
             *q = front;
@@ -3355,6 +3395,83 @@ fn restore_fyis(id: &str, saved: &[SavedFyi]) {
         notes.append(q);
         *q = notes;
     }
+}
+
+/// What `id` watches in the background changed. Kept on disk while it runs,
+/// with the turn's origin, so a restart that ends it can say so. A daemon
+/// going down leaves the record as it is: that is the case it is kept for.
+pub(crate) fn note_watch(id: &str, what: &[String]) {
+    if is_cut_off(id) {
+        return;
+    }
+    let origin = get_origin(id);
+    let what = what.to_vec();
+    update_waits(id, |saved| {
+        saved.watch = (!what.is_empty()).then_some(SavedWatch { what, origin });
+    });
+}
+
+fn restart_watch_text(what: &[String]) -> String {
+    let list = what
+        .iter()
+        .map(|w| w.trim())
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join("; ");
+    let head = if list.is_empty() {
+        "Crew restarted while background work you started was still running, and that work stopped with it.".to_string()
+    } else {
+        format!(
+            "Crew restarted while background work you started was still running ({list}), and that work stopped with it."
+        )
+    };
+    format!(
+        "{head} Check how far it got. Run again what did not finish, or finish it yourself, then report the result to whoever asked for the work."
+    )
+}
+
+fn restart_watch_line(locale: &str) -> &'static str {
+    if locale == "en" {
+        "Crew restarted and stopped this bot's background work. Waking it once to check on it."
+    } else {
+        "Crew가 다시 켜지면서 이 봇의 백그라운드 작업이 멈춰, 확인하도록 한 번 깨웠어요"
+    }
+}
+
+/// The one turn a bot gets after a restart ended the background work its last
+/// turn left running. Not when that turn itself is sent on (it is one
+/// prompt either way), not for a terminal, and only once: the record goes
+/// as it is read, and the turn is a watch wake, which gets no second one.
+fn restart_watch_wake(id: &str, agent_cfg: &AgentConfig, resumed: bool) -> Option<PendingDelivery> {
+    let watch = load_waits(id).watch?;
+    update_waits(id, |saved| saved.watch = None);
+    if resumed || agent_cfg.uses_pty() {
+        return None;
+    }
+    let base = watch
+        .origin
+        .as_ref()
+        .and_then(|o| continued_origin(o, id))
+        .unwrap_or_else(TurnOrigin::user);
+    eprintln!("[crew] wake {id}: background work the restart stopped");
+    crate::transcript::push_system(
+        id,
+        "crew",
+        restart_watch_line(&crate::paths::locale()),
+        None,
+    );
+    Some(PendingDelivery {
+        text: crate::protocol::system_envelope(&restart_watch_text(&watch.what)),
+        newline: true,
+        msg_id: None,
+        joins: false,
+        origin: TurnOrigin {
+            watch_wake: true,
+            ..base
+        },
+        then: VecDeque::new(),
+        parked: false,
+    })
 }
 
 fn prune_unpaired_waits(id: &str, live: &HashSet<String>) {
@@ -12713,6 +12830,141 @@ printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type"
                 wait_idle(id);
                 remove_agent(id).unwrap();
             }
+        });
+    }
+
+    /// A bot answered and left background work running; Crew restarted and
+    /// the work died with the CLI. The next daemon wakes it once, on the work
+    /// the lead gave it, so what it finds goes back to the lead. Not again on
+    /// the restart after, and not a bot that was watching nothing.
+    #[test]
+    fn a_restart_wakes_a_bot_whose_background_work_it_stopped() {
+        paths::testing::with_home("restart-watch", || {
+            crate::transcript::set_seal_hook(on_assistant_sealed);
+            let [lead, worker] = ["lead", "worker"].map(test_id);
+            let logs = paths::home_dir().join("logs");
+            fs::create_dir_all(&logs).unwrap();
+            let body = format!(
+                r#"printf '%s\n---\n' "$last" >> '{logs}'/"$CREW_AGENT_ID"
+case "$last" in
+*watch-work*)
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"CI 끝나면 알릴게요"}}]}}}}' '{{"type":"system","subtype":"background_tasks_changed","tasks":[{{"task_id":"t1","description":"Watch CI"}}]}}' '{{"type":"result","subtype":"success","result":"CI 끝나면 알릴게요"}}'
+sleep 30
+;;
+*"Crew restarted while background work"*)
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s1"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"다시 돌려서 끝냈어요"}}]}}}}' '{{"type":"result","subtype":"success","result":"다시 돌려서 끝냈어요"}}'
+;;
+*)
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s2"}}' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"확인했어요"}}]}}}}' '{{"type":"result","subtype":"success","result":"확인했어요"}}'
+;;
+esac"#,
+                logs = logs.display()
+            );
+            for id in [&lead, &worker] {
+                fake_bot_running(id, &body);
+                wait_idle(id);
+            }
+            let heard = |id: &str, text: &str| {
+                fs::read_to_string(logs.join(id))
+                    .unwrap_or_default()
+                    .matches(text)
+                    .count()
+            };
+            tell_agent(&lead, &worker, "watch-work 해 주세요").unwrap();
+            eventually(Duration::from_secs(5), "the watch was not shown", || {
+                watch_of(&worker) == ["Watch CI"]
+            });
+            eventually(
+                Duration::from_secs(3),
+                "the watch never reached the disk",
+                || load_waits(&worker).watch.is_some(),
+            );
+            let saved = load_waits(&worker).watch.expect("the watch is on disk");
+            assert_eq!(saved.what, ["Watch CI"]);
+            assert_eq!(
+                saved.origin.as_ref().map(|o| o.from.as_str()),
+                Some(lead.as_str())
+            );
+
+            // The daemon goes down: the watch stops with the CLI, the record stays.
+            let Some(LiveAgent::Headless(session)) = agents().lock().unwrap().get(&worker).cloned()
+            else {
+                panic!("headless");
+            };
+            cut_off(&session);
+            assert!(
+                load_waits(&worker).watch.is_some(),
+                "a shutdown kept the record"
+            );
+            CUT_OFF.get().unwrap().lock().unwrap().remove(&worker);
+            wait_idle(&lead);
+
+            let cfg = Config {
+                agents: vec![configs().lock().unwrap().get(&worker).cloned().unwrap()],
+            };
+            restore_transcripts(&cfg);
+            assert!(load_waits(&worker).watch.is_none(), "read once");
+            pump_inbox(&worker);
+            eventually(
+                Duration::from_secs(8),
+                "the lead never heard what the look found",
+                || heard(&lead, "다시 돌려서 끝냈어요") == 1,
+            );
+            assert!(system_said(
+                &worker,
+                restart_watch_line(&crate::paths::locale())
+            ));
+            wait_idle(&worker);
+            wait_idle(&lead);
+
+            restore_transcripts(&cfg);
+            pump_inbox(&worker);
+            std::thread::sleep(Duration::from_millis(500));
+            assert_eq!(
+                heard(&worker, "Crew restarted while background work"),
+                1,
+                "woken twice"
+            );
+            for id in [&lead, &worker] {
+                wait_idle(id);
+                remove_agent(id).unwrap();
+            }
+        });
+    }
+
+    /// A turn the restart sends on already tells the bot to pick up where it
+    /// stopped: its background work does not get a second wake.
+    #[test]
+    fn a_resumed_turn_takes_the_place_of_the_watch_wake() {
+        paths::testing::with_home("restart-watch-resumed", || {
+            let bot = test_id("bot");
+            update_waits(&bot, |saved| {
+                saved.watch = Some(SavedWatch {
+                    what: vec!["Watch CI".into()],
+                    origin: None,
+                });
+            });
+            let cfg = headless_cfg(&bot);
+            assert!(restart_watch_wake(&bot, &cfg, true).is_none());
+            assert!(
+                load_waits(&bot).watch.is_none(),
+                "the record goes either way"
+            );
+            assert!(
+                restart_watch_wake(&bot, &cfg, false).is_none(),
+                "nothing left to wake for"
+            );
+            update_waits(&bot, |saved| {
+                saved.watch = Some(SavedWatch {
+                    what: vec!["Watch CI".into()],
+                    origin: None,
+                });
+            });
+            let wake = restart_watch_wake(&bot, &cfg, false).expect("woken");
+            assert!(wake.origin.watch_wake, "a watch wake gets no second one");
+            assert!(wake.text.contains("Watch CI"), "{}", wake.text);
+            crate::transcript::drop_agent(&bot);
+            drop_waits(&bot);
         });
     }
 

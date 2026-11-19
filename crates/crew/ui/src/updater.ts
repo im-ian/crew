@@ -148,3 +148,15 @@ export function useUpdater() {
 }
 
 export type UpdaterApi = ReturnType<typeof useUpdater>;
+
+/**
+ * Bots an update would cut short: working, waiting on the user, or still
+ * watching background work they started. A teammate's bot runs elsewhere.
+ */
+export function botsAtWork(
+  agents: readonly { status: string; watch?: readonly unknown[] | null; remote?: string }[],
+): number {
+  return agents.filter(
+    (a) => !a.remote && (a.status === "working" || a.status === "blocked" || (a.watch?.length ?? 0) > 0),
+  ).length;
+}

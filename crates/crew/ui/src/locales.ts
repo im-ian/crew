@@ -113,6 +113,9 @@ export const KO = {
 
   "update.available": "새 버전을 받을 수 있습니다",
   "update.install": "설치 후 다시 열기",
+  "update.busyTitle": "지금 업데이트할까요?",
+  "update.busyBody": "봇 {n}개가 작업 중이에요. 지금 업데이트하면 다시 켜질 때 이어서 하지만, 돌던 백그라운드 작업은 다시 시작해야 해요.",
+  "update.busyInstall": "지금 업데이트",
   "update.installing": "설치 중…",
   "update.later": "나중에",
 
@@ -767,6 +770,9 @@ export const EN: { [K in MessageKey]: string } = {
 
   "update.available": "is available",
   "update.install": "Install and relaunch",
+  "update.busyTitle": "Update now?",
+  "update.busyBody": "{n} bots are at work. After the update they pick up where they stopped, but background work they had running has to start again.",
+  "update.busyInstall": "Update now",
   "update.installing": "Installing…",
   "update.later": "Later",
 
