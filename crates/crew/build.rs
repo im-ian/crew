@@ -57,7 +57,7 @@ fn main() {
             "open_url",
             "pick_folder",
             "path_kinds",
-            "files_exist",
+            "file_states",
             "link_states",
             "get_pins",
             "set_pin",

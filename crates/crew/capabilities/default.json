@@ -65,7 +65,7 @@
     "allow-open-url",
     "allow-pick-folder",
     "allow-path-kinds",
-    "allow-files-exist",
+    "allow-file-states",
     "allow-link-states",
     "allow-get-pins",
     "allow-set-pin",
