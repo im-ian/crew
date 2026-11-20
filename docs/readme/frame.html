@@ -42,6 +42,9 @@
       gap: 8px;
       pointer-events: none;
     }
+    /* `&phone=1`: a phone, 390 wide, no window buttons. */
+    .phone .window { width: 390px; border-radius: 44px; box-shadow: 0 40px 80px rgba(0, 0, 0, 0.5), 0 0 0 10px #1c1c1e, 0 0 0 11px rgba(255, 255, 255, 0.08); }
+    .phone .traffic { display: none; }
     .traffic i {
       width: 12px;
       height: 12px;
@@ -59,6 +62,7 @@
   <script>
     const q = new URLSearchParams(location.search);
     document.getElementById("window").style.height = (q.get("h") || "740") + "px";
+    if (q.get("phone")) document.body.classList.add("phone");
     document.getElementById("app").src = q.get("img");
   </script>
 </body>

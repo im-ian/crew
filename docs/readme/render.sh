@@ -1,5 +1,5 @@
 #!/bin/sh
-# Rebuild README art. The three screens are the real app on demo data
+# Rebuild README art. The screens are the real app on demo data
 # (crates/crew/ui/src/readme.tsx), served by Vite on 127.0.0.1:1430.
 set -e
 cd "$(dirname "$0")"
@@ -28,8 +28,18 @@ shot() { # name window-height
     --force-device-scale-factor=2 --window-size=1280,$(($2 + 120)) \
     --screenshot="$PWD/$1.png" "file://$PWD/frame.html?img=$TMP/$1.png&h=$2"
 }
+# A phone: the same app at 390 px, which is the phone layout. Chrome keeps
+# a headless window wider than that, so phone.mjs sets the width.
+phone() { # name height
+  node phone.mjs "$CHROME" "http://127.0.0.1:1430/readme.html?shot=$1" 390 $2 "$TMP/$1.png"
+  "$CHROME" --headless=new --disable-gpu --hide-scrollbars \
+    --force-device-scale-factor=2 --window-size=640,$(($2 + 120)) \
+    --screenshot="$PWD/$1.png" "file://$PWD/frame.html?img=$TMP/$1.png&h=$2&phone=1"
+}
 shot window 740
 shot new-bot 740
 shot routines 740
+shot archive 740
+phone phone 780
 rm -r "$TMP"
-echo "wrote $PWD/hero.png window.png new-bot.png routines.png"
+echo "wrote $PWD/hero.png window.png new-bot.png routines.png archive.png phone.png"
