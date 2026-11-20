@@ -1107,6 +1107,10 @@ export function App() {
           onToggleRoutine={crew.toggleRoutine}
           onDeleteRoutine={crew.deleteRoutine}
           onRunRoutine={crew.runRoutine}
+          agents={crew.agents}
+          groups={crew.groups}
+          messages={crew.currentAgent && crew.messagesFor === crew.currentAgent.id ? crew.messages : null}
+          onJump={(agent, msgId) => crew.selectAgent(agent, msgId)}
         />
         {leadOpen && paneGroup && leadPane ? (
           <LeadGroupPane

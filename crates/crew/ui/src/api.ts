@@ -100,6 +100,14 @@ export const api = {
   tellMessage: (to: string, text: string, from = "user") =>
     invoke<void>("tell_message", { from, to, text }),
   getMessages: (agent: string) => invoke<ChatMessage[]>("get_messages", { agent }),
+  /** 보관함: the bot's pinned links and files, by key (a link's address or a file's path). */
+  archivePins: (agent: string) => invoke<string[]>("archive_pins", { agent }),
+  setArchivePin: (agent: string, key: string, pinned: boolean) =>
+    invoke<string[]>("set_archive_pin", { agent, key, pinned }),
+  /** GitHub PRs and issues it could read, by address. Others are left out. */
+  githubStates: (urls: string[]) =>
+    invoke<Record<string, { state: "open" | "merged" | "closed"; title?: string }>>("github_states", { urls }),
+  pathsExist: (paths: string[]) => invoke<Record<string, boolean>>("paths_exist", { paths }),
   daemonPing: () => invoke<void>("daemon_ping"),
   resetAgent: (agent: string, dropRoutines: boolean) =>
     invoke<string>("reset_agent", { agent, dropRoutines }),

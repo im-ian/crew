@@ -8674,3 +8674,78 @@ html.is-web.is-standalone[data-theme="light"]::after {
 @media (prefers-reduced-motion: reduce) {
   .swipe-reply { transition: none; }
 }
+
+/* 보관함, the bot info sheet's third tab: the links and files its chat
+   brought up. Rows are cards like a routine's; the switch is a .seg. */
+.archive { display: flex; flex-direction: column; gap: var(--space-12); }
+.seg[data-cols="3"] { grid-template-columns: repeat(3, 1fr); }
+.archive-search {
+  display: flex; align-items: center; gap: var(--space-8);
+  padding: 0 var(--space-10); border: 1px solid var(--line); border-radius: var(--radius-md);
+  color: var(--muted);
+}
+.archive-search .textin { border: 0; background: transparent; padding-left: 0; flex: 1; min-width: 0; }
+.archive-label { margin-top: var(--space-4); }
+.archive-list { display: flex; flex-direction: column; gap: var(--space-6); }
+.archive-item {
+  display: flex; align-items: flex-start; gap: var(--space-10);
+  padding: var(--space-10) var(--space-10) var(--space-10) var(--space-12);
+  border: 1px solid var(--line); border-radius: var(--radius-lg);
+  outline: none;
+}
+.archive-item:hover { background: var(--hover); }
+.archive-icon {
+  flex: none; display: inline-grid; place-items: center;
+  width: 28px; height: 28px; border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--muted);
+}
+.archive-icon.kind-pr, .archive-icon.kind-issue, .archive-icon.kind-tag { color: var(--working); }
+.archive-icon.kind-image { color: var(--done, #34c759); }
+.archive-text { flex: 1; min-width: 0; }
+.archive-title {
+  font-size: var(--text-md); font-weight: 600; line-height: 1.35;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.archive-meta {
+  display: flex; align-items: center; gap: var(--space-6);
+  margin-top: var(--space-2); font-size: var(--text-sm); color: var(--muted); min-width: 0;
+}
+.archive-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.archive-when { flex: none; margin-left: auto; }
+.archive-face { width: 14px; height: 14px; flex: none; }
+.archive-badge {
+  display: inline-block; margin-left: var(--space-6); padding: 0 6px; border-radius: 999px;
+  font-size: 11px; font-weight: 650; line-height: 18px; vertical-align: 1px;
+}
+.archive-badge.is-merged { background: color-mix(in srgb, #8957e5 22%, transparent); color: #a371f7; }
+.archive-badge.is-open { background: color-mix(in srgb, #2da44e 22%, transparent); color: #3fb950; }
+.archive-badge.is-closed { background: color-mix(in srgb, var(--blocked) 18%, transparent); color: var(--blocked); }
+html[data-theme="light"] .archive-badge.is-merged { color: #8250df; }
+html[data-theme="light"] .archive-badge.is-open { color: #1a7f37; }
+.archive-actions { flex: none; display: flex; gap: 2px; margin-top: 2px; }
+.archive-act {
+  display: inline-grid; place-items: center; width: 28px; height: 28px;
+  border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--faint); cursor: pointer;
+}
+.archive-act:hover { background: var(--hover); color: var(--ink); }
+.archive-act.is-on { color: var(--working); }
+.archive-item.is-missing { opacity: 0.5; }
+.archive-item.is-missing .archive-title { text-decoration: line-through; }
+.archive-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: var(--space-8); }
+.archive-shot {
+  position: relative; aspect-ratio: 1; padding: 0; border: 1px solid var(--line);
+  border-radius: var(--radius-md); overflow: hidden; background: var(--bg); cursor: zoom-in;
+}
+.archive-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.archive-shot-name {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 6px 4px;
+  font-size: 11px; color: #fff; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.6));
+}
+.archive-shot-gone { display: grid; place-items: center; height: 100%; color: var(--faint); font-size: 12px; }
+@media (max-width: 640px) {
+  .archive-act { width: 36px; height: 36px; }
+  .archive-grid { grid-template-columns: repeat(3, 1fr); }
+}
+.archive-day { display: flex; flex-direction: column; gap: var(--space-6); }

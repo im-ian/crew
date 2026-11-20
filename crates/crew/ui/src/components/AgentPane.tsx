@@ -1,13 +1,15 @@
 import { handleBackdropPointerDown } from "../dialogLayer";
 import { useT } from "../LocaleContext";
-import type { AgentInfo, CliKind, PaneTab, Routine } from "../types";
+import type { AgentInfo, ChatMessage, CliKind, Group, PaneTab, Routine } from "../types";
+import { ArchivePane } from "./ArchivePane";
 import { InfoPane } from "./InfoPane";
 import { RoutinesModal } from "./RoutinesModal";
 import { X } from "../icons";
 
-const TABS: { id: PaneTab; labelKey: "pane.tab.info" | "pane.tab.routines" }[] = [
+const TABS: { id: PaneTab; labelKey: "pane.tab.info" | "pane.tab.routines" | "pane.tab.archive" }[] = [
   { id: "info", labelKey: "pane.tab.info" },
   { id: "routines", labelKey: "pane.tab.routines" },
+  { id: "archive", labelKey: "pane.tab.archive" },
 ];
 
 type Props = {
@@ -28,6 +30,12 @@ type Props = {
   onToggleRoutine: (r: Routine) => Promise<void>;
   onDeleteRoutine: (r: Routine) => Promise<void>;
   onRunRoutine: (r: Routine) => Promise<void>;
+  agents: readonly AgentInfo[];
+  groups: readonly Group[];
+  /** The open chat's lines, when that chat is this bot's. */
+  messages: readonly ChatMessage[] | null;
+  /** Shows the line an archived link or file came from, in its bot's chat. */
+  onJump: (agent: string, msgId: string) => void;
 };
 
 export function AgentPane({
@@ -43,6 +51,10 @@ export function AgentPane({
   onToggleRoutine,
   onDeleteRoutine,
   onRunRoutine,
+  agents,
+  groups,
+  messages,
+  onJump,
 }: Props) {
   const t = useT();
   return (
@@ -95,6 +107,16 @@ export function AgentPane({
               onToggle={onToggleRoutine}
               onDelete={onDeleteRoutine}
               onRun={onRunRoutine}
+            />
+          </div>
+          <div hidden={tab !== "archive"}>
+            <ArchivePane
+              open={open && tab === "archive"}
+              agent={agent}
+              agents={agents}
+              groups={groups}
+              messages={messages}
+              onJump={onJump}
             />
           </div>
         </div>
