@@ -24,13 +24,15 @@ const modelLists = new Map<string, Promise<ModelList>>();
 
 /** What `link_states` says of one link: no state when `gh` could not read it. */
 export type LinkState = { url: string; kind?: string; state?: string; title?: string };
-export type GithubState = { state: "open" | "merged" | "closed"; title?: string };
+/** What GitHub says a link is now. `kind` is what it really is: GitHub sends an issue address of a PR on to the PR. */
+export type GithubState = { state: "open" | "merged" | "closed"; title?: string; kind?: "pr" | "issue" };
 
 export function linkStateMap(list: readonly LinkState[]): Record<string, GithubState> {
   const out: Record<string, GithubState> = {};
   for (const s of list) {
     if (s.state === "open" || s.state === "merged" || s.state === "closed") {
-      out[s.url] = { state: s.state, title: s.title };
+      const kind = s.kind === "pr" || s.kind === "issue" ? s.kind : undefined;
+      out[s.url] = { state: s.state, title: s.title, ...(kind ? { kind } : {}) };
     }
   }
   return out;

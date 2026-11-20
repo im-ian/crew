@@ -3,6 +3,7 @@ import { api, type GithubState } from "../api";
 import {
   collectArchive,
   dayOf,
+  shownKind,
   matches,
   mergeArchives,
   newestFirst,
@@ -155,29 +156,29 @@ export function ArchivePane({
   function row(item: ArchiveItem) {
     const gone = item.path ? exists[item.path] === false : false;
     const gh = item.url ? states[item.url] : undefined;
-    const Icon = ICON[item.kind];
+    const kind = shownKind(item, gh);
+    const Icon = ICON[kind];
     const face = mates.length ? byAgent.get(item.agent) : undefined;
     const from = item.from ? t(`archive.from.${item.from}`) : "";
     const what =
-      item.kind === "pr" || item.kind === "issue"
-        ? `${item.where} · ${t(`archive.kind.${item.kind}`)} #${item.num}`
+      kind === "pr" || kind === "issue"
+        ? `${item.where} · ${t(`archive.kind.${kind}`)} #${item.num}`
         : item.kind === "release"
           ? `${item.where} · ${t("archive.kind.release")}`
           : item.where;
     return (
       <div key={item.key} className={"archive-item" + (gone ? " is-missing" : "")} title={item.url ?? item.path}>
-        <span className={`archive-icon kind-${item.kind}`}>
+        <span className={`archive-icon kind-${kind}`}>
           <Icon />
         </span>
         <div className="archive-text">
-          <div className="archive-title">
-            {gh?.title || item.title}
-            {gh ? <span className={`archive-badge is-${gh.state}`}>{t(`archive.state.${gh.state}`)}</span> : null}
-          </div>
+          <div className="archive-title">{gh?.title || item.title}</div>
           <div className="archive-meta">
             {face ? (
               <Avatar as="span" className="archive-face" id={face.id} name={face.name} src={face.avatar} shape={face.avatar_shape} color={face.avatar_color} />
             ) : null}
+            {/* On the meta line: after a title cut at two lines it was cut too. */}
+            {gh ? <span className={`archive-badge is-${gh.state}`}>{t(`archive.state.${gh.state}`)}</span> : null}
             <span className="archive-where">{gone ? `${what} · ${t("archive.gone")}` : from ? `${what} · ${from}` : what}</span>
             <span className="archive-when">{when(item.ts)}</span>
           </div>

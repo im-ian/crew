@@ -200,8 +200,12 @@ describe("archive commands", () => {
       linkStateMap([
         { url: "https://github.com/a/b/pull/1", kind: "pr", state: "merged", title: "Fix" },
         { url: "https://github.com/a/b/issues/2" },
+        { url: "https://github.com/a/b/issues/3", kind: "pr", state: "open", title: "Moved" },
       ]),
-    ).toEqual({ "https://github.com/a/b/pull/1": { state: "merged", title: "Fix" } });
+    ).toEqual({
+      "https://github.com/a/b/pull/1": { state: "merged", title: "Fix", kind: "pr" },
+      "https://github.com/a/b/issues/3": { state: "open", title: "Moved", kind: "pr" },
+    });
   });
 
   it("reads files_exist in the order it was asked", () => {
