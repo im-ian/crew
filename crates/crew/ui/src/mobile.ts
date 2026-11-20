@@ -2,11 +2,12 @@ import { createContext, useSyncExternalStore } from "react";
 import type { MenuEntry } from "./components/ContextMenu";
 
 /**
- * A phone-wide window: one column, the rail a drawer, side panels and dialogs
- * as full-width sheets. The same width as the `@media` block at the end of
- * styles.css, so script and style switch together.
+ * A phone layout: one column, the rail a drawer, side panels and dialogs as
+ * full-width sheets. A narrow window, or a short touch screen such as a
+ * phone on its side, whatever its width. The same query as the phone
+ * `@media` block in styles.css, so script and style switch together.
  */
-export const MOBILE_QUERY = "(max-width: 640px)";
+export const MOBILE_QUERY = "(max-width: 640px), (hover: none) and (max-height: 500px)";
 
 function query(): MediaQueryList | null {
   return typeof window !== "undefined" && typeof window.matchMedia === "function"

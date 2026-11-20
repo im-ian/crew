@@ -1012,8 +1012,16 @@ export function App() {
         unread={crew.unread}
         drafting={drafting}
         searchRef={searchRef}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onOpenTemplates={() => setTemplatesOpen(true)}
+        onOpenSettings={() => {
+          // Opened from the phone's drawer, it closes the drawer: closing
+          // the window lands on the chat, not back in the rail.
+          setRailOpen(false);
+          setSettingsOpen(true);
+        }}
+        onOpenTemplates={() => {
+          setRailOpen(false);
+          setTemplatesOpen(true);
+        }}
         templatesOpen={templatesOpen}
         drawer={mobile}
       />

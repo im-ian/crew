@@ -7964,10 +7964,11 @@ button.wait-chip:focus-visible {
 html.kb-open {
   --safe-bottom: 0px;
 }
-/* A browser at a wide width (an unfolded phone, a tablet, a phone on its
-   side) gets the desktop layout; it keeps clear of the edges too. Below
-   640px the phone block further down does it. */
-@media not all and (max-width: 640px) {
+/* A browser at a wide width (an unfolded phone, a tablet) gets the desktop
+   layout; it keeps clear of the edges too. Below 640px, or on a short touch
+   screen such as a phone on its side, the phone block further down does it
+   (the two queries are each other's exact opposite, as MOBILE_QUERY). */
+@media (min-width: 640.5px) and (hover: hover), (min-width: 640.5px) and (min-height: 500.5px) {
   html.is-web .app > aside {
     padding-top: var(--safe-top);
     padding-bottom: var(--safe-bottom);
@@ -7999,7 +8000,7 @@ html.kb-open {
     top: calc(var(--titlebar) + 8px + var(--safe-top));
   }
 }
-@media (max-width: 640px) {
+@media (max-width: 640px), (hover: none) and (max-height: 500px) {
   :root {
     --titlebar: 0px;
     --content-pad: 14px;
@@ -8589,5 +8590,52 @@ html.is-web.is-standalone[data-theme="light"]::after {
   }
   .ctx-hint {
     display: none;
+  }
+}
+
+/* A table wider than its balloon scrolls; the side with more to see fades
+   (MdBody's ScrollTable marks it), so the cut reads as "slide for more". */
+.md .md-table[data-more-right] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+.md .md-table[data-more-left] {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+}
+.md .md-table[data-more-left][data-more-right] {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
+
+/* A switch row toggles from anywhere on it: its label fills the row. */
+.settings-notify > label.field {
+  flex: 1;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+.settings-notify:has(> input:disabled) > label.field {
+  cursor: default;
+}
+
+/* The default AI list on a phone: the model's name gets its own line, so a
+   narrow sheet does not cut it to "Grok …". */
+@media (max-width: 640px), (hover: none) and (max-height: 500px) {
+  .ai-pick .model-pick-hit {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: var(--control-h);
+    row-gap: 0;
+    padding-top: var(--space-6);
+    padding-bottom: var(--space-6);
+  }
+  .ai-pick .model-pick-name {
+    flex: 1 1 calc(100% - 28px);
+    white-space: normal;
+  }
+  .ai-pick .model-pick-meta {
+    margin-left: 0;
   }
 }

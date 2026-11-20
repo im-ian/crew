@@ -54,6 +54,15 @@ export function translate(
 }
 
 /** The app's `t`: `locale`'s words, with the user called `userName` when set. */
-export function makeT(locale: Locale, userName = ""): TFn {
+export function makeT(locale: Locale, userName = "", touch = false): TFn {
+  if (touch) return (key, vars) => dropShortcut(translate(locale, key, vars, userName));
   return (key, vars) => translate(locale, key, vars, userName);
+}
+
+/**
+ * A label without the keyboard shortcut at its end ("검색 ⌘F" → "검색"), for
+ * a touch screen, which has no keyboard to press it on.
+ */
+export function dropShortcut(text: string): string {
+  return text.replace(/\s+[⌘⌥⌃⇧][^\s]*$/u, "");
 }
