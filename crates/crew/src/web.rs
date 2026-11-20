@@ -582,7 +582,7 @@ fn device_name(user_agent: &str) -> String {
 
 /// Where `/api/file` may read: the Crew home, the user's home and the temp
 /// folders, and inside them nothing hidden (`.ssh`, `.aws`, `.git` …).
-fn file_allowed(path: &Path) -> Option<PathBuf> {
+pub(crate) fn file_allowed(path: &Path) -> Option<PathBuf> {
     let real = path.canonicalize().ok()?;
     if !real.is_file() {
         return None;

@@ -18,11 +18,13 @@ mod log;
 #[cfg(target_os = "macos")]
 mod macos_escape;
 mod memory;
+mod link_state;
 mod models;
 mod nerd_font;
 mod nl_routine;
 mod notify;
 mod paths;
+mod pins;
 mod protocol;
 mod pty_agent;
 mod relay;

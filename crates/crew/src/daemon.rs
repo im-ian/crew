@@ -5617,6 +5617,7 @@ fn remove_agent(id: &str) -> anyhow::Result<()> {
     // back moments after we unlink it.
     crate::transcript::drop_agent(id);
     crate::memory::remove(id);
+    let _ = crate::pins::clear(id);
     forget_auto_approve(id);
     note_turn_failed(id, false);
     if let Ok(mut map) = failed_waits().lock() {
