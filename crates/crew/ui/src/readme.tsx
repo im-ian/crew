@@ -223,6 +223,17 @@ if (shot === "file") {
 const probe: RemoteServer = {
   url: "wss://router.acme.dev:7420", name: "crew-router", version: "0.1.0", protocol: 1, title: "Acme Team", signup: "invite",
 };
+// `?shot=archive`: the bot info sheet's 보관함, from links and files the
+// chat brought up. A made-up repository and paths, no one's real ones.
+if (shot === "archive") {
+  thread.impl.unshift(
+    { id: "a1", role: "assistant", from: "impl", ts: at(60 * 26), text: "PR 올렸어요: https://github.com/acme/app/pull/128\n관련 이슈는 https://github.com/acme/app/issues/121 이에요." },
+    { id: "a2", role: "assistant", from: "impl", ts: at(60 * 5), text: "설계 문서는 `~/Projects/app/docs/sidebar.md` 에 정리했어요. 캡처: ![접힌 레일](~/Projects/app/shots/rail.png)" },
+    { id: "a3", role: "assistant", from: "impl", ts: at(40), text: "배포했어요: https://app.acme.dev/preview 그리고 릴리즈 https://github.com/acme/app/releases/tag/v2.4.0" },
+    { id: "a4", role: "assistant", from: "impl", ts: at(20), text: "후속 PR: https://github.com/acme/app/pull/131" },
+  );
+}
+
 // The App opens the first bot in the list.
 const first =
   shot === "routines" ? "brief" : shot === "remote-handon" ? "rep" : remoteShot ? "acme/acc_k3j9x0" : "impl";
@@ -253,6 +264,16 @@ mockIPC(
         return { models: list, default: list[0] ?? null, installed: true };
       }
       case "get_group_memory": return "";
+      case "get_pins": return ["https://github.com/acme/app/pull/131"];
+      case "link_states": {
+        const known: Record<string, { kind: string; state: string; title: string }> = {
+          "https://github.com/acme/app/pull/128": { kind: "pr", state: "merged", title: "Fold the sidebar down to faces" },
+          "https://github.com/acme/app/issues/121": { kind: "issue", state: "closed", title: "Sidebar takes too much room" },
+          "https://github.com/acme/app/pull/131": { kind: "pr", state: "open", title: "Move focus to search when the rail unfolds" },
+        };
+        return (a.urls as string[]).map((url) => ({ url, ...(known[url] ?? {}) }));
+      }
+      case "file_states": return (a.paths as string[]).map(() => "exists");
       case "read_text_file": {
         const path = String(a.path);
         if (!path.endsWith(".ts") && !path.endsWith(".tsx")) throw `not found: ${path}`;
@@ -296,6 +317,13 @@ when(
     if (shot === "window") when(() => document.querySelector<HTMLElement>(".note-run-head"), (el) => el.click());
     if (shot === "new-bot") key("n");
     if (shot === "routines") key("R", true);
+    if (shot === "archive") {
+      key("i");
+      when(
+        () => [...document.querySelectorAll<HTMLElement>(".pane-tabs button")].find((b) => b.textContent === "보관함") ?? null,
+        (tab) => tab.click(),
+      );
+    }
     if (shot === "remote-add" || shot === "remote-join") {
       document.querySelector<HTMLElement>(".search-row .icon-btn:last-child")?.click();
       when(

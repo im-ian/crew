@@ -30,6 +30,8 @@ crew group memory append 이 그룹은 develop 브랜치에서 일한다   # 봇
 
 crew tell grok 이 파일의 테스트를 보강해줘
 crew tell review --from grok 방금 패치 리뷰해줘
+crew tell --now review 잠깐 멈춰. 브랜치가 바뀌었어
+crew tell --fyi review 배포는 금요일에 하지 않는다
 crew tell review <<'EOF'
 인자가 없으면 메시지를 stdin에서 읽어요
 EOF
@@ -37,6 +39,8 @@ crew ask --question "어느 쪽을 고를래?" --option A --option B --option C
 crew ask --question "어떤 걸 넣을까?" --option 테스트 --option 문서 --multi
 crew ask --question "로그인" --input 아이디 --input 비밀번호
 crew ask -q "머지할까요?" -o 네 -o 아니요 -q "릴리즈 이름은?" --input 이름
+
+crew show src/App.tsx:42                    # 채팅 옆에 파일 열기 (봇 세션 안에서)
 
 crew routine add grok --name "아침" --schedule "0 8 * * 1-5" --prompt "오늘 할 일 브리핑"
 crew routine add grok --name "아침" --schedule "평일 8시에 브리핑" --prompt "오늘 할 일 브리핑"
@@ -78,6 +82,14 @@ crew reset grok --drop-routines
 원격 봇은 0.6.0부터 쓸 수 있어요. 라우터에 붙는 건 앱의 **+ → 원격 봇 추가**에서 해요. `crew remote list`는 라우터마다 별칭, 주소, 내 이름, 대표 봇, 연결 상태와 팀원들의 원격 봇 id(`<별칭>/<계정 id>`)를 출력해요. 그 id로 `crew tell`하면 그 봇이 자기 PC에서 일하고, 답은 보낸 봇에게 돌아와요.
 
 `crew team memory show|append|set`은 라우터의 팀 공용 메모를 다뤄요. `--remote <별칭>`을 생략하면 대표 봇 세션 안에선 그 봇의 라우터, 아니면 라우터가 하나일 때 그 라우터예요. `set`은 그 사이 다른 사람이 고쳤으면 거절돼요. 데몬과 라우터 연결이 필요해요.
+
+## `crew tell`
+
+받는 봇이 일하는 중이면 그 턴이 끝난 뒤에 전해요. `--now`는 지금 턴을 멈추고 이 말부터 시작하게 해요. 멈춰, 취소, 잠깐처럼 바로 들어야 하는 말에 써요. `--fyi`는 받는 봇이 다음 메시지와 함께 읽는 메모예요. 턴을 시작하지 않고 답도 돌아오지 않아요. 둘은 같이 쓸 수 없어요. 메시지를 생략하면 표준 입력에서 읽어서 heredoc도 돼요.
+
+## `crew show`
+
+텍스트·코드 파일을 채팅 옆에 열어 사용자에게 보여 줘요. `경로:줄`이면 그 줄에서 열려요. 봇은 `--agent`를 생략하면 `CREW_AGENT_ID`의 채팅이에요.
 
 ## `crew ask`
 
