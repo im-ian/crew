@@ -8301,37 +8301,6 @@ html.kb-open {
     overflow-y: auto;
   }
 
-  /* A message's time, copy and reply chip floats beside the balloon on
-     hover, past a phone's edge. Holding the message gives the same reply and
-     copy (mobile.ts), and the thread's time dividers keep the time, so the
-     chip and the strip that bridges the pointer to it are not drawn. */
-  .msg-actions {
-    display: none;
-  }
-  .bubble-row.has-actions::after,
-  .xfer-chip::after,
-  .xfer::after,
-  .me-msg::after {
-    content: none;
-  }
-
-  /* A held message opens its menu (reply, copy, select text) instead of the
-     system's selection; "Select text" lets that one message be selected. */
-  .bubble-row,
-  .xfer {
-    -webkit-user-select: none;
-    user-select: none;
-    -webkit-touch-callout: none;
-  }
-  .bubble-row.is-selecting,
-  .bubble-row.is-selecting *,
-  .xfer.is-selecting,
-  .xfer.is-selecting * {
-    -webkit-user-select: text;
-    user-select: text;
-    -webkit-touch-callout: default;
-  }
-
   /* A notice row may use the screen's width less a margin, so the pile's
      sentence keeps some room beside its "+N more", Go and ✕. */
   .island-stack {
@@ -8580,5 +8549,45 @@ html.is-web.is-standalone[data-theme="light"]::after {
   /* The note between bots: its full-width head was 22px tall. */
   .note-run-head {
     min-height: 32px;
+  }
+}
+
+/* A touch screen at any width (a phone, an unfolded phone, a tablet): the
+   held-message menu (mobile.ts) takes the place of what a mouse finds on
+   hover, and keyboard shortcuts in menus mean nothing. */
+@media (hover: none) {
+  /* A message's time, copy and reply chip floats beside the balloon on
+     hover, which a finger does not have, and past a phone's edge. Holding
+     the message gives the same reply and copy (mobile.ts), and the thread's
+     time dividers keep the time, so the chip and the strip that bridges the
+     pointer to it are not drawn. */
+  .msg-actions {
+    display: none;
+  }
+  .bubble-row.has-actions::after,
+  .xfer-chip::after,
+  .xfer::after,
+  .me-msg::after {
+    content: none;
+  }
+
+  /* A held message opens its menu (reply, copy, select text) instead of the
+     system's selection; "Select text" lets that one message be selected. */
+  .bubble-row,
+  .xfer {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .bubble-row.is-selecting,
+  .bubble-row.is-selecting *,
+  .xfer.is-selecting,
+  .xfer.is-selecting * {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+  .ctx-hint {
+    display: none;
   }
 }

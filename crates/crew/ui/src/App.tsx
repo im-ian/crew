@@ -101,6 +101,7 @@ import {
   railSwipe,
   TouchMenuContext,
   useMobile,
+  useTouch,
   watchViewport,
   type OpenTouchMenu,
 } from "./mobile";
@@ -153,7 +154,6 @@ export function App() {
     if (!mobile) return;
     // The web page watches the viewport from main.tsx at any width.
     const unwatch = isWeb() ? () => {} : watchViewport();
-    const unpress = installLongPress();
     // A swipe right from the left edge opens the rail; left on it shuts it.
     let swipe: { kind: "open" | "close"; x: number; y: number } | null = null;
     const onStart = (e: TouchEvent) => {
@@ -176,11 +176,18 @@ export function App() {
     document.addEventListener("touchend", onEnd, { passive: true });
     return () => {
       unwatch();
-      unpress();
+      
       document.removeEventListener("touchstart", onStart);
       document.removeEventListener("touchend", onEnd);
     };
   }, [mobile]);
+  // Held fingers open menus on any touch screen, an unfolded phone or a
+  // tablet too, not only at a phone's width.
+  const touch = useTouch();
+  useEffect(() => {
+    if (!touch) return;
+    return installLongPress();
+  }, [touch]);
   const [renameId, setRenameId] = useState<string | null>(null);
   const [drafting, setDrafting] = useState<string[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -1341,7 +1348,7 @@ export function App() {
       viewer={crew.selectedKind === "agent" ? crew.selected : null}
     >
       <FileOpenContext.Provider value={fileCtx}>
-        <TouchMenuContext.Provider value={mobile ? openTouchMenu : null}>
+        <TouchMenuContext.Provider value={touch ? openTouchMenu : null}>
           {app}
         </TouchMenuContext.Provider>
       </FileOpenContext.Provider>
