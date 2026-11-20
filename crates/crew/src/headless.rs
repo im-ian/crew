@@ -1188,14 +1188,7 @@ fn run_turn(
             && o.error.as_deref().is_some_and(crate::fallback::is_limit_error));
     let mut on_fallback = false;
     let result = if limit_hit {
-        let now = unix_now();
-        let reset = result
-            .as_ref()
-            .ok()
-            .and_then(|o| o.error.as_deref())
-            .and_then(|err| crate::fallback::reset_in_error(err, now))
-            .or_else(|| crate::usage::full_until(&program, now));
-        let limit = crate::fallback::note_limited(&program, reset);
+        let limit = note_limit_hit(&program, &result);
         match run_on_fallback(
             &session,
             &cfg,
@@ -1228,6 +1221,8 @@ fn run_turn(
     } else {
         result
     };
+    // A balance that ran out is said as such, not as the CLI's "Internal error".
+    let result = say_balance(result, &program);
     if on_fallback {
         let (failed, hold) = show_result(&session, result);
         close_turn(&session, generation, turn, failed, hold);
@@ -1404,6 +1399,11 @@ fn show_spawn_error(session: &Arc<HeadlessSession>, err: &anyhow::Error) {
 /// An error the API or the CLI may not hit again: a 5xx, 529 Overloaded, or
 /// an internal error. A full disk, a missing session, or a limit is not.
 pub(crate) fn is_transient_error(text: &str) -> bool {
+    // A limit or a balance that ran out comes back as the same error: grok
+    // words its 402 as an "Internal error".
+    if crate::fallback::is_limit_error(text) {
+        return false;
+    }
     let lower = text.to_ascii_lowercase();
     const PHRASES: &[&str] = &[
         "internal error",
@@ -1476,6 +1476,37 @@ fn show_result(session: &Arc<HeadlessSession>, result: anyhow::Result<TurnOutcom
     }
 }
 
+/// The turn was turned away for its limit: that CLI is set aside until its
+/// reset, or for a while when none is said. A balance that ran out also shows
+/// in the usage button, since no window says so.
+fn note_limit_hit(program: &str, result: &anyhow::Result<TurnOutcome>) -> crate::fallback::Limit {
+    let now = unix_now();
+    let error = result.as_ref().ok().and_then(|o| o.error.as_deref());
+    let reset = error
+        .and_then(|err| crate::fallback::reset_in_error(err, now))
+        .or_else(|| crate::usage::full_until(program, now));
+    if error.is_some_and(crate::fallback::is_balance_error) {
+        crate::usage::note_out_of_balance(program);
+    }
+    crate::fallback::note_limited(program, reset)
+}
+
+/// A turn that said nothing because the account's balance ran out: its error
+/// becomes the line that says so and what to do, in place of the CLI's own
+/// ("Internal error: {…402…}"). Anything else is left as it was.
+fn say_balance(result: anyhow::Result<TurnOutcome>, program: &str) -> anyhow::Result<TurnOutcome> {
+    match result {
+        Ok(mut outcome)
+            if !outcome.got_text
+                && outcome.error.as_deref().is_some_and(crate::fallback::is_balance_error) =>
+        {
+            outcome.error = Some(crate::fallback::balance_note(&crate::paths::locale(), program));
+            Ok(outcome)
+        }
+        other => other,
+    }
+}
+
 /// Runs the turn on the AIs after the bot's own, in the list's order, until
 /// one is not out of its limit. Each says so above its answer. None when the
 /// list has no other AI to try; `say_none` notes that when the bot's own CLI
@@ -1530,16 +1561,9 @@ fn run_on_fallback(
             }
             return Some(result);
         }
-        let now = unix_now();
-        let reset = result
-            .as_ref()
-            .ok()
-            .and_then(|o| o.error.as_deref())
-            .and_then(|err| crate::fallback::reset_in_error(err, now))
-            .or_else(|| crate::usage::full_until(&program, now));
-        from_limit = crate::fallback::note_limited(&program, reset);
+        from_limit = note_limit_hit(&program, &result);
+        last = Some(say_balance(result, &program));
         from = program;
-        last = Some(result);
     }
     if last.is_none() && say_none {
         let note = crate::fallback::none_free_note(&locale, &from);

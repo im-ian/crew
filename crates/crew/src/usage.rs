@@ -234,6 +234,67 @@ fn claude_config_dir() -> Option<PathBuf> {
 /// Grok logs its weekly credits when it fetches them. Headless runs often
 /// never fetch, so the last line can sit far behind the end of the log.
 fn grok_usage() -> Option<PlanUsage> {
+    match out_of_balance_since(now()) {
+        Some(since) => Some(used_up(grok_reading(), since)),
+        None => grok_reading(),
+    }
+}
+
+/// A turn Grok turned away because the account's balance ran out (a 402).
+/// Grok's log has no line for that, and a headless run never fetches its
+/// credits, so the reading it left can be days old and well under 100%.
+fn out_of_balance_path() -> PathBuf {
+    crate::paths::home_dir().join("plan-usage-grok-empty")
+}
+
+/// Shorter than the week the reading is for: a top-up is not seen by Crew, so
+/// the mark lapses by itself if no grok turn comes to clear it.
+const OUT_OF_BALANCE_TTL: i64 = 3 * 60 * 60;
+
+/// The CLI turned a turn away for its balance: the usage button shows it used
+/// up until it answers again. Only Grok's plan reading is blind to this.
+pub fn note_out_of_balance(cli: &str) {
+    if cli != "grok" {
+        return;
+    }
+    let _ = crate::paths::ensure_home();
+    let _ = fs::write(out_of_balance_path(), now().to_string());
+}
+
+/// It answered: the balance is back.
+pub fn clear_out_of_balance(cli: &str) {
+    if cli == "grok" {
+        let _ = fs::remove_file(out_of_balance_path());
+    }
+}
+
+/// When the balance was last found gone, if that is recent.
+fn out_of_balance_since(now: i64) -> Option<i64> {
+    let since: i64 = fs::read_to_string(out_of_balance_path()).ok()?.trim().parse().ok()?;
+    (since <= now && now - since < OUT_OF_BALANCE_TTL).then_some(since)
+}
+
+/// The reading with every window used up and none with a reset time, since a
+/// balance comes back when it is paid, not when a window starts over. A
+/// reset time here would also keep the CLI aside past the top-up.
+fn used_up(reading: Option<PlanUsage>, since: i64) -> PlanUsage {
+    let mut usage = reading.unwrap_or_else(|| PlanUsage {
+        cli: "grok".into(),
+        windows: vec![Window::new(100.0, None, WEEK)],
+        captured_at: None,
+        groups: Vec::new(),
+        five_hour: None,
+        weekly: None,
+    });
+    for w in &mut usage.windows {
+        w.used_percent = 100.0;
+        w.resets_at = None;
+    }
+    usage.captured_at = Some(since);
+    usage
+}
+
+fn grok_reading() -> Option<PlanUsage> {
     let root = env_dir("GROK_HOME").or_else(|| user_home().map(|h| h.join(".grok")))?;
     let path = root.join("logs").join("unified.jsonl");
     let len = fs::metadata(&path).ok()?.len();
@@ -718,6 +779,38 @@ mod tests {
         assert!(u.window(FIVE_HOURS).is_none());
         assert_eq!(u.window(WEEK).unwrap().resets_at, Some(1793235600));
         assert_eq!(u.captured_at, Some(1793182801));
+    }
+
+    /// Grok's reading is days old and shows 23%; the balance ran out since.
+    #[test]
+    fn an_empty_grok_balance_shows_every_window_used_up_without_a_reset() {
+        let old = PlanUsage::of("grok", vec![Window::new(23.0, Some(1795394012), WEEK)], Some(100), Vec::new());
+        let u = used_up(old, 5000);
+        assert_eq!(u.windows.len(), 1);
+        assert_eq!(u.windows[0].used_percent, 100.0);
+        assert_eq!(u.windows[0].resets_at, None, "a top-up, not a reset, ends it");
+        assert_eq!(u.windows[0].minutes, Some(WEEK));
+        assert_eq!(u.captured_at, Some(5000));
+        // With no reading at all there is still a window to show.
+        let none = used_up(None, 5000);
+        assert_eq!((none.cli.as_str(), none.windows[0].used_percent), ("grok", 100.0));
+        // And it keeps no CLI aside by a reset time.
+        assert_eq!(used_up_until(&u, 0), None);
+    }
+
+    #[test]
+    fn the_empty_mark_is_kept_until_grok_answers_or_hours_pass() {
+        crate::paths::testing::with_home("usage-empty", || {
+            assert_eq!(out_of_balance_since(now()), None);
+            note_out_of_balance("claude");
+            assert_eq!(out_of_balance_since(now()), None, "only Grok's reading is blind to it");
+            note_out_of_balance("grok");
+            let at = out_of_balance_since(now()).expect("marked");
+            assert_eq!(out_of_balance_since(at + OUT_OF_BALANCE_TTL - 1), Some(at));
+            assert_eq!(out_of_balance_since(at + OUT_OF_BALANCE_TTL), None);
+            clear_out_of_balance("grok");
+            assert_eq!(out_of_balance_since(now()), None);
+        });
     }
 
     #[test]

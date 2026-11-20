@@ -8095,6 +8095,10 @@ printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s2"}}' '{{"type"
             "No conversation found with session ID: 5a1b",
             "port 5000 in use",
             "spawn grok: No such file or directory",
+            // Grok's 402 is worded as an internal error; sending it again
+            // changes nothing.
+            "Internal error (API error (status 402 Payment Required): Grok Build usage balance exhausted)",
+            "Credit balance is too low",
         ] {
             assert!(!crate::headless::is_transient_error(text), "{text}");
         }
@@ -8937,6 +8941,40 @@ EOF"#,
             assert!(prompt.contains("answered by gemini"), "{prompt}");
             assert!(crate::fallback::since(&bot).is_none(), "the missed turns were kept");
             assert!(crate::fallback::limited("claude").is_none());
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// The account's balance ran out (grok words its 402 as an "Internal
+    /// error"). Sending the turn again changes nothing, so it is not sent
+    /// again. With no other AI to take it, the chat says what happened and
+    /// what to do, once for the turn, not the CLI's raw error.
+    #[test]
+    fn a_turn_past_the_balance_is_not_sent_again_and_says_so() {
+        paths::testing::with_home("balance-out", || {
+            let bot = test_id("balance");
+            fake_bot(
+                &bot,
+                r#"{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Internal error (API error (status 402 Payment Required): Grok Build usage balance exhausted)"}"#,
+            );
+            crate::fallback::save(&[]).unwrap();
+            send_agent(&bot, "go").unwrap();
+            wait_idle(&bot);
+            let rows = crate::transcript::messages(&bot);
+            assert!(
+                rows.iter().any(|m| m.role == Role::Assistant
+                    && m.text == "Claude 사용 잔액이 다 떨어졌어요. 충전하거나 다른 AI로 바꿔 주세요."),
+                "the balance note is missing: {:?}",
+                rows.iter().map(|m| m.text.as_str()).collect::<Vec<_>>()
+            );
+            assert!(
+                !rows.iter().any(|m| m.text.contains("일시 오류") || m.text.contains("402")),
+                "it was sent again, or the raw error was shown"
+            );
+            let info = list_agents().into_iter().find(|a| a.id == bot).unwrap();
+            assert!(info.failed, "the turn went unmarked");
+            assert!(crate::fallback::limited("claude").is_some(), "its CLI was not set aside");
+            crate::fallback::clear_limited("claude");
             remove_agent(&bot).unwrap();
         });
     }
