@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { api, newestOnly, oneAtATime } from "./api";
+import { api, existsMap, linkStateMap, newestOnly, oneAtATime } from "./api";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -191,5 +191,31 @@ describe("oneAtATime", () => {
     const work = vi.fn(() => Promise.resolve());
     await poll(work);
     expect(work).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("archive commands", () => {
+  it("keeps the links gh could read, by address", () => {
+    expect(
+      linkStateMap([
+        { url: "https://github.com/a/b/pull/1", kind: "pr", state: "merged", title: "Fix" },
+        { url: "https://github.com/a/b/issues/2" },
+      ]),
+    ).toEqual({ "https://github.com/a/b/pull/1": { state: "merged", title: "Fix" } });
+  });
+
+  it("reads files_exist in the order it was asked", () => {
+    expect(existsMap(["/a", "/b"], [true, false])).toEqual({ "/a": true, "/b": false });
+    expect(existsMap(["/a", "/b"], [true])).toEqual({ "/a": true });
+  });
+
+  it("calls the daemon's commands by their names", async () => {
+    mocks.invoke.mockResolvedValueOnce([]).mockResolvedValueOnce([true]);
+    await api.archivePins("bot-a");
+    await api.pathsExist(["/a"]);
+    expect(mocks.invoke.mock.calls.slice(-2)).toEqual([
+      ["get_pins", { agent: "bot-a" }],
+      ["files_exist", { paths: ["/a"] }],
+    ]);
   });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { api } from "../api";
+import { api, type GithubState } from "../api";
 import {
   collectArchive,
   dayOf,
@@ -32,7 +32,6 @@ import type { AgentInfo, ChatMessage, Group } from "../types";
 import { Avatar } from "./Avatar";
 
 type Sub = "links" | "files" | "images";
-export type GithubState = { state: "open" | "merged" | "closed"; title?: string };
 
 const ICON: Record<ArchiveKind, (p: { size?: number }) => ReactNode> = {
   pr: GitPullRequest,
