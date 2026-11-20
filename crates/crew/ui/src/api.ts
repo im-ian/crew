@@ -22,6 +22,29 @@ import type {
 
 const modelLists = new Map<string, Promise<ModelList>>();
 
+/** What `link_states` says of one link: no state when `gh` could not read it. */
+export type LinkState = { url: string; kind?: string; state?: string; title?: string };
+export type GithubState = { state: "open" | "merged" | "closed"; title?: string };
+
+export function linkStateMap(list: readonly LinkState[]): Record<string, GithubState> {
+  const out: Record<string, GithubState> = {};
+  for (const s of list) {
+    if (s.state === "open" || s.state === "merged" || s.state === "closed") {
+      out[s.url] = { state: s.state, title: s.title };
+    }
+  }
+  return out;
+}
+
+/** `files_exist` answers in the order it was asked. */
+export function existsMap(paths: readonly string[], found: readonly boolean[]): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  paths.forEach((p, i) => {
+    if (typeof found[i] === "boolean") out[p] = found[i];
+  });
+  return out;
+}
+
 export function errMsg(err: unknown): string {
   if (typeof err === "string") return err;
   if (err && typeof err === "object" && "message" in err) {
@@ -100,6 +123,15 @@ export const api = {
   tellMessage: (to: string, text: string, from = "user") =>
     invoke<void>("tell_message", { from, to, text }),
   getMessages: (agent: string) => invoke<ChatMessage[]>("get_messages", { agent }),
+  /** 보관함: the bot's pinned links and files, by key (a link's address or a file's path). */
+  archivePins: (agent: string) => invoke<string[]>("get_pins", { agent }),
+  setArchivePin: (agent: string, key: string, pinned: boolean) =>
+    invoke<string[]>("set_pin", { agent, key, pinned }),
+  /** GitHub PRs and issues `gh` could read, by address. Others are left out. */
+  githubStates: async (urls: string[]) =>
+    linkStateMap(await invoke<LinkState[]>("link_states", { urls })),
+  /** Whether each file is one the archive can show, by path. */
+  pathsExist: async (paths: string[]) => existsMap(paths, await invoke<boolean[]>("files_exist", { paths })),
   daemonPing: () => invoke<void>("daemon_ping"),
   resetAgent: (agent: string, dropRoutines: boolean) =>
     invoke<string>("reset_agent", { agent, dropRoutines }),

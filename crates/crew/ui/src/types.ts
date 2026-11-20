@@ -2,7 +2,7 @@ export type AgentStatus = "working" | "idle" | "blocked" | "exited";
 export type Effort = "low" | "medium" | "high";
 export type Role = "user" | "assistant" | "system";
 export type Kind = "agent";
-export type PaneTab = "info" | "routines";
+export type PaneTab = "info" | "routines" | "archive";
 /** How saving an edit to a waiting message ended. "gone": it went out first. */
 export type EditResult = "saved" | "gone" | "failed";
 export type CtxKind = Kind | "group" | "create" | "split";
