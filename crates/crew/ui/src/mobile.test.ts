@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { KEYBOARD_PX, SWIPE_PX, isLongPress, keyboardOpen, railSwipe } from "./mobile";
+import {
+  KEYBOARD_PX,
+  REPLY_PX,
+  SWIPE_MAX,
+  SWIPE_PX,
+  isLongPress,
+  keyboardOpen,
+  railSwipe,
+  swipeIntent,
+  swipeOffset,
+} from "./mobile";
 
 describe("railSwipe", () => {
   it("opens on a swipe right from the edge", () => {
@@ -36,5 +46,29 @@ describe("keyboardOpen", () => {
 
   it("does not take a short screen with nothing typed for a keyboard", () => {
     expect(keyboardOpen(500, 800, false)).toBe(false);
+  });
+});
+
+describe("swipe to reply", () => {
+  it("waits until the finger has moved", () => {
+    expect(swipeIntent(-4, 3)).toBe("undecided");
+  });
+
+  it("takes a clearly sideways pull to the left as a swipe", () => {
+    expect(swipeIntent(-30, 10)).toBe("swipe");
+  });
+
+  it("leaves scrolling, a slanted pull and a pull to the right to the page", () => {
+    expect(swipeIntent(-12, 30)).toBe("scroll");
+    expect(swipeIntent(-20, 15)).toBe("scroll");
+    expect(swipeIntent(40, 2)).toBe("scroll");
+  });
+
+  it("follows the finger, then drags behind it, and stops at the most", () => {
+    expect(swipeOffset(-30)).toBe(-30);
+    expect(swipeOffset(-REPLY_PX)).toBe(-REPLY_PX);
+    expect(swipeOffset(-REPLY_PX - 20)).toBeCloseTo(-(REPLY_PX + 7));
+    expect(swipeOffset(-400)).toBe(-SWIPE_MAX);
+    expect(swipeOffset(25)).toBe(-0);
   });
 });

@@ -1,5 +1,4 @@
-import { createContext, useSyncExternalStore } from "react";
-import type { MenuEntry } from "./components/ContextMenu";
+import { useSyncExternalStore } from "react";
 
 /**
  * A phone layout: one column, the rail a drawer, side panels and dialogs as
@@ -186,33 +185,14 @@ export const LONG_PRESS_MS = 480;
 /** A finger that moves this far is scrolling, not holding. */
 export const LONG_PRESS_SLOP = 10;
 /**
- * Where a held finger opens a menu: the rail's rows, the routine list, and a
- * message (its reply, copy and select, the buttons a mouse finds on hover).
+ * Where a held finger opens a menu: the rail's rows and the routine list. A
+ * message is left to the system: holding it selects its text.
  */
-export const LONG_PRESS_TARGETS = "aside, .routine, .bubble-row, .xfer";
+export const LONG_PRESS_TARGETS = "aside, .routine";
 
 /** A `contextmenu` this file sent for a held finger, not a right click. */
 export function isLongPress(e: Event): boolean {
   return !!(e as Event & { crewLongPress?: boolean }).crewLongPress;
-}
-
-/** Opens a touch menu at a point. App provides it while the window is a phone. */
-export type OpenTouchMenu = (x: number, y: number, items: MenuEntry[]) => void;
-export const TouchMenuContext = createContext<OpenTouchMenu | null>(null);
-
-/**
- * Lets one message's text be selected after "Select text": a phone's chat
- * text is not selectable, so a held finger opens the message menu instead of
- * the system's selection. The next touch outside it ends the selection.
- */
-export function selectTextIn(el: Element) {
-  el.classList.add("is-selecting");
-  const end = (e: Event) => {
-    if (e.target instanceof Node && el.contains(e.target)) return;
-    el.classList.remove("is-selecting");
-    document.removeEventListener("touchstart", end, true);
-  };
-  window.setTimeout(() => document.addEventListener("touchstart", end, true), 0);
 }
 
 export function longPressTarget(el: EventTarget | null): Element | null {
@@ -304,5 +284,160 @@ export function installLongPress(doc: Document = document): () => void {
     doc.removeEventListener("touchend", onEnd);
     doc.removeEventListener("touchcancel", clear);
     doc.removeEventListener("contextmenu", onNative, true);
+  };
+}
+
+/** How far a balloon is pulled left before letting go starts a reply. */
+export const REPLY_PX = 60;
+/** The furthest a balloon goes, however far the finger does. */
+export const SWIPE_MAX = 96;
+
+/**
+ * What a finger that moved `dx, dy` from where it landed is doing. A swipe
+ * is clearly sideways and to the left; up, down or right is the page's
+ * (scrolling, or the rail's edge swipe). Undecided until it has moved.
+ */
+export function swipeIntent(dx: number, dy: number): "undecided" | "swipe" | "scroll" {
+  const ax = Math.abs(dx);
+  const ay = Math.abs(dy);
+  if (ax < 10 && ay < 10) return "undecided";
+  return dx < 0 && ax > ay * 1.5 ? "swipe" : "scroll";
+}
+
+/** Where the balloon sits: with the finger up to REPLY_PX, then dragging behind it. */
+export function swipeOffset(dx: number): number {
+  const d = Math.max(0, -dx);
+  const o = d <= REPLY_PX ? d : REPLY_PX + (d - REPLY_PX) * 0.35;
+  return -Math.min(o, SWIPE_MAX);
+}
+
+const REPLY_SVG =
+  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>';
+
+/** A balloon row that can be answered: it carries its own reply button. */
+function replyRow(el: EventTarget | null): { row: HTMLElement; bubble: HTMLElement; reply: HTMLElement } | null {
+  if (!(el instanceof Element)) return null;
+  const row = el.closest<HTMLElement>(".bubble-row");
+  if (!row) return null;
+  const reply = row.querySelector<HTMLElement>(":scope > .msg-actions .reply-btn");
+  const bubble = row.querySelector<HTMLElement>(":scope > .bubble, :scope > .dots-clip");
+  return reply && bubble ? { row, bubble, reply } : null;
+}
+
+/** A table or code block that scrolls sideways keeps the finger for itself. */
+function scrollsSideways(el: Element): boolean {
+  const box = el.closest<HTMLElement>(".md-table, pre");
+  return !!box && box.scrollWidth > box.clientWidth + 1;
+}
+
+/**
+ * Swipe a balloon right to left to answer it, as in a messenger: it follows
+ * the finger, a reply arrow shows behind it and grows once the pull is far
+ * enough, and letting go there starts the reply (the row's own reply
+ * button). Less, and it springs back. One listener for the whole page.
+ */
+export function installSwipeReply(doc: Document = document): () => void {
+  let drag: {
+    row: HTMLElement;
+    bubble: HTMLElement;
+    reply: HTMLElement;
+    x: number;
+    y: number;
+    mode: "undecided" | "swipe" | "scroll";
+    armed: boolean;
+    icon: HTMLElement | null;
+  } | null = null;
+  const settle = (fire: boolean) => {
+    const d = drag;
+    drag = null;
+    if (!d || d.mode !== "swipe") return;
+    d.bubble.style.transition = "transform 0.32s cubic-bezier(0.2, 1.4, 0.4, 1)";
+    d.bubble.style.transform = "";
+    const icon = d.icon;
+    if (icon) {
+      icon.style.opacity = "0";
+      window.setTimeout(() => icon.remove(), 260);
+    }
+    window.setTimeout(() => {
+      d.bubble.style.transition = "";
+    }, 340);
+    if (fire && d.armed) d.reply.click();
+  };
+  const onStart = (e: TouchEvent) => {
+    drag = null;
+    if (e.touches.length !== 1) return;
+    const hit = replyRow(e.target);
+    if (!hit || !(e.target instanceof Element) || scrollsSideways(e.target)) return;
+    // Text being selected keeps the finger for the selection.
+    if (doc.getSelection()?.toString()) return;
+    const t = e.touches[0];
+    drag = { ...hit, x: t.clientX, y: t.clientY, mode: "undecided", armed: false, icon: null };
+  };
+  const onMove = (e: TouchEvent) => {
+    const d = drag;
+    const t = e.touches[0];
+    if (!d || !t || d.mode === "scroll") return;
+    const dx = t.clientX - d.x;
+    const dy = t.clientY - d.y;
+    if (d.mode === "undecided") {
+      d.mode = swipeIntent(dx, dy);
+      if (d.mode !== "swipe") return;
+      d.bubble.style.transition = "none";
+      const icon = doc.createElement("span");
+      icon.className = "swipe-reply";
+      icon.innerHTML = REPLY_SVG;
+      d.row.appendChild(icon);
+      d.icon = icon;
+    }
+    if (e.cancelable) e.preventDefault();
+    const off = swipeOffset(dx);
+    d.bubble.style.transform = `translateX(${off}px)`;
+    if (d.icon) d.icon.style.opacity = String(Math.min(1, -off / REPLY_PX));
+    const armed = -dx >= REPLY_PX;
+    if (armed !== d.armed) {
+      d.armed = armed;
+      d.icon?.classList.toggle("is-armed", armed);
+      if (armed) navigator.vibrate?.(8);
+    }
+  };
+  const onEnd = () => settle(true);
+  const onCancel = () => settle(false);
+  doc.addEventListener("touchstart", onStart, { passive: true });
+  doc.addEventListener("touchmove", onMove, { passive: false });
+  doc.addEventListener("touchend", onEnd);
+  doc.addEventListener("touchcancel", onCancel);
+  return () => {
+    settle(false);
+    doc.removeEventListener("touchstart", onStart);
+    doc.removeEventListener("touchmove", onMove);
+    doc.removeEventListener("touchend", onEnd);
+    doc.removeEventListener("touchcancel", onCancel);
+  };
+}
+
+/**
+ * A tap on a balloon shows its time, copy and reply under it, the buttons a
+ * mouse finds on hover, for a finger that cannot swipe. Another tap, or a
+ * tap anywhere else, hides them. A tap on a link or a button inside it, or
+ * one that ends a text selection, is left alone.
+ */
+export function installTapActions(doc: Document = document): () => void {
+  const onClick = (e: MouseEvent) => {
+    const target = e.target instanceof Element ? e.target : null;
+    const shown = doc.querySelector(".bubble-row.show-actions");
+    if (target?.closest(".msg-actions")) return;
+    const row = target?.closest<HTMLElement>(".bubble-row");
+    const actions = row?.querySelector(":scope > .msg-actions");
+    if (!row || !actions || target?.closest("a, button, input, textarea, summary, [contenteditable='true']") || doc.getSelection()?.toString()) {
+      shown?.classList.remove("show-actions");
+      return;
+    }
+    if (shown && shown !== row) shown.classList.remove("show-actions");
+    row.classList.toggle("show-actions");
+  };
+  doc.addEventListener("click", onClick);
+  return () => {
+    doc.removeEventListener("click", onClick);
+    doc.querySelector(".bubble-row.show-actions")?.classList.remove("show-actions");
   };
 }

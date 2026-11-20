@@ -98,12 +98,12 @@ import { usePaneMessages } from "./usePaneMessages";
 import {
   EDGE_PX,
   installLongPress,
+  installSwipeReply,
+  installTapActions,
   railSwipe,
-  TouchMenuContext,
   useMobile,
   useTouch,
   watchViewport,
-  type OpenTouchMenu,
 } from "./mobile";
 import type { AgentInfo } from "./types";
 
@@ -115,36 +115,6 @@ export function App() {
   // A phone: the rail is a drawer over the chat, and a chosen chat shuts it.
   const mobile = useMobile();
   const [railOpen, setRailOpen] = useState(false);
-  // A held message's menu on a phone: its reply, copy and select.
-  const [touchMenu, setTouchMenu] = useState<{ x: number; y: number; items: MenuEntry[] } | null>(
-    null,
-  );
-  const openTouchMenu = useCallback<OpenTouchMenu>((x, y, items) => {
-    setTouchMenu({
-      x,
-      y,
-      items: items.map((item) =>
-        item.type === "action"
-          ? {
-              ...item,
-              onClick: () => {
-                setTouchMenu(null);
-                item.onClick();
-              },
-            }
-          : item,
-      ),
-    });
-  }, []);
-  useEffect(() => {
-    if (!touchMenu) return;
-    const shut = (e: Event) => {
-      if (e.target instanceof Element && e.target.closest(".ctx")) return;
-      setTouchMenu(null);
-    };
-    document.addEventListener("pointerdown", shut, true);
-    return () => document.removeEventListener("pointerdown", shut, true);
-  }, [touchMenu]);
   const railOpenRef = useRef(railOpen);
   railOpenRef.current = railOpen;
   useEffect(() => {
@@ -181,12 +151,15 @@ export function App() {
       document.removeEventListener("touchend", onEnd);
     };
   }, [mobile]);
-  // Held fingers open menus on any touch screen, an unfolded phone or a
-  // tablet too, not only at a phone's width.
+  // On any touch screen, an unfolded phone or a tablet too: a held rail row
+  // opens its menu, a balloon swiped right to left starts a reply, and a
+  // tapped balloon shows its time, copy and reply. Holding a balloon is left
+  // to the system, which selects its text.
   const touch = useTouch();
   useEffect(() => {
     if (!touch) return;
-    return installLongPress();
+    const off = [installLongPress(), installSwipeReply(), installTapActions()];
+    return () => off.forEach((stop) => stop());
   }, [touch]);
   const [renameId, setRenameId] = useState<string | null>(null);
   const [drafting, setDrafting] = useState<string[]>([]);
@@ -1222,9 +1195,6 @@ export function App() {
         onLoad={crew.loadGroupMemory}
         onSave={crew.saveGroupSettings}
       />
-      {touchMenu ? (
-        <ContextMenu open x={touchMenu.x} y={touchMenu.y} items={touchMenu.items} />
-      ) : null}
       <ContextMenu
         open={crew.ctx.open}
         x={crew.ctx.x}
@@ -1356,9 +1326,7 @@ export function App() {
       viewer={crew.selectedKind === "agent" ? crew.selected : null}
     >
       <FileOpenContext.Provider value={fileCtx}>
-        <TouchMenuContext.Provider value={touch ? openTouchMenu : null}>
-          {app}
-        </TouchMenuContext.Provider>
+        {app}
       </FileOpenContext.Provider>
     </BotLabelProvider>
   );
