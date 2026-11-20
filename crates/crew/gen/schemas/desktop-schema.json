@@ -213,6 +213,12 @@
           "markdownDescription": "Enables the clear_avatar command without any pre-configured scope."
         },
         {
+          "description": "Enables the clear_pins command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-pins",
+          "markdownDescription": "Enables the clear_pins command without any pre-configured scope."
+        },
+        {
           "description": "Enables the clone_agent command without any pre-configured scope.",
           "type": "string",
           "const": "allow-clone-agent",
@@ -235,6 +241,12 @@
           "type": "string",
           "const": "allow-edit-routine",
           "markdownDescription": "Enables the edit_routine command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the files_exist command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-files-exist",
+          "markdownDescription": "Enables the files_exist command without any pre-configured scope."
         },
         {
           "description": "Enables the get_display_prefs command without any pre-configured scope.",
@@ -261,10 +273,22 @@
           "markdownDescription": "Enables the get_messages command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_pins command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-pins",
+          "markdownDescription": "Enables the get_pins command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_snapshot command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-snapshot",
           "markdownDescription": "Enables the get_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the link_states command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-link-states",
+          "markdownDescription": "Enables the link_states command without any pre-configured scope."
         },
         {
           "description": "Enables the list_agents command without any pre-configured scope.",
@@ -567,6 +591,12 @@
           "markdownDescription": "Enables the set_notifications command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_pin command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-pin",
+          "markdownDescription": "Enables the set_pin command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_routine_enabled command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-routine-enabled",
@@ -645,6 +675,12 @@
           "markdownDescription": "Denies the clear_avatar command without any pre-configured scope."
         },
         {
+          "description": "Denies the clear_pins command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-pins",
+          "markdownDescription": "Denies the clear_pins command without any pre-configured scope."
+        },
+        {
           "description": "Denies the clone_agent command without any pre-configured scope.",
           "type": "string",
           "const": "deny-clone-agent",
@@ -667,6 +703,12 @@
           "type": "string",
           "const": "deny-edit-routine",
           "markdownDescription": "Denies the edit_routine command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the files_exist command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-files-exist",
+          "markdownDescription": "Denies the files_exist command without any pre-configured scope."
         },
         {
           "description": "Denies the get_display_prefs command without any pre-configured scope.",
@@ -693,10 +735,22 @@
           "markdownDescription": "Denies the get_messages command without any pre-configured scope."
         },
         {
+          "description": "Denies the get_pins command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-pins",
+          "markdownDescription": "Denies the get_pins command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_snapshot command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-snapshot",
           "markdownDescription": "Denies the get_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the link_states command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-link-states",
+          "markdownDescription": "Denies the link_states command without any pre-configured scope."
         },
         {
           "description": "Denies the list_agents command without any pre-configured scope.",
@@ -997,6 +1051,12 @@
           "type": "string",
           "const": "deny-set-notifications",
           "markdownDescription": "Denies the set_notifications command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_pin command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-pin",
+          "markdownDescription": "Denies the set_pin command without any pre-configured scope."
         },
         {
           "description": "Denies the set_routine_enabled command without any pre-configured scope.",

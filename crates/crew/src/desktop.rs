@@ -1141,6 +1141,43 @@ fn path_kind(path: &std::path::Path) -> &'static str {
     }
 }
 
+/// Whether each path is a file the archive may show: the rule `/api/file`
+/// serves by (`~` expanded; a regular file under the Crew home, the user's
+/// home or a temp folder; nothing hidden). Same length and order as `paths`.
+#[tauri::command(async)]
+pub(crate) fn files_exist(paths: Vec<String>) -> Vec<bool> {
+    paths
+        .iter()
+        .map(|p| crate::web::file_allowed(&crate::paths::expand_tilde(p.trim())).is_some())
+        .collect()
+}
+
+/// Open, merged or closed, and the title, of each GitHub pull request or issue
+/// link, read with `gh`. Same length and order as `urls`; a link `gh` cannot
+/// read, or that is not one, has no state.
+#[tauri::command(async)]
+pub(crate) fn link_states(urls: Vec<String>) -> Vec<crate::link_state::LinkState> {
+    crate::link_state::link_states(&urls)
+}
+
+/// The keys pinned in a bot's archive tab, oldest first.
+#[tauri::command(async)]
+pub(crate) fn get_pins(agent: String) -> Vec<String> {
+    crate::pins::get(&agent)
+}
+
+/// Pin or unpin one key of a bot's archive tab; the bot's pins after.
+#[tauri::command(async)]
+pub(crate) fn set_pin(agent: String, key: String, pinned: bool) -> Result<Vec<String>, String> {
+    crate::pins::set(&agent, &key, pinned)
+}
+
+/// Forget all of a bot's pins.
+#[tauri::command(async)]
+pub(crate) fn clear_pins(agent: String) -> Result<(), String> {
+    crate::pins::clear(&agent)
+}
+
 #[tauri::command]
 pub(crate) fn save_upload(name: String, data: String) -> Result<String, String> {
     let bytes = crate::avatar::decode_input(&data).map_err(|e| e.to_string())?;
@@ -1301,6 +1338,11 @@ pub fn run() -> anyhow::Result<()> {
             open_url,
             pick_folder,
             path_kinds,
+            files_exist,
+            link_states,
+            get_pins,
+            set_pin,
+            clear_pins,
             set_dock_badge,
             set_locale,
             set_notifications,
@@ -1361,6 +1403,29 @@ mod tests {
                 "{name} is missing from capabilities ({allow})"
             );
         }
+    }
+
+    /// The archive asks the window's own rule for each file: one under the
+    /// user's home, in order, and none of the hidden, missing or folders.
+    #[test]
+    fn files_exist_follows_the_file_route_rule() {
+        let dir = std::env::temp_dir().join(format!("cw-fe-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".hidden")).unwrap();
+        std::fs::write(dir.join("a.txt"), "a").unwrap();
+        std::fs::write(dir.join(".hidden/b.txt"), "b").unwrap();
+        let p = |name: &str| dir.join(name).to_string_lossy().into_owned();
+        let got = files_exist(vec![
+            p("a.txt"),
+            p("missing.txt"),
+            p(".hidden/b.txt"),
+            dir.to_string_lossy().into_owned(),
+            "/etc/hosts".into(),
+            format!("  {}  ", p("a.txt")),
+            String::new(),
+        ]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(got, vec![true, false, false, false, false, true, false]);
     }
 
     /// Ids for a template's bots are free now and of each other, even when two

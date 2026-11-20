@@ -273,6 +273,28 @@ pub fn dispatch(name: &str, args: Value) -> Option<Result<Value, String>> {
             let paths: Vec<String> = arg(&args, "paths")?;
             ok(crate::desktop::path_kinds(paths))
         }
+        "files_exist" => {
+            let paths: Vec<String> = arg(&args, "paths")?;
+            ok(crate::desktop::files_exist(paths))
+        }
+        "link_states" => {
+            let urls: Vec<String> = arg(&args, "urls")?;
+            ok(crate::desktop::link_states(urls))
+        }
+        "get_pins" => {
+            let agent: String = arg(&args, "agent")?;
+            ok(crate::desktop::get_pins(agent))
+        }
+        "set_pin" => {
+            let agent: String = arg(&args, "agent")?;
+            let key: String = arg(&args, "key")?;
+            let pinned: bool = arg(&args, "pinned")?;
+            ok(crate::desktop::set_pin(agent, key, pinned)?)
+        }
+        "clear_pins" => {
+            let agent: String = arg(&args, "agent")?;
+            ok(crate::desktop::clear_pins(agent)?)
+        }
         "set_notifications" => {
             let enabled: bool = arg(&args, "enabled")?;
             ok(crate::desktop::set_notifications(enabled)?)
@@ -396,6 +418,11 @@ pub const NAMES: &[&str] = &[
     "take_pending_focus",
     "read_text_file",
     "path_kinds",
+    "files_exist",
+    "link_states",
+    "get_pins",
+    "set_pin",
+    "clear_pins",
     "set_notifications",
     "set_lead_only_notify",
     "set_user_name",
