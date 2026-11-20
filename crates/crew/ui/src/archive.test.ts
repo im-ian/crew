@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectArchive, dayOf, linkItem, looksSecret, matches, mergeArchives } from "./archive";
+import { collectArchive, dayOf, linkItem, looksSecret, matches, mergeArchives, shownKind } from "./archive";
 import type { ChatMessage } from "./types";
 
 const at = (id: string, role: ChatMessage["role"], text: string, ts: number, extra: Partial<ChatMessage> = {}): ChatMessage => ({
@@ -85,5 +85,16 @@ describe("together", () => {
     expect(matches(item, "pr #12")).toBe(true);
     expect(matches(item, "im-ian")).toBe(true);
     expect(matches(item, "nothing")).toBe(false);
+  });
+});
+
+describe("shownKind", () => {
+  it("follows GitHub when an issue address is a PR", () => {
+    const [item] = collectArchive([at("1", "assistant", "https://github.com/im-ian/crew/issues/375", 1)], "bot-a");
+    expect(item.kind).toBe("issue");
+    expect(shownKind(item, { kind: "pr" })).toBe("pr");
+    expect(shownKind(item, undefined)).toBe("issue");
+    const [doc] = collectArchive([at("2", "assistant", "https://docs.github.com/en/rest", 1)], "bot-a");
+    expect(shownKind(doc, { kind: "pr" })).toBe("doc");
   });
 });

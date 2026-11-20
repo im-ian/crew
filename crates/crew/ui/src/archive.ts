@@ -210,6 +210,14 @@ export function mergeArchives(lists: readonly ArchiveItem[][]): ArchiveItem[] {
   return [...byKey.values()];
 }
 
+/**
+ * The kind to show: what GitHub says a link is, when it said. A bot that
+ * wrote a PR's address as `/issues/375` still gets a PR.
+ */
+export function shownKind(item: ArchiveItem, github?: { kind?: "pr" | "issue" }): ArchiveKind {
+  return (item.kind === "pr" || item.kind === "issue") && github?.kind ? github.kind : item.kind;
+}
+
 export type ArchiveDay = "today" | "week" | "older";
 
 export function dayOf(ts: number, now: number): ArchiveDay {
