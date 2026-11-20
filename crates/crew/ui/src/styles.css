@@ -8552,3 +8552,33 @@ html.is-web.is-standalone[data-theme="light"]::after {
   left: 0;
   width: var(--safe-left);
 }
+
+/* A finger needs more than a 20px icon to land on. On a touch screen the
+   small icon buttons keep their look and take a clear edge around them,
+   so the press reaches about 36-40px. */
+@media (pointer: coarse) {
+  /* A code block's copy button is pinned in its corner and stays so. */
+  .copy-btn:not(.code-copy),
+  .choice-x,
+  .group-toggle,
+  .group-more,
+  .ai-row-btn {
+    position: relative;
+  }
+  .copy-btn::after,
+  .choice-x::after,
+  .group-toggle::after,
+  .group-more::after,
+  .ai-row-btn::after {
+    content: "";
+    position: absolute;
+    inset: -8px;
+  }
+  .ai-row-btn::after {
+    inset: -5px;
+  }
+  /* The note between bots: its full-width head was 22px tall. */
+  .note-run-head {
+    min-height: 32px;
+  }
+}

@@ -11,6 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useLocale, useT } from "../LocaleContext";
+import { useTouch } from "../mobile";
 import {
   groupLead,
   groupOrderChanges,
@@ -513,6 +514,8 @@ export function Sidebar({
   drawer = false,
 }: Props) {
   const t = useT();
+  // Rows move with a mouse; a finger only scrolls the rail (beginDrag).
+  const touch = useTouch();
   const { locale } = useLocale();
   // Rebuilding the list numbers every duplicate name and re-sorts each group;
   // a drag re-renders this on every pointermove and none of it can change.
@@ -1143,7 +1146,7 @@ export function Sidebar({
           items.filter((item) => item.id === lead).map(row)
         ) : showEmpty ? (
           <div className="empty-rail" data-rail-empty="1">
-            {t("sidebar.dropHere")}
+            {t(touch ? "sidebar.emptyGroup" : "sidebar.dropHere")}
           </div>
         ) : (
           items.map(row)

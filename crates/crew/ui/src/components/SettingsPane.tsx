@@ -33,6 +33,7 @@ import { RemoteSettings, type RemoteChange } from "./RemoteSettings";
 import { Seg } from "./Seg";
 import { ShortcutList } from "./ShortcutHelp";
 import { isWeb } from "../web";
+import { useTouch } from "../mobile";
 import { mirrorDisplayPrefs, useLaptopPrefs } from "../displayPrefs";
 
 type Props = {
@@ -86,6 +87,7 @@ export function SettingsPane({
 }: Props) {
   const t = useT();
   const { locale, setLocale, userName, setUserName } = useLocale();
+  const touch = useTouch();
   const [notify, setNotify] = useState(loadNotify);
   const [leadOnly, setLeadOnly] = useState(loadLeadOnlyNotify);
   const [noticeKeep, setNoticeKeep] = useState(loadNoticeKeep);
@@ -177,7 +179,8 @@ export function SettingsPane({
     ...(isWeb()
       ? []
       : [{ id: "mobile" as Section, label: t("settings.group.mobile"), icon: <Smartphone /> }]),
-    { id: "shortcuts", label: t("settings.shortcuts"), icon: <Keyboard /> },
+    // A finger has no keyboard shortcuts to look up.
+    ...(touch ? [] : [{ id: "shortcuts" as Section, label: t("settings.shortcuts"), icon: <Keyboard /> }]),
     { id: "about", label: t("settings.group.about"), icon: <Info /> },
   ];
   const current = sections.find((s) => s.id === section) ?? sections[0];
@@ -293,7 +296,9 @@ export function SettingsPane({
                   onChange={changeAiList}
                 />
               </Field>
-              <p className="apply-note">{t("settings.botDefault.note")}</p>
+              <p className="apply-note">
+                {t(touch ? "settings.botDefault.noteTouch" : "settings.botDefault.note")}
+              </p>
             </div>
           ) : section === "display" ? (
             <div className="form-stack">
@@ -386,7 +391,9 @@ export function SettingsPane({
                   disabled={web}
                 />
               </Field>
-              <p className="apply-note">{t("settings.fontSize.note")}</p>
+              <p className="apply-note">
+                {t(touch ? "settings.fontSize.noteTouch" : "settings.fontSize.note")}
+              </p>
             </div>
           ) : section === "chat" ? (
             <div className="form-stack">
@@ -403,7 +410,7 @@ export function SettingsPane({
               <p className="apply-note">
                 {delivery === "interrupt"
                   ? t("settings.delivery.note.interrupt")
-                  : t("settings.delivery.note.queue")}
+                  : t(touch ? "settings.delivery.note.queueTouch" : "settings.delivery.note.queue")}
               </p>
               <Field label={t("settings.tools")}>
                 <Seg

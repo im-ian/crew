@@ -28,6 +28,31 @@ export function useMobile(): boolean {
   return useSyncExternalStore(subscribe, isMobile, () => false);
 }
 
+/** A screen worked by finger: no hover, so no mouse to drag with and no keyboard shortcuts at hand. */
+export const TOUCH_QUERY = "(hover: none)";
+
+function touchQuery(): MediaQueryList | null {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia(TOUCH_QUERY)
+    : null;
+}
+
+export function isTouch(): boolean {
+  return !!touchQuery()?.matches;
+}
+
+export function useTouch(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      const q = touchQuery();
+      q?.addEventListener("change", cb);
+      return () => q?.removeEventListener("change", cb);
+    },
+    isTouch,
+    () => false,
+  );
+}
+
 /** How much of the screen a keyboard takes before it counts as up. */
 export const KEYBOARD_PX = 120;
 
