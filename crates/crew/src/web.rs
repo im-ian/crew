@@ -580,6 +580,38 @@ fn device_name(user_agent: &str) -> String {
 
 // ------------------------------------------------------------------ files
 
+/// The places a file may be shown from: the Crew home, the user's home and
+/// the temp folders.
+fn file_roots() -> Vec<PathBuf> {
+    let mut roots = vec![
+        crate::paths::home_dir(),
+        PathBuf::from("/tmp"),
+        PathBuf::from("/private/tmp"),
+        PathBuf::from("/private/var/folders"),
+        // How the temp folder is written before the system's link is followed.
+        PathBuf::from("/var/folders"),
+    ];
+    if let Ok(home) = std::env::var("HOME") {
+        roots.push(PathBuf::from(home));
+    }
+    roots
+}
+
+/// The part of `path` under the deepest of `roots` that holds it, or None when
+/// no root does. Nothing hidden is under it (`.ssh`, `.aws`, `.git` …).
+fn shown_under<'a>(path: &'a Path, roots: &[PathBuf]) -> Option<&'a Path> {
+    let root = roots
+        .iter()
+        .filter(|r| path.starts_with(r))
+        .max_by_key(|r| r.components().count())?;
+    path.strip_prefix(root).ok()
+}
+
+fn is_hidden(rest: &Path) -> bool {
+    rest.components()
+        .any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
+}
+
 /// Where `/api/file` may read: the Crew home, the user's home and the temp
 /// folders, and inside them nothing hidden (`.ssh`, `.aws`, `.git` …).
 pub(crate) fn file_allowed(path: &Path) -> Option<PathBuf> {
@@ -587,25 +619,69 @@ pub(crate) fn file_allowed(path: &Path) -> Option<PathBuf> {
     if !real.is_file() {
         return None;
     }
-    let mut roots = vec![
-        crate::paths::home_dir(),
-        PathBuf::from("/tmp"),
-        PathBuf::from("/private/tmp"),
-        PathBuf::from("/private/var/folders"),
-    ];
-    if let Ok(home) = std::env::var("HOME") {
-        roots.push(PathBuf::from(home));
-    }
-    let root = roots
+    let roots: Vec<PathBuf> = file_roots()
         .iter()
         .filter_map(|r| r.canonicalize().ok())
-        .filter(|r| real.starts_with(r))
-        .max_by_key(|r| r.components().count())?;
-    let rest = real.strip_prefix(&root).ok()?;
-    let hidden = rest
-        .components()
-        .any(|c| c.as_os_str().to_string_lossy().starts_with('.'));
-    (!hidden).then_some(real)
+        .collect();
+    let rest = shown_under(&real, &roots)?;
+    (!is_hidden(rest)).then_some(real)
+}
+
+/// What the archive learns of a file it lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum FileState {
+    /// A file `/api/file` shows.
+    Exists,
+    /// Not there, or not a file.
+    Missing,
+    /// Where files are not shown: a hidden folder, or outside the Crew home,
+    /// the user's home and the temp folders. Whether it exists is not looked
+    /// at, so the answer says nothing of it.
+    Blocked,
+}
+
+/// `path` as `/api/file` would take it, said three ways. A path that is
+/// blocked by where it is written never touches the disk; only a link that
+/// leads out of the allowed places is found by looking.
+pub(crate) fn file_state(path: &Path) -> FileState {
+    use std::path::Component;
+    if !path.is_absolute() {
+        return FileState::Missing;
+    }
+    // `..` and `.` read as they are written, with no help from the disk.
+    let mut written = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::ParentDir => {
+                written.pop();
+            }
+            Component::CurDir => {}
+            other => written.push(other.as_os_str()),
+        }
+    }
+    let mut roots = file_roots();
+    roots.extend(roots.clone().iter().filter_map(|r| r.canonicalize().ok()));
+    match shown_under(&written, &roots) {
+        Some(rest) if !is_hidden(rest) => {}
+        _ => return FileState::Blocked,
+    }
+    let Ok(real) = path.canonicalize() else {
+        return FileState::Missing;
+    };
+    let canon: Vec<PathBuf> = file_roots()
+        .iter()
+        .filter_map(|r| r.canonicalize().ok())
+        .collect();
+    match shown_under(&real, &canon) {
+        Some(rest) if !is_hidden(rest) => {}
+        _ => return FileState::Blocked,
+    }
+    if real.is_file() {
+        FileState::Exists
+    } else {
+        FileState::Missing
+    }
 }
 
 fn content_type(path: &Path) -> &'static str {

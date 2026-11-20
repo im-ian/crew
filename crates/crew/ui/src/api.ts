@@ -38,11 +38,19 @@ export function linkStateMap(list: readonly LinkState[]): Record<string, GithubS
   return out;
 }
 
-/** `files_exist` answers in the order it was asked. */
-export function existsMap(paths: readonly string[], found: readonly boolean[]): Record<string, boolean> {
-  const out: Record<string, boolean> = {};
+/**
+ * What the daemon says of a file: there, not there, or in a place it does not
+ * show files from (a hidden folder, or outside the home and temp folders) and
+ * so does not say whether it is there.
+ */
+export type FileState = "exists" | "missing" | "blocked";
+
+/** `file_states` answers in the order it was asked. */
+export function fileStateMap(paths: readonly string[], found: readonly unknown[]): Record<string, FileState> {
+  const out: Record<string, FileState> = {};
   paths.forEach((p, i) => {
-    if (typeof found[i] === "boolean") out[p] = found[i];
+    const s = found[i];
+    if (s === "exists" || s === "missing" || s === "blocked") out[p] = s;
   });
   return out;
 }
@@ -132,8 +140,8 @@ export const api = {
   /** GitHub PRs and issues `gh` could read, by address. Others are left out. */
   githubStates: async (urls: string[]) =>
     linkStateMap(await invoke<LinkState[]>("link_states", { urls })),
-  /** Whether each file is one the archive can show, by path. */
-  pathsExist: async (paths: string[]) => existsMap(paths, await invoke<boolean[]>("files_exist", { paths })),
+  /** Whether each file is there, is not, or is somewhere the archive cannot show files from, by path. */
+  fileStates: async (paths: string[]) => fileStateMap(paths, await invoke<string[]>("file_states", { paths })),
   daemonPing: () => invoke<void>("daemon_ping"),
   resetAgent: (agent: string, dropRoutines: boolean) =>
     invoke<string>("reset_agent", { agent, dropRoutines }),

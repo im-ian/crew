@@ -243,10 +243,10 @@
           "markdownDescription": "Enables the edit_routine command without any pre-configured scope."
         },
         {
-          "description": "Enables the files_exist command without any pre-configured scope.",
+          "description": "Enables the file_states command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-files-exist",
-          "markdownDescription": "Enables the files_exist command without any pre-configured scope."
+          "const": "allow-file-states",
+          "markdownDescription": "Enables the file_states command without any pre-configured scope."
         },
         {
           "description": "Enables the get_display_prefs command without any pre-configured scope.",
@@ -705,10 +705,10 @@
           "markdownDescription": "Denies the edit_routine command without any pre-configured scope."
         },
         {
-          "description": "Denies the files_exist command without any pre-configured scope.",
+          "description": "Denies the file_states command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-files-exist",
-          "markdownDescription": "Denies the files_exist command without any pre-configured scope."
+          "const": "deny-file-states",
+          "markdownDescription": "Denies the file_states command without any pre-configured scope."
         },
         {
           "description": "Denies the get_display_prefs command without any pre-configured scope.",

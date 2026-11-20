@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { api, existsMap, linkStateMap, newestOnly, oneAtATime } from "./api";
+import { api, fileStateMap, linkStateMap, newestOnly, oneAtATime } from "./api";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -208,18 +208,24 @@ describe("archive commands", () => {
     });
   });
 
-  it("reads files_exist in the order it was asked", () => {
-    expect(existsMap(["/a", "/b"], [true, false])).toEqual({ "/a": true, "/b": false });
-    expect(existsMap(["/a", "/b"], [true])).toEqual({ "/a": true });
+  it("reads file_states in the order it was asked, and drops what it does not know", () => {
+    expect(fileStateMap(["/a", "/b", "/c"], ["exists", "missing", "blocked"])).toEqual({
+      "/a": "exists",
+      "/b": "missing",
+      "/c": "blocked",
+    });
+    expect(fileStateMap(["/a", "/b"], ["exists"])).toEqual({ "/a": "exists" });
+    // An old daemon answered true and false: no state, so no strike-through.
+    expect(fileStateMap(["/a", "/b"], [true, false])).toEqual({});
   });
 
   it("calls the daemon's commands by their names", async () => {
-    mocks.invoke.mockResolvedValueOnce([]).mockResolvedValueOnce([true]);
+    mocks.invoke.mockResolvedValueOnce([]).mockResolvedValueOnce(["exists"]);
     await api.archivePins("bot-a");
-    await api.pathsExist(["/a"]);
+    await api.fileStates(["/a"]);
     expect(mocks.invoke.mock.calls.slice(-2)).toEqual([
       ["get_pins", { agent: "bot-a" }],
-      ["files_exist", { paths: ["/a"] }],
+      ["file_states", { paths: ["/a"] }],
     ]);
   });
 });

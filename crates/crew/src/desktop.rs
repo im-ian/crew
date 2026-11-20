@@ -1141,14 +1141,16 @@ fn path_kind(path: &std::path::Path) -> &'static str {
     }
 }
 
-/// Whether each path is a file the archive may show: the rule `/api/file`
-/// serves by (`~` expanded; a regular file under the Crew home, the user's
-/// home or a temp folder; nothing hidden). Same length and order as `paths`.
+/// What the archive learns of each file it lists, by the rule `/api/file`
+/// serves by (`~` expanded): "exists", "missing", or "blocked" for one in a
+/// hidden folder or outside the Crew home, the user's home and the temp
+/// folders. A blocked path is not looked at, so it tells nothing of whether the
+/// file is there. Same length and order as `paths`.
 #[tauri::command(async)]
-pub(crate) fn files_exist(paths: Vec<String>) -> Vec<bool> {
+pub(crate) fn file_states(paths: Vec<String>) -> Vec<crate::web::FileState> {
     paths
         .iter()
-        .map(|p| crate::web::file_allowed(&crate::paths::expand_tilde(p.trim())).is_some())
+        .map(|p| crate::web::file_state(&crate::paths::expand_tilde(p.trim())))
         .collect()
 }
 
@@ -1338,7 +1340,7 @@ pub fn run() -> anyhow::Result<()> {
             open_url,
             pick_folder,
             path_kinds,
-            files_exist,
+            file_states,
             link_states,
             get_pins,
             set_pin,
@@ -1405,27 +1407,44 @@ mod tests {
         }
     }
 
-    /// The archive asks the window's own rule for each file: one under the
-    /// user's home, in order, and none of the hidden, missing or folders.
+    /// The archive asks the window's own rule for each file, and a path the
+    /// rule shuts out is blocked without a look at the disk, so a hidden file
+    /// that is there and one that is not answer alike.
     #[test]
-    fn files_exist_follows_the_file_route_rule() {
+    fn file_states_say_exists_missing_or_blocked() {
+        use crate::web::FileState::*;
         let dir = std::env::temp_dir().join(format!("cw-fe-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join(".hidden")).unwrap();
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
         std::fs::write(dir.join("a.txt"), "a").unwrap();
         std::fs::write(dir.join(".hidden/b.txt"), "b").unwrap();
+        std::os::unix::fs::symlink("/etc/hosts", dir.join("out.txt")).unwrap();
         let p = |name: &str| dir.join(name).to_string_lossy().into_owned();
-        let got = files_exist(vec![
+        let got = file_states(vec![
             p("a.txt"),
             p("missing.txt"),
             p(".hidden/b.txt"),
-            dir.to_string_lossy().into_owned(),
+            p(".hidden/none.txt"),
+            p("sub"),
+            p("out.txt"),
+            format!("{}/sub/../../../../../../../../../etc/hosts", dir.display()),
             "/etc/hosts".into(),
+            "/etc/not-there-at-all".into(),
             format!("  {}  ", p("a.txt")),
+            "relative/a.txt".into(),
             String::new(),
         ]);
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!(got, vec![true, false, false, false, false, true, false]);
+        assert_eq!(
+            got,
+            vec![
+                Exists, Missing, Blocked, Blocked, Missing, Blocked, Blocked, Blocked, Blocked,
+                Exists, Missing, Missing,
+            ]
+        );
+        let json = serde_json::to_string(&got[..3]).unwrap();
+        assert_eq!(json, r#"["exists","missing","blocked"]"#);
     }
 
     /// Ids for a template's bots are free now and of each other, even when two

@@ -273,9 +273,9 @@ pub fn dispatch(name: &str, args: Value) -> Option<Result<Value, String>> {
             let paths: Vec<String> = arg(&args, "paths")?;
             ok(crate::desktop::path_kinds(paths))
         }
-        "files_exist" => {
+        "file_states" => {
             let paths: Vec<String> = arg(&args, "paths")?;
-            ok(crate::desktop::files_exist(paths))
+            ok(crate::desktop::file_states(paths))
         }
         "link_states" => {
             let urls: Vec<String> = arg(&args, "urls")?;
@@ -418,7 +418,7 @@ pub const NAMES: &[&str] = &[
     "take_pending_focus",
     "read_text_file",
     "path_kinds",
-    "files_exist",
+    "file_states",
     "link_states",
     "get_pins",
     "set_pin",

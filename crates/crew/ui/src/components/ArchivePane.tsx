@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { api, type GithubState } from "../api";
+import { api, type FileState, type GithubState } from "../api";
 import {
   collectArchive,
   dayOf,
@@ -76,7 +76,7 @@ export function ArchivePane({
   const [query, setQuery] = useState("");
   const [pins, setPins] = useState<Set<string>>(new Set());
   const [states, setStates] = useState<Record<string, GithubState>>({});
-  const [exists, setExists] = useState<Record<string, boolean>>({});
+  const [fileStates, setFileStates] = useState<Record<string, FileState>>({});
   const [own, setOwn] = useState<readonly ChatMessage[]>([]);
   const [team, setTeam] = useState<Record<string, readonly ChatMessage[]>>({});
   const id = agent?.id ?? null;
@@ -116,7 +116,7 @@ export function ArchivePane({
     const paths = items.filter((i) => i.path && !asked.has(i.path)).map((i) => i.path!);
     for (const k of [...urls, ...paths]) asked.add(k);
     if (urls.length) api.githubStates(urls).then((s) => setStates((p) => ({ ...p, ...s })), () => {});
-    if (paths.length) api.pathsExist(paths).then((e) => setExists((p) => ({ ...p, ...e })), () => {});
+    if (paths.length) api.fileStates(paths).then((e) => setFileStates((p) => ({ ...p, ...e })), () => {});
   }, [open, items, asked]);
 
   const links = items.filter((i) => i.section === "links");
@@ -154,12 +154,16 @@ export function ArchivePane({
   };
 
   function row(item: ArchiveItem) {
-    const gone = item.path ? exists[item.path] === false : false;
+    const fileState = item.path ? fileStates[item.path] : undefined;
+    const gone = fileState === "missing";
+    const blocked = fileState === "blocked";
     const gh = item.url ? states[item.url] : undefined;
     const kind = shownKind(item, gh);
     const Icon = ICON[kind];
     const face = mates.length ? byAgent.get(item.agent) : undefined;
     const from = item.from ? t(`archive.from.${item.from}`) : "";
+    // A file that is gone is struck through; one in a place no file is shown from is only said to be.
+    const note = gone ? t("archive.gone") : blocked ? t("archive.blocked") : from;
     const what =
       kind === "pr" || kind === "issue"
         ? `${item.where} · ${t(`archive.kind.${kind}`)} #${item.num}`
@@ -179,7 +183,7 @@ export function ArchivePane({
             ) : null}
             {/* On the meta line: after a title cut at two lines it was cut too. */}
             {gh ? <span className={`archive-badge is-${gh.state}`}>{t(`archive.state.${gh.state}`)}</span> : null}
-            <span className="archive-where">{gone ? `${what} · ${t("archive.gone")}` : from ? `${what} · ${from}` : what}</span>
+            <span className="archive-where">{note ? `${what} · ${note}` : what}</span>
             <span className="archive-when">{when(item.ts)}</span>
           </div>
         </div>
@@ -203,7 +207,7 @@ export function ArchivePane({
           >
             <CornerDownRight size={15} />
           </button>
-          {gone ? null : (
+          {gone || blocked ? null : (
             <button
               type="button"
               className="archive-act archive-open"
@@ -257,16 +261,22 @@ export function ArchivePane({
       ) : sub === "images" ? (
         <div className="archive-grid">
           {rest.map((item) => {
-            const gone = item.path ? exists[item.path] === false : false;
+            const fileState = item.path ? fileStates[item.path] : undefined;
+            const gone = fileState === "missing";
+            const blocked = fileState === "blocked";
             return (
               <button
                 key={item.key}
                 type="button"
                 className="archive-shot"
                 title={item.path}
-                onClick={() => (gone ? onJump(item.agent, item.msgId) : openItem(item))}
+                onClick={() => (gone || blocked ? onJump(item.agent, item.msgId) : openItem(item))}
               >
-                {gone ? <span className="archive-shot-gone">{t("archive.gone")}</span> : <img src={mediaSrc(item.path!)} alt="" loading="lazy" />}
+                {gone || blocked ? (
+                  <span className="archive-shot-gone">{t(gone ? "archive.gone" : "archive.blocked")}</span>
+                ) : (
+                  <img src={mediaSrc(item.path!)} alt="" loading="lazy" />
+                )}
                 <span className="archive-shot-name">{item.title}</span>
               </button>
             );
