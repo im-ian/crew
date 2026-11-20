@@ -1,6 +1,5 @@
 import {
   forwardRef,
-  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -95,9 +94,7 @@ import { parseFileRef, sameFile, useFileOpen, workDir } from "../fileRef";
 import { splitFilePath } from "./FileView";
 import { Avatar } from "./Avatar";
 import { ReplyQuote as SharedReplyQuote, quoteFrom } from "./ReplyQuote";
-import { CopyButton, copyText } from "./CopyButton";
-import type { MenuEntry } from "./ContextMenu";
-import { isLongPress, selectTextIn, TouchMenuContext } from "../mobile";
+import { CopyButton } from "./CopyButton";
 import { MdBody } from "./MdBody";
 import { WhoButton, WhoLabel, whoColor } from "./WhoButton";
 import { STICK_PX, rebuiltTop, stickMove, type StickMove } from "../stick";
@@ -2904,37 +2901,10 @@ export function MsgActions({
   onReply?: () => void;
 }) {
   const { locale } = useLocale();
-  const t = useT();
   const { day, time } = messageClockParts(ts, locale);
-  const openMenu = useContext(TouchMenuContext);
-  const ref = useRef<HTMLDivElement>(null);
-  const latest = useRef({ copy, onReply });
-  latest.current = { copy, onReply };
-  // On a phone the buttons a mouse finds on hover come from a held finger on
-  // the message: the same reply and copy, as a menu. Only that hold is read,
-  // so a desktop right click still gets the system menu.
-  useEffect(() => {
-    const host = ref.current?.closest(".bubble-row, .xfer");
-    if (!openMenu || !host) return;
-    const onHold = (e: Event) => {
-      if (!isLongPress(e)) return;
-      e.preventDefault();
-      const { copy: text, onReply: reply } = latest.current;
-      const items: MenuEntry[] = [];
-      if (reply) items.push({ type: "action", label: t("thread.reply"), onClick: reply });
-      if (text) {
-        items.push({ type: "action", label: t("common.copy"), onClick: () => void copyText(text) });
-      }
-      items.push({ type: "action", label: t("thread.selectText"), onClick: () => selectTextIn(host) });
-      const me = e as MouseEvent;
-      openMenu(me.clientX, me.clientY, items);
-    };
-    host.addEventListener("contextmenu", onHold);
-    return () => host.removeEventListener("contextmenu", onHold);
-  }, [openMenu, t]);
   if (!copy && !onReply) return null;
   return (
-    <div className="msg-actions" ref={ref}>
+    <div className="msg-actions">
       {time ? (
         <time className="msg-time" dateTime={new Date(ts).toISOString()}>
           {day ? <span className="msg-time-day">{day}</span> : null}
@@ -2952,7 +2922,7 @@ function ReplyButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       type="button"
-      className="copy-btn"
+      className="copy-btn reply-btn"
       title={t("thread.reply")}
       aria-label={t("thread.reply")}
       onClick={(e) => {

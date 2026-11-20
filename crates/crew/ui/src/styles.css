@@ -8553,15 +8553,15 @@ html.is-web.is-standalone[data-theme="light"]::after {
   }
 }
 
-/* A touch screen at any width (a phone, an unfolded phone, a tablet): the
-   held-message menu (mobile.ts) takes the place of what a mouse finds on
-   hover, and keyboard shortcuts in menus mean nothing. */
+/* A touch screen at any width (a phone, an unfolded phone, a tablet): a
+   swipe answers a message and a tap shows its buttons (mobile.ts) in place
+   of what a mouse finds on hover, and keyboard shortcuts in menus mean
+   nothing. Holding a message selects its text, as the system does. */
 @media (hover: none) {
   /* A message's time, copy and reply chip floats beside the balloon on
-     hover, which a finger does not have, and past a phone's edge. Holding
-     the message gives the same reply and copy (mobile.ts), and the thread's
-     time dividers keep the time, so the chip and the strip that bridges the
-     pointer to it are not drawn. */
+     hover, which a finger does not have, and past a phone's edge. It is not
+     drawn there, nor the strip that bridges the pointer to it; a tap shows
+     it under the balloon instead (.show-actions). */
   .msg-actions {
     display: none;
   }
@@ -8572,22 +8572,6 @@ html.is-web.is-standalone[data-theme="light"]::after {
     content: none;
   }
 
-  /* A held message opens its menu (reply, copy, select text) instead of the
-     system's selection; "Select text" lets that one message be selected. */
-  .bubble-row,
-  .xfer {
-    -webkit-user-select: none;
-    user-select: none;
-    -webkit-touch-callout: none;
-  }
-  .bubble-row.is-selecting,
-  .bubble-row.is-selecting *,
-  .xfer.is-selecting,
-  .xfer.is-selecting * {
-    -webkit-user-select: text;
-    user-select: text;
-    -webkit-touch-callout: default;
-  }
   .ctx-hint {
     display: none;
   }
@@ -8638,4 +8622,55 @@ html.is-web.is-standalone[data-theme="light"]::after {
   .ai-pick .model-pick-meta {
     margin-left: 0;
   }
+}
+
+/* Swipe to reply (mobile.ts): the arrow behind a balloon pulled left. It
+   fades in with the pull and grows, filled, once letting go would reply. */
+.swipe-reply {
+  position: absolute;
+  top: 50%;
+  right: var(--space-4);
+  z-index: 0;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--chip);
+  color: var(--muted);
+  opacity: 0;
+  transform: translateY(-50%) scale(0.8);
+  transition: transform 0.16s var(--ease-out), background 0.16s var(--ease), color 0.16s var(--ease), opacity 0.2s var(--ease);
+  pointer-events: none;
+}
+.swipe-reply.is-armed {
+  transform: translateY(-50%) scale(1.12);
+  background: var(--working);
+  color: #fff;
+}
+.bubble-row > .bubble {
+  position: relative;
+  z-index: 1;
+}
+/* A tapped balloon shows its time, copy and reply under it, inside the
+   screen, on a touch screen where hover never shows them. */
+@media (hover: none) {
+  .bubble-row.show-actions > .msg-actions {
+    display: flex;
+    position: static;
+    margin-top: var(--space-4);
+    max-width: 100%;
+    height: 28px;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .me-msg .bubble-row.show-actions > .msg-actions {
+    margin-left: auto;
+  }
+  .bubble-row.show-actions > .msg-actions::before {
+    content: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .swipe-reply { transition: none; }
 }
