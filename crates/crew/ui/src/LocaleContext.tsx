@@ -19,6 +19,7 @@ import {
 import { cleanUserName, loadUserName, saveUserName } from "./userName";
 import { useLaptopPrefs } from "./displayPrefs";
 import { isWeb } from "./web";
+import { useTouch } from "./mobile";
 
 type LocaleCtx = {
   locale: Locale;
@@ -56,7 +57,8 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     void api.setUserName(name).catch(() => {});
   }, [name]);
 
-  const t = useMemo<TFn>(() => makeT(locale, name), [locale, name]);
+  const touch = useTouch();
+  const t = useMemo<TFn>(() => makeT(locale, name, touch), [locale, name, touch]);
 
   const setLocale = useCallback((next: Locale) => {
     setLocaleState(next);

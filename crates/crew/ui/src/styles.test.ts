@@ -28,7 +28,7 @@ describe("styles.css", () => {
   });
 
   it("keeps the model line on a phone, under the name, off the header buttons", () => {
-    const phone = source.slice(source.lastIndexOf("@media (max-width: 640px)"));
+    const phone = source.slice(source.indexOf("---------- Phone ----------"));
     const run = phone.match(/header \.head-run\s*\{[^}]*\}/);
     expect(run, "the phone rule for .head-run").not.toBeNull();
     expect(run![0]).not.toMatch(/display:\s*none/);
@@ -48,7 +48,7 @@ describe("styles.css", () => {
   });
 
   it("gives the picture overlay a full screen and a finger-sized close on a phone", () => {
-    const phone = source.slice(source.lastIndexOf("@media (max-width: 640px)"));
+    const phone = source.slice(source.indexOf("---------- Phone ----------"));
     expect(phone).toMatch(/\.img-preview\s*\{[^}]*height:\s*var\(--phone-h\)/);
     expect(phone).toMatch(/\.img-preview-close\s*\{[^}]*top:\s*calc\(8px \+ var\(--safe-top\)\)/);
     expect(phone).toMatch(/\.img-preview-close\s*\{[^}]*width:\s*44px/);

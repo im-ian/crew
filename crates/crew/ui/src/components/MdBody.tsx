@@ -131,6 +131,36 @@ export function MdBody({
   );
 }
 
+/**
+ * A table too wide for its balloon scrolls sideways. The side with more to
+ * see fades out, so the cut reads as "slide for more", not as a lost column.
+ */
+function ScrollTable({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const mark = () => {
+      const max = el.scrollWidth - el.clientWidth;
+      el.toggleAttribute("data-more-left", el.scrollLeft > 1);
+      el.toggleAttribute("data-more-right", el.scrollLeft < max - 1);
+    };
+    mark();
+    el.addEventListener("scroll", mark, { passive: true });
+    const watch = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(mark);
+    watch?.observe(el);
+    return () => {
+      el.removeEventListener("scroll", mark);
+      watch?.disconnect();
+    };
+  }, []);
+  return (
+    <div ref={ref} className="md-table">
+      <table>{children}</table>
+    </div>
+  );
+}
+
 /** A command that printed nothing still ran; say so instead of an empty box. */
 function EmptyBlock({ isOut }: { isOut: boolean }) {
   const t = useT();
@@ -270,9 +300,7 @@ function nodeToReact(
   if (tag === "TABLE") {
     // The wrapper scrolls; a table restyled to scroll itself stops reading as a table.
     return (
-      <div key={key} className="md-table">
-        <table>{kids}</table>
-      </div>
+      <ScrollTable key={key}>{kids}</ScrollTable>
     );
   }
   if (tag === "IMG") {

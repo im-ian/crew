@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { interpolate, makeT, translate } from "./i18n";
+import { dropShortcut, interpolate, makeT, translate } from "./i18n";
 import { EN, KO } from "./locales";
 
 describe("interpolate", () => {
@@ -55,5 +55,25 @@ describe("locale tables", () => {
     for (const key of Object.keys(KO) as (keyof typeof KO)[]) {
       expect(slots(EN[key]), key).toEqual(slots(KO[key]));
     }
+  });
+});
+
+describe("dropShortcut", () => {
+  it("drops a shortcut at the end of a label, for touch", () => {
+    expect(dropShortcut("검색 ⌘F")).toBe("검색");
+    expect(dropShortcut("멈추고 바로 보내기 ⌘⇧↩")).toBe("멈추고 바로 보내기");
+    expect(dropShortcut("중지 ⌘.")).toBe("중지");
+    expect(dropShortcut("Bot info ⌘I")).toBe("Bot info");
+  });
+
+  it("leaves text that only mentions a shortcut", () => {
+    const note = "창 전체를 키우거나 줄이려면 ⌘+ / ⌘−를 누르세요.";
+    expect(dropShortcut(note)).toBe(note);
+    expect(dropShortcut("메시지")).toBe("메시지");
+  });
+
+  it("is what a touch t() gives", () => {
+    expect(makeT("ko", "", true)("header.botInfo")).toBe("봇 정보");
+    expect(makeT("ko")("header.botInfo")).toBe("봇 정보 ⌘I");
   });
 });
