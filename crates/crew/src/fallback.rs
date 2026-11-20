@@ -138,6 +138,8 @@ pub fn clear_limited(program: &str) {
     if let Some(map) = guard.as_mut() {
         map.remove(program);
     }
+    drop(guard);
+    crate::usage::clear_out_of_balance(program);
 }
 
 /// Whether this CLI is still out: what a turn ran into, or a plan reading
@@ -187,7 +189,31 @@ pub fn is_limit_error(text: &str) -> bool {
     if PHRASES.iter().any(|p| lower.contains(p)) {
         return true;
     }
-    hit_your_limit(&lower) || has_status_429(&lower)
+    hit_your_limit(&lower) || has_status(&lower, "429") || is_balance_error(text)
+}
+
+/// A turn turned away because the account has no balance left to pay for it,
+/// not because a window used up: Grok's `402 Payment Required: Grok Build
+/// usage balance exhausted`, Claude's `Credit balance is too low`, OpenAI's
+/// `insufficient_quota`. Topping up or switching AI is the way out, and
+/// sending the same turn again changes nothing.
+pub fn is_balance_error(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    const PHRASES: &[&str] = &[
+        "usage balance",
+        "balance exhausted",
+        "payment required",
+        "insufficient balance",
+        "insufficient funds",
+        "insufficient credit",
+        "credit balance is too low",
+        "credit balance too low",
+        "out of credits",
+        "run out of credits",
+        "insufficient_quota",
+        "exceeded your current quota",
+    ];
+    PHRASES.iter().any(|p| lower.contains(p)) || has_status(&lower, "402")
 }
 
 /// Claude's `You've hit your 5-hour limit`, `hit your Opus weekly limit`:
@@ -199,13 +225,13 @@ fn hit_your_limit(lower: &str) -> bool {
     })
 }
 
-/// `429` as an HTTP status, not inside a longer number.
-fn has_status_429(lower: &str) -> bool {
+/// `code` (`429`, `402`) as an HTTP status, not inside a longer number.
+fn has_status(lower: &str, code: &str) -> bool {
     let bytes = lower.as_bytes();
     let mut from = 0;
-    while let Some(at) = lower[from..].find("429") {
+    while let Some(at) = lower[from..].find(code) {
         let start = from + at;
-        let end = start + 3;
+        let end = start + code.len();
         let before = start == 0 || !bytes[start - 1].is_ascii_digit();
         let after = end >= bytes.len() || !bytes[end].is_ascii_digit();
         if before && after {
@@ -440,6 +466,22 @@ pub fn ran_on_note(locale: &str, from: &str, to: &str, limit: Limit) -> String {
     }
 }
 
+/// What a turn says when its AI has no balance left and no other AI took it
+/// over: what happened, and the two ways out.
+pub fn balance_note(locale: &str, program: &str) -> String {
+    if locale == "en" {
+        format!(
+            "{} is out of usage balance. Top it up, or switch this bot to another AI.",
+            label(program)
+        )
+    } else {
+        format!(
+            "{} 사용 잔액이 다 떨어졌어요. 충전하거나 다른 AI로 바꿔 주세요.",
+            label(program)
+        )
+    }
+}
+
 /// The line when every AI on the list is out too, or none is installed.
 pub fn none_free_note(locale: &str, from: &str) -> String {
     if locale == "en" {
@@ -505,9 +547,48 @@ mod tests {
             "You've hit your session limit · resets 11am (Asia/Seoul)",
             "You've hit your weekly limit · resets Nov 21, 9am (Asia/Seoul)",
             "You've hit your Opus limit · resets 3pm",
+            // Out of balance, which Grok's ACP hands over as an internal error.
+            "Internal error (API error (status 402 Payment Required): Grok Build usage balance exhausted)",
+            "API Error: 402 {\"error\":{\"message\":\"Your credit balance is too low to access the Anthropic API\"}}",
+            "You exceeded your current quota, please check your plan and billing details.",
         ] {
             assert!(is_limit_error(text), "{text}");
         }
+    }
+
+    #[test]
+    fn tells_a_balance_that_ran_out_from_a_window_that_did() {
+        for text in [
+            "Internal error (API error (status 402 Payment Required): Grok Build usage balance exhausted)",
+            "HTTP 402",
+            "Error: Payment Required",
+            "Credit balance is too low",
+            "insufficient_quota",
+        ] {
+            assert!(is_balance_error(text), "{text}");
+        }
+        for text in [
+            "Internal error",
+            "Error: 429 Too Many Requests",
+            "You've hit your 5-hour limit · resets 6:50pm (Asia/Seoul)",
+            "No conversation found with session ID: 1402",
+            "port 14020 in use",
+            "Internal error (API error (status 503): overloaded)",
+        ] {
+            assert!(!is_balance_error(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn the_balance_note_names_the_ai_and_the_way_out() {
+        assert_eq!(
+            balance_note("ko", "grok"),
+            "Grok 사용 잔액이 다 떨어졌어요. 충전하거나 다른 AI로 바꿔 주세요."
+        );
+        assert_eq!(
+            balance_note("en", "grok"),
+            "Grok is out of usage balance. Top it up, or switch this bot to another AI."
+        );
     }
 
     #[test]

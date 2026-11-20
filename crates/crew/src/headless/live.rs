@@ -759,9 +759,14 @@ fn rpc_error(v: &Value) -> Option<String> {
         .get("message")
         .and_then(Value::as_str)
         .unwrap_or("an error");
-    let detail = err.pointer("/data/detail").and_then(Value::as_str);
+    // Grok's `-32603 Internal error` carries what went wrong in `data.message`
+    // (an `API error (status 402 …)`); others use `data.detail`.
+    let detail = err
+        .pointer("/data/detail")
+        .or_else(|| err.pointer("/data/message"))
+        .and_then(Value::as_str);
     Some(match detail {
-        Some(detail) if !detail.is_empty() => format!("{message} ({detail})"),
+        Some(detail) if !detail.is_empty() && detail != message => format!("{message} ({detail})"),
         _ => message.to_string(),
     })
 }
@@ -2456,6 +2461,33 @@ fn watch_of(background: &[(String, Watch)]) -> Vec<Watch> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What grok answers when its balance is gone, as ACP's `session/prompt`
+    /// error: the cause is in `data.message`, and "Internal error" alone hid it.
+    #[test]
+    fn an_rpc_error_says_what_its_data_says() {
+        let grok: Value = serde_json::from_str(
+            r#"{"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"Internal error","data":{"message":"API error (status 402 Payment Required): Grok Build usage balance exhausted","http_status":402}}}"#,
+        )
+        .unwrap();
+        let said = rpc_error(&grok).unwrap();
+        assert_eq!(
+            said,
+            "Internal error (API error (status 402 Payment Required): Grok Build usage balance exhausted)"
+        );
+        assert!(crate::fallback::is_limit_error(&said));
+        assert!(crate::fallback::is_balance_error(&said));
+        let detail: Value = serde_json::from_str(
+            r#"{"error":{"message":"Bad","data":{"detail":"no such thread"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(rpc_error(&detail).as_deref(), Some("Bad (no such thread)"));
+        let plain: Value = serde_json::from_str(r#"{"error":{"message":"Internal error"}}"#).unwrap();
+        assert_eq!(rpc_error(&plain).as_deref(), Some("Internal error"));
+        let same: Value =
+            serde_json::from_str(r#"{"error":{"message":"Boom","data":{"message":"Boom"}}}"#).unwrap();
+        assert_eq!(rpc_error(&same).as_deref(), Some("Boom"));
+    }
 
     #[test]
     fn a_prompt_line_is_one_stream_json_user_message() {
