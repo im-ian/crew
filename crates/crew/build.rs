@@ -62,6 +62,8 @@ fn main() {
             "get_pins",
             "set_pin",
             "clear_pins",
+            "get_read_marks",
+            "mark_read",
             "set_dock_badge",
             "set_locale",
             "set_notifications",

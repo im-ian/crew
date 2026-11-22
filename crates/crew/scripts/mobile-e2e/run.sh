@@ -27,10 +27,22 @@ ln -s "$CREW_BIN" "$E2E_DIR/bin/crew"
 cp "$HERE/fake-bot.sh" "$E2E_DIR/bin/fake-bot.sh"
 cp -R "$DIST" "$E2E_DIR/dist"
 
-# One bot that answers what it was sent, and asks a card on "카드".
+# One bot that answers what it was sent, and asks a card on "카드", and one
+# with a long chat written over the last five hours.
 cat > "$E2E_DIR/home/agents.json" <<JSON
-{"agents":[{"id":"bot-echo","name":"에코","cmd":["$E2E_DIR/bin/fake-bot.sh"],"cwd":"$E2E_DIR/work","headless":true,"routines":[]}]}
+{"agents":[{"id":"bot-echo","name":"에코","cmd":["$E2E_DIR/bin/fake-bot.sh"],"cwd":"$E2E_DIR/work","headless":true,"routines":[]},
+{"id":"bot-long","name":"긴대화","cmd":["$E2E_DIR/bin/fake-bot.sh"],"cwd":"$E2E_DIR/work","headless":true,"routines":[]}]}
 JSON
+mkdir -p "$E2E_DIR/home/transcripts"
+python3 - "$E2E_DIR/home/transcripts/bot-long.jsonl" <<'PY'
+import json, sys, time
+now = int(time.time() * 1000)
+with open(sys.argv[1], "w") as f:
+    for i in range(300):
+        ts, mine = now - (300 - i) * 60000, i % 2 == 0
+        text = f"{i}번째 줄. " + "줄이 두세 줄로 접히게 조금 더 써요. " * (1 + i % 3)
+        f.write(json.dumps({"id": f"{ts}-{i}", "role": "user" if mine else "assistant", "from": "user" if mine else "bot-long", "text": text, "ts": ts}, ensure_ascii=False) + "\n")
+PY
 # Loopback only: the throwaway daemon is not reached over Tailscale.
 echo "{\"enabled\":true,\"port\":$PORT,\"loopback\":true}" > "$E2E_DIR/home/mobile.json"
 # The laptop's display settings the phone should follow.

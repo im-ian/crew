@@ -26,6 +26,7 @@ mod notify;
 mod paths;
 mod pins;
 mod protocol;
+mod read_marks;
 mod pty_agent;
 mod relay;
 mod remote;

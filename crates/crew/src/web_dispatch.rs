@@ -295,6 +295,14 @@ pub fn dispatch(name: &str, args: Value) -> Option<Result<Value, String>> {
             let agent: String = arg(&args, "agent")?;
             ok(crate::desktop::clear_pins(agent)?)
         }
+        "get_read_marks" => {
+            ok(crate::desktop::get_read_marks())
+        }
+        "mark_read" => {
+            let key: String = arg(&args, "key")?;
+            let ts: u64 = arg(&args, "ts")?;
+            ok(crate::desktop::mark_read(key, ts)?)
+        }
         "set_notifications" => {
             let enabled: bool = arg(&args, "enabled")?;
             ok(crate::desktop::set_notifications(enabled)?)
@@ -423,6 +431,8 @@ pub const NAMES: &[&str] = &[
     "get_pins",
     "set_pin",
     "clear_pins",
+    "get_read_marks",
+    "mark_read",
     "set_notifications",
     "set_lead_only_notify",
     "set_user_name",

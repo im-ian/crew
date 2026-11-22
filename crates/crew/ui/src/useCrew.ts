@@ -43,7 +43,7 @@ import {
   type IslandNotice,
   type PlainTone,
 } from "./island";
-import { loadRead, markRead, saveRead, unreadKeys } from "./readCursors";
+import { loadRead, markRead, mergeRead, saveRead, unreadKeys } from "./readCursors";
 import { isOnline, localAgents, remoteLabel } from "./remote";
 import { useRemotes } from "./useRemotes";
 import { keepSame } from "./stableList";
@@ -97,6 +97,9 @@ type Ctx = {
   id: string | null;
   kind: CtxKind;
 };
+
+/** How often the unread dots catch up with what other devices read. */
+const READ_SYNC_MS = 5000;
 
 export function useCrew() {
   const t = useT();
@@ -215,11 +218,55 @@ export function useCrew() {
     if (selected) saveLastChat(selected);
   }, [selected]);
 
+  // The cursors other devices left in the daemon. A phone that last saw a
+  // chat yesterday would otherwise open it at yesterday's line, far up or at
+  // the very top, though the chat was read on the laptop since.
+  const readMapRef = useRef(readMap);
+  readMapRef.current = readMap;
+  const adoptRead = useCallback((other: unknown) => {
+    setReadMap((prev) => {
+      const next = mergeRead(prev, other);
+      if (next === prev) return prev;
+      saveRead(next);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     if (!selected) return;
     const key = itemKey(selectedKind, selected);
-    setOpenedRead({ key, ts: readMap[key] ?? 0 });
+    // This device's place, before the effect below moves it to the end.
+    const mine = readMapRef.current[key] ?? 0;
+    let gone = false;
+    api.readMarks().then(
+      (marks) => {
+        if (gone) return;
+        adoptRead(marks);
+        setOpenedRead({ key, ts: Math.max(mine, marks?.[key] ?? 0) });
+      },
+      () => {
+        if (!gone) setOpenedRead({ key, ts: mine });
+      },
+    );
+    return () => {
+      gone = true;
+    };
   }, [selected, selectedKind]);
+
+  // Tell the other devices once this chat's place is taken: sent sooner, it
+  // could land first and make the chat look read before it opened.
+  const pushedRead = useRef<Record<string, number>>({});
+  const readSyncedAt = useRef(0);
+  useEffect(() => {
+    if (!selected || openedRead?.key !== itemKey(selectedKind, selected)) return;
+    const key = openedRead.key;
+    const ts = readMap[key] ?? 0;
+    if (ts <= (pushedRead.current[key] ?? 0)) return;
+    pushedRead.current[key] = ts;
+    api.markRead(key, ts).catch(() => {
+      if (pushedRead.current[key] === ts) delete pushedRead.current[key];
+    });
+  }, [readMap, openedRead, selected, selectedKind]);
 
   useEffect(() => {
     if (!selected) return;
@@ -1587,6 +1634,10 @@ export function useCrew() {
       // hold the ping, which is what notices and brings a dead daemon back.
       void pollList(refreshList).catch(lost);
       void refreshGroups();
+      if (Date.now() - readSyncedAt.current > READ_SYNC_MS) {
+        readSyncedAt.current = Date.now();
+        api.readMarks().then((marks) => !cancelled && adoptRead(marks), () => {});
+      }
     }
     void tickList();
     void tickMessages();

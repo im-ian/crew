@@ -1180,6 +1180,18 @@ pub(crate) fn clear_pins(agent: String) -> Result<(), String> {
     crate::pins::clear(&agent)
 }
 
+/// How far each chat has been read, on any device, by chat key.
+#[tauri::command(async)]
+pub(crate) fn get_read_marks() -> crate::read_marks::Marks {
+    crate::read_marks::get()
+}
+
+/// Move a chat's read mark forward to `ts`; the mark after.
+#[tauri::command(async)]
+pub(crate) fn mark_read(key: String, ts: u64) -> Result<u64, String> {
+    crate::read_marks::mark(&key, ts)
+}
+
 #[tauri::command]
 pub(crate) fn save_upload(name: String, data: String) -> Result<String, String> {
     let bytes = crate::avatar::decode_input(&data).map_err(|e| e.to_string())?;
@@ -1345,6 +1357,8 @@ pub fn run() -> anyhow::Result<()> {
             get_pins,
             set_pin,
             clear_pins,
+            get_read_marks,
+            mark_read,
             set_dock_badge,
             set_locale,
             set_notifications,

@@ -133,6 +133,13 @@ export const api = {
   tellMessage: (to: string, text: string, from = "user") =>
     invoke<void>("tell_message", { from, to, text }),
   getMessages: (agent: string) => invoke<ChatMessage[]>("get_messages", { agent }),
+  /**
+   * How far each chat has been read, on any device (the window or a paired
+   * phone), by chat key. A device keeps its own copy too; the later wins.
+   */
+  readMarks: () => invoke<Record<string, number>>("get_read_marks"),
+  /** Move a chat's shared read mark forward. It never moves back. */
+  markRead: (key: string, ts: number) => invoke<number>("mark_read", { key, ts }),
   /** 보관함: the bot's pinned links and files, by key (a link's address or a file's path). */
   archivePins: (agent: string) => invoke<string[]>("get_pins", { agent }),
   setArchivePin: (agent: string, key: string, pinned: boolean) =>

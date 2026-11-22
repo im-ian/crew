@@ -29,6 +29,21 @@ export function saveRead(map: ReadMap) {
   }
 }
 
+/**
+ * This device's cursors with the ones another device left in the daemon:
+ * the later of the two for each chat. The same map when nothing moves.
+ */
+export function mergeRead(map: ReadMap, other: unknown): ReadMap {
+  if (!other || typeof other !== "object") return map;
+  let next = map;
+  for (const [k, n] of Object.entries(other as Record<string, unknown>)) {
+    if (typeof n !== "number" || !Number.isFinite(n) || n <= (next[k] ?? 0)) continue;
+    if (next === map) next = { ...map };
+    next[k] = n;
+  }
+  return next;
+}
+
 export function markRead(map: ReadMap, kind: Kind, id: string, ts: number): ReadMap {
   if (!id || ts <= 0) return map;
   const key = itemKey(kind, id);
