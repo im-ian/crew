@@ -399,10 +399,10 @@ describe("missingReason", () => {
 });
 
 describe("a link to a picture", () => {
-  it("is drawn as the picture, with the link's words as its alt", () => {
-    const html = renderMarkdown("결과: [접힌 레일](/tmp/qab/rail.png)");
-    expect(html).toContain('<img src="/tmp/qab/rail.png" alt="접힌 레일">');
-    expect(html).not.toContain("<a ");
+  const flat = (md: string) => renderMarkdown(md).replace(/\n/g, "");
+
+  it("alone on its line is drawn as the picture, with the link's words as its alt", () => {
+    expect(flat("[접힌 레일](/tmp/qab/rail.png)")).toBe('<p><img src="/tmp/qab/rail.png" alt="접힌 레일"></p>');
   });
 
   it("works for a capture's web address, a private one included", () => {
@@ -413,6 +413,37 @@ describe("a link to a picture", () => {
   it("puts several in a row in one album", () => {
     const html = renderMarkdown("[1](/tmp/a.png)\n[2](/tmp/b.jpg)\n[3](https://x.example/c.gif)");
     expect(html).toContain('<div class="md-gallery" data-count="3">');
+  });
+
+  it("inside a sentence stays a link, and the picture follows the paragraph", () => {
+    expect(flat("웹 캡처는 [캡처 화면](/tmp/q/a.png)이에요.")).toBe(
+      '<p>웹 캡처는 <a href="/tmp/q/a.png" class="md-media-ref">캡처 화면</a>이에요.</p>' +
+        '<p><img src="/tmp/q/a.png" alt="캡처 화면"></p>',
+    );
+  });
+
+  it("gathers a paragraph's pictures under it, as an album, and its videos after them", () => {
+    const html = flat("웹 캡처는 [화면](/tmp/q/a.png)이고, 녹화는 [영상](/tmp/q/run.mp4)이에요.\n[둘째](/tmp/q/b.png)");
+    // The line that was only a link leaves the text; the in-sentence ones stay links.
+    expect(html).toContain(
+      '<p>웹 캡처는 <a href="/tmp/q/a.png" class="md-media-ref">화면</a>이고, 녹화는 <a href="/tmp/q/run.mp4" class="md-media-ref">영상</a>이에요.</p>',
+    );
+    expect(html).toContain('<div class="md-gallery" data-count="2"><img src="/tmp/q/a.png" alt="화면"><img src="/tmp/q/b.png" alt="둘째"></div>');
+    expect(html.endsWith('<p><img src="/tmp/q/run.mp4" alt="영상"></p>')).toBe(true);
+    expect(html).not.toContain("<br>");
+  });
+
+  it("under words on the lines above still makes an album below them", () => {
+    const html = flat("QA 끝났어요.\n[레일](/tmp/q/a.png)\n[검색](/tmp/q/b.png)");
+    expect(html).toBe('<p>QA 끝났어요.</p><div class="md-gallery" data-count="2"><img src="/tmp/q/a.png" alt="레일"><img src="/tmp/q/b.png" alt="검색"></div>');
+  });
+
+  it("leaves a video alone on its line a link, which is drawn as its player", () => {
+    expect(flat("[영상](/tmp/a.mp4)")).toBe('<p><a href="/tmp/a.mp4">영상</a></p>');
+  });
+
+  it("leaves ![]() as it was, in a sentence too", () => {
+    expect(flat("결과: ![레일](/tmp/q/a.png) 끝")).toBe('<p>결과: <img src="/tmp/q/a.png" alt="레일"> 끝</p>');
   });
 
   it("keeps a path with spaces whole", () => {
@@ -426,8 +457,7 @@ describe("a link to a picture", () => {
     expect(renderMarkdown("[문서](/tmp/a.md)")).toContain('<a href="/tmp/a.md">');
     expect(renderMarkdown("[그림](/tmp/a.svg)")).not.toContain("<img");
     expect(renderMarkdown("[x](mailto:a.png)")).not.toContain("<img");
-    // A video link stays a link; MdBody draws it as a player.
-    expect(renderMarkdown("[영상](/tmp/a.mp4)")).toContain('<a href="/tmp/a.mp4">');
+    expect(renderMarkdown("[문서](/tmp/a.md)에 적었어요")).not.toContain("md-media-ref");
   });
 
   it("is told apart by its extension, after a query or fragment", () => {
