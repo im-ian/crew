@@ -4742,6 +4742,20 @@ html.peek-resizing .peek-resize::after {
   overflow: auto;
   border-top: 1px solid var(--line);
 }
+/* `crew show` of a picture or a video: fitted to the panel, centred. */
+.file-body.is-media {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-12, 12px);
+}
+.file-media {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+}
 /* The bots of the group the open chat leads (`LeadGroupPane`): rail rows
    beside the chat, each with a status word before its last line. */
 .lead-pane-body {

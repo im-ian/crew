@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fileName, isLocalHref, mediaKind, messageDefinitions, missingReason, renderMarkdown, resolveLocalPath } from "./markdown";
+import { fileName, isLocalHref, isPictureHref, mediaKind, messageDefinitions, missingReason, renderMarkdown, resolveLocalPath } from "./markdown";
 import { setHomeDir } from "./homeDir";
 
 /** The rendered html without the newlines markdown-it puts after tags. */
@@ -214,8 +214,8 @@ describe("the rest of markdown", () => {
   });
 
   it("opens files, and refuses a script link", () => {
-    expect(html("[f](file:///tmp/a.png) [g](./문서.md) [x](javascript:alert(1))")).toBe(
-      '<p><a href="file:///tmp/a.png">f</a> <a href="./문서.md">g</a> [x](javascript:alert(1))</p>',
+    expect(html("[f](file:///tmp/a.txt) [g](./문서.md) [x](javascript:alert(1))")).toBe(
+      '<p><a href="file:///tmp/a.txt">f</a> <a href="./문서.md">g</a> [x](javascript:alert(1))</p>',
     );
   });
 });
@@ -395,5 +395,46 @@ describe("missingReason", () => {
   it("names the file at the end of the path", () => {
     expect(fileName("/Users/me/Documents/GitHub/images/04-handle.png")).toBe("04-handle.png");
     expect(fileName("/tmp/dir/")).toBe("dir");
+  });
+});
+
+describe("a link to a picture", () => {
+  it("is drawn as the picture, with the link's words as its alt", () => {
+    const html = renderMarkdown("결과: [접힌 레일](/tmp/qab/rail.png)");
+    expect(html).toContain('<img src="/tmp/qab/rail.png" alt="접힌 레일">');
+    expect(html).not.toContain("<a ");
+  });
+
+  it("works for a capture's web address, a private one included", () => {
+    const html = renderMarkdown("[캡처](http://100.111.145.71:3000/captures/a.webp)");
+    expect(html).toContain('<img src="http://100.111.145.71:3000/captures/a.webp" alt="캡처">');
+  });
+
+  it("puts several in a row in one album", () => {
+    const html = renderMarkdown("[1](/tmp/a.png)\n[2](/tmp/b.jpg)\n[3](https://x.example/c.gif)");
+    expect(html).toContain('<div class="md-gallery" data-count="3">');
+  });
+
+  it("keeps a path with spaces whole", () => {
+    const html = renderMarkdown("[업로드](/Users/me/Library/Application Support/crew/uploads/a b.png)");
+    expect(html).toContain('<img src="/Users/me/Library/Application Support/crew/uploads/a b.png" alt="업로드">');
+  });
+
+  it("leaves code, other files, svg and videos alone", () => {
+    const code = renderMarkdown("```\n[x](/tmp/a.png)\n```\n`[y](/tmp/b.png)`");
+    expect(code).not.toContain("<img");
+    expect(renderMarkdown("[문서](/tmp/a.md)")).toContain('<a href="/tmp/a.md">');
+    expect(renderMarkdown("[그림](/tmp/a.svg)")).not.toContain("<img");
+    expect(renderMarkdown("[x](mailto:a.png)")).not.toContain("<img");
+    // A video link stays a link; MdBody draws it as a player.
+    expect(renderMarkdown("[영상](/tmp/a.mp4)")).toContain('<a href="/tmp/a.mp4">');
+  });
+
+  it("is told apart by its extension, after a query or fragment", () => {
+    expect(isPictureHref("/tmp/a.PNG")).toBe(true);
+    expect(isPictureHref("https://x.example/a.jpeg?raw=1")).toBe(true);
+    expect(isPictureHref("https://x.example/a.png/view")).toBe(false);
+    expect(isPictureHref("relative/a.png")).toBe(false);
+    expect(isPictureHref("data:image/png;base64,AAAA.png")).toBe(false);
   });
 });
