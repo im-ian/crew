@@ -279,6 +279,12 @@
           "markdownDescription": "Enables the get_pins command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_read_marks command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-read-marks",
+          "markdownDescription": "Enables the get_read_marks command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_snapshot command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-snapshot",
@@ -337,6 +343,12 @@
           "type": "string",
           "const": "allow-lookup-skill",
           "markdownDescription": "Enables the lookup_skill command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mark_read command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mark-read",
+          "markdownDescription": "Enables the mark_read command without any pre-configured scope."
         },
         {
           "description": "Enables the mobile_pair command without any pre-configured scope.",
@@ -741,6 +753,12 @@
           "markdownDescription": "Denies the get_pins command without any pre-configured scope."
         },
         {
+          "description": "Denies the get_read_marks command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-read-marks",
+          "markdownDescription": "Denies the get_read_marks command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_snapshot command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-snapshot",
@@ -799,6 +817,12 @@
           "type": "string",
           "const": "deny-lookup-skill",
           "markdownDescription": "Denies the lookup_skill command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mark_read command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mark-read",
+          "markdownDescription": "Denies the mark_read command without any pre-configured scope."
         },
         {
           "description": "Denies the mobile_pair command without any pre-configured scope.",

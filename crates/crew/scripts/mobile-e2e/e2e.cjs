@@ -135,6 +135,39 @@ const newCode = () => JSON.parse(execSync(`python3 ${JSON.stringify(__dirname + 
     await shot(page, "11-card-answered");
     if (!last.includes("왼쪽")) throw new Error("the bot got: " + last);
   });
+  await step("다른 기기에서 읽은 긴 대화는 끝에서 열린다", async () => {
+    // The phone last looked at this chat two days ago. Since then it was read
+    // to the end on another device (the laptop's window, here a second phone).
+    await page.evaluate(() => {
+      const read = JSON.parse(localStorage.getItem("crew.read") || "{}");
+      read["agent:bot-long"] = Date.now() - 2 * 86400000;
+      localStorage.setItem("crew.read", JSON.stringify(read));
+    });
+    const other = await browser.newContext({ ...devices["iPhone 13"] });
+    const laptop = await other.newPage();
+    await laptop.goto(`http://127.0.0.1:${PORT}/?pair=${newCode()}`);
+    await laptop.waitForSelector(".composer-input");
+    await laptop.tap(".head-rail");
+    await laptop.click(".rail-row:has-text('긴대화')");
+    await laptop.waitForTimeout(2500);
+    await other.close();
+    await page.reload();
+    await page.waitForSelector(".composer-input");
+    await page.waitForTimeout(1000);
+    await page.tap(".head-rail");
+    await page.click(".rail-row:has-text('긴대화')");
+    await page.waitForTimeout(2500);
+    const at = await page.evaluate(() => {
+      const t = document.querySelector(".thread");
+      return { top: Math.round(t.scrollTop), gap: Math.round(t.scrollHeight - t.scrollTop - t.clientHeight) };
+    });
+    await shot(page, "11b-long-chat");
+    if (at.gap > 40) throw new Error(`opened ${at.gap}px above the end (scrollTop ${at.top})`);
+    // Back to the bot the steps below talk to.
+    await page.tap(".head-rail");
+    await page.click(".rail-row:has-text('에코')");
+    await page.waitForTimeout(800);
+  });
   await step("노트북이 꺼지면 배너", async () => {
     execSync(`CREW_HOME=${JSON.stringify(E + "/home")} ${JSON.stringify(E + "/bin/crew")} stop`, { stdio: "ignore" });
     await page.waitForSelector(".conn-banner", { timeout: 20000 });

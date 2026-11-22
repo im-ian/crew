@@ -70,6 +70,8 @@
     "allow-get-pins",
     "allow-set-pin",
     "allow-clear-pins",
+    "allow-get-read-marks",
+    "allow-mark-read",
     "allow-set-dock-badge",
     "allow-set-locale",
     "allow-set-notifications",
