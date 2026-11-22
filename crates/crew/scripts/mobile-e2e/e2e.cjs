@@ -74,24 +74,35 @@ const newCode = () => JSON.parse(execSync(`python3 ${JSON.stringify(__dirname + 
     await page.waitForTimeout(500);
     await shot(page, "06-reply");
   });
-  await step("노트북 표시 설정(글자 크기·내 이름)을 따른다", async () => {
+  await step("노트북 표시 설정(글자 크기·내 이름)을 따르고, 밀어서 답장", async () => {
     const scale = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--chat-scale").trim());
     if (!scale) throw new Error("no --chat-scale from the laptop's large text");
-    // A phone has no reply chip beside the message (#345): a held finger
-    // opens the menu (#341). Playwright cannot hold a touch, so this sends
-    // the event the hold sends, on the user's own message.
-    const held = await page.evaluate(() => {
+    // A phone answers a balloon by swiping it right to left (#381). The
+    // finger's path goes in as touch events on the user's own message.
+    const swiped = await page.evaluate(async () => {
       const rows = [...document.querySelectorAll(".bubble-row")].filter((r) => r.innerText.includes("휴대폰에서 안녕"));
-      const host = rows[0];
-      if (!host) return false;
-      const box = host.getBoundingClientRect();
-      const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: box.x + 30, clientY: box.y + 10, view: window });
-      ev.crewLongPress = true;
-      host.dispatchEvent(ev);
+      const bubble = rows[0]?.querySelector(":scope > .bubble");
+      if (!bubble) return false;
+      const box = bubble.getBoundingClientRect();
+      const y = box.y + box.height / 2;
+      const touch = (type, x) => {
+        const point = { identifier: 1, target: bubble, clientX: x, clientY: y, pageX: x, pageY: y, screenX: x, screenY: y };
+        const ev = new Event(type, { bubbles: true, cancelable: true });
+        const list = type === "touchend" ? [] : [point];
+        Object.defineProperty(ev, "touches", { value: list });
+        Object.defineProperty(ev, "changedTouches", { value: [point] });
+        bubble.dispatchEvent(ev);
+      };
+      const from = box.right - 20;
+      touch("touchstart", from);
+      for (let dx = 8; dx <= 120; dx += 8) {
+        touch("touchmove", from - dx);
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+      touch("touchend", from - 120);
       return true;
     });
-    if (!held) throw new Error("no message of the user's to hold");
-    await page.click(".ctx button:has-text('답장')");
+    if (!swiped) throw new Error("no message of the user's to swipe");
     await page.waitForTimeout(300);
     const named = await page.isVisible("text=대호에게 답장");
     await shot(page, "07-reply-to-me");
