@@ -360,7 +360,9 @@ function nodeToReact(
   if (tag === "A") {
     const href = el.getAttribute("href") || "";
     const title = el.getAttribute("title") || undefined;
-    const clip = title === "video" || title === "audio" ? title : mediaKind(href);
+    // A link inside a sentence stays a link: its player is under the paragraph.
+    const inSentence = el.classList.contains("md-media-ref");
+    const clip = inSentence ? null : title === "video" || title === "audio" ? title : mediaKind(href);
     if (clip) {
       const src = mediaSrc(href, baseDir);
       if (src) {

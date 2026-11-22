@@ -353,11 +353,14 @@ md.core.ruler.after("inline", "image_gallery", (state) => {
   state.tokens = out;
 });
 
-// A link to a picture is the picture: a bot that writes `[화면](/tmp/x.png)`
-// or links a capture's address means it to be seen, so it is drawn as
-// `![화면](/tmp/x.png)` is, in an album with its neighbours. Code is not
-// parsed for links, so a path in a code block stays text. A video link is
-// already a player (MdBody). An svg is never drawn (#371).
+// A link to a picture or a video is shown as one. A paragraph that is
+// nothing but such links shows them where they are, several pictures as an
+// album. In a paragraph with words, a link inside a sentence stays a link
+// (marked `md-media-ref`, so MdBody does not turn it into a player either),
+// a link alone on its line leaves the text, and the paragraph's pictures and
+// videos follow right under it. `![]()` is left as written. Code is not
+// parsed for links, so a path in a code block stays text. An svg is never
+// drawn (#371).
 const PICTURE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
 
 export function isPictureHref(href: string): boolean {
@@ -368,23 +371,121 @@ export function isPictureHref(href: string): boolean {
   return !!m && PICTURE_EXT.has(m[1].toLowerCase());
 }
 
-md.core.ruler.before("image_gallery", "picture_links", (state) => {
-  for (const block of state.tokens) {
-    const kids = block.type === "inline" ? block.children : null;
-    if (!kids) continue;
-    for (let i = 0; i < kids.length; i++) {
-      if (kids[i].type !== "link_open") continue;
-      const href = String(kids[i].attrGet("href") ?? "");
-      const end = kids.findIndex((t, j) => j > i && t.type === "link_close");
-      if (end < 0 || !isPictureHref(href)) continue;
-      const label = kids.slice(i + 1, end);
-      const image = new state.Token("image", "img", 0);
-      image.attrs = [["src", href], ["alt", ""]];
-      image.children = label;
-      image.content = label.map((t) => t.content).join("");
-      kids.splice(i, end - i + 1, image);
+function isMediaHref(href: string): boolean {
+  return isPictureHref(href) || (!!mediaKind(href) && (/^https?:\/\//i.test(href.trim()) || !!resolveLocalPath(href)));
+}
+
+type MediaLink = { href: string; alt: string };
+
+/** A line's tokens, and whether it holds nothing but media links. */
+function mediaOnly(line: Token[]): boolean {
+  let links = 0;
+  for (let i = 0; i < line.length; i++) {
+    const t = line[i];
+    if (t.type === "text" && t.content.trim() === "") continue;
+    if (t.type !== "link_open") return false;
+    const end = line.findIndex((u, j) => j > i && u.type === "link_close");
+    if (end < 0 || !isMediaHref(String(t.attrGet("href") ?? ""))) return false;
+    links += 1;
+    i = end;
+  }
+  return links > 0;
+}
+
+function mediaLinks(line: Token[]): { link: Token; media: MediaLink }[] {
+  const out: { link: Token; media: MediaLink }[] = [];
+  for (let i = 0; i < line.length; i++) {
+    if (line[i].type !== "link_open") continue;
+    const end = line.findIndex((u, j) => j > i && u.type === "link_close");
+    const href = String(line[i].attrGet("href") ?? "");
+    if (end < 0 || !isMediaHref(href)) continue;
+    const alt = line.slice(i + 1, end).map((t) => t.content).join("");
+    out.push({ link: line[i], media: { href, alt } });
+    i = end;
+  }
+  return out;
+}
+
+md.core.ruler.before("image_gallery", "media_links", (state) => {
+  const Tok = state.Token;
+  const image = (m: MediaLink) => {
+    const t = new Tok("image", "img", 0);
+    t.attrs = [["src", m.href], ["alt", ""]];
+    const label = new Tok("text", "", 0);
+    label.content = m.alt;
+    t.children = [label];
+    t.content = m.alt;
+    return t;
+  };
+  const paragraph = (open: Token, kids: Token[]) => {
+    const p = new Tok("paragraph_open", "p", 1);
+    p.block = true;
+    p.hidden = open.hidden;
+    p.level = open.level;
+    const inline = new Tok("inline", "", 0);
+    inline.level = open.level + 1;
+    inline.content = "";
+    inline.children = kids;
+    const close = new Tok("paragraph_close", "p", -1);
+    close.block = true;
+    close.hidden = open.hidden;
+    close.level = open.level;
+    return [p, inline, close];
+  };
+  const out: Token[] = [];
+  const src = state.tokens;
+  for (let i = 0; i < src.length; i++) {
+    const open = src[i];
+    const inline = src[i + 1];
+    if (open.type !== "paragraph_open" || inline?.type !== "inline" || src[i + 2]?.type !== "paragraph_close" || !inline.children) {
+      out.push(open);
+      continue;
+    }
+    // The paragraph's lines, each with the break that ended it.
+    const lines: { toks: Token[]; br: Token | null }[] = [{ toks: [], br: null }];
+    for (const t of inline.children) {
+      if (t.type === "softbreak" || t.type === "hardbreak") {
+        lines[lines.length - 1].br = t;
+        lines.push({ toks: [], br: null });
+      } else lines[lines.length - 1].toks.push(t);
+    }
+    const found = lines.flatMap((l) => mediaLinks(l.toks));
+    if (!found.length) {
+      out.push(open);
+      continue;
+    }
+    if (lines.every((l) => l.toks.length === 0 || mediaOnly(l.toks))) {
+      // Nothing but media: in place. A picture becomes the picture; a video
+      // link stays a link, which MdBody draws as its player.
+      const kids = inline.children;
+      for (let j = 0; j < kids.length; j++) {
+        const href = String(kids[j].attrGet("href") ?? "");
+        if (kids[j].type !== "link_open" || !isPictureHref(href)) continue;
+        const end = kids.findIndex((u, k) => k > j && u.type === "link_close");
+        const alt = kids.slice(j + 1, end).map((u) => u.content).join("");
+        kids.splice(j, end - j + 1, image({ href, alt }));
+      }
+      out.push(open);
+      continue;
+    }
+    // Words with media: the words stay, the media follow.
+    const kept = lines.filter((l) => !(l.toks.length && mediaOnly(l.toks)));
+    const children: Token[] = [];
+    kept.forEach((l, j) => {
+      children.push(...l.toks);
+      if (j < kept.length - 1 && l.br) children.push(l.br);
+    });
+    for (const f of found) f.link.attrJoin("class", "md-media-ref");
+    inline.children = children;
+    out.push(open, inline, src[i + 2]);
+    i += 2;
+    const pictures = found.filter((f) => isPictureHref(f.media.href));
+    if (pictures.length) out.push(...paragraph(open, pictures.map((f) => image(f.media))));
+    for (const f of found) {
+      if (!isPictureHref(f.media.href)) out.push(...paragraph(open, [image(f.media)]));
     }
   }
+  state.tokens = out;
 });
 
 md.renderer.rules.image_gallery_open = (tokens, idx, options, _env, self) =>
