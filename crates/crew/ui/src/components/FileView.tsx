@@ -2,9 +2,11 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type { FileTarget } from "../fileRef";
 import type { Token } from "../highlight";
-import { ExternalLink, FileText, X } from "../icons";
+import { ExternalLink, FileText, ImageIcon, X } from "../icons";
 import { useT } from "../LocaleContext";
 import type { MessageKey } from "../locales";
+import { isPictureHref, mediaKind, missingReason } from "../markdown";
+import { fileSrc } from "../transport";
 import type { TextFile } from "../types";
 import { SidePane } from "./SidePane";
 
@@ -41,6 +43,40 @@ export function splitFilePath(path: string): { name: string; dir: string } {
 }
 
 /**
+ * What `crew show` of a picture or a video opens: a viewer, not its bytes as
+ * text. An svg is a script that draws, so it is not one (#371).
+ */
+export function fileMedia(path: string): "image" | "video" | null {
+  if (isPictureHref(path)) return "image";
+  return mediaKind(path) === "video" ? "video" : null;
+}
+
+/** A picture or a video, fitted to the panel. Where it did not load, why. */
+function FileMedia({ kind, path }: { kind: "image" | "video"; path: string }) {
+  const t = useT();
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [path]);
+  if (failed) {
+    const key = missingReason(path) === "hidden" ? "file.hiddenAt" : "file.missingAt";
+    return <p className="file-state">{t(key, { path })}</p>;
+  }
+  const src = fileSrc(path);
+  return kind === "image" ? (
+    <img className="file-media" src={src} alt={splitFilePath(path).name} onError={() => setFailed(true)} />
+  ) : (
+    // No autoplay: the first frame and the player's own play button.
+    <video
+      className="file-media"
+      src={src.includes("#") ? src : `${src}#t=0.1`}
+      controls
+      playsInline
+      preload="metadata"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+/**
  * Text or code files beside the chat, colored, each opened at its line. Files
  * a bot showed together are tabs; `at` is the one shown.
  */
@@ -64,8 +100,10 @@ export function FileView({
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   const [tokens, setTokens] = useState<Token[][] | null>(null);
   const [flashing, setFlashing] = useState(false);
+  const media = fileMedia(target.path);
 
   useEffect(() => {
+    if (media) return;
     let gone = false;
     setLoaded({ state: "loading" });
     setTokens(null);
@@ -76,9 +114,9 @@ export function FileView({
     return () => {
       gone = true;
     };
-  }, [target.path, target.base, target.rel]);
+  }, [target.path, target.base, target.rel, media]);
 
-  const file = loaded.state === "ok" ? loaded.file : null;
+  const file = !media && loaded.state === "ok" ? loaded.file : null;
   const lines = useMemo(() => (file ? fileLines(file.text) : []), [file]);
 
   useEffect(() => {
@@ -118,7 +156,7 @@ export function FileView({
     <SidePane labelledBy="file-title" focusKey={`${target.path}:${target.line ?? ""}`} className="file-view">
       <div className="titlebar-align" data-tauri-drag-region />
       <header className="peek-head file-head" data-tauri-drag-region="deep">
-        <FileText className="file-head-icon" size={16} />
+        {media ? <ImageIcon className="file-head-icon" size={16} /> : <FileText className="file-head-icon" size={16} />}
         <div className="file-head-text">
           <h2 id="file-title" className="file-name" title={file?.path ?? target.path}>
             {name}
@@ -193,9 +231,10 @@ export function FileView({
       ) : (
         <div />
       )}
-      <div className="file-body" ref={bodyRef}>
-        {loaded.state === "loading" ? <p className="file-state">{t("file.loading")}</p> : null}
-        {loaded.state === "error" ? <p className="file-state">{t(loaded.key)}</p> : null}
+      <div className={"file-body" + (media ? " is-media" : "")} ref={bodyRef}>
+        {media ? <FileMedia kind={media} path={target.path} /> : null}
+        {!media && loaded.state === "loading" ? <p className="file-state">{t("file.loading")}</p> : null}
+        {!media && loaded.state === "error" ? <p className="file-state">{t(loaded.key)}</p> : null}
         {file ? (
           <div className="file-code" style={{ ["--gutter" as string]: `${gutter}ch` }}>
             {lines.map((line, i) => {

@@ -1260,7 +1260,7 @@ pub fn team_rules_for(
         ask_minutes = crate::client::ASK_WAIT.as_secs() / 60
     ));
     s.push_str(
-        "To show the user a text or code file, actually run `crew show <path>`; add `:<line>` to open it at that line. It opens beside the chat. An image or a video is not shown this way: link it in your reply. When you name a file in a reply, write it as `path:line` in inline code; the user can click it to open it beside the chat. When a reply shows a picture or links a file, write its absolute path: a relative one is read from your working folder, wherever you made the file. A file under a hidden folder (a name starting with a dot, like `~/.grok`) is never shown, so copy it out first, for example to `/tmp`.\n",
+        "To show the user a file, actually run `crew show <path>`; add `:<line>` to open a text or code file at that line. It opens beside the chat; a picture or a video opens in a viewer there. To put a picture or a video in your reply, write `![what it shows](absolute path or URL)`: the user sees it in the chat. Several in a row, in a paragraph of their own, become one album. When you name a file in a reply, write it as `path:line` in inline code; the user can click it to open it beside the chat. When a reply shows a picture or links a file, write its absolute path: a relative one is read from your working folder, wherever you made the file. A file under a hidden folder (a name starting with a dot, like `~/.grok`) is never shown, so copy it out first, for example to `/tmp`.\n",
     );
     s.push_str(&format!(
         "Your memory survives chat resets. It is under `{MEMORY_HEADING}` at the end of these instructions (absent while empty); if it changes between turns, a `[crew system]` note gives you the new one, and `crew memory show` prints it now. It is your own memory: keep your notes there, not in other memory files or tools. The teammate list and notes every bot shares belong in shared memory. Keep it yourself: when you learn something later chats need (the user's name, preferences, a decision) or the user asks you to remember it, actually run `crew memory append <<'EOF'` with one short line, then `EOF`. To correct or forget something, run `crew memory show`, then `crew memory set <<'EOF'` with the whole new memory; it replaces everything. Always pass the text in a quoted heredoc like this, so the shell leaves `$` and backticks alone. A schedule is a routine, not a memory. Do not save what is already there, one-off chatter, or passwords, tokens and other secrets. Do not only claim you remembered.\n",
@@ -3773,6 +3773,19 @@ mod tests {
         let rules = team_rules(&alpha, &[alpha.clone()]);
         assert!(rules.contains("write its absolute path"), "{rules}");
         assert!(rules.contains("hidden folder"), "{rules}");
+    }
+
+    /// A capture sent as a plain link stayed a link the user had to open: the
+    /// rules say to put pictures and videos in the reply as images, and that
+    /// `crew show` opens them too.
+    #[test]
+    fn team_rules_put_pictures_and_videos_in_the_reply() {
+        let alpha = AgentConfig::new("alpha".into(), "Alpha".into(), vec!["grok".into()], None);
+        let rules = team_rules(&alpha, &[alpha.clone()]);
+        assert!(rules.contains("write `![what it shows](absolute path or URL)`"), "{rules}");
+        assert!(rules.contains("one album"), "{rules}");
+        assert!(rules.contains("a picture or a video opens in a viewer"), "{rules}");
+        assert!(!rules.contains("is not shown this way"), "{rules}");
     }
 
     /// Several independent jobs in one message go to the CLI's own subagents,

@@ -353,6 +353,40 @@ md.core.ruler.after("inline", "image_gallery", (state) => {
   state.tokens = out;
 });
 
+// A link to a picture is the picture: a bot that writes `[화면](/tmp/x.png)`
+// or links a capture's address means it to be seen, so it is drawn as
+// `![화면](/tmp/x.png)` is, in an album with its neighbours. Code is not
+// parsed for links, so a path in a code block stays text. A video link is
+// already a player (MdBody). An svg is never drawn (#371).
+const PICTURE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
+
+export function isPictureHref(href: string): boolean {
+  const s = href.trim();
+  if (!/^https?:\/\//i.test(s) && !resolveLocalPath(s)) return false;
+  const base = s.split(/[?#]/)[0];
+  const m = base.match(/\.([a-z0-9]+)$/i);
+  return !!m && PICTURE_EXT.has(m[1].toLowerCase());
+}
+
+md.core.ruler.before("image_gallery", "picture_links", (state) => {
+  for (const block of state.tokens) {
+    const kids = block.type === "inline" ? block.children : null;
+    if (!kids) continue;
+    for (let i = 0; i < kids.length; i++) {
+      if (kids[i].type !== "link_open") continue;
+      const href = String(kids[i].attrGet("href") ?? "");
+      const end = kids.findIndex((t, j) => j > i && t.type === "link_close");
+      if (end < 0 || !isPictureHref(href)) continue;
+      const label = kids.slice(i + 1, end);
+      const image = new state.Token("image", "img", 0);
+      image.attrs = [["src", href], ["alt", ""]];
+      image.children = label;
+      image.content = label.map((t) => t.content).join("");
+      kids.splice(i, end - i + 1, image);
+    }
+  }
+});
+
 md.renderer.rules.image_gallery_open = (tokens, idx, options, _env, self) =>
   self.renderToken(tokens, idx, options);
 md.renderer.rules.image_gallery_close = (tokens, idx, options, _env, self) =>
