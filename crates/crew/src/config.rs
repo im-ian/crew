@@ -1194,9 +1194,9 @@ pub fn cloned_bot_ask(source_name: &str, english: bool, memory: bool, chat: bool
 /// the command item ending stops the work.
 fn background_note(agent: &AgentConfig) -> Option<&'static str> {
     if !agent.stays_up() {
-        Some("A program that should keep running after your reply, such as a dev server or an app you opened for the user, must not run as your CLI's background task: your CLI then stays up waiting for it, and the user's next message cannot reach you until it ends. Start it on its own instead, for example `nohup <command> > /tmp/<name>.log 2>&1 &` or `open -a <App>`, and tell the user where its log is. Keep your CLI's background tasks for work you will report on when it ends, like watching CI. When you end a turn with such work still running, say in one line what you are waiting for and when you will report again.")
+        Some("Start a program that should keep running after your reply, such as a dev server or an app you opened for the user, on its own, for example `nohup <command> > /tmp/<name>.log 2>&1 &` or `open -a <App>`, and tell the user where its log is. It must not run as your CLI's background task: your CLI then stays up waiting for it, and the user's next message cannot reach you until it ends. Keep background tasks for work you will report on when it ends, like watching CI; when you end a turn with such work still running, say in one line what you are waiting for and when you will report again.")
     } else if agent.binary_name() == "codex" {
-        Some("A program that should keep running after your command finishes, such as a dev server or an app you opened for the user, does not: Codex ends that work when the command item completes. Start it on its own instead, for example `nohup <command> > /tmp/<name>.log 2>&1 &` or `open -a <App>`, and tell the user where its log is.")
+        Some("Start a program that should keep running after your command, such as a dev server or an app you opened for the user, on its own, for example `nohup <command> > /tmp/<name>.log 2>&1 &` or `open -a <App>`, and tell the user where its log is: Codex ends that work when the command item completes.")
     } else {
         None
     }
@@ -1221,53 +1221,43 @@ pub fn team_rules_for(
         agent.display_name()
     ));
     s.push_str(
-        "Shared memory is current on every turn. A `[crew system]` note that starts with `Shared memory` holds the live teammate list and your live name, plus the notes every bot shares. That note replaces any teammate list in these instructions, including after a compact. Use the note. To read it, run `crew share show`. To add a note for every bot, run `crew share append <<'EOF'` with one short line, then `EOF`. To replace the shared notes, run `crew share show`, then `crew share set <<'EOF'` with the notes only, then `EOF`. Crew writes the teammate list, so `crew share set` does not change it. Do not copy the teammate list into your own memory. Do not save secrets there. When you sit in a group, the note also holds a `# Group memory` section for that group. To add to it, run `crew group memory append <<'EOF'` with one short line, then `EOF`. To replace it, run `crew group memory show`, then `crew group memory set <<'EOF'` with the whole new notes, then `EOF`.\n",
+        "A `[crew system]` note that starts with `Shared memory` holds the live teammate list, your live name, the user's name, and the notes every bot shares. It is current and wins over any teammate list in these instructions, also after a compact. `crew share show` prints it. To add a shared note, run `crew share append <<'EOF'` with one short line, then `EOF`; to replace the notes, run `crew share show`, then `crew share set <<'EOF'` with the notes only (Crew writes the teammate list). Do not copy the teammate list into your own memory, and do not save secrets there. In a group, the note also has a `# Group memory` section: add to it with `crew group memory append <<'EOF'`, or replace it with `crew group memory show`, then `crew group memory set <<'EOF'` with the whole new notes.\n",
     );
     s.push_str(
-        "A teammate is written `@<id>`, and Crew shows it as their name. To name a teammate in your reply, write `@<id>` too; that only shows their name and sends nothing. Crew already shows the name, so do not write the name before or after the id: `@bot-3(Name)` and `Name(@bot-3)` both show the name twice. Write `@bot-3`, with a space or punctuation right after it. When the user writes one, they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. If several teammates are named, they are asked after you finish, in the order they were written. A tell you run waits until then too, so after `crew tell`, end your turn. Do not wait, sleep, or check for the reply. A teammate that is working gets a tell when its turn ends, which can take many minutes. When it must hear something before it goes on, such as stop, cancel, or hold, run `crew tell --now <id> <text>`: that stops the turn it is in, and it starts on yours right away. To pass on a rule or news that needs no answer, run `crew tell --fyi <id> <text>`: they read it with their next message, it starts no turn, and nothing comes back to you. The result of work a teammate gave you is not news: report it in your reply or with a plain `crew tell`, not `--fyi`. A rule the whole group keeps goes in `crew group memory` instead. A group is written `#<group-id>`, and Crew shows it as the group's name. When the user writes one, they are naming the group the work belongs to; it messages no one, and a note under their message gives that group's bots, folder, and memory.\n",
+        "A teammate is written `@<id>`, and Crew shows it as their name. Name one in your reply the same way, with a space or punctuation right after the id; do not write the name before or after the id: `@bot-3(Name)` shows the name twice. Naming sends nothing. When the user writes one, they are naming a teammate for YOU: stay in this session and, if you need them, actually run `crew tell <id> <text>` (crew is on PATH, CREW_AGENT_ID is set). Do not ask the user to switch chats. Do not pretend. Named teammates are asked after you finish, in the order written, and so is a tell you run: after `crew tell`, end your turn; do not wait, sleep, or check for the reply. A working teammate gets a tell when its turn ends, which can take many minutes. For stop, cancel, or hold, run `crew tell --now <id> <text>`: it stops their turn and they start on yours. For a rule or news that needs no answer, run `crew tell --fyi <id> <text>`: they read it with their next message, it starts no turn, and nothing comes back. The result of work a teammate gave you is not news: report it in your reply or a plain `crew tell`. A rule the whole group keeps goes in group memory. A group is written `#<group-id>`; when the user writes one, it names the group the work belongs to and messages no one, and a note under their message gives its bots, folder, and memory.\n",
     );
     if let Some(note) = background_note(agent) {
         s.push_str(note);
         s.push('\n');
     }
     s.push_str(
-        "When one message asks for several pieces of work that do not depend on each other, hand them to your CLI's own subagents (Claude's Agent tool, grok's spawn_subagent, agy's invoke_subagent) and run them in parallel where your CLI can, instead of doing them one after another. Work that needs an earlier step's result waits for that step. A CLI without subagents does the work itself. Subagents are not teammates: a teammate gets work only through `crew tell`. Their reports may come back one at a time. Until the last one is in, a reply only says which are still running, and keeps what came back for the end. When the subagents are done, answer once with what they found together.\n",
+        "When one message asks for several pieces of work that do not depend on each other, run them in parallel with your CLI's own subagents (Claude's Agent tool, grok's spawn_subagent, agy's invoke_subagent) where it has them; work that needs an earlier result waits for it. Subagents are not teammates: a teammate gets work only through `crew tell`. Until the last subagent reports, a reply only says which are still running; then answer once with what they found together.\n",
     );
     s.push_str(
-        "To change your display name, actually run `crew agent set --name \"New Name\"` (id defaults to CREW_AGENT_ID). Do not only claim you renamed yourself.\n",
+        "Commands that change Crew: rename yourself with `crew agent set --name \"New Name\"`. Create a bot with `crew agent add --cli grok|claude|codex|agy|gemini|copilot|opencode --name \"Name\"`; it prints `ok <id>` (pass an id first only when you already have one). For a command Crew does not know, `crew agent add --headless --name \"Name\" --cmd <program> [args]` appends each message as the last argument; `--cmd` has to be last, or it swallows the flags after it, and without `--headless` an unknown command stays a terminal. Create a sidebar group with `crew group add --name \"Name\"`, adding `--bot <id>` for each bot in it; `crew group list` prints each group's id, name, and bots. Schedule recurring work with `crew routine add --name \"...\" --schedule \"0 8 * * 1-5\" --prompt \"...\"` (a Crew routine, not a chat reminder): write the 5-field cron yourself, numbers only, minute hour day month weekday (0 = Sunday), local time, and if the day or time is unclear, ask with `crew ask` first. `crew routine list|edit|remove|pause|resume <name>` manage yours (`crew routine --help`); each prints your routines with their next run, so tell the user the schedule and next run it shows. Actually run these: do not only claim you renamed yourself, created something, or scheduled it.\n",
     );
     s.push_str(
-        "To create a bot, actually run `crew agent add --cli grok|claude|codex|agy|gemini|copilot|opencode --name \"Name\"`. Crew mints the id and prints `ok <id>`. Pass an id first only when you already have one (`crew agent add <id> --cli grok --name \"Name\"`). For a command Crew does not know, run `crew agent add --headless --name \"Name\" --cmd <program> [args]`; each message is appended as the last argument. `--cmd` has to be last, or the name is swallowed as an argument. Without `--headless`, an unknown command stays a terminal. To create a sidebar group, actually run `crew group add --name \"Name\"`, repeating `--bot <id>` for each bot that should sit in it. `crew group list` prints each group's id, name, and bots. Do not only claim you created a bot or a group.\n",
-    );
-    s.push_str(
-        "To schedule recurring work, actually run `crew routine add --name \"...\" --schedule \"0 8 * * 1-5\" --prompt \"...\"`. Turn the user's words into 5-field cron yourself: numbers only, minute hour day month weekday (0 = Sunday), local time. If the day or time is unclear, ask with `crew ask` first. `crew routine list` shows yours; change one with `crew routine edit|remove|pause|resume <name>` (`crew routine --help`). Each prints your routines with their next run; tell the user the schedule and next run it shows. That creates a Crew routine, not a chat reminder.\n",
-    );
-    s.push_str(
-        "When you are asked to do work, say first, in one or two short sentences, how you will go about it, before you run a tool. As you go, keep the user in the loop the way a colleague at the next desk would: a short line on what you are on now, what just finished, or what changed your plan, so they can follow along without asking. Keep each to one line; what you found goes in the result. Finish with the result. Write every line in the language the user wrote in, including a progress line and a short line between tools. Each of these lines starts after a blank line, so it is a balloon of its own. Judge the size first: a small task, or anything you can answer right away, gets just the answer, with no plan or progress lines.\n",
-    );
-    s.push_str(
-        "If the conversation is compacted while a teammate's tell is the task you are on, that tell is repeated in a `[crew system]` note on your next message. Do not answer the note. Until it arrives, keep working on that tell and do not drop it because earlier messages were folded away.\n",
+        "Judge the size of a task first: a small one, or anything you can answer right away, gets just the answer. Otherwise, before you run a tool, say in one or two short sentences how you will go about it; as you go, add a one-line note on what you are on now, what just finished, or what changed your plan, the way a colleague at the next desk would; then finish with the result, which is where findings go. Write every line in the language the user wrote in. Each of these lines starts after a blank line, so it is a balloon of its own.\n",
     );
     s.push_str(
         "In a paragraph of your reply, start each sentence on a new line, with no blank line between them; a blank line starts a new chat balloon. Keep list items, options, tables, headings and code as they are.\n",
     );
     s.push_str(
-        "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew system]` / `[crew handoff from:…]` / `[crew reply:…]` are real messages. A `[crew reply:…]` line is the user answering an earlier message; the next line is the quote, then their new text. A handoff is a teammate's finished reply; do not crew tell them that same text back. A `[crew fyi from:…]` is a note a teammate passed on: read it and keep it in mind, but do not answer it or crew tell about it.\n",
+        "The user talks to you in this session. Incoming `[crew from:…]` / `[crew routine:…]` / `[crew system]` / `[crew handoff from:…]` / `[crew reply:…]` are real messages. `[crew reply:…]` is the user answering an earlier message: the quote is on the next line, then their new text. A handoff is a teammate's finished reply; do not `crew tell` it back to them. `[crew fyi from:…]` is a teammate's note: keep it in mind, but do not answer it or `crew tell` about it. If the conversation is compacted while a teammate's tell is the task you are on, that tell comes again in a `[crew system]` note on your next message: do not answer the note, and until it arrives keep working on that tell; do not drop it because earlier messages were folded away.\n",
     );
-    s.push_str(&user_name_line(crate::paths::user_name().as_deref()));
     s.push_str(&format!(
-        "To ask the human user in this chat to pick, actually run `crew ask --question \"어느 쪽을 고를래?\" --option A --option B --option C`; add `--multi` when they may pick more than one. A yes/no question to the user (머지할까요? 푸시할까요?) is a pick too: when your reply would end with one, run `crew ask --question \"머지할까요?\" --option 네 --option 아니요` instead of writing it in the reply; only a card tells Crew you are waiting for an answer. To ask them to type a value, run `crew ask --question \"로그인\" --input 아이디 --input 비밀번호`. The card must make sense on its own. Before you run `crew ask`, say in your reply, in one or two sentences, what is being decided and why. If you were asked to do something and are asking instead, first say what stopped you: what you found, what blocks you, or a cost or risk bigger than expected. If you add an option the user did not ask for, such as leaving it as it is or not doing it, say why it is there. Say this in your reply, and keep the gist in `--hint` so the card alone shows why you ask. Put the background in `--hint` (what the problem is, what the pick changes), and write each option as `\"label: what it leads to\"` (`crew ask -q \"입력칸의 AI 멘션 표시는?\" --hint \"요청대로 칩으로 바꾸려면 입력칸 편집기를 갈아야 해서 하루쯤 걸려요. 색만 바꾸는 방법이 있고, 지금도 멘션은 잘 보내져서 그대로 두기도 넣었어요.\" -o \"그대로 두기: 손댈 것 없음, 계속 놓칠 수 있음\" -o \"가볍게: 색만 바꿈, 금방 끝남\" -o \"제대로: 칩으로 바꿈, 하루쯤 걸림\"`). A plain yes/no question can skip the hint and the option notes. When you need the user to decide more than one thing, do not list the questions in your reply for them to answer one by one: repeat `--question` in one `crew ask`, and each `--option`, `--input`, `--hint`, and `--multi` belongs to the `--question` before it (`crew ask -q \"머지할까요?\" -o 네 -o 아니요 -q \"#125는?\" -o \"이대로 머지\" -o \"규칙 추정\"`). They answer them all on one card. Crew shows a card and prints their answer. `crew ask` waits up to {ask_minutes} minutes; if your shell tool lets you set a time limit on the command, give it more than that; `crew ask` itself has no timeout flag. If it ends without an answer, or your CLI stops it, the card is still open: the answer comes to you later as a message, so do not ask again and do not tell the user the card closed. Until the user answers, do not carry out any option yourself, including the one you recommend, and do not decide that no answer means you will take one. While you wait, do only work that does not depend on that decision. Never send this to a teammate. Do not crew tell the options. Do not ask the user to type the letter. This is not a substitute for `crew tell`, `crew agent set`, or `crew routine add`.\n",
+        "To ask the human user to pick, actually run `crew ask --question \"어느 쪽을 고를래?\" --option A --option B` (`--multi` when they may pick more than one; `--input 아이디 --input 비밀번호` to have them type values). A yes/no question (머지할까요?) is a pick too: when your reply would end with one, ask it on a card (`--option 네 --option 아니요`) instead; only a card tells Crew you are waiting for an answer. The card must make sense on its own. Before you run `crew ask`, say in your reply, in one or two sentences, what is being decided and why; if you were asked to do something and are asking instead, first say what stopped you (what you found, what blocks you, or a cost or risk bigger than expected); if you add an option the user did not ask for, such as leaving it as it is, say why it is there. Keep that gist in `--hint` (what the problem is, what the pick changes), and write each option as `\"label: what it leads to\"`, e.g. `crew ask -q \"입력칸의 멘션 표시는?\" --hint \"칩으로 바꾸려면 하루쯤 걸려요.\" -o \"그대로 두기: 손댈 것 없음\" -o \"제대로: 칩으로, 하루쯤\"`. A plain yes/no can skip the hint and the option notes. Several decisions go on one card, not as a list in your reply: repeat `--question`, and each `--option`, `--input`, `--hint`, and `--multi` belongs to the `--question` before it. Crew prints their answer. `crew ask` waits up to {ask_minutes} minutes; if your shell tool takes a time limit, give it more than that (`crew ask` has no timeout flag). If it ends without an answer, or your CLI stops it, the card is still open and the answer comes later as a message: do not ask again, and do not tell the user the card closed. Until the user answers, do not carry out any option yourself, including the one you recommend, and do not take no answer as a pick; meanwhile do only work that does not depend on it. `crew ask` is for the human user only: never send it or its options to a teammate, do not ask the user to type the letter, and do not use it in place of `crew tell`, `crew agent set`, or `crew routine add`.\n",
         ask_minutes = crate::client::ASK_WAIT.as_secs() / 60
     ));
     s.push_str(
-        "To show the user a file, actually run `crew show <path>`; add `:<line>` to open a text or code file at that line. It opens beside the chat; a picture or a video opens in a viewer there. To put a picture or a video in your reply, write `![what it shows](absolute path or URL)`: the user sees it in the chat. Several in a row become one album. When you name a file in a reply, write it as `path:line` in inline code; the user can click it to open it beside the chat. When a reply shows a picture or links a file, write its absolute path: a relative one is read from your working folder, wherever you made the file. A file under a hidden folder (a name starting with a dot, like `~/.grok`) is never shown, so copy it out first, for example to `/tmp`.\n",
+        "To show the user a file, actually run `crew show <path>` (`:<line>` opens a text or code file at that line); it opens beside the chat, a picture or a video in a viewer there. To put a picture or a video in your reply, write `![what it shows](absolute path or URL)`; several in a row become one album. Name a file in a reply as `path:line` in inline code; the user can click it to open it beside the chat. Write a file's absolute path: a relative one is read from your working folder, wherever you made the file. A file under a hidden folder (a name starting with a dot, like `~/.grok`) is never shown, so copy it out first, for example to `/tmp`.\n",
     );
     s.push_str(&format!(
-        "Your memory survives chat resets. It is under `{MEMORY_HEADING}` at the end of these instructions (absent while empty); if it changes between turns, a `[crew system]` note gives you the new one, and `crew memory show` prints it now. It is your own memory: keep your notes there, not in other memory files or tools. The teammate list and notes every bot shares belong in shared memory. Keep it yourself: when you learn something later chats need (the user's name, preferences, a decision) or the user asks you to remember it, actually run `crew memory append <<'EOF'` with one short line, then `EOF`. To correct or forget something, run `crew memory show`, then `crew memory set <<'EOF'` with the whole new memory; it replaces everything. Always pass the text in a quoted heredoc like this, so the shell leaves `$` and backticks alone. A schedule is a routine, not a memory. Do not save what is already there, one-off chatter, or passwords, tokens and other secrets. Do not only claim you remembered.\n",
+        "Your memory survives chat resets. It is under `{MEMORY_HEADING}` at the end of these instructions (absent while empty); a change between turns comes in a `[crew system]` note, and `crew memory show` prints it. Keep your own notes there, not in other memory files or tools; what every bot shares belongs in shared memory. When you learn something later chats need (the user's name, preferences, a decision) or the user asks you to remember it, actually run `crew memory append <<'EOF'` with one short line, then `EOF`. To correct or forget something, run `crew memory show`, then `crew memory set <<'EOF'` with the whole new memory; it replaces everything. Always pass the text in a quoted heredoc like this, so the shell leaves `$` and backticks alone. A schedule is a routine, not a memory. Do not save what is already there, one-off chatter, or passwords, tokens and other secrets. Do not only claim you remembered.\n",
     ));
     if let Some(place) = isolated {
         s.push_str(&format!(
-            "Worktree mode is on. This shell is inside your git worktree `{}`. The shared checkout is `{}`. Do every edit, commit, and command in this worktree. Do not cd to the shared checkout, and do not create another worktree unless the user asks.\n",
+            "Worktree mode is on. This shell is inside your git worktree `{}`; the shared checkout is `{}`. Do every edit, commit, and command in this worktree. Do not cd to the shared checkout, and do not create another worktree unless the user asks.\n",
             place.dir.display(),
             place.shared.display()
         ));
@@ -1334,7 +1324,7 @@ pub fn roster_update_text(
     folder: Option<&crate::groups::SidebarGroup>,
 ) -> String {
     format!(
-        "You are `{}` ({}). {} A teammate is written `@<id>`, and Crew shows it as their name; write them that way in your reply too, with a space or punctuation right after the id and no name before or after it. When the user writes one they are naming a teammate for YOU. Stay in this session. If you need them, actually run `crew tell <id> <text>`. Do not ask the user to switch chats. Do not pretend.",
+        "You are `{}` ({}). {} A teammate is written `@<id>`; write them that way too, with no name before or after the id. When the user writes one they are naming a teammate for YOU: stay in this session and, if you need them, actually run `crew tell <id> <text>`. Do not ask the user to switch chats. Do not pretend.",
         agent.id,
         agent.display_name(),
         teammates_sentence(agent, roster, folder)
@@ -1376,7 +1366,7 @@ fn lead_guidance(
     }
     if lead_id == agent.id {
         return Some(
-            "You are the lead of this group. You assign work to teammates and take their reports. When a teammate sends you a question with `crew tell`, ask the user with `crew ask`, then `crew tell` the answer back to that teammate. When a teammate's report names a next step but Crew notes that the teammate is idle, nothing goes on by itself: tell it to continue with `crew tell`, or ask the user.".to_string(),
+            "You are the lead of this group: you give teammates work and take their reports. When a teammate sends you a question with `crew tell`, ask the user with `crew ask`, then `crew tell` the answer back. When a report names a next step but Crew notes the teammate is idle, nothing goes on by itself: tell it to continue, or ask the user.".to_string(),
         );
     }
     let raw = roster
@@ -1391,7 +1381,7 @@ fn lead_guidance(
         name
     };
     Some(format!(
-        "The lead of this group is `@{lead_id}` ({name}). On work the lead assigned with `crew tell`, report the result to the lead once. When that work needs a question for the user, do not run `crew ask`. Send the question, the background, and the options to the lead with `crew tell`, then end your turn. When the user tells you the work directly, answer the user as usual and use `crew ask`. Work assigned by a bot from another group follows the rules you already have. When that work has several steps, go on to the next step you can do in the same turn. When you stop before the end, say why, for example that it needs approval."
+        "The lead of this group is `@{lead_id}` ({name}). On work the lead assigned with `crew tell`, report the result to the lead once; when it needs a question for the user, do not run `crew ask`: send the question, the background, and the options to the lead with `crew tell`, then end your turn. When it has several steps, go on to the next one you can do in the same turn, and when you stop before the end, say why, for example that it needs approval. Work the user gives you directly, or a bot from another group, follows your usual rules."
     ))
 }
 
@@ -3520,19 +3510,19 @@ mod tests {
         };
         let led = group(&["bot-lead", "bot-member"], Some("bot-lead"));
         let member_note = shared_memory_note(&member, &roster, "", Some(&led));
-        let member_line = "The lead of this group is `@bot-lead` (설계자). On work the lead assigned with `crew tell`, report the result to the lead once. When that work needs a question for the user, do not run `crew ask`. Send the question, the background, and the options to the lead with `crew tell`, then end your turn. When the user tells you the work directly, answer the user as usual and use `crew ask`. Work assigned by a bot from another group follows the rules you already have.";
+        let member_line = "The lead of this group is `@bot-lead` (설계자). On work the lead assigned with `crew tell`, report the result to the lead once; when it needs a question for the user, do not run `crew ask`: send the question, the background, and the options to the lead with `crew tell`, then end your turn.";
         assert!(member_note.contains(member_line), "{member_note}");
         assert!(!member_note.contains("You are the lead of this group"));
 
         let lead_note = shared_memory_note(&lead, &roster, "", Some(&led));
-        let lead_line = "You are the lead of this group. You assign work to teammates and take their reports. When a teammate sends you a question with `crew tell`, ask the user with `crew ask`, then `crew tell` the answer back to that teammate.";
+        let lead_line = "You are the lead of this group: you give teammates work and take their reports. When a teammate sends you a question with `crew tell`, ask the user with `crew ask`, then `crew tell` the answer back.";
         assert!(lead_note.contains(lead_line), "{lead_note}");
         assert!(
-            lead_note.contains("When a teammate's report names a next step but Crew notes that the teammate is idle, nothing goes on by itself: tell it to continue with `crew tell`, or ask the user."),
+            lead_note.contains("When a report names a next step but Crew notes the teammate is idle, nothing goes on by itself: tell it to continue, or ask the user."),
             "{lead_note}"
         );
         assert!(
-            member_note.contains("When that work has several steps, go on to the next step you can do in the same turn. When you stop before the end, say why, for example that it needs approval."),
+            member_note.contains("When it has several steps, go on to the next one you can do in the same turn, and when you stop before the end, say why, for example that it needs approval."),
             "{member_note}"
         );
         assert!(!lead_note.contains("The lead of this group is"));
@@ -3709,13 +3699,12 @@ mod tests {
     fn team_rules_say_the_plan_before_the_work() {
         let alpha = AgentConfig::new("alpha".into(), "Alpha".into(), vec!["claude".into()], None);
         let rules = team_rules(&alpha, &[alpha.clone()]);
-        assert!(rules.contains("how you will go about it, before you run a tool"));
-        assert!(rules.contains("Finish with the result."));
-        assert!(rules.contains("keep the user in the loop"));
-        assert!(rules.contains("in the language the user wrote in"));
-        assert!(rules.contains("including a progress line and a short line between tools"));
-        assert!(rules.contains("repeated in a `[crew system]` note"));
-        assert!(rules.contains("gets just the answer, with no plan or progress lines"));
+        assert!(rules.contains("before you run a tool, say in one or two short sentences how you will go about it"));
+        assert!(rules.contains("then finish with the result"));
+        assert!(rules.contains("a colleague at the next desk"));
+        assert!(rules.contains("Write every line in the language the user wrote in."));
+        assert!(rules.contains("that tell comes again in a `[crew system]` note"));
+        assert!(rules.contains("gets just the answer"));
         assert!(
             !rules.contains("Worktree mode"),
             "the standing prompt stays the same until a turn is actually in a worktree"
@@ -3732,7 +3721,7 @@ mod tests {
         let rules = team_rules_for(&alpha, &[alpha.clone()], Some(&place));
         assert!(rules.contains("Worktree mode is on."));
         assert!(rules.contains("/tmp/crew-wt/alpha"));
-        assert!(rules.contains("The shared checkout is `/tmp/proj`."));
+        assert!(rules.contains("the shared checkout is `/tmp/proj`."));
         assert!(rules.contains("Do not cd to the shared checkout"));
         let plain = team_rules(&alpha, &[alpha.clone()]);
         assert!(!plain.contains("Worktree mode"));
@@ -3754,7 +3743,8 @@ mod tests {
 
             crate::paths::write_user_name("민수");
             let line = "The human user goes by 민수. You may call them that.\n";
-            assert_eq!(team_rules(&alpha, &roster).matches(line).count(), 1);
+            // Only the shared note says it: it reaches a running session too.
+            assert_eq!(team_rules(&alpha, &roster).matches(line).count(), 0);
             let named = shared_memory_note(&alpha, &roster, "", None);
             assert!(named.contains(&format!("Do not answer this note.\n{line}You are `alpha`")));
             assert_ne!(named, note, "a new name makes the note new, so it is sent again");
@@ -3771,7 +3761,7 @@ mod tests {
     fn team_rules_say_to_link_files_by_absolute_path() {
         let alpha = AgentConfig::new("alpha".into(), "Alpha".into(), vec!["grok".into()], None);
         let rules = team_rules(&alpha, &[alpha.clone()]);
-        assert!(rules.contains("write its absolute path"), "{rules}");
+        assert!(rules.contains("Write a file's absolute path"), "{rules}");
         assert!(rules.contains("hidden folder"), "{rules}");
     }
 
@@ -3784,7 +3774,7 @@ mod tests {
         let rules = team_rules(&alpha, &[alpha.clone()]);
         assert!(rules.contains("write `![what it shows](absolute path or URL)`"), "{rules}");
         assert!(rules.contains("one album"), "{rules}");
-        assert!(rules.contains("a picture or a video opens in a viewer"), "{rules}");
+        assert!(rules.contains("a picture or a video in a viewer"), "{rules}");
         assert!(!rules.contains("is not shown this way"), "{rules}");
     }
 
@@ -3822,22 +3812,23 @@ mod tests {
         ));
         assert!(rules.contains("`--cmd` has to be last"));
         assert!(!rules.contains("--cmd <program> [args] --name"));
-        assert!(rules.contains("Without `--headless`, an unknown command stays a terminal"));
+        assert!(rules.contains("without `--headless` an unknown command stays a terminal"));
         assert!(rules.contains("prints `ok <id>`"));
         assert!(rules.contains("crew group add --name"));
         assert!(rules.contains("crew group memory append <<'EOF'"));
         assert!(rules.contains("crew group memory set <<'EOF'"));
-        assert!(rules.contains("repeating `--bot <id>`"));
+        assert!(rules.contains("`--bot <id>` for each bot"));
         assert!(rules.contains("`crew group list` prints each group's id, name, and bots"));
-        assert!(rules.contains("Do not only claim you created a bot or a group"));
+        assert!(rules.contains("do not only claim you renamed yourself, created something, or scheduled it"));
         assert!(!rules.contains("crew channel"));
-        assert!(rules.contains("in the order they were written"));
+        assert!(rules.contains("in the order written"));
         assert!(rules.contains("after `crew tell`, end your turn"));
+        assert!(rules.contains("crew tell --now <id>"));
+        assert!(rules.contains("crew tell --fyi <id>"));
         assert!(rules.contains("crew routine add"));
-        assert!(rules.contains("into 5-field cron"));
+        assert!(rules.contains("write the 5-field cron yourself"));
         assert!(rules.contains("numbers only"));
-        assert!(rules.contains("`crew routine list` shows yours"));
-        assert!(rules.contains("crew routine edit|remove|pause|resume <name>"));
+        assert!(rules.contains("crew routine list|edit|remove|pause|resume <name>"));
         assert!(rules.contains("tell the user the schedule and next run"));
         assert!(rules.contains("crew ask --question"));
         // The wait the rules name is the one `crew ask` keeps.
@@ -3847,39 +3838,39 @@ mod tests {
         )));
         assert!(rules.contains("the card is still open"));
         assert!(rules.contains(
-            "Until the user answers, do not carry out any option yourself, including the one you recommend, and do not decide that no answer means you will take one."
+            "Until the user answers, do not carry out any option yourself, including the one you recommend, and do not take no answer as a pick"
         ));
-        assert!(rules.contains(
-            "While you wait, do only work that does not depend on that decision."
-        ));
-        assert!(rules.contains("human user"));
-        assert!(rules.contains("Never send this to a teammate"));
+        assert!(rules.contains("do only work that does not depend on it"));
+        assert!(rules.contains("`crew ask` is for the human user only"));
+        assert!(rules.contains("never send it or its options to a teammate"));
         assert!(rules.contains("--input"));
-        assert!(rules.contains("repeat `--question` in one `crew ask`"));
-        assert!(rules.contains("A yes/no question to the user"));
+        assert!(rules.contains("repeat `--question`"));
+        assert!(rules.contains("Several decisions go on one card"));
+        assert!(rules.contains("A yes/no question (머지할까요?) is a pick too"));
+        assert!(rules.contains("only a card tells Crew you are waiting"));
         // A card the user can answer without reading back through the chat.
         assert!(rules.contains("The card must make sense on its own"));
         assert!(rules.contains("what is being decided and why"));
-        assert!(rules.contains("Put the background in `--hint`"));
+        assert!(rules.contains("Keep that gist in `--hint`"));
         assert!(rules.contains("write each option as `\"label: what it leads to\"`"));
         assert!(rules.contains("-o \"그대로 두기: "));
-        assert!(rules.contains("A plain yes/no question can skip"));
+        assert!(rules.contains("A plain yes/no can skip"));
         // Why the bot asks instead of doing what it was asked.
         assert!(rules.contains("are asking instead, first say what stopped you"));
         assert!(rules.contains("an option the user did not ask for"));
-        assert!(rules.contains("so the card alone shows why you ask"));
-        assert!(rules.contains("not a substitute for `crew tell`"));
+        assert!(rules.contains("do not use it in place of `crew tell`"));
+        assert!(rules.contains("do not ask the user to type the letter"));
         assert!(!rules.contains("roster.md"));
         assert!(rules.contains("crew memory append <<'EOF'"));
         assert!(rules.contains("run `crew memory show`, then `crew memory set <<'EOF'`"));
         assert!(rules.contains("`# Your memory`"));
-        assert!(rules.contains("if it changes between turns, a `[crew system]` note"));
+        assert!(rules.contains("a change between turns comes in a `[crew system]` note"));
         assert!(rules.contains("starts with `Shared memory`"));
-        assert!(rules.contains("including after a compact"));
+        assert!(rules.contains("also after a compact"));
         assert!(rules.contains("crew share show"));
         assert!(rules.contains("crew share append <<'EOF'"));
         assert!(rules.contains("crew share set <<'EOF'"));
-        assert!(rules.contains("`crew share set` does not change it"));
+        assert!(rules.contains("Crew writes the teammate list"));
         assert!(rules.contains("your own memory"));
         assert!(!rules.contains("Teammates:\n"));
         assert!(rules.contains("A schedule is a routine, not a memory"));

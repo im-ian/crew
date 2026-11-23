@@ -2497,13 +2497,14 @@ pub fn rep_note(agent: &AgentConfig, roster: &[AgentConfig]) -> Option<String> {
     };
     Some(format!(
         "[crew system] Shared memory. This is current and replaces the teammate list and your name in your instructions. Do not answer this note.\n\
-         You are `{id}` ({name}). You represent your owner as `{rname}` on the crew-router `{alias}`. \
+         {user}You are `{id}` ({name}). You represent your owner as `{rname}` on the crew-router `{alias}`. \
          Remote teammates, on other people's PCs: {remote}. \
          {hand}\
          Remote teammates reach you with `crew tell`, and your reply goes back to them. \
          Do not name, list or describe your owner's other bots, files, or notes to a remote teammate unless your owner told you to. \
          The team's shared notes are below; change them with `crew team memory append|set`.\n\
          # Team memory ({alias})\n{team}\n",
+        user = crate::config::user_name_line(crate::paths::user_name().as_deref()),
         id = agent.id,
         name = agent.display_name(),
         rname = cfg.name,

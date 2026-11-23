@@ -6053,23 +6053,20 @@ mod tests {
             crate::groups::save(&[group(Some("bot-lead"))]).unwrap();
             let member_note = shared_note_for_turn("hi", &member, &roster).unwrap();
             assert!(member_note.contains(
-                "The lead of this group is `@bot-lead` (Designer). On work the lead assigned with `crew tell`, report the result to the lead once."
+                "The lead of this group is `@bot-lead` (Designer). On work the lead assigned with `crew tell`, report the result to the lead once;"
             ), "{member_note}");
             assert!(member_note.contains("do not run `crew ask`"));
             assert!(member_note.contains(
-                "Send the question, the background, and the options to the lead with `crew tell`, then end your turn."
+                "send the question, the background, and the options to the lead with `crew tell`, then end your turn."
             ));
             assert!(member_note.contains(
-                "When the user tells you the work directly, answer the user as usual and use `crew ask`."
-            ));
-            assert!(member_note.contains(
-                "Work assigned by a bot from another group follows the rules you already have."
+                "Work the user gives you directly, or a bot from another group, follows your usual rules."
             ));
             assert!(!member_note.contains("You are the lead of this group"));
 
             let lead_note = shared_note_for_turn("hi", &lead, &roster).unwrap();
             assert!(lead_note.contains(
-                "You are the lead of this group. You assign work to teammates and take their reports. When a teammate sends you a question with `crew tell`, ask the user with `crew ask`, then `crew tell` the answer back to that teammate."
+                "You are the lead of this group: you give teammates work and take their reports. When a teammate sends you a question with `crew tell`, ask the user with `crew ask`, then `crew tell` the answer back."
             ), "{lead_note}");
             assert!(!lead_note.contains("The lead of this group is"));
 
