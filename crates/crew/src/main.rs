@@ -508,6 +508,12 @@ fn run() -> anyhow::Result<()> {
             cli,
             headless,
         })) => {
+            // A typed command is its own AI; only `--cli` can be the default's.
+            let (model, effort) = if cmd.is_empty() {
+                fallback::add_defaults(cli, model, effort, &fallback::load().unwrap_or_default())
+            } else {
+                (model, effort)
+            };
             let cmd = resolve_add_cmd(cli, cmd)?;
             let headless = config::headless_cmd(headless, &cmd);
             let name_given = name.and_then(|n| {
