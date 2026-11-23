@@ -359,6 +359,44 @@ export function orderedSlots(layout: RailLayout): string[] {
   return out;
 }
 
+/** What putting a group away takes with it: its bots on this PC, their routines, and how many are at work. */
+export function archiveSummary(
+  group: Group | null | undefined,
+  agents: readonly AgentInfo[],
+): { bots: number; routines: number; working: number } {
+  const keys = new Set(group?.items ?? []);
+  const mine = agents.filter((a) => keys.has(itemKey("agent", a.id)) && !a.remote);
+  return {
+    bots: mine.length,
+    routines: mine.reduce((n, a) => n + (a.routines?.length ?? 0), 0),
+    working: mine.filter((a) => a.status === "working" || a.status === "blocked").length,
+  };
+}
+
+/** The layout without the groups in `ids`: their place in the order goes with them. */
+export function withoutGroups(layout: RailLayout, ids: ReadonlySet<string>): RailLayout {
+  const groups = layout.groups.filter((g) => g.id === UNGROUPED_ID || !ids.has(g.id));
+  const slots = orderedSlots(layout).filter((k) => !ids.has(k));
+  return applyOrder(groups, slots);
+}
+
+/**
+ * The layout with folder `id` at place `slot` among `slots`, the rail's top
+ * level as it is shown. A place that is gone, or none, is the bottom.
+ */
+export function withGroupAt(
+  layout: RailLayout,
+  id: string,
+  slots: readonly string[],
+  slot: number | null | undefined,
+): RailLayout {
+  if (!layout.groups.some((g) => g.id === id)) return layout;
+  const rest = slots.filter((k) => k !== id);
+  const at = slot == null || slot < 0 ? rest.length : Math.min(slot, rest.length);
+  rest.splice(at, 0, id);
+  return applyOrder(layout.groups, rest);
+}
+
 /** The rail's top level, including loose bots that are not saved yet. */
 export function railSlots(
   groups: Group[],

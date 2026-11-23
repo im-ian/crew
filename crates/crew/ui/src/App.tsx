@@ -8,7 +8,7 @@ import { CloneBotModal } from "./components/CloneBotModal";
 import { TemplatesHost } from "./components/TemplatesHost";
 import { UpdateConfirm } from "./components/UpdateConfirm";
 import { canCarryChat } from "./cloneParts";
-import { itemKey } from "./groups";
+import { archiveSummary, itemKey } from "./groups";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ContextMenu, type MenuEntry } from "./components/ContextMenu";
 import { AgentPane } from "./components/AgentPane";
@@ -938,6 +938,9 @@ export function App() {
       <Sidebar
         agents={crew.agents}
         remotes={crew.remotes}
+        archived={crew.archived}
+        onRestoreArchived={(id) => void crew.restoreArchivedGroup(id)}
+        onDeleteArchived={(id) => crew.openConfirm(id, "delete-archived")}
         groups={crew.groups}
         ungrouped={crew.ungrouped}
         order={crew.order}
@@ -1156,6 +1159,16 @@ export function App() {
             ? representing(crew.confirmId, crew.remotes)
             : []
         }
+        archiving={(() => {
+          if (crew.confirmKind !== "archive-group") return null;
+          const group = crew.groups.find((g) => g.id === crew.confirmId);
+          return group ? { name: group.name, ...archiveSummary(group, crew.agents) } : null;
+        })()}
+        deleting={(() => {
+          if (crew.confirmKind !== "delete-archived") return null;
+          const held = crew.archived.find((g) => g.id === crew.confirmId);
+          return held ? { name: held.name, bots: held.bots.length } : null;
+        })()}
         onCancel={crew.closeConfirm}
         onConfirm={(drop) => void crew.doConfirm(drop)}
       />
@@ -1412,6 +1425,14 @@ function menuItems(
         onClick: () => {
           crew.hideCtx();
           if (id) crew.openGroupSettings(id);
+        },
+      },
+      {
+        type: "action",
+        label: t("menu.archiveGroup"),
+        onClick: () => {
+          crew.hideCtx();
+          if (id) crew.openConfirm(id, "archive-group");
         },
       },
       {

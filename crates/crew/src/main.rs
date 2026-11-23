@@ -11,6 +11,7 @@ mod desktop;
 mod escape_layer;
 mod fallback;
 mod files;
+mod group_archive;
 mod groups;
 mod headless;
 mod interrupt;
@@ -276,6 +277,21 @@ enum GroupCmd {
         /// Bot id to put in the new group. Repeat for more than one.
         #[arg(long = "bot")]
         bots: Vec<String>,
+    },
+    /// Put a group away with its bots. Chats and memory are kept.
+    #[command(hide = true)]
+    Archive {
+        /// Group id, from `crew group list`.
+        id: String,
+        /// Stop bots that are working instead of refusing.
+        #[arg(long)]
+        stop: bool,
+    },
+    /// Bring an archived group back.
+    #[command(hide = true)]
+    Restore {
+        /// Group id, from `crew group list`.
+        id: String,
     },
     /// Notes every bot in a group shares. Defaults to the group $CREW_AGENT_ID sits in.
     Memory {
@@ -722,6 +738,8 @@ fn run() -> anyhow::Result<()> {
         }
         Some(Cmd::Group(GroupCmd::List)) => list_groups_cmd(),
         Some(Cmd::Group(GroupCmd::Add { name, bots })) => add_group_cmd(name, bots),
+        Some(Cmd::Group(GroupCmd::Archive { id, stop })) => group_archive_cmd("archive", id, stop),
+        Some(Cmd::Group(GroupCmd::Restore { id })) => group_archive_cmd("restore", id, false),
         Some(Cmd::Group(GroupCmd::Memory { group, cmd })) => group_memory_cmd(group, cmd),
         Some(Cmd::Routine(sub)) => run_routine(sub),
         Some(Cmd::Memory(sub)) => run_memory(sub),
@@ -1333,14 +1351,42 @@ fn list_groups_cmd() -> anyhow::Result<()> {
         .iter()
         .filter(|g| g.id != groups::UNGROUPED_ID)
         .collect();
-    if shown.is_empty() {
+    let archived = group_archive::load();
+    if shown.is_empty() && archived.is_empty() {
         println!("(no groups)");
         return Ok(());
     }
     for g in shown {
         println!("{}\t{}\t{}", g.id, g.name, bot_ids(&g.items));
     }
+    // Put away with their bots: `crew group restore <id>` brings them back.
+    for g in archived {
+        println!("{}\t{}\t{}\tarchived", g.group.id, g.group.name, bot_ids(&g.group.items));
+    }
     Ok(())
+}
+
+/// `crew group archive|restore <id>`, answered by the daemon, which holds the bots.
+fn group_archive_cmd(action: &str, id: String, stop: bool) -> anyhow::Result<()> {
+    let id = id.trim().to_string();
+    if id.is_empty() {
+        anyhow::bail!("group id is empty");
+    }
+    client::ensure_daemon()?;
+    match client::rpc(Request::GroupArchive {
+        action: action.to_string(),
+        id,
+        stop,
+        slot: None,
+    })? {
+        Event::GroupArchive { info } => {
+            let bots = info.get("bots").and_then(|v| v.as_u64()).unwrap_or(0);
+            println!("ok {action} {bots} bots");
+            Ok(())
+        }
+        Event::Error { message } => anyhow::bail!(message),
+        _ => anyhow::bail!("unexpected daemon response"),
+    }
 }
 
 /// `--group`, else the group the calling bot sits in.
@@ -1699,6 +1745,35 @@ mod tests {
             }
             _ => panic!("expected group add"),
         }
+    }
+
+    #[test]
+    fn group_archive_and_restore_take_a_group_id() {
+        match parse_ok(&["crew", "group", "archive", "g1", "--stop"]).cmd {
+            Some(Cmd::Group(GroupCmd::Archive { id, stop })) => {
+                assert_eq!((id.as_str(), stop), ("g1", true));
+            }
+            _ => panic!("expected group archive"),
+        }
+        match parse_ok(&["crew", "group", "archive", "g1"]).cmd {
+            Some(Cmd::Group(GroupCmd::Archive { stop, .. })) => assert!(!stop),
+            _ => panic!("expected group archive"),
+        }
+        match parse_ok(&["crew", "group", "restore", "g1"]).cmd {
+            Some(Cmd::Group(GroupCmd::Restore { id })) => assert_eq!(id, "g1"),
+            _ => panic!("expected group restore"),
+        }
+    }
+
+    /// Bots may run these, but they are not in what `crew group --help` tells.
+    #[test]
+    fn group_archive_stays_out_of_the_help() {
+        use clap::CommandFactory;
+        let mut cmd = Cli::command();
+        let group = cmd.find_subcommand_mut("group").expect("group");
+        let help = group.render_help().to_string();
+        assert!(help.contains("add"), "{help}");
+        assert!(!help.contains("archive") && !help.contains("restore"), "{help}");
     }
 
     #[test]

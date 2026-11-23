@@ -219,6 +219,22 @@ describe("archive commands", () => {
     expect(fileStateMap(["/a", "/b"], [true, false])).toEqual({});
   });
 
+  it("puts a group away, restores it and deletes it by the daemon's commands", async () => {
+    mocks.invoke.mockResolvedValue({});
+    await api.archiveGroup("g1", true, 3);
+    await api.archiveGroup("g2", false, null);
+    await api.listArchivedGroups();
+    await api.restoreGroup("g1");
+    await api.deleteArchivedGroup("g1");
+    expect(mocks.invoke.mock.calls.slice(-5)).toEqual([
+      ["archive_group", { id: "g1", stop: true, slot: 3 }],
+      ["archive_group", { id: "g2", stop: false, slot: null }],
+      ["list_archived_groups"],
+      ["restore_group", { id: "g1" }],
+      ["delete_archived_group", { id: "g1" }],
+    ]);
+  });
+
   it("calls the daemon's commands by their names", async () => {
     mocks.invoke.mockResolvedValueOnce([]).mockResolvedValueOnce(["exists"]);
     await api.archivePins("bot-a");

@@ -77,6 +77,18 @@ pub enum Request {
     RemoveAgent {
         id: String,
     },
+    /// Put a group away with its bots, bring it back, or delete it for good:
+    /// `action` is `archive`, `restore` or `delete`, `id` the group's. A
+    /// group whose bots are working is archived only with `stop`. `slot` is
+    /// where the sidebar had it, kept for the restore.
+    GroupArchive {
+        action: String,
+        id: String,
+        #[serde(default)]
+        stop: bool,
+        #[serde(default)]
+        slot: Option<usize>,
+    },
     /// Mobile access: `status`, `on`, `off`, `pair` (a new code), or
     /// `revoke` with the device id in `arg`.
     Mobile {
@@ -313,6 +325,10 @@ pub enum Event {
     },
     /// What `Request::Mobile` answered.
     Mobile {
+        info: serde_json::Value,
+    },
+    /// What `Request::GroupArchive` did.
+    GroupArchive {
         info: serde_json::Value,
     },
     Error {

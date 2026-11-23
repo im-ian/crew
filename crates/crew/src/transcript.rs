@@ -142,6 +142,17 @@ pub fn drop_agent(agent: &str) {
     drop_key(agent, &paths::transcript_path(agent));
 }
 
+/// The chat leaves memory and stays on disk, as when a bot is put away with its
+/// group. `load_agent` brings it back.
+pub fn unload_agent(agent: &str) {
+    let Ok(mut map) = chats().lock() else {
+        return;
+    };
+    if let Some(chat) = map.remove(agent) {
+        persist(agent, &chat);
+    }
+}
+
 /// Removal is final: forget the chat and its file, so an id reused by a
 /// later agent of the same name does not inherit the old session.
 ///

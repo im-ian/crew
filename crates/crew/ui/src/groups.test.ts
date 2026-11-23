@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   UNGROUPED_ID,
+  archiveSummary,
   focusedGroupId,
   groupIdOf,
   groupOrderChanges,
@@ -22,6 +23,8 @@ import {
   groupLead,
   toPersist,
   visibleUngroupedKeys,
+  withGroupAt,
+  withoutGroups,
 } from "./groups";
 import type { AgentInfo, Group } from "./types";
 
@@ -481,5 +484,69 @@ describe("pruneLayout while bots are being made", () => {
     expect(kept.groups[0].items).toEqual(["agent:a", "agent:new"]);
     expect(kept.groups[0].lead).toBe("new");
     expect(pruneLayout(layout, agents).groups[0].items).toEqual(["agent:a"]);
+  });
+});
+
+describe("putting a group away and back", () => {
+  const layout = {
+    groups: [group("g1", ["agent:a1"]), group("g2", ["agent:a2"]), group("g3", [])],
+    ungrouped: ["agent:a3"],
+    order: ["g1", "agent:a3", "g2", "g3"],
+  };
+
+  it("takes a group and its place in the order out of the layout", () => {
+    const next = withoutGroups(layout, new Set(["g2"]));
+    expect(next.groups.map((g) => g.id)).toEqual(["g1", "g3"]);
+    expect(next.ungrouped).toEqual(["agent:a3"]);
+    // Folders then loose bots would be the plain order, so none is kept; a
+    // loose bot between folders would be.
+    expect(next.order).toEqual(["g1", "agent:a3", "g3"]);
+    expect(withoutGroups(layout, new Set(["nope"])).groups).toHaveLength(3);
+    const two = withoutGroups(layout, new Set(["g1", "g3"]));
+    expect(two.groups.map((g) => g.id)).toEqual(["g2"]);
+    expect(two.order).toEqual(["agent:a3", "g2"]);
+    // With no loose bot left in front, the order is the plain one and is dropped.
+    expect(withoutGroups({ ...layout, ungrouped: [], order: ["g1", "g2", "g3"] }, new Set(["g1"])).order).toBeUndefined();
+  });
+
+  it("puts a restored group back at its place among the rail's top level", () => {
+    const rest = withoutGroups(layout, new Set(["g2"]));
+    const slots = ["g1", "agent:a3", "g3"];
+    // It was third of four: after the loose bot, before g3.
+    const back = withGroupAt(
+      { ...rest, groups: [...rest.groups, group("g2", ["agent:a2"])] },
+      "g2",
+      slots,
+      2,
+    );
+    expect(back.groups.map((g) => g.id)).toEqual(["g1", "g2", "g3"]);
+    expect(back.order).toEqual(["g1", "agent:a3", "g2", "g3"]);
+  });
+
+  it("puts it at the bottom when its place is unknown or gone", () => {
+    const base = { groups: [group("g1", []), group("new", ["agent:n"])], ungrouped: [] as string[] };
+    for (const slot of [null, undefined, 99, -1]) {
+      const next = withGroupAt(base, "new", ["g1"], slot);
+      expect(next.groups.map((g) => g.id), String(slot)).toEqual(["g1", "new"]);
+    }
+    expect(withGroupAt(base, "new", ["g1"], 0).groups.map((g) => g.id)).toEqual(["new", "g1"]);
+    // A group the layout does not hold changes nothing.
+    expect(withGroupAt(base, "missing", ["g1"], 0)).toBe(base);
+  });
+});
+
+describe("archiveSummary", () => {
+  it("counts the group's bots here, their routines and the ones at work", () => {
+    const bots: AgentInfo[] = [
+      { ...agent("a"), status: "working", routines: [{ id: "r1", name: "r1", schedule: "0 9 * * *", prompt: "x", enabled: true }] },
+      { ...agent("b"), status: "blocked", routines: [] },
+      { ...agent("c"), routines: [{ id: "r2", name: "r2", schedule: "0 9 * * *", prompt: "x", enabled: false }, { id: "r3", name: "r3", schedule: "0 9 * * *", prompt: "x", enabled: true }] },
+      // Another group's bot, and a teammate's bot on a router, do not count.
+      { ...agent("d"), status: "working" },
+      { ...agent("e"), remote: "team" },
+    ];
+    const g = group("g", ["agent:a", "agent:b", "agent:c", "agent:e", "agent:gone"]);
+    expect(archiveSummary(g, bots)).toEqual({ bots: 3, routines: 3, working: 2 });
+    expect(archiveSummary(null, bots)).toEqual({ bots: 0, routines: 0, working: 0 });
   });
 });

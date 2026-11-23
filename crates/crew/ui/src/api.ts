@@ -6,6 +6,7 @@ import type { PathKind } from "./dropAttach";
 import type { DisplayPrefs } from "./displayPrefs";
 import type {
   AgentInfo,
+  ArchivedGroup,
   ChatMessage,
   Group,
   ModelList,
@@ -255,6 +256,13 @@ export const api = {
     invoke<boolean>("set_group_memory", { group, text, base }),
   removeGroupMemory: (group: string) => invoke<void>("remove_group_memory", { group }),
   listGroups: () => invoke<Group[]>("list_groups"),
+  /** Put a group away with its bots. `stop` is the user's yes to stopping bots at work. */
+  archiveGroup: (id: string, stop: boolean, slot: number | null) =>
+    invoke<{ bots: number; routines: number; stopped: number }>("archive_group", { id, stop, slot }),
+  listArchivedGroups: () => invoke<ArchivedGroup[]>("list_archived_groups"),
+  restoreGroup: (id: string) =>
+    invoke<{ id: string; bots: number; slot?: number | null }>("restore_group", { id }),
+  deleteArchivedGroup: (id: string) => invoke<unknown>("delete_archived_group", { id }),
   planUsage: (clis: string[]) => invoke<PlanUsage[]>("plan_usage", { clis }),
   setGroups: (groups: Group[]) => invoke<void>("set_groups", { groups }),
   searchCrew: (query: string) => invoke<SearchHit[]>("search_crew", { query }),

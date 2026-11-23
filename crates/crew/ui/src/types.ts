@@ -6,7 +6,34 @@ export type PaneTab = "info" | "routines" | "archive";
 /** How saving an edit to a waiting message ended. "gone": it went out first. */
 export type EditResult = "saved" | "gone" | "failed";
 export type CtxKind = Kind | "group" | "create" | "split";
-export type ConfirmKind = "reset" | "remove" | "remove-group" | "leave-remote";
+export type ConfirmKind =
+  | "reset"
+  | "remove"
+  | "remove-group"
+  | "archive-group"
+  | "delete-archived"
+  | "leave-remote";
+
+/** A bot of an archived group, as the daemon kept it. */
+export type ArchivedBot = {
+  id: string;
+  name: string;
+  avatar?: string | null;
+  avatar_shape?: string | null;
+  avatar_color?: string | null;
+};
+
+/** A group put away with its bots: off the sidebar until it is restored. */
+export type ArchivedGroup = {
+  id: string;
+  name: string;
+  /** Unix milliseconds. */
+  archived_at: number;
+  /** Where the sidebar had it, so a restore puts it back there. */
+  slot?: number | null;
+  bots: ArchivedBot[];
+  routines: number;
+};
 
 export type Group = {
   id: string;

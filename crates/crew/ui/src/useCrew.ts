@@ -49,6 +49,7 @@ import { useRemotes } from "./useRemotes";
 import { keepSame } from "./stableList";
 import {
   adoptNewGroups,
+  archiveSummary,
   firstOpenAgent,
   groupCwd,
   focusedGroupId,
@@ -63,6 +64,7 @@ import {
   orderedSlots,
   parseItemKey,
   pruneLayout,
+  railSlots,
   setGroupFolder,
   setGroupLead,
   setGroupWorktree,
@@ -72,12 +74,15 @@ import {
   UNGROUPED_ID,
   uniqueGroupName,
   visibleUngroupedKeys,
+  withGroupAt,
+  withoutGroups,
   type RailLayout,
 } from "./groups";
 import type {
   AgentInfo,
   ChatMessage,
   CliKind,
+  ArchivedGroup,
   ConfirmKind,
   CtxKind,
   EditResult,
@@ -100,6 +105,8 @@ type Ctx = {
 
 /** How often the unread dots catch up with what other devices read. */
 const READ_SYNC_MS = 5000;
+/** How often the archived groups are read, for one put away elsewhere. */
+const ARCHIVED_SYNC_MS = 3000;
 
 export function useCrew() {
   const t = useT();
@@ -139,6 +146,8 @@ export function useCrew() {
     kind: "agent",
   });
   const [groups, setGroups] = useState<Group[]>([]);
+  /** Groups put away with their bots, shown under the rail until restored. */
+  const [archived, setArchived] = useState<ArchivedGroup[]>([]);
   const [ungrouped, setUngrouped] = useState<string[]>([]);
   const [order, setOrder] = useState<string[] | undefined>();
   const [pendingRenameId, setPendingRenameId] = useState<string | null>(null);
@@ -257,6 +266,7 @@ export function useCrew() {
   // could land first and make the chat look read before it opened.
   const pushedRead = useRef<Record<string, number>>({});
   const readSyncedAt = useRef(0);
+  const archivedSyncedAt = useRef(0);
   useEffect(() => {
     if (!selected || openedRead?.key !== itemKey(selectedKind, selected)) return;
     const key = openedRead.key;
@@ -838,6 +848,71 @@ export function useCrew() {
     });
   }
 
+  /**
+   * Groups put away, from the daemon. One put away elsewhere (`crew group
+   * archive`, another window) is gone from the rail here too, or the next save
+   * would write its empty folder back.
+   */
+  async function refreshArchived() {
+    try {
+      const list = await api.listArchivedGroups();
+      setArchived((prev) => keepSame(prev, list));
+      const away = new Set(list.map((g) => g.id));
+      const current = groupsRef.current;
+      if (groupsLoaded.current && current.groups.some((g) => away.has(g.id))) {
+        persistLayout(withoutGroups(current, away));
+      }
+    } catch (err) {
+      console.error("refreshArchived", err);
+    }
+  }
+
+  /** Put a group away. Its bots at work are stopped: the dialog asked first. */
+  async function archiveGroup(id: string) {
+    const current = groupsRef.current;
+    const group = current.groups.find((g) => g.id === id);
+    if (!group) return;
+    const local = localAgents(agentsRef.current);
+    const { working } = archiveSummary(group, local);
+    const slot = railSlots(current.groups, current.ungrouped, local, current.order).indexOf(id);
+    try {
+      await api.archiveGroup(id, working > 0, slot >= 0 ? slot : null);
+    } catch (err) {
+      showError(err);
+      await refreshList();
+      return;
+    }
+    persistLayout(withoutGroups(groupsRef.current, new Set([id])));
+    await refreshList();
+    await refreshMessages();
+    await refreshArchived();
+  }
+
+  /** Bring a group back, at the place the rail had it. */
+  async function restoreArchivedGroup(id: string) {
+    let back: { id: string; slot?: number | null };
+    try {
+      back = await api.restoreGroup(id);
+    } catch (err) {
+      showError(err);
+      await refreshArchived();
+      return;
+    }
+    // Its bots are in the list first, or the layout would be pruned of them.
+    await refreshList();
+    try {
+      const raw = await api.listGroups();
+      const layout = adoptNewGroups(groupsRef.current, raw) ?? groupsRef.current;
+      const local = localAgents(agentsRef.current);
+      const slots = railSlots(layout.groups, layout.ungrouped, local, layout.order);
+      persistLayout(withGroupAt(layout, back.id, slots, back.slot));
+    } catch (err) {
+      showError(err);
+    }
+    await refreshList();
+    await refreshArchived();
+  }
+
   function removeGroup(id: string) {
     const current = groupsRef.current;
     const gone = current.groups.find((g) => g.id === id);
@@ -1313,6 +1388,13 @@ export function useCrew() {
         await refreshList();
         await refreshMessages();
         return;
+      } else if (kind === "archive-group") {
+        await archiveGroup(id);
+        return;
+      } else if (kind === "delete-archived") {
+        await api.deleteArchivedGroup(id);
+        await refreshArchived();
+        return;
       } else {
         await api.resetAgent(id, dropRoutines);
       }
@@ -1634,6 +1716,10 @@ export function useCrew() {
       // hold the ping, which is what notices and brings a dead daemon back.
       void pollList(refreshList).catch(lost);
       void refreshGroups();
+      if (Date.now() - archivedSyncedAt.current > ARCHIVED_SYNC_MS) {
+        archivedSyncedAt.current = Date.now();
+        void refreshArchived();
+      }
       if (Date.now() - readSyncedAt.current > READ_SYNC_MS) {
         readSyncedAt.current = Date.now();
         api.readMarks().then((marks) => !cancelled && adoptRead(marks), () => {});
@@ -1885,6 +1971,8 @@ export function useCrew() {
     createGroup,
     renameGroup,
     removeGroup,
+    archived,
+    restoreArchivedGroup,
     moveToGroup,
     reorderGroup,
     toggleGroup,
