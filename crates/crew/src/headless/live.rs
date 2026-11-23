@@ -1034,7 +1034,7 @@ fn read_turn(
         };
         heard = true;
         // A stopped turn reads on to its `result`, and shows none of it.
-        if note_stdout(session, generation) {
+        if note_stdout(session, generation, &line) {
             continue;
         }
         show_compacts(session, &mut state);

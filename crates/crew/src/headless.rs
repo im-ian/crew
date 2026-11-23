@@ -86,6 +86,13 @@ pub struct InFlight {
     pub msg_ids: Vec<String>,
     /// Set on the first stdout line. A stop before that puts the prompt back.
     pub got_output: bool,
+    /// A stdout line other than an error came: the CLI started on the prompt,
+    /// so it may have acted on it. An error alone (the CLI could not open its
+    /// session) does not count.
+    pub worked: bool,
+    /// Which turn this is. The first-output watch is armed for one, and must
+    /// not stop the next turn when the first has already ended.
+    pub serial: u64,
     /// The turn resumed a saved CLI session. One that never answers is stuck
     /// in that session, so the prompt goes once more on a new one.
     pub resumed: bool,
@@ -524,7 +531,7 @@ pub fn halt(session: &Arc<HeadlessSession>) {
 }
 
 fn stop(session: &Arc<HeadlessSession>, keep_cli: bool) {
-    let Some(pulled) = pull_turn(session, None, false) else {
+    let Some(pulled) = pull_turn(session, None, false, None) else {
         if !keep_cli {
             live::close(session);
         }
@@ -541,7 +548,9 @@ fn stop(session: &Arc<HeadlessSession>, keep_cli: bool) {
 }
 
 /// Record `flight` as the prompt the CLI is about to read.
-pub fn remember_inflight(session: &HeadlessSession, flight: InFlight) {
+pub fn remember_inflight(session: &HeadlessSession, mut flight: InFlight) {
+    static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    flight.serial = SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     if let Ok(mut inner) = session.inner.lock() {
         inner.in_flight = Some(flight);
     }
@@ -571,7 +580,12 @@ pub fn ring_first_output_watch(session: &Arc<HeadlessSession>) {
     let Some(generation) = session.inner.lock().ok().map(|inner| inner.generation) else {
         return;
     };
-    give_back_if_unheard(Arc::clone(session), generation);
+    let serial = session
+        .inner
+        .lock()
+        .ok()
+        .and_then(|inner| inner.in_flight.as_ref().map(|f| f.serial));
+    give_back_if_unheard(Arc::clone(session), generation, serial);
 }
 
 pub fn set_first_output_timeout(session: &HeadlessSession, wait: Duration) {
@@ -591,11 +605,14 @@ struct PulledTurn {
 }
 
 /// `only_unheard` claims the turn only when it is still running and no stdout
-/// line has arrived. Anything else leaves the turn alone.
+/// line has arrived, and, with a serial, only when it is that turn: a watch
+/// armed for a turn that ended must not stop the next one. Anything else
+/// leaves the turn alone.
 fn pull_turn(
     session: &HeadlessSession,
     generation: Option<u64>,
     only_unheard: bool,
+    serial: Option<u64>,
 ) -> Option<PulledTurn> {
     let mut inner = session.inner.lock().ok()?;
     if let Some(generation) = generation {
@@ -608,7 +625,7 @@ fn pull_turn(
             && inner
                 .in_flight
                 .as_ref()
-                .is_some_and(|flight| !flight.got_output);
+                .is_some_and(|flight| !flight.got_output && serial.is_none_or(|s| flight.serial == s));
         if !unheard {
             return None;
         }
@@ -640,11 +657,12 @@ fn claim_turn(inner: &mut HeadlessInner) -> PulledTurn {
 }
 
 fn arm_first_output_watch(session: Arc<HeadlessSession>, generation: u64, cli: CliKind) {
-    let set = session
+    let (set, serial) = session
         .inner
         .lock()
         .ok()
-        .and_then(|inner| inner.first_output_timeout);
+        .map(|inner| (inner.first_output_timeout, inner.in_flight.as_ref().map(|f| f.serial)))
+        .unwrap_or((None, None));
     let Some(wait) = set.or_else(|| first_output_limit(cli)) else {
         return;
     };
@@ -653,7 +671,7 @@ fn arm_first_output_watch(session: Arc<HeadlessSession>, generation: u64, cli: C
         .name(format!("crew-silent-{id}"))
         .spawn(move || {
             std::thread::sleep(wait);
-            give_back_if_unheard(session, generation);
+            give_back_if_unheard(session, generation, serial);
         })
         .is_err()
     {
@@ -669,8 +687,8 @@ fn arm_first_output_watch(session: Arc<HeadlessSession>, generation: u64, cli: C
 /// hangs the same way. That session is dropped and the prompt goes again,
 /// once, on a new one that reads the chat as a recap. A new session that
 /// hangs too is parked.
-fn give_back_if_unheard(session: Arc<HeadlessSession>, generation: u64) {
-    let Some(pulled) = pull_turn(&session, Some(generation), true) else {
+fn give_back_if_unheard(session: Arc<HeadlessSession>, generation: u64, serial: Option<u64>) {
+    let Some(pulled) = pull_turn(&session, Some(generation), true, serial) else {
         return;
     };
     let mut retry = false;
@@ -680,6 +698,10 @@ fn give_back_if_unheard(session: Arc<HeadlessSession>, generation: u64) {
             crate::daemon::retry_unheard(&session.id, flight);
             retry = true;
         } else {
+            // A session this turn opened never answered, so the CLI may not
+            // have kept it. The next turn opens another, instead of resuming
+            // one it cannot find, and reads the chat so far.
+            drop_stuck_session(&session, &flight.msg_ids);
             crate::daemon::halt_unheard(&session.id, flight);
         }
     }
@@ -714,7 +736,7 @@ fn give_back_lost(session: &Arc<HeadlessSession>, generation: u64, error: &str) 
             return false;
         };
         if inner.generation != generation
-            || flight.got_output
+            || flight.worked
             || !crate::daemon::claim_lost_retry(&session.id, &flight.msg_ids, &flight.text)
         {
             return false;
@@ -1730,7 +1752,7 @@ fn live_launch(
 
 /// True when this turn was stopped. The first line that still belongs to it
 /// marks the prompt heard, so a later stop leaves it sent.
-fn note_stdout(session: &HeadlessSession, generation: u64) -> bool {
+fn note_stdout(session: &HeadlessSession, generation: u64, line: &str) -> bool {
     let Ok(mut inner) = session.inner.lock() else {
         return true;
     };
@@ -1739,8 +1761,27 @@ fn note_stdout(session: &HeadlessSession, generation: u64) -> bool {
     }
     if let Some(flight) = inner.in_flight.as_mut() {
         flight.got_output = true;
+        flight.worked |= !is_preamble_line(line);
     }
     false
+}
+
+/// A stdout line that says nothing of the prompt having been taken: an error
+/// the CLI ended on before any turn ran. Claude, resuming a session it cannot
+/// find, prints only a `result` with `is_error` and `num_turns: 0`, whether it
+/// is started per message or kept up, and the prompt had not been read.
+fn is_preamble_line(line: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<Value>(line.trim()) else {
+        return false;
+    };
+    match v.get("type").and_then(Value::as_str) {
+        Some("error") => true,
+        Some("result") => {
+            v.get("is_error").and_then(Value::as_bool) == Some(true)
+                && v.get("num_turns").and_then(Value::as_u64).unwrap_or(0) == 0
+        }
+        _ => false,
+    }
 }
 
 /// The turn was stopped (or its bot reset or removed) since it began.
@@ -1915,7 +1956,7 @@ fn spawn_and_stream(
         // that still belongs to this turn marks the prompt heard.
         // A sealed grok turn still reads child results into the side chat.
         // That does not add to the parent's reply or take back what it said.
-        if note_stdout(session, generation) {
+        if note_stdout(session, generation, &line) {
             continue;
         }
         if sealed {
@@ -4179,6 +4220,26 @@ mod tests {
         let mut st = ParseState::default();
         let chunk = ingest_line(CliKind::Grok, line, &mut st);
         (chunk, st)
+    }
+
+    /// What `claude -p --resume <missing>` prints, in both modes: one `result`
+    /// and nothing else. That line alone does not say the prompt was read; any
+    /// other line, or an error after a turn ran, does.
+    #[test]
+    fn a_resume_error_alone_is_not_the_prompt_being_read() {
+        let lost = r#"{"type":"result","subtype":"error_during_execution","duration_ms":0,"is_error":true,"num_turns":0,"errors":["No conversation found with session ID: 0000"]}"#;
+        assert!(is_preamble_line(lost));
+        assert!(is_preamble_line(r#"{"type":"error","message":"Internal error"}"#));
+        for read in [
+            r#"{"type":"system","subtype":"init","session_id":"s"}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}"#,
+            r#"{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":3}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1}"#,
+            "plain text",
+            "",
+        ] {
+            assert!(!is_preamble_line(read), "{read}");
+        }
     }
 
     #[test]
