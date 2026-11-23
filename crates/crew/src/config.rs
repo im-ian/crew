@@ -1202,6 +1202,19 @@ fn background_note(agent: &AgentConfig) -> Option<&'static str> {
     }
 }
 
+/// How to size a subagent, for a CLI whose subagent tool takes a model and an
+/// effort. Claude's `Agent` tool says to set `effort` only when an instruction
+/// asks for it, so this says that it is one. Codex's `spawn_agent` takes
+/// `model` and `reasoning_effort`. grok's `spawn_subagent` offers neither and
+/// agy's `invoke_subagent` only a model, so those CLIs get nothing.
+fn subagent_size_note(agent: &AgentConfig) -> Option<&'static str> {
+    match agent.binary_name().as_str() {
+        "claude" => Some("When you spawn a subagent, pick its model and effort by how hard that piece is and pass both; this is the instruction that sets effort, so do set it. Light work (finding files, listing, a simple check): `model` haiku, `effort` low. Ordinary implementation or research: sonnet, medium. Design across several files, a bug with an unknown cause, or a review: opus, high.\n"),
+        "codex" => Some("When you spawn a subagent with `spawn_agent`, pick its `model` and `reasoning_effort` by how hard that piece is. Light work (finding files, listing, a simple check): your fastest listed model, low. Ordinary implementation or research: a mid one, medium. Design across several files, a bug with an unknown cause, or a review: your strongest, high.\n"),
+        _ => None,
+    }
+}
+
 /// Short spawn-time prompt: identity, where the live team list lives, and how to `crew tell`.
 pub fn team_rules(agent: &AgentConfig, roster: &[AgentConfig]) -> String {
     team_rules_for(agent, roster, None)
@@ -1233,6 +1246,9 @@ pub fn team_rules_for(
     s.push_str(
         "When one message asks for several pieces of work that do not depend on each other, run them in parallel with your CLI's own subagents (Claude's Agent tool, grok's spawn_subagent, agy's invoke_subagent) where it has them; a CLI without subagents does the work itself. Work that needs an earlier result waits for it. Subagents are not teammates: a teammate gets work only through `crew tell`. Their reports may come back one at a time: until the last one is in, a reply only says which are still running and keeps what came back for the end; then answer once with what they found together.\n",
     );
+    if let Some(note) = subagent_size_note(agent) {
+        s.push_str(note);
+    }
     s.push_str(
         "Commands that change Crew: rename yourself with `crew agent set --name \"New Name\"` (the id defaults to CREW_AGENT_ID). Create a bot with `crew agent add --cli grok|claude|codex|agy|gemini|copilot|opencode --name \"Name\"`; it prints `ok <id>` (pass an id first only when you already have one). For a command Crew does not know, `crew agent add --headless --name \"Name\" --cmd <program> [args]` appends each message as the last argument; `--cmd` has to be last, or it swallows the flags after it, and without `--headless` an unknown command stays a terminal. Create a sidebar group with `crew group add --name \"Name\"`, adding `--bot <id>` for each bot in it; `crew group list` prints each group's id, name, and bots. Schedule recurring work with `crew routine add --name \"...\" --schedule \"0 8 * * 1-5\" --prompt \"...\"` (a Crew routine, not a chat reminder): write the 5-field cron yourself, numbers only, minute hour day month weekday (0 = Sunday), local time, and if the day or time is unclear, ask with `crew ask` first. `crew routine list|edit|remove|pause|resume <name>` manage yours (`crew routine --help`); each prints your routines with their next run, so tell the user the schedule and next run it shows. Actually run these: do not only claim you renamed yourself, created something, or scheduled it.\n",
     );
@@ -3042,6 +3058,39 @@ mod tests {
         // This grok stays up, so a background task does not hold the next
         // message. That warning is for a process per turn.
         assert!(!rules.contains("must not run as your CLI's background task"));
+    }
+
+    /// A subagent's model and effort are chosen by how hard the piece is, but only
+    /// for a CLI whose subagent tool takes them, and only in that CLI's words.
+    #[test]
+    fn subagents_are_sized_for_the_clis_that_can() {
+        let claude = team_rules_for(&cfg(&["claude", "--dangerously-skip-permissions"], None, None), &[], None);
+        assert!(claude.contains("this is the instruction that sets effort, so do set it"));
+        for word in ["haiku", "sonnet", "opus", "`effort` low", "medium", "high"] {
+            assert!(claude.contains(word), "{word}");
+        }
+        assert!(!claude.contains("reasoning_effort"));
+
+        let codex = team_rules_for(&cfg(&["codex", "--yolo"], None, None), &[], None);
+        assert!(codex.contains("`spawn_agent`") && codex.contains("`reasoning_effort`"));
+        assert!(!codex.contains("haiku") && !codex.contains("opus"));
+
+        // grok's subagents take neither, agy's only a model, and the rest have none.
+        for cmd in [
+            &["grok", "--always-approve"][..],
+            &["agy", "--dangerously-skip-permissions"][..],
+            &["gemini", "--approval-mode", "yolo"][..],
+            &["copilot", "--allow-all"][..],
+            &["opencode", "run", "--auto"][..],
+            &["cat"][..],
+        ] {
+            let rules = team_rules_for(&cfg(cmd, None, None), &[], None);
+            for word in ["pick its model", "haiku", "reasoning_effort", "so do set it"] {
+                assert!(!rules.contains(word), "{cmd:?} {word}");
+            }
+            // The rest of the subagent rule is every CLI's.
+            assert!(rules.contains("Subagents are not teammates"), "{cmd:?}");
+        }
     }
 
     #[test]
