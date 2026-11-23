@@ -71,6 +71,30 @@ pub fn config_for(bot: &AgentConfig, c: &Candidate) -> Option<AgentConfig> {
     Some(cfg)
 }
 
+/// The model and effort `crew agent add --cli <cli>` starts with, as the window's
+/// New bot dialog does: when neither flag was given and `cli` is the default AI
+/// (the list's first), that AI's own. Any other CLI keeps the CLI's default.
+pub fn add_defaults(
+    cli: Option<AgentCli>,
+    model: Option<String>,
+    effort: Option<Effort>,
+    list: &[Candidate],
+) -> (Option<String>, Option<Effort>) {
+    let first = list.first();
+    let same = cli.zip(first).is_some_and(|(cli, c)| {
+        c.cmd.trim().is_empty() && AgentCli::from_key(&c.cli).is_ok_and(|first| first == cli)
+    });
+    if !same || model.is_some() || effort.is_some() {
+        return (model, effort);
+    }
+    let Some(first) = first else { return (model, effort) };
+    let filled = config_for(&AgentConfig::new(String::new(), String::new(), Vec::new(), None), first);
+    match filled {
+        Some(cfg) => (cfg.model, cfg.effort),
+        None => (model, effort),
+    }
+}
+
 /// The AIs this bot's turn may move to, in order: a known CLI other than its
 /// own, each once, installed. Whether one is out of its own limit is asked
 /// as each is tried.
@@ -589,6 +613,39 @@ mod tests {
             balance_note("en", "grok"),
             "Grok is out of usage balance. Top it up, or switch this bot to another AI."
         );
+    }
+
+    fn pick(cli: &str, model: &str, effort: &str) -> Candidate {
+        Candidate { cli: cli.into(), model: model.into(), effort: effort.into(), cmd: String::new() }
+    }
+
+    #[test]
+    fn a_bot_added_on_the_default_ai_takes_its_model_and_effort() {
+        let list = [pick("claude", "opus", "high"), pick("grok", "", "")];
+        let got = add_defaults(Some(AgentCli::Claude), None, None, &list);
+        assert_eq!(got, (Some("opus".to_string()), Some(Effort::High)));
+        // Another CLI than the default keeps its own default.
+        assert_eq!(add_defaults(Some(AgentCli::Grok), None, None, &list), (None, None));
+        // A flag given is the user's: neither is filled in beside it.
+        assert_eq!(
+            add_defaults(Some(AgentCli::Claude), Some("sonnet".into()), None, &list),
+            (Some("sonnet".to_string()), None)
+        );
+        assert_eq!(
+            add_defaults(Some(AgentCli::Claude), None, Some(Effort::Low), &list),
+            (None, Some(Effort::Low))
+        );
+        // No CLI named (a typed command), no list, or a default with nothing set.
+        assert_eq!(add_defaults(None, None, None, &list), (None, None));
+        assert_eq!(add_defaults(Some(AgentCli::Claude), None, None, &[]), (None, None));
+        assert_eq!(
+            add_defaults(Some(AgentCli::Claude), None, None, &[pick("claude", "", "")]),
+            (None, None)
+        );
+        // A typed command as the default is no CLI's default.
+        let mut typed = pick("claude", "opus", "high");
+        typed.cmd = "/opt/claude".into();
+        assert_eq!(add_defaults(Some(AgentCli::Claude), None, None, &[typed]), (None, None));
     }
 
     #[test]
