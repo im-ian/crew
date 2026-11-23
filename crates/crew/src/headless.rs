@@ -6060,7 +6060,7 @@ mod tests {
                 "send the question, the background, and the options to the lead with `crew tell`, then end your turn."
             ));
             assert!(member_note.contains(
-                "Work the user gives you directly, or a bot from another group, follows your usual rules."
+                "When the user tells you the work directly, answer the user as usual and use `crew ask`;"
             ));
             assert!(!member_note.contains("You are the lead of this group"));
 
