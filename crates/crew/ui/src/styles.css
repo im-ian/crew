@@ -388,6 +388,71 @@ html.peek-resizing * {
   -webkit-user-select: text;
   user-select: text;
 }
+/* Groups put away, under the lists and above the footer. */
+.archived-groups {
+  flex-shrink: 0;
+  padding: 0 var(--rail-pad);
+  border-top: 1px solid var(--line);
+}
+.archived-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  min-height: 28px;
+  padding: var(--space-6) var(--space-4);
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.archived-head:hover { color: var(--ink); }
+.archived-chevron { transform: rotate(-90deg); transition: transform 0.12s ease; flex-shrink: 0; }
+.archived-head.is-open .archived-chevron { transform: rotate(0deg); }
+.archived-title { flex: 1; min-width: 0; }
+.archived-count { color: var(--faint); font-weight: 500; }
+.archived-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 var(--space-6);
+  max-height: 30vh;
+  overflow-y: auto;
+}
+.archived-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6) var(--space-4);
+  border-radius: var(--radius-md);
+}
+.archived-row:hover { background: var(--hover); }
+.archived-name {
+  color: var(--ink);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.archived-info { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.archived-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  color: var(--faint);
+  font-size: var(--text-xs);
+}
+.archived-faces { display: inline-flex; align-items: center; }
+.archived-face { width: 16px; height: 16px; margin-right: -3px; }
+.archived-more { margin-left: var(--space-6); }
+.archived-acts { display: flex; gap: var(--space-4); }
+.archived-acts .ghost.sm { padding: 3px 8px; font-size: var(--text-xs); }
+.ghost.danger-text { color: var(--blocked); }
+.confirm-working { color: var(--blocked); font-weight: 600; }
 .rail-foot {
   flex-shrink: 0;
   display: flex;

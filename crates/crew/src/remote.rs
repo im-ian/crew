@@ -650,6 +650,16 @@ pub(crate) fn test_link(alias: &str) -> mpsc::UnboundedReceiver<Value> {
     rx
 }
 
+/// `test_link`, with `bot` as the representative.
+#[cfg(test)]
+pub(crate) fn test_rep(alias: &str, bot: &str) -> mpsc::UnboundedReceiver<Value> {
+    let rx = test_link(alias);
+    if let Some(link) = state().lock().unwrap().links.get_mut(alias) {
+        link.cfg.bot = bot.into();
+    }
+    rx
+}
+
 #[cfg(test)]
 pub(crate) fn drop_test_link(alias: &str) {
     let mut st = state().lock().unwrap();

@@ -538,6 +538,56 @@ pub(crate) fn remove_agent(id: String) -> Result<(), String> {
     }
 }
 
+fn group_archive_rpc(
+    action: &str,
+    id: String,
+    stop: bool,
+    slot: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    client::ensure_daemon().map_err(|e| e.to_string())?;
+    match client::rpc(Request::GroupArchive {
+        action: action.to_string(),
+        id,
+        stop,
+        slot,
+    }) {
+        Ok(Event::GroupArchive { info }) => Ok(info),
+        Ok(Event::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected daemon response".into()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+/// Put a group away with its bots: off the sidebar, its bots off the daemon,
+/// everything they were kept. A group with bots at work needs `stop`, the
+/// user's yes to stopping them. `slot` is where the window had the group.
+#[tauri::command(async)]
+pub(crate) fn archive_group(
+    id: String,
+    stop: bool,
+    slot: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    group_archive_rpc("archive", id, stop, slot)
+}
+
+/// The archived groups, newest first, each with its bots' faces.
+#[tauri::command(async)]
+pub(crate) fn list_archived_groups() -> Vec<crate::group_archive::ArchivedInfo> {
+    crate::group_archive::infos()
+}
+
+/// Bring an archived group back, its bots with their routines as they were.
+#[tauri::command(async)]
+pub(crate) fn restore_group(id: String) -> Result<serde_json::Value, String> {
+    group_archive_rpc("restore", id, false, None)
+}
+
+/// Delete an archived group for good, its bots and their chats with it.
+#[tauri::command(async)]
+pub(crate) fn delete_archived_group(id: String) -> Result<serde_json::Value, String> {
+    group_archive_rpc("delete", id, false, None)
+}
+
 fn rpc_set_avatar(id: String, avatar: Option<String>, unset_avatar: bool) -> Result<(), String> {
     match client::rpc(Request::SetAgent {
         id,
@@ -1332,6 +1382,10 @@ pub fn run() -> anyhow::Result<()> {
             remove_group_memory,
             list_groups,
             set_groups,
+            archive_group,
+            list_archived_groups,
+            restore_group,
+            delete_archived_group,
             plan_usage,
             list_models,
             get_fallback_ais,

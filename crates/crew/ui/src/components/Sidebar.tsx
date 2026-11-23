@@ -20,7 +20,7 @@ import {
   railSlots,
   UNGROUPED_ID,
 } from "../groups";
-import type { AgentInfo, Group, Kind, RemoteInfo, SearchHit } from "../types";
+import type { AgentInfo, ArchivedGroup, Group, Kind, RemoteInfo, SearchHit } from "../types";
 import { listStamp } from "../clock";
 import { mentionRuns, mentionText } from "../mentions";
 import { foldsAt, numberDuplicateNames, RAIL_FOLDED } from "../rail";
@@ -47,6 +47,7 @@ import {
 } from "../remote";
 import { collapsedGroupMark } from "../statusView";
 import { Avatar } from "./Avatar";
+import { ArchivedGroups } from "./ArchivedGroups";
 import { watchCount } from "../watchView";
 import { RenameField } from "./RenameField";
 import { MentionRunsView } from "./MentionChip";
@@ -386,6 +387,10 @@ type Props = {
   agents: AgentInfo[];
   /** Routers this PC is on. Their bots come from `agents`, by `remote`. */
   remotes?: RemoteInfo[];
+  /** Groups put away with their bots. */
+  archived?: readonly ArchivedGroup[];
+  onRestoreArchived?: (id: string) => void;
+  onDeleteArchived?: (id: string) => void;
   groups: Group[];
   ungrouped: string[];
   /** Folder ids and loose bot keys, when a bot sits between folders. */
@@ -476,6 +481,9 @@ function orderItems(items: RailItem[], order: string[], locale: string): RailIte
 export function Sidebar({
   agents,
   remotes = [],
+  archived = [],
+  onRestoreArchived,
+  onDeleteArchived,
   groups,
   ungrouped,
   order,
@@ -1395,6 +1403,9 @@ export function Sidebar({
           </section>
         ) : null}
       </div>
+      {archived.length && !folded && onRestoreArchived && onDeleteArchived ? (
+        <ArchivedGroups groups={archived} onRestore={onRestoreArchived} onDelete={onDeleteArchived} />
+      ) : null}
       {onOpenSettings ? (
         <div className="rail-foot">
           <button

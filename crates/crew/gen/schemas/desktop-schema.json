@@ -201,6 +201,12 @@
           "markdownDescription": "Enables the approve_agent command without any pre-configured scope."
         },
         {
+          "description": "Enables the archive_group command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-archive-group",
+          "markdownDescription": "Enables the archive_group command without any pre-configured scope."
+        },
+        {
           "description": "Enables the cancel_queued command without any pre-configured scope.",
           "type": "string",
           "const": "allow-cancel-queued",
@@ -229,6 +235,12 @@
           "type": "string",
           "const": "allow-daemon-ping",
           "markdownDescription": "Enables the daemon_ping command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_archived_group command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-archived-group",
+          "markdownDescription": "Enables the delete_archived_group command without any pre-configured scope."
         },
         {
           "description": "Enables the edit_queued command without any pre-configured scope.",
@@ -301,6 +313,12 @@
           "type": "string",
           "const": "allow-list-agents",
           "markdownDescription": "Enables the list_agents command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_archived_groups command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-archived-groups",
+          "markdownDescription": "Enables the list_archived_groups command without any pre-configured scope."
         },
         {
           "description": "Enables the list_groups command without any pre-configured scope.",
@@ -489,6 +507,12 @@
           "markdownDescription": "Enables the reset_agent command without any pre-configured scope."
         },
         {
+          "description": "Enables the restore_group command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-restore-group",
+          "markdownDescription": "Enables the restore_group command without any pre-configured scope."
+        },
+        {
           "description": "Enables the run_routine command without any pre-configured scope.",
           "type": "string",
           "const": "allow-run-routine",
@@ -675,6 +699,12 @@
           "markdownDescription": "Denies the approve_agent command without any pre-configured scope."
         },
         {
+          "description": "Denies the archive_group command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-archive-group",
+          "markdownDescription": "Denies the archive_group command without any pre-configured scope."
+        },
+        {
           "description": "Denies the cancel_queued command without any pre-configured scope.",
           "type": "string",
           "const": "deny-cancel-queued",
@@ -703,6 +733,12 @@
           "type": "string",
           "const": "deny-daemon-ping",
           "markdownDescription": "Denies the daemon_ping command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_archived_group command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-archived-group",
+          "markdownDescription": "Denies the delete_archived_group command without any pre-configured scope."
         },
         {
           "description": "Denies the edit_queued command without any pre-configured scope.",
@@ -775,6 +811,12 @@
           "type": "string",
           "const": "deny-list-agents",
           "markdownDescription": "Denies the list_agents command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_archived_groups command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-archived-groups",
+          "markdownDescription": "Denies the list_archived_groups command without any pre-configured scope."
         },
         {
           "description": "Denies the list_groups command without any pre-configured scope.",
@@ -961,6 +1003,12 @@
           "type": "string",
           "const": "deny-reset-agent",
           "markdownDescription": "Denies the reset_agent command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the restore_group command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-restore-group",
+          "markdownDescription": "Denies the restore_group command without any pre-configured scope."
         },
         {
           "description": "Denies the run_routine command without any pre-configured scope.",

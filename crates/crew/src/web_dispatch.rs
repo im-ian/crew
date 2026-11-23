@@ -204,6 +204,23 @@ pub fn dispatch(name: &str, args: Value) -> Option<Result<Value, String>> {
             let groups: Vec<SidebarGroup> = arg(&args, "groups")?;
             ok(crate::desktop::set_groups(groups)?)
         }
+        "archive_group" => {
+            let id: String = arg(&args, "id")?;
+            let stop: bool = arg(&args, "stop")?;
+            let slot: Option<usize> = arg(&args, "slot")?;
+            ok(crate::desktop::archive_group(id, stop, slot)?)
+        }
+        "list_archived_groups" => {
+            ok(crate::desktop::list_archived_groups())
+        }
+        "restore_group" => {
+            let id: String = arg(&args, "id")?;
+            ok(crate::desktop::restore_group(id)?)
+        }
+        "delete_archived_group" => {
+            let id: String = arg(&args, "id")?;
+            ok(crate::desktop::delete_archived_group(id)?)
+        }
         "plan_usage" => {
             let clis: Vec<String> = arg(&args, "clis")?;
             ok(crate::desktop::plan_usage(clis))
@@ -409,6 +426,10 @@ pub const NAMES: &[&str] = &[
     "remove_group_memory",
     "list_groups",
     "set_groups",
+    "archive_group",
+    "list_archived_groups",
+    "restore_group",
+    "delete_archived_group",
     "plan_usage",
     "list_models",
     "get_fallback_ais",

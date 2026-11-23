@@ -4380,6 +4380,20 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
                 message: err.to_string(),
             }],
         },
+        Request::GroupArchive { action, id, stop, slot } => {
+            let done = match action.as_str() {
+                "archive" => archive_group(&id, stop, slot),
+                "restore" => restore_archived_group(&id),
+                "delete" => delete_archived_group(&id),
+                other => Err(anyhow::anyhow!("unknown group action {other}")),
+            };
+            match done {
+                Ok(info) => vec![Event::GroupArchive { info }, snapshot_event()],
+                Err(err) => vec![Event::Error {
+                    message: err.to_string(),
+                }],
+            }
+        }
         Request::SetAgent {
             id,
             model,
@@ -4806,7 +4820,7 @@ fn tell_fyi(from: &str, to: &str, text: &str) -> anyhow::Result<Option<String>> 
         anyhow::bail!("--fyi reaches bots on this PC only. Send {to} a plain `crew tell`.");
     }
     if !known_agent(to) {
-        anyhow::bail!("unknown agent {to}");
+        return Err(unknown_agent(to));
     }
     let from = from_id(from);
     if from == to {
@@ -4886,7 +4900,7 @@ fn tell_now(from: &str, to: &str, text: &str) -> anyhow::Result<Option<String>> 
         )));
     }
     if !known_agent(to) {
-        anyhow::bail!("unknown agent {to}");
+        return Err(unknown_agent(to));
     }
     let sender = from_id(from);
     ensure_accepts_turn(to)?;
@@ -4986,7 +5000,7 @@ fn tell_agent_origin(
     {
         let map = agents().lock().expect("agents mutex");
         if !map.contains_key(to) {
-            anyhow::bail!("unknown agent {to}");
+            return Err(unknown_agent(to));
         }
     }
     let from = from_id(from);
@@ -5628,6 +5642,207 @@ fn remove_agent(id: &str) -> anyhow::Result<()> {
     save_state()?;
     inject_roster_update(None);
     Ok(())
+}
+
+fn unix_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// A tell to a bot the daemon does not hold: unknown, or put away with its
+/// group, which the sender is told so it does not look for a typo.
+fn unknown_agent(id: &str) -> anyhow::Error {
+    match crate::group_archive::holding(id) {
+        Some(held) => anyhow::anyhow!(crate::group_archive::archived_note(
+            &crate::paths::locale(),
+            id,
+            &held.group.name
+        )),
+        None => anyhow::anyhow!("unknown agent {id}"),
+    }
+}
+
+/// Put a group away: it leaves the sidebar and its bots leave the daemon (no
+/// process, roster entry, routine or tell), and all that they were is kept for
+/// `restore_archived_group`. Chats, memory, pins, avatars, sessions, group
+/// memory and worktrees stay where they are. Bots that are working are stopped
+/// first, but only when `stop` says the user agreed.
+fn archive_group(group_id: &str, stop: bool, slot: Option<usize>) -> anyhow::Result<serde_json::Value> {
+    use crate::group_archive::ArchivedGroup;
+    let groups = crate::groups::load()?;
+    let group = groups
+        .iter()
+        .find(|g| g.id == group_id && g.id != crate::groups::UNGROUPED_ID)
+        .cloned()
+        .with_context(|| format!("unknown group {group_id}"))?;
+    let cfgs: Vec<AgentConfig> = {
+        let held = configs().lock().expect("configs mutex");
+        crate::group_archive::bot_ids(&group)
+            .iter()
+            .filter_map(|id| held.get(id).cloned())
+            .collect()
+    };
+    // A router's representative speaks for this PC: archiving it would leave
+    // teammates talking to a bot that is gone.
+    if let Some(rep) = cfgs.iter().find(|c| crate::remote::is_rep(&c.id)) {
+        if crate::paths::locale() == "en" {
+            anyhow::bail!(
+                "{} represents this PC on a router, so its group cannot be archived. Leave the router first.",
+                rep.id
+            );
+        }
+        anyhow::bail!(
+            "{}는 라우터 대표 봇이라 이 그룹은 보관할 수 없어요. 먼저 라우터에서 나가 주세요.",
+            rep.id
+        );
+    }
+    let working: Vec<&str> = cfgs
+        .iter()
+        .filter(|c| matches!(live_status(&c.id), Ok(AgentStatus::Working | AgentStatus::Blocked)))
+        .map(|c| c.id.as_str())
+        .collect();
+    if !working.is_empty() && !stop {
+        anyhow::bail!("{} bots are working: {}", working.len(), working.join(", "));
+    }
+    let stopped = working.len();
+    // The record first: a crash after this leaves the bots restorable.
+    let mut archived = crate::group_archive::load();
+    archived.retain(|g| g.group.id != group.id);
+    archived.push(ArchivedGroup {
+        group: group.clone(),
+        bots: cfgs.clone(),
+        archived_at: unix_ms(),
+        slot,
+    });
+    crate::group_archive::save(&archived)?;
+    for cfg in &cfgs {
+        park_agent(&cfg.id);
+    }
+    save_state()?;
+    let rest: Vec<_> = groups.into_iter().filter(|g| g.id != group.id).collect();
+    crate::groups::save(&rest)?;
+    inject_roster_update(None);
+    Ok(serde_json::json!({
+        "id": group.id,
+        "bots": cfgs.len(),
+        "routines": cfgs.iter().map(|c| c.routines.len()).sum::<usize>(),
+        "stopped": stopped,
+    }))
+}
+
+/// A bot leaves the daemon and keeps its files. What waits for it and what runs
+/// stop; its process ends; its chat is saved and let go of. The session id,
+/// memory, pins and avatar are left, so the next turn after a restore opens
+/// the same session.
+fn park_agent(id: &str) {
+    // Lines still waiting are cancelled, so a restore does not send them days late.
+    let waiting: Vec<String> = crate::transcript::messages(id)
+        .into_iter()
+        .filter(|m| m.queued && m.role == Role::User)
+        .map(|m| m.id)
+        .collect();
+    for msg in waiting {
+        let _ = cancel_queued(id, &msg);
+    }
+    let _ = halt_turn(id);
+    let session = agents().lock().expect("agents mutex").remove(id);
+    configs().lock().expect("configs mutex").remove(id);
+    clear_inbox(id);
+    drop_waits(id);
+    // Before the kill, which would otherwise put a silent prompt back.
+    forget_prompt(id);
+    clear_agent_context(id, false);
+    if let Some(session) = session {
+        session.kill();
+    }
+    crate::transcript::unload_agent(id);
+    forget_auto_approve(id);
+    note_turn_failed(id, false);
+    if let Ok(mut map) = failed_waits().lock() {
+        map.remove(id);
+        map.values_mut().for_each(|list| list.retain(|w| w.bot != id));
+        map.retain(|_, list| !list.is_empty());
+    }
+}
+
+/// Bring an archived group back: its bots to the daemon with their routines as
+/// they were, and the group to the end of the sidebar's list (the window moves
+/// it to `slot`). A group id or name taken since is made new.
+fn restore_archived_group(group_id: &str) -> anyhow::Result<serde_json::Value> {
+    let mut archived = crate::group_archive::load();
+    let at = archived
+        .iter()
+        .position(|g| g.group.id == group_id)
+        .with_context(|| format!("unknown archived group {group_id}"))?;
+    let held = archived[at].clone();
+    {
+        let cfgs = configs().lock().expect("configs mutex");
+        if let Some(taken) = held.bots.iter().find(|b| cfgs.contains_key(&b.id)) {
+            anyhow::bail!("a bot with the id {} exists already", taken.id);
+        }
+    }
+    let mut groups = crate::groups::load()?;
+    let mut group = held.group.clone();
+    if groups.iter().any(|g| g.id == group.id) {
+        group.id = crate::groups::new_group_id(&groups, unix_ms() as u128);
+    }
+    group.name = crate::groups::unique_group_name(&groups, &group.name);
+    let mut roster = roster_vec();
+    roster.extend(held.bots.iter().cloned());
+    {
+        let mut cfgs = configs().lock().expect("configs mutex");
+        for cfg in &held.bots {
+            cfgs.insert(cfg.id.clone(), cfg.clone());
+        }
+    }
+    for cfg in &held.bots {
+        crate::transcript::load_agent(&cfg.id);
+        match open_agent(cfg, DEFAULT_COLS, DEFAULT_ROWS, false, &roster) {
+            Ok(live) => {
+                agents()
+                    .lock()
+                    .expect("agents mutex")
+                    .insert(cfg.id.clone(), live);
+            }
+            Err(err) => eprintln!("[crew] failed to open {}: {err:#}", cfg.id),
+        }
+    }
+    save_state()?;
+    groups.push(group.clone());
+    crate::groups::save(&groups)?;
+    archived.remove(at);
+    crate::group_archive::save(&archived)?;
+    inject_roster_update(None);
+    Ok(serde_json::json!({
+        "id": group.id,
+        "bots": held.bots.len(),
+        "slot": held.slot,
+    }))
+}
+
+/// An archived group is deleted for good: each bot the way a removed bot is,
+/// its chat, memory, pins, avatar and session gone, and the group's memory.
+fn delete_archived_group(group_id: &str) -> anyhow::Result<serde_json::Value> {
+    let mut archived = crate::group_archive::load();
+    let at = archived
+        .iter()
+        .position(|g| g.group.id == group_id)
+        .with_context(|| format!("unknown archived group {group_id}"))?;
+    let held = archived.remove(at);
+    for cfg in &held.bots {
+        let id = cfg.id.as_str();
+        crate::avatar::clear(id);
+        crate::headless::clear_session(id);
+        crate::headless::clear_recap(id);
+        crate::transcript::drop_agent(id);
+        crate::memory::remove(id);
+        let _ = crate::pins::clear(id);
+    }
+    crate::memory::remove_group(&held.group.id);
+    crate::group_archive::save(&archived)?;
+    Ok(serde_json::json!({ "id": held.group.id, "bots": held.bots.len() }))
 }
 
 fn inject_roster_update(skip: Option<&str>) {
@@ -8839,6 +9054,187 @@ esac; done ;; esac"#
                 !turn_failed(&bot),
                 "a removed bot left its failure behind"
             );
+        });
+    }
+
+    fn group_of_bots(id: &str, name: &str, bots: &[&str]) -> crate::groups::SidebarGroup {
+        crate::groups::SidebarGroup {
+            id: id.into(),
+            name: name.into(),
+            collapsed: false,
+            items: bots.iter().map(|b| format!("agent:{b}")).collect(),
+            path: None,
+            lead: bots.first().map(|b| b.to_string()),
+            worktree: crate::groups::WorktreeChoice::On,
+        }
+    }
+
+    /// A group put away takes its bots off the daemon, the roster, the routines
+    /// and the tells, and keeps what they were. Restored, they are back with
+    /// their chat, their routines as they were, and the group in the list.
+    #[test]
+    fn an_archived_group_leaves_everything_and_comes_back_as_it_was() {
+        paths::testing::with_home("group-archive", || {
+            let (a, b, c) = (test_id("ga"), test_id("gb"), test_id("gc"));
+            for bot in [&a, &b, &c] {
+                fake_bot(
+                    bot,
+                    r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hello there"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"hello there"}"#,
+                );
+            }
+            add_routine(&a, "morning".into(), "0 9 * * *".into(), "go".into()).unwrap();
+            add_routine(&a, "evening".into(), "0 18 * * *".into(), "stop".into()).unwrap();
+            let key = list_agents().into_iter().find(|x| x.id == a).unwrap().routines[1].id.clone();
+            set_routine_enabled(&a, &key, false).unwrap();
+            crate::groups::save(&[
+                group_of_bots("g1", "Destia", &[&a, &b]),
+                group_of_bots("g2", "Other", &[&c]),
+            ])
+            .unwrap();
+            send_agent(&a, "hi").unwrap();
+            wait_idle(&a);
+            let said = crate::transcript::messages(&a).len();
+            assert!(said >= 2);
+
+            let done = archive_group("g1", false, Some(4)).unwrap();
+            assert_eq!(done["bots"], 2);
+            assert_eq!(done["routines"], 2);
+
+            // Off the daemon, the roster and the sidebar's file.
+            let listed: Vec<String> = list_agents().into_iter().map(|x| x.id).collect();
+            assert!(!listed.contains(&a) && !listed.contains(&b), "{listed:?}");
+            assert!(listed.contains(&c));
+            assert!(roster_vec().iter().all(|r| r.id != a && r.id != b));
+            assert!(agents().lock().unwrap().get(&a).is_none());
+            let saved = crate::config::Config::load().unwrap();
+            assert!(saved.agents.iter().all(|r| r.id != a && r.id != b), "still in agents.json");
+            let groups = crate::groups::load().unwrap();
+            assert_eq!(groups.iter().map(|g| g.id.as_str()).collect::<Vec<_>>(), vec!["g2"]);
+            // A routine that was on does not tick: no bot holds it.
+            assert!(configs().lock().unwrap().values().all(|c| c.routines.is_empty()));
+            // The record is on disk, so a restart keeps it archived.
+            let kept = crate::group_archive::load();
+            assert_eq!(kept.len(), 1);
+            assert_eq!((kept[0].group.id.as_str(), kept[0].slot, kept[0].bots.len()), ("g1", Some(4), 2));
+            // A tell to it is turned away, and says why.
+            let err = tell_with("user", &a, "are you there", false).unwrap_err().to_string();
+            assert!(err.contains("보관된 그룹"), "{err}");
+            let err = tell_fyi("user", &b, "note").unwrap_err().to_string();
+            assert!(err.contains("보관된 그룹"), "{err}");
+            // What it was is still on disk.
+            assert!(paths::transcript_path(&a).exists(), "the chat was deleted");
+            assert!(crate::group_archive::holding(&a).is_some());
+
+            // Back: the bots, their chat, their routines as they were.
+            let back = restore_archived_group("g1").unwrap();
+            assert_eq!((back["bots"].as_u64(), back["slot"].as_u64()), (Some(2), Some(4)));
+            let listed: Vec<String> = list_agents().into_iter().map(|x| x.id).collect();
+            assert!(listed.contains(&a) && listed.contains(&b), "{listed:?}");
+            let info = list_agents().into_iter().find(|x| x.id == a).unwrap();
+            assert_eq!(
+                info.routines.iter().map(|r| (r.name.as_str(), r.enabled)).collect::<Vec<_>>(),
+                vec![("morning", true), ("evening", false)]
+            );
+            assert_eq!(crate::transcript::messages(&a).len(), said, "the chat did not come back whole");
+            let groups = crate::groups::load().unwrap();
+            assert_eq!(groups.iter().map(|g| g.id.as_str()).collect::<Vec<_>>(), vec!["g2", "g1"]);
+            let restored = groups.iter().find(|g| g.id == "g1").unwrap();
+            assert_eq!((restored.name.as_str(), restored.lead.as_deref()), ("Destia", Some(a.as_str())));
+            assert!(crate::group_archive::load().is_empty());
+            assert!(crate::config::Config::load().unwrap().agents.iter().any(|r| r.id == a));
+            // And it answers a tell again.
+            send_agent(&a, "again").unwrap();
+            wait_idle(&a);
+            assert!(crate::transcript::messages(&a).len() > said);
+            for bot in [&a, &b, &c] {
+                remove_agent(bot).unwrap();
+            }
+        });
+    }
+
+    /// Bots at work are stopped only when the user said yes, and a restore
+    /// makes a new id for a group whose id or name was taken meanwhile.
+    #[test]
+    fn archiving_asks_before_stopping_work_and_restore_avoids_a_taken_name() {
+        paths::testing::with_home("group-archive-busy", || {
+            let bot = test_id("busy");
+            fake_one_shot_bot(&bot, "exec sleep 5");
+            crate::groups::save(&[group_of_bots("g1", "Destia", &[&bot])]).unwrap();
+            send_agent(&bot, "오래 걸리는 일").unwrap();
+            eventually(Duration::from_secs(5), "the turn never started", || {
+                headless_child_started(&bot)
+            });
+            let err = archive_group("g1", false, None).unwrap_err().to_string();
+            assert!(err.contains("1 bots are working"), "{err}");
+            assert!(list_agents().iter().any(|x| x.id == bot), "it was archived anyway");
+            assert!(crate::group_archive::load().is_empty());
+            let done = archive_group("g1", true, None).unwrap();
+            assert_eq!((done["bots"].as_u64(), done["stopped"].as_u64()), (Some(1), Some(1)));
+            assert!(list_agents().iter().all(|x| x.id != bot));
+            assert!(crate::transcript::messages(&bot).iter().all(|m| !m.queued));
+
+            // Meanwhile a group of the same id and name is made.
+            crate::groups::save(&[group_of_bots("g1", "Destia", &[])]).unwrap();
+            let back = restore_archived_group("g1").unwrap();
+            assert_ne!(back["id"], "g1");
+            let groups = crate::groups::load().unwrap();
+            assert_eq!(groups.len(), 2);
+            let names: Vec<&str> = groups.iter().map(|g| g.name.as_str()).collect();
+            assert!(names.contains(&"Destia") && names.contains(&"Destia 2"), "{names:?}");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A router's representative speaks for this PC, so its group stays.
+    #[test]
+    fn a_group_with_a_router_representative_is_not_archived() {
+        paths::testing::with_home("group-archive-rep", || {
+            let (rep, mate) = (test_id("rep"), test_id("mate"));
+            for bot in [&rep, &mate] {
+                fake_bot(bot, r#"{"type":"result","subtype":"success","is_error":false,"result":"ok"}"#);
+            }
+            crate::groups::save(&[group_of_bots("g1", "Destia", &[&mate, &rep])]).unwrap();
+            let _rx = crate::remote::test_rep("rep-test", &rep);
+            let err = archive_group("g1", true, None).unwrap_err().to_string();
+            crate::remote::drop_test_link("rep-test");
+            assert!(err.contains("라우터 대표 봇"), "{err}");
+            assert!(err.contains(&rep), "{err}");
+            let listed: Vec<String> = list_agents().into_iter().map(|x| x.id).collect();
+            assert!(listed.contains(&rep) && listed.contains(&mate), "{listed:?}");
+            assert!(crate::group_archive::load().is_empty());
+            assert_eq!(crate::groups::load().unwrap().len(), 1);
+            remove_agent(&rep).unwrap();
+            remove_agent(&mate).unwrap();
+        });
+    }
+
+    /// Deleting an archived group is final, the way removing a bot is.
+    #[test]
+    fn deleting_an_archived_group_removes_its_bots_for_good() {
+        paths::testing::with_home("group-archive-delete", || {
+            let bot = test_id("gd");
+            fake_bot(
+                &bot,
+                r#"{"type":"assistant","message":{"content":[{"type":"text","text":"ok"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"ok"}"#,
+            );
+            crate::groups::save(&[group_of_bots("g1", "Destia", &[&bot])]).unwrap();
+            crate::memory::write_group("g1", "shared notes").unwrap();
+            send_agent(&bot, "hi").unwrap();
+            wait_idle(&bot);
+            archive_group("g1", false, None).unwrap();
+            assert!(paths::transcript_path(&bot).exists());
+            assert_eq!(crate::memory::read_group("g1"), "shared notes", "group memory is kept");
+            assert!(delete_archived_group("nope").is_err());
+            delete_archived_group("g1").unwrap();
+            assert!(!paths::transcript_path(&bot).exists(), "the chat stayed");
+            assert!(crate::group_archive::load().is_empty());
+            assert!(crate::group_archive::holding(&bot).is_none());
+            assert!(crate::memory::read_group("g1").is_empty(), "group memory stayed");
+            let err = tell_with("user", &bot, "hi", false).unwrap_err().to_string();
+            assert!(err.contains("unknown agent"), "{err}");
+            assert!(restore_archived_group("g1").is_err());
         });
     }
 

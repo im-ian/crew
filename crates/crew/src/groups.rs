@@ -208,7 +208,7 @@ pub fn led_by_another(groups: &[SidebarGroup], agent_id: &str) -> bool {
         .is_some_and(|lead| lead != agent_id)
 }
 
-fn unique_group_name(groups: &[SidebarGroup], base: &str) -> String {
+pub(crate) fn unique_group_name(groups: &[SidebarGroup], base: &str) -> String {
     let taken: std::collections::HashSet<&str> = groups.iter().map(|g| g.name.as_str()).collect();
     if !taken.contains(base) {
         return base.to_string();
@@ -223,7 +223,7 @@ fn unique_group_name(groups: &[SidebarGroup], base: &str) -> String {
     }
 }
 
-fn new_group_id(groups: &[SidebarGroup], now_ms: u128) -> String {
+pub(crate) fn new_group_id(groups: &[SidebarGroup], now_ms: u128) -> String {
     let taken: std::collections::HashSet<&str> = groups.iter().map(|g| g.id.as_str()).collect();
     let base = format!("g{now_ms:x}");
     if !taken.contains(base.as_str()) {

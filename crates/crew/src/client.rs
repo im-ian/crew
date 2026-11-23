@@ -72,6 +72,7 @@ fn answer_timeout(req: &Request) -> Option<Duration> {
         | Request::RemoteSet { .. }
         | Request::TeamMemory { .. }
         | Request::Mobile { .. }
+        | Request::GroupArchive { .. }
         | Request::Shutdown => Some(ANSWER_TIMEOUT),
         // These wait on a router somewhere on the network.
         Request::RemoteProbe { .. }
@@ -247,6 +248,7 @@ fn answers(req: &Request, ev: &Event) -> bool {
         Request::RemoteList => matches!(ev, Event::Remotes { .. }),
         Request::TeamMemory { .. } => matches!(ev, Event::TeamMemory { .. }),
         Request::Mobile { .. } => matches!(ev, Event::Mobile { .. }),
+        Request::GroupArchive { .. } => matches!(ev, Event::GroupArchive { .. }),
         Request::TeamMemoryAppend { .. } | Request::TeamMemorySet { .. } => {
             matches!(ev, Event::Ok | Event::TeamMemoryConflict)
         }
