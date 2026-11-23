@@ -626,6 +626,8 @@ fn remember_prompt(id: &str, prompt: Vec<PendingDelivery>) -> bool {
             text,
             msg_ids,
             got_output: false,
+            worked: false,
+            serial: 0,
             resumed: false,
         },
     );
@@ -1381,7 +1383,14 @@ fn submit_delivery_then(
             }
         }
     }
+    // A teammate's tell waiting behind a parked line: only the user's own line
+    // released a parked one, so every tell queued behind it stayed for good.
+    // It is not "never answered" any more once a teammate asks again.
+    let teammate_tell = !joins && !origin.from.is_empty() && origin.from != "user" && origin.from != "crew";
     enqueue_delivery(id, text, newline, msg_id, joins, origin, then)?;
+    if teammate_tell {
+        unpark_prefix(id);
+    }
     // The turn that was in the way, or a start under way, can finish before
     // the push and find nothing to start. Nothing else would start this one.
     pump_inbox_inner(id);
@@ -8848,6 +8857,202 @@ printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s2"}}' '{{"type"
         });
     }
 
+    /// The watch armed for a turn that has ended must not stop the next one.
+    /// It looked at "a turn running and nothing heard", which the next turn,
+    /// two seconds old, was, and killed it.
+    #[test]
+    fn an_old_turns_watch_does_not_stop_the_next_turn() {
+        paths::testing::with_home("stale-watch", || {
+            let bot = test_id("stale");
+            let log = paths::home_dir().join("prompts");
+            fake_bot_running(
+                &bot,
+                &format!(
+                    "printf '%s|' \"$last\" >> '{}'\n\
+                     case \"$last\" in *slow*) sleep 1.4 ;; esac\n\
+                     printf '%s\\n' '{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"ok\"}}]}}}}'",
+                    log.display()
+                ),
+            );
+            wait_idle(&bot);
+            set_output_wait(&bot, Duration::from_secs(2));
+            let before = assistant_texts(&bot).len();
+            // The first turn answers at once; its watch rings in two seconds.
+            send_agent(&bot, "one").unwrap();
+            eventually(Duration::from_secs(5), "no answer to the first turn", || {
+                assistant_texts(&bot).len() == before + 1
+            });
+            wait_idle(&bot);
+            // The second starts a second later and says nothing for 1.4: its
+            // first line lands after the first turn's watch rang, before its own.
+            std::thread::sleep(Duration::from_millis(1000));
+            send_agent(&bot, "slow two").unwrap();
+            eventually(Duration::from_secs(8), "the second turn never answered", || {
+                assistant_texts(&bot).len() == before + 2
+            });
+            wait_idle(&bot);
+            for line in [
+                "CLI가 응답하지 않습니다",
+                "CLI가 이전 세션에서 응답하지 않아 새 세션으로 다시 보냅니다",
+            ] {
+                assert!(!system_said(&bot, line), "a finished turn's watch stopped the next one: {line}");
+            }
+            // It ran once, not stopped and sent again.
+            let sent = fs::read_to_string(&log).unwrap();
+            assert_eq!(sent.matches("slow two").count(), 1, "{sent}");
+            assert!(queued_text(&bot).is_empty());
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A new session whose turn never answered is not kept: the CLI may not
+    /// have written it, and the next turn resuming it was told the session
+    /// did not exist. The next turn opens another and reads the chat so far.
+    #[test]
+    fn a_new_session_that_never_answered_is_not_resumed() {
+        paths::testing::with_home("fresh-unheard", || {
+            let bot = test_id("fresh");
+            let log = paths::home_dir().join("prompts");
+            let flag = paths::home_dir().join("hung");
+            fake_bot_running(
+                &bot,
+                &format!(
+                    "case \" $* \" in *' --resume '*) mode=resume ;; *) mode=fresh ;; esac\n\
+                     printf '%s:%s|' \"$mode\" \"$last\" >> '{log}'\n\
+                     case \"$last\" in *HANG*) [ -e '{flag}' ] || {{ touch '{flag}'; exec sleep 30; }} ;; esac\n\
+                     printf '%s\\n' '{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"살았어요\"}}]}}}}'",
+                    log = log.display(),
+                    flag = flag.display(),
+                ),
+            );
+            wait_idle(&bot);
+            hold_output_watch(&bot);
+            // No session to resume: the turn opens one.
+            headless::clear_session(&bot);
+            if let Some(LiveAgent::Headless(session)) = agents().lock().unwrap().get(&bot) {
+                session.inner.lock().unwrap().session_id = None;
+            }
+            send_agent(&bot, "HANG 하나").unwrap();
+            eventually(Duration::from_secs(10), "the turn never started", || {
+                tried(&log, "fresh:", "HANG")
+            });
+            ring_output_watch(&bot);
+            eventually(Duration::from_secs(5), "the stall was not reported", || {
+                system_said(&bot, "CLI가 응답하지 않습니다")
+            });
+            assert_eq!(headless::load_session(&bot), None, "the unheard session was kept");
+            // The next line takes the parked one along, on a new session.
+            send_agent(&bot, "둘").unwrap();
+            eventually(Duration::from_secs(10), "no answer", || told(&bot, "살았어요"));
+            wait_idle(&bot);
+            let sent = fs::read_to_string(&log).unwrap();
+            assert!(!sent.contains("resume:"), "a session the CLI never wrote was resumed: {sent}");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
+    /// A tell that was parked (the CLI never answered it) sat at the front, and
+    /// every tell that came while the bot was busy waited behind it for good:
+    /// only the user's own line released it. A teammate's tell takes it along.
+    #[test]
+    fn a_teammates_tell_releases_a_parked_one() {
+        paths::testing::with_home("parked-tell", || {
+            let (bot, peer) = (test_id("held"), test_id("peer"));
+            let log = paths::home_dir().join("prompts");
+            let flag = paths::home_dir().join("hung");
+            // One stand-in `claude` serves every bot here, so the sender is made
+            // and settled first, and the bot's own script is the one left.
+            fake_bot(&peer, r#"{"type":"result","subtype":"success","is_error":false,"result":"ok"}"#);
+            wait_idle(&peer);
+            fake_bot_running(
+                &bot,
+                &format!(
+                    "printf '%s|' \"$last\" >> '{log}'\n\
+                     case \"$last\" in *FIRST*) [ -e '{flag}' ] || {{ touch '{flag}'; exec sleep 30; }} ;; esac\n\
+                     printf '%s\\n' '{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"받았어요\"}}]}}}}'",
+                    log = log.display(),
+                    flag = flag.display(),
+                ),
+            );
+            wait_idle(&bot);
+            hold_output_watch(&bot);
+            tell_with(&peer, &bot, "FIRST 일을 시작해 주세요", false).unwrap();
+            eventually(Duration::from_secs(10), "the first tell never started", || {
+                fs::read_to_string(&log).is_ok_and(|s| s.contains("FIRST"))
+            });
+            ring_output_watch(&bot);
+            eventually(Duration::from_secs(5), "the stall was not reported", || {
+                system_said(&bot, "CLI가 응답하지 않습니다")
+            });
+            assert!(inbox_front_parked(&bot), "the tell was not parked");
+            // The bot is busy when the next tell comes, so it waits in line.
+            headless_status(&bot, AgentStatus::Working);
+            tell_with(&peer, &bot, "SECOND 다시 알려요", false).unwrap();
+            assert!(!inbox_front_parked(&bot), "the tell waits behind a parked one");
+            headless_status(&bot, AgentStatus::Idle);
+            pump_inbox(&bot);
+            eventually(Duration::from_secs(10), "the tell behind a parked one never went", || {
+                told(&bot, "받았어요")
+            });
+            wait_idle(&bot);
+            let sent = fs::read_to_string(&log).unwrap();
+            let last = sent.split('|').filter(|p| p.contains("SECOND")).last().unwrap_or("");
+            assert!(last.contains("FIRST") && last.contains("SECOND"), "{sent}");
+            assert!(queued_text(&bot).is_empty(), "{:?}", queued_text(&bot));
+            remove_agent(&bot).unwrap();
+            remove_agent(&peer).unwrap();
+        });
+    }
+
+    /// Claude's own words for a session it cannot find: one `result` on stdout,
+    /// `num_turns` 0. It is the only line, so the prompt was not read and goes
+    /// again on a new session; a second such error is not sent a third time.
+    #[test]
+    fn a_session_claude_could_not_find_is_retried_once() {
+        paths::testing::with_home("lost-result-line", || {
+            let bot = test_id("lostline");
+            let log = paths::home_dir().join("prompts");
+            let body = format!(
+                "case \" $* \" in *' --resume '*) mode=resume ;; *) mode=fresh ;; esac\n\
+                 printf '%s:%s|' \"$mode\" \"$last\" >> '{log}'\n\
+                 if [ $mode = resume ] || [ -e '{always}' ]; then\n\
+                 printf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"num_turns\":0,\"errors\":[\"No conversation found with session ID: lost-session\"]}}'; exit 1\n\
+                 fi\n\
+                 printf '%s\\n' '{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"새 세션\"}}]}}}}'",
+                log = log.display(),
+                always = paths::home_dir().join("always").display(),
+            );
+            fake_bot_running(&bot, &body);
+            wait_idle(&bot);
+            crate::transcript::push_user(&bot, "user", "어제 시킨 일");
+            resume_from(&bot, "lost-session");
+            send_agent(&bot, "하나").unwrap();
+            eventually(Duration::from_secs(5), "never answered", || told(&bot, "새 세션"));
+            wait_idle(&bot);
+            let sent = fs::read_to_string(&log).unwrap();
+            let tries: Vec<&str> = sent.split('|').filter(|t| t.contains("하나")).collect();
+            assert_eq!(tries.len(), 2, "{sent}");
+            assert!(tries[0].starts_with("resume:") && tries[1].starts_with("fresh:"), "{sent}");
+            assert!(tries[1].contains("어제 시킨 일"), "no recap: {sent}");
+            assert!(system_said(&bot, "CLI가 이전 세션을 열지 못해 새 세션으로 다시 보냅니다"));
+            assert!(!crate::transcript::messages(&bot).iter().any(|m| m.text.contains("No conversation found")));
+            assert!(!turn_failed(&bot));
+
+            // Every start fails now: the one retry is used, and it stops there.
+            fs::write(paths::home_dir().join("always"), "").unwrap();
+            resume_from(&bot, "lost-session");
+            let _ = fs::remove_file(&log);
+            send_agent(&bot, "둘").unwrap();
+            eventually(Duration::from_secs(5), "the failed retry was not shown", || {
+                turn_failed(&bot) && !agent_busy(&bot).unwrap()
+            });
+            std::thread::sleep(Duration::from_millis(300));
+            let sent = fs::read_to_string(&log).unwrap();
+            assert_eq!(sent.matches("둘").count(), 2, "{sent}");
+            remove_agent(&bot).unwrap();
+        });
+    }
+
     /// A line already arrived. Stopping keeps the prompt sent.
     #[test]
     fn a_stop_after_the_first_line_keeps_what_was_sent() {
@@ -11650,14 +11855,12 @@ while IFS= read -r line; do handle "$line"; done"#,
         });
     }
 
-    /// Claude kept up between turns says a session it was started on is gone
-    /// in its `result` and stays quiet on stdout otherwise. That session is
-    /// dropped, as a one-shot process's exit dropped it, and the next turn
-    /// opens a new one instead of failing on it forever. The message is not
-    /// sent again: the `result` came after the prompt, so Claude may have
-    /// acted on it.
+    /// Claude, kept up or not, says a session it was started on is gone in a
+    /// `result` and nothing else on stdout: no turn ran, so the prompt was not
+    /// read. The message goes once more on a new session, with the chat so far,
+    /// the chat says so, and the lost session's error never reaches it.
     #[test]
-    fn a_gone_claude_session_is_dropped() {
+    fn a_gone_claude_session_is_retried_on_a_new_one() {
         paths::testing::with_home("live-gone", || {
             let bot = test_id("livegone");
             let (starts, _) = fake_live_claude(&bot);
@@ -11673,11 +11876,6 @@ while IFS= read -r line; do handle "$line"; done"#,
             });
             fs::write(paths::home_dir().join("resume-fails"), "").unwrap();
             send_agent(&bot, "two").unwrap();
-            eventually(Duration::from_secs(5), "the failed resume ran on", || {
-                started_pids(&starts).len() == 2 && !agent_busy(&bot).unwrap()
-            });
-            assert!(turn_failed(&bot), "a turn on a gone session read as fine");
-            send_agent(&bot, "three").unwrap();
             eventually(Duration::from_secs(5), "no answer on a new session", || {
                 let pids = started_pids(&starts);
                 pids.len() == 3 && told(&bot, &format!("answer 1 from {}", pids[2]))
@@ -11689,6 +11887,17 @@ while IFS= read -r line; do handle "$line"; done"#,
             assert!(lines[1].contains("--resume"), "{log}");
             assert!(!lines[2].contains("--resume"), "{log}");
             assert!(lines[2].contains("--session-id"), "{log}");
+            assert!(system_said(
+                &bot,
+                "CLI가 이전 세션을 열지 못해 새 세션으로 다시 보냅니다"
+            ));
+            assert!(
+                !crate::transcript::messages(&bot)
+                    .iter()
+                    .any(|m| m.text.contains("No conversation found")),
+                "the lost session's error reached the chat"
+            );
+            assert!(!turn_failed(&bot));
             remove_agent(&bot).unwrap();
         });
     }
@@ -13933,6 +14142,8 @@ sleep 1"#,
                 text: "하나".into(),
                 msg_ids: vec![row.id.clone()],
                 got_output: false,
+                worked: false,
+                serial: 0,
                 resumed: true,
             };
             retry_unheard(&bot, flight());
