@@ -64,11 +64,11 @@ export function webFileSrc(path: string): string {
 const LOCAL: Record<string, (args: Record<string, unknown>) => unknown> = {
   // The laptop's window mirrors these settings to the daemon from its own
   // storage. A phone starts with defaults of its own, and mirroring them
-  // would overwrite the laptop's choice the moment the page opened.
+  // would overwrite the laptop's choice the moment the page opened. The alert
+  // switches are not here: they live in the daemon, and the phone reads and
+  // changes them there (`set_notifications`, `set_lead_only_notify`).
   set_locale: () => undefined,
   set_user_name: () => undefined,
-  set_notifications: () => undefined,
-  set_lead_only_notify: () => undefined,
   set_display_prefs: () => undefined,
   set_dock_badge: () => undefined,
   set_escape_layer: () => undefined,

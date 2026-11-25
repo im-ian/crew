@@ -72,6 +72,7 @@ fn main() {
             "set_locale",
             "set_notifications",
             "set_lead_only_notify",
+            "get_notify_prefs",
             "set_user_name",
             "set_display_prefs",
             "get_display_prefs",

@@ -291,6 +291,8 @@ export const api = {
     invoke<void>("set_notifications", { enabled }),
   setLeadOnlyNotify: (enabled: boolean) =>
     invoke<void>("set_lead_only_notify", { enabled }),
+  /** The daemon's alert switches: the value both the window and a phone show. */
+  getNotifyPrefs: () => invoke<{ enabled: boolean; leadOnly: boolean }>("get_notify_prefs"),
   /** The window's fonts and text size, for a paired phone to read. */
   setDisplayPrefs: (prefs: DisplayPrefs) => invoke<void>("set_display_prefs", { prefs }),
   getDisplayPrefs: () => invoke<DisplayPrefs>("get_display_prefs"),

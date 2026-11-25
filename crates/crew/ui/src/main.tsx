@@ -14,6 +14,7 @@ import { isWeb } from "./web";
 import { loadHomeDir } from "./homeDir";
 import { watchViewport } from "./mobile";
 import { followLaptopPrefs, mirrorDisplayPrefs } from "./displayPrefs";
+import { followNotifyPrefs } from "./notifyPref";
 import "./styles.css";
 
 applyTheme(loadThemePref());
@@ -27,6 +28,8 @@ installAppZoom();
 // The laptop's window tells the daemon how it shows chat; a phone follows it.
 mirrorDisplayPrefs();
 followLaptopPrefs();
+// The alert switches are the daemon's: read them, and again when the page returns.
+followNotifyPrefs();
 // A phone or tablet browser draws edge to edge (viewport-fit=cover) at any
 // width: the safe-area rules in styles.css key off this class, and the
 // viewport watch tells them when the keyboard is up.

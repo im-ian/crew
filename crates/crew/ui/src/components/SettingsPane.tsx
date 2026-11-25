@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
-import { api } from "../api";
+import { useEffect, useMemo, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
 import { loadBotDefault } from "../botDefault";
 import type { AiChoice } from "../aiList";
 import { loadAiList, saveAiList } from "../aiListSync";
@@ -18,7 +17,13 @@ import {
   saveFont,
 } from "../fontPref";
 import { applyFontSize, FONT_SIZES, fontSizeOf, loadFontSize, saveFontSize, type FontSize } from "../fontSize";
-import { loadLeadOnlyNotify, loadNotify, saveLeadOnlyNotify, saveNotify } from "../notifyPref";
+import {
+  changeLeadOnlyNotify,
+  changeNotify,
+  getNotifyPrefs,
+  refreshNotifyPrefs,
+  subscribeNotifyPrefs,
+} from "../notifyPref";
 import { loadNoticeKeep, saveNoticeKeep } from "../noticeKeepPref";
 import type { NoticeKeep } from "../island";
 import type { ThemePref } from "../theme";
@@ -88,8 +93,11 @@ export function SettingsPane({
   const t = useT();
   const { locale, setLocale, userName, setUserName } = useLocale();
   const touch = useTouch();
-  const [notify, setNotify] = useState(loadNotify);
-  const [leadOnly, setLeadOnly] = useState(loadLeadOnlyNotify);
+  // The daemon's switches, read when this opens and written only when moved.
+  const { enabled: notify, leadOnly } = useSyncExternalStore(subscribeNotifyPrefs, getNotifyPrefs, getNotifyPrefs);
+  useEffect(() => {
+    if (open) void refreshNotifyPrefs();
+  }, [open]);
   const [noticeKeep, setNoticeKeep] = useState(loadNoticeKeep);
 
   function changeNoticeKeep(next: NoticeKeep) {
@@ -142,18 +150,6 @@ export function SettingsPane({
   }
   // Stays on the last page while the app runs, like the window it came from.
   const [section, setSection] = useState<Section>("general");
-
-  useEffect(() => {
-    saveNotify(notify);
-    // The daemon sends the same alerts while the window is closed.
-    void api.setNotifications(notify).catch(() => {});
-  }, [notify]);
-
-  useEffect(() => {
-    saveLeadOnlyNotify(leadOnly);
-    // The daemon decides which bot's finish notifies, window or not.
-    void api.setLeadOnlyNotify(leadOnly).catch(() => {});
-  }, [leadOnly]);
 
   const themes: { value: ThemePref; label: string }[] = [
     { value: "dark", label: t("settings.theme.dark") },
@@ -248,7 +244,7 @@ export function SettingsPane({
                   className="switch"
                   checked={notify}
                   title={notify ? t("common.on") : t("common.off")}
-                  onChange={(e) => setNotify(e.target.checked)}
+                  onChange={(e) => void changeNotify(e.target.checked)}
                 />
               </div>
               <p className="apply-note">
@@ -268,7 +264,7 @@ export function SettingsPane({
                   checked={leadOnly}
                   disabled={!notify}
                   title={leadOnly ? t("common.on") : t("common.off")}
-                  onChange={(e) => setLeadOnly(e.target.checked)}
+                  onChange={(e) => void changeLeadOnlyNotify(e.target.checked)}
                 />
               </div>
               <p className="apply-note">

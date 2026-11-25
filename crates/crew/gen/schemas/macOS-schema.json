@@ -285,6 +285,12 @@
           "markdownDescription": "Enables the get_messages command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_notify_prefs command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-notify-prefs",
+          "markdownDescription": "Enables the get_notify_prefs command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_pins command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-pins",
@@ -781,6 +787,12 @@
           "type": "string",
           "const": "deny-get-messages",
           "markdownDescription": "Denies the get_messages command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_notify_prefs command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-notify-prefs",
+          "markdownDescription": "Denies the get_notify_prefs command without any pre-configured scope."
         },
         {
           "description": "Denies the get_pins command without any pre-configured scope.",

@@ -328,6 +328,9 @@ pub fn dispatch(name: &str, args: Value) -> Option<Result<Value, String>> {
             let enabled: bool = arg(&args, "enabled")?;
             ok(crate::desktop::set_lead_only_notify(enabled)?)
         }
+        "get_notify_prefs" => {
+            ok(crate::desktop::get_notify_prefs())
+        }
         "set_user_name" => {
             let name: String = arg(&args, "name")?;
             ok(crate::desktop::set_user_name(name)?)
@@ -456,6 +459,7 @@ pub const NAMES: &[&str] = &[
     "mark_read",
     "set_notifications",
     "set_lead_only_notify",
+    "get_notify_prefs",
     "set_user_name",
     "set_display_prefs",
     "get_display_prefs",

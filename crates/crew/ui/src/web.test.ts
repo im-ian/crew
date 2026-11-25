@@ -132,6 +132,19 @@ describe("webInvoke", () => {
     expect(open).toHaveBeenLastCalledWith("/api/file?path=%2FUsers%2Fme%2Fa%20b.png", "_blank", "noopener");
     expect(calls).toHaveLength(0);
   });
+
+  it("sends the alert switches to the daemon, which holds them, and reads them back", async () => {
+    const { fetch, calls } = fakeFetch(() => json(200, { enabled: false, leadOnly: true }));
+    await webInvoke("set_notifications", { enabled: false }, fetch);
+    await webInvoke("set_lead_only_notify", { enabled: true }, fetch);
+    expect(await webInvoke("get_notify_prefs", {}, fetch)).toEqual({ enabled: false, leadOnly: true });
+    expect(calls.map((c) => c.url)).toEqual([
+      "/api/invoke/set_notifications",
+      "/api/invoke/set_lead_only_notify",
+      "/api/invoke/get_notify_prefs",
+    ]);
+    expect(JSON.parse(String(calls[1].init.body))).toEqual({ enabled: true });
+  });
 });
 
 describe("transport", () => {
