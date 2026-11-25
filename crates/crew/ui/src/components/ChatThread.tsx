@@ -99,6 +99,8 @@ import { MdBody } from "./MdBody";
 import { WhoButton, WhoLabel, whoColor } from "./WhoButton";
 import { STICK_PX, rebuiltTop, stickMove, type StickMove } from "../stick";
 
+/** How near the top of the loaded rows a scroll asks for older ones. */
+const LOAD_OLDER_PX = 800;
 /** How far below the thread's top edge a jumped question sits, clear of the fade. */
 const ASK_INSET = 16;
 
@@ -237,6 +239,9 @@ type Props = {
   onOpenRoutines?: () => void;
   /** The bot's face follows the composer caret: it is idle. */
   lookAtCaret?: boolean;
+  /** Rows of this chat older than the ones loaded; `onLoadOlder` brings some in. */
+  olderRows?: number;
+  onLoadOlder?: () => void;
   /** The chat is split in two. Turning it on or off rebuilds the box around the thread. */
   split?: boolean;
 };
@@ -269,6 +274,8 @@ export function ChatThread({
   showTools = false,
   onOpenRoutines,
   lookAtCaret = false,
+  olderRows = 0,
+  onLoadOlder,
   split = false,
 }: Props) {
   const { locale } = useLocale();
@@ -405,6 +412,8 @@ export function ChatThread({
   const heightsRef = useRef(new Map<string, number>());
   const heightRaf = useRef(0);
   const prevOffsets = useRef<number[] | null>(null);
+  const prevKeys = useRef<string[] | null>(null);
+  const virtualRef = useRef(false);
   const born = useRef(new Map<string, number>());
   const opened = useRef(new Map<string, number>());
   const unpinnedRef = useRef(false);
@@ -412,7 +421,6 @@ export function ChatThread({
   const stickRef = useRef(stick);
   const offsetsRef = useRef<number[]>([]);
   const flowLenRef = useRef(0);
-  const rowsLenRef = useRef(0);
   const rangeRef = useRef({ start: 0, end: 0 });
   const viewportRef = useRef(0);
   const followRef = useRef(true);
@@ -427,7 +435,10 @@ export function ChatThread({
 
   // Past the threshold, waiting lines stay mounted at the bottom (the flex
   // order that pins them) and the rest of the history is a measured window.
-  const virtual = rows.length > VIRTUAL_THRESHOLD;
+  // A chat with older rows still to load is long, and it keeps its place by
+  // the measured window when they come in.
+  const virtual = rows.length > VIRTUAL_THRESHOLD || olderRows > 0;
+  virtualRef.current = virtual;
   const flow = virtual ? rows.filter((row) => !isPinned(row)) : rows;
   const pinned = virtual ? rows.filter(isPinned) : [];
   const offsets = virtual
@@ -439,7 +450,6 @@ export function ChatThread({
     : [];
   offsetsRef.current = offsets;
   flowLenRef.current = flow.length;
-  rowsLenRef.current = rows.length;
   const followBottom = stick && !unpinned && !highlightId && !resumeHold;
   const focusId = highlightId ?? (resumeHold ? resumeId : null);
   const focusIndex = virtual ? indexOfRow(flow, focusId) : -1;
@@ -621,12 +631,42 @@ export function ChatThread({
       const next = el.scrollHeight;
       if (Math.abs(el.scrollTop - next) > 1) el.scrollTop = next;
     } else if (el && before && before.length === offsets.length) {
-      const anchor = anchorIndex(before, el.scrollTop, flow.length);
+      // A jumped-to row holds its place while the rows above it are measured;
+      // at the very top, the first row would, and the hit slid off screen.
+      const anchor = focusIndex >= 0 ? focusIndex : anchorIndex(before, el.scrollTop, flow.length);
       const shift = anchorShift(before, offsets, anchor);
       if (shift) el.scrollTop += shift;
+    } else if (el && before && prevKeys.current && !highlightId) {
+      // Older rows came in above: the row at the top of the screen stays
+      // where it was. A jump places its row itself.
+      const keys = prevKeys.current;
+      const anchor = anchorIndex(before, el.scrollTop, keys.length);
+      const at = flow.findIndex((row) => rowKey(row) === keys[anchor]);
+      if (at > anchor) {
+        const next = (offsets[at] ?? 0) + (el.scrollTop - (before[anchor] ?? 0));
+        el.scrollTop = next;
+        setScrollTop(next);
+      }
     }
     prevOffsets.current = offsets;
+    prevKeys.current = flow.map(rowKey);
   }, [virtual, offsetsKey, followBottom, flow.length]);
+
+  const olderRef = useRef(olderRows);
+  olderRef.current = olderRows;
+  const loadOlderRef = useRef(onLoadOlder);
+  loadOlderRef.current = onLoadOlder;
+
+  // Still near the top after a load, or too little shown to scroll at all:
+  // no scroll event will ask, as rows that are all hidden tool calls add
+  // nothing to scroll past. Keep loading until there is room.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !ready || olderRows <= 0 || highlightId) return;
+    const short = el.scrollHeight - el.clientHeight < LOAD_OLDER_PX;
+    const atTop = unpinnedRef.current && el.scrollTop < LOAD_OLDER_PX;
+    if (short || atTop) loadOlderRef.current?.();
+  }, [ready, olderRows, rows.length, chatKey, highlightId]);
 
   useEffect(() => {
     if (!jumpSeq) return;
@@ -896,7 +936,10 @@ export function ChatThread({
       setUnpinned(true);
     }
     const el = ref.current;
-    if (!el || rowsLenRef.current <= VIRTUAL_THRESHOLD) return;
+    // Near the top of what is loaded: the rows before it.
+    // Not while a jump holds a row in place: rows coming in above would push it off.
+    if (el && olderRef.current > 0 && !highlightId && el.scrollTop < LOAD_OLDER_PX) loadOlderRef.current?.();
+    if (!el || !virtualRef.current) return;
     const nextTop = el.scrollTop;
     const nextView = el.clientHeight;
     const gapPx = el.scrollHeight - nextTop - nextView;

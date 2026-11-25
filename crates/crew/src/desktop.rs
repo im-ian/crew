@@ -290,6 +290,49 @@ pub(crate) fn remove_group_memory(group: String) -> Result<(), String> {
     Ok(())
 }
 
+/// The end of a chat, not all of it: a long one sent whole on every switch
+/// and every poll held the window up. See `transcript::page_start`.
+#[tauri::command(async)]
+pub(crate) fn get_messages_page(
+    agent: String,
+    start: Option<usize>,
+    end: Option<usize>,
+    tail: usize,
+    need: Option<String>,
+    since_ts: Option<u64>,
+) -> Result<MessagesPage, String> {
+    match client::rpc(Request::MessagesPage {
+        agent,
+        start,
+        end,
+        tail,
+        need,
+        since_ts,
+    }) {
+        Ok(Event::MessagesPage {
+            messages,
+            start,
+            total,
+            ..
+        }) => Ok(MessagesPage {
+            messages,
+            start,
+            total,
+        }),
+        Ok(Event::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected daemon response".into()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+/// The end of a chat for the window: rows from `start` of `total`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct MessagesPage {
+    messages: Vec<ChatMessage>,
+    start: usize,
+    total: usize,
+}
+
 #[tauri::command(async)]
 pub(crate) fn get_messages(agent: String) -> Result<Vec<ChatMessage>, String> {
     match client::rpc(Request::Messages { agent }) {
@@ -1380,6 +1423,7 @@ pub fn run() -> anyhow::Result<()> {
             tell_message,
             get_snapshot,
             get_messages,
+            get_messages_page,
             daemon_ping,
             reset_agent,
             set_agent,

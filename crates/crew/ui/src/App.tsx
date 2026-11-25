@@ -907,6 +907,8 @@ export function App() {
           openedRead={crew.openedRead}
           ready={!!liveRows || !!rows || crew.messagesFor === crew.selected}
           jumpSeq={jumpSeq}
+          olderRows={liveRows || !rows ? crew.olderRows : 0}
+          onLoadOlder={crew.loadOlder}
           onReply={(target) => composerRef.current?.replyTo(target)}
           onJump={crew.highlightMessage}
           peekFocus={peekOpen ? peek?.focus[0] ?? null : null}
@@ -1112,7 +1114,8 @@ export function App() {
           onRunRoutine={crew.runRoutine}
           agents={crew.agents}
           groups={crew.groups}
-          messages={crew.currentAgent && crew.messagesFor === crew.currentAgent.id ? crew.messages : null}
+          // The open chat holds only its end; the archive reads all of it.
+          messages={null}
           onJump={(agent, msgId) => crew.selectAgent(agent, msgId)}
         />
         {leadOpen && paneGroup && leadPane ? (

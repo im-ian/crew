@@ -284,6 +284,13 @@ export type ChoiceCard = {
   state: ChoiceState;
 };
 
+/** A chat's rows from index `start` of `total`: the end of it, not all. */
+export type MessagesPage = {
+  messages: ChatMessage[];
+  start: number;
+  total: number;
+};
+
 export type ChatMessage = {
   id: string;
   role: Role;

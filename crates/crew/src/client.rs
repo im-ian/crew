@@ -49,6 +49,7 @@ fn answer_timeout(req: &Request) -> Option<Duration> {
         | Request::Resize { .. }
         | Request::Snapshot { .. }
         | Request::Messages { .. }
+        | Request::MessagesPage { .. }
         | Request::AddAgent { .. }
         | Request::CloneAgent { .. }
         | Request::RemoveAgent { .. }
@@ -228,6 +229,7 @@ fn answers(req: &Request, ev: &Event) -> bool {
         Request::Tell { .. } => matches!(ev, Event::Told { .. } | Event::Ok),
         Request::Snapshot { .. } => matches!(ev, Event::Snapshot { .. }),
         Request::Messages { .. } => matches!(ev, Event::Messages { .. }),
+        Request::MessagesPage { .. } => matches!(ev, Event::MessagesPage { .. }),
         Request::CloneAgent { .. } => {
             matches!(ev, Event::Cloned { .. } | Event::Ok | Event::Agents { .. })
         }
