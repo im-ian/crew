@@ -25,7 +25,8 @@ import {
 } from "../imageZoom";
 import type { MediaKind } from "../markdown";
 import { useT } from "../LocaleContext";
-import { X, ZoomIn, ZoomOut } from "../icons";
+import { ZoomIn, ZoomOut } from "../icons";
+import { CloseButton } from "./CloseButton";
 
 export type Shot = {
   src: string;
@@ -113,16 +114,13 @@ export function MediaPreview({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <button
+      <CloseButton
         ref={closeRef}
-        type="button"
         className="img-preview-close"
-        aria-label={t("common.close")}
+        label={t("common.close")}
         onMouseDown={keep}
         onClick={onClose}
-      >
-        <X size={18} />
-      </button>
+      />
       {shot.kind === "image" ? (
         <img
           ref={imgRef}

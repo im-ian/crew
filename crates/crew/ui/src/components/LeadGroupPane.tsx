@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { BotLabelProvider, useLabelGroups } from "../BotLabelContext";
 import { listStamp } from "../clock";
-import { Star, Users, X } from "../icons";
+import { Star, Users } from "../icons";
+import { CloseButton } from "./CloseButton";
 import { useLocale, useT } from "../LocaleContext";
 import { mentionRuns } from "../mentions";
 import { askingAmong, briefStatus, waitingOn, waitingUserPhrase } from "../statusView";
@@ -43,15 +44,7 @@ export function LeadGroupPane({
           </h2>
           <p className="file-dir">{t("leadPane.count", { count: bots.length })}</p>
         </div>
-        <button
-          type="button"
-          className="head-action"
-          title={t("leadPane.close")}
-          aria-label={t("leadPane.close")}
-          onClick={onClose}
-        >
-          <X />
-        </button>
+        <CloseButton label={t("leadPane.close")} onClick={onClose} />
       </header>
       <div className="lead-pane-body">
         {bots.length ? (

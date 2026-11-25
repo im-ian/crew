@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { handleBackdropPointerDown, rememberSelectClose } from "../dialogLayer";
+import { useT } from "../LocaleContext";
+import { CloseButton } from "./CloseButton";
 
 type Props = {
   open: boolean;
@@ -9,9 +11,16 @@ type Props = {
   className?: string;
   /** Beside the title, at the right: a small control such as a help link. */
   aside?: ReactNode;
+  /**
+   * The close control a phone shows in the title bar (a desktop dialog has
+   * none: its buttons and Escape close it). Off for a dialog whose own
+   * buttons are the choice, where closing is one of them.
+   */
+  closeButton?: boolean;
 };
 
-export function Modal({ open, title, onClose, children, className, aside }: Props) {
+export function Modal({ open, title, onClose, children, className, aside, closeButton = true }: Props) {
+  const t = useT();
   return (
     <div
       className={"modal" + (open ? " open" : "")}
@@ -19,14 +28,13 @@ export function Modal({ open, title, onClose, children, className, aside }: Prop
       onBlur={(e) => rememberSelectClose(e.currentTarget, e.target)}
     >
       <div className={"dialog" + (className ? " " + className : "")}>
-        {aside ? (
-          <div className="dialog-head">
-            <h3>{title}</h3>
-            {aside}
-          </div>
-        ) : (
+        <div className="dialog-head">
           <h3>{title}</h3>
-        )}
+          {aside}
+          {closeButton ? (
+            <CloseButton className="dialog-close" label={t("common.close")} onClick={onClose} />
+          ) : null}
+        </div>
         {children}
       </div>
     </div>

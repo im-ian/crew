@@ -24,7 +24,7 @@ export function UpdateConfirm({
 }) {
   const t = useT();
   return (
-    <Modal open={bots > 0} title={t("update.busyTitle")} onClose={onCancel}>
+    <Modal open={bots > 0} title={t("update.busyTitle")} onClose={onCancel} closeButton={false}>
       <p>{bots > 0 ? updateWarning(t, bots) : null}</p>
       <div className="actions spread">
         <button type="button" className="ghost" onClick={onCancel}>

@@ -4,7 +4,8 @@ import { splitBubbles } from "../bubbles";
 import { useT } from "../LocaleContext";
 import { useBotLabel } from "../BotLabelContext";
 import { messageDefinitions } from "../markdown";
-import { Lock, X } from "../icons";
+import { Lock } from "../icons";
+import { CloseButton } from "./CloseButton";
 import { displayWho, peekMessages, subagentFace } from "../peek";
 import type { AgentInfo, ChatMessage } from "../types";
 import { Avatar } from "./Avatar";
@@ -124,15 +125,7 @@ export function PeekRoom({
             fallbackId={peerId}
           />
         </div>
-        <button
-          type="button"
-          className="head-action"
-          title={t("thread.peekClose")}
-          aria-label={t("thread.peekClose")}
-          onClick={onClose}
-        >
-          <X />
-        </button>
+        <CloseButton label={t("thread.peekClose")} onClick={onClose} />
       </header>
       <div className="thread-wrap">
         <div className="thread peek-thread" ref={threadRef} onScroll={sync}>
