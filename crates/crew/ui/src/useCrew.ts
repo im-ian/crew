@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -47,6 +48,7 @@ import { loadRead, markRead, mergeRead, saveRead, unreadKeys } from "./readCurso
 import { isOnline, localAgents, remoteLabel } from "./remote";
 import { useRemotes } from "./useRemotes";
 import { keepSame } from "./stableList";
+import { mergeAbove, mergeTail, pollStart, type PageWindow } from "./messagePage";
 import {
   adoptNewGroups,
   archiveSummary,
@@ -105,6 +107,15 @@ type Ctx = {
 
 /** How often the unread dots catch up with what other devices read. */
 const READ_SYNC_MS = 5000;
+/**
+ * Rows a chat loads when it opens: several screens of it. Older ones come
+ * as the reader scrolls up. A long chat sent whole held up every switch and
+ * every poll.
+ */
+export const PAGE_ROWS = 200;
+/** Chats kept in memory, so going back to one shows it at once. */
+const CACHED_CHATS = 8;
+
 /** How often the archived groups are read, for one put away elsewhere. */
 const ARCHIVED_SYNC_MS = 3000;
 
@@ -183,7 +194,13 @@ export function useCrew() {
   const quickBusy = useRef(false);
   agentsRef.current = agents;
   const listAgents = useRef(newestOnly(api.listAgents)).current;
-  const getMessages = useRef(newestOnly(api.getMessages)).current;
+  const getPage = useRef(newestOnly(api.getMessagesPage)).current;
+  // Per chat: where its loaded rows start in the transcript, and the rows
+  // last shown, newest chat last.
+  const windows = useRef(new Map<string, PageWindow>());
+  const shownRows = useRef(new Map<string, ChatMessage[]>());
+  const [olderRows, setOlderRows] = useState(0);
+  const loadingOlder = useRef(false);
   const pollMessages = useRef(oneAtATime()).current;
   const pollPing = useRef(oneAtATime()).current;
   const pollList = useRef(oneAtATime()).current;
@@ -1057,20 +1074,103 @@ export function useCrew() {
     applyOpenAgent(list);
   }, []);
 
+  // The open chat's rows as the daemon has them, one cached set per chat
+  // opened lately; what is shown adds the sends it has not answered yet.
+  const keep = (id: string, rows: ChatMessage[], win: PageWindow) => {
+    const cache = shownRows.current;
+    cache.delete(id);
+    cache.set(id, rows);
+    windows.current.set(id, win);
+    while (cache.size > CACHED_CHATS) {
+      const oldest = cache.keys().next().value;
+      if (oldest === undefined) break;
+      cache.delete(oldest);
+      windows.current.delete(oldest);
+    }
+  };
+  const show = (id: string) => {
+    if (selectedRef.current.id !== id) return;
+    const rows = shownRows.current.get(id) ?? [];
+    // A send the daemon has not answered stays on the end as a sending line
+    // until its own row is in this snapshot.
+    const shown = withUnaccepted(rows, heldFor(id, heldSends.current));
+    setOlderRows(windows.current.get(id)?.start ?? 0);
+    setMessages((prev) => keepSame(prev, shown));
+    setMessagesFor(id);
+  };
+
   const refreshMessages = useCallback(async () => {
     const { id } = selectedRef.current;
     if (!id) {
       setMessages([]);
       return;
     }
-    const next = await getMessages(id);
-    if (!next) return;
-    // A send the daemon has not answered stays on the end as a sending line
-    // until its own row is in this snapshot.
-    const shown = withUnaccepted(next, heldFor(id, heldSends.current));
-    setMessages((prev) => keepSame(prev, shown));
-    setMessagesFor(id);
+    const win = windows.current.get(id);
+    const rows = shownRows.current.get(id) ?? [];
+    const page = await getPage(
+      id,
+      win
+        ? { start: pollStart(win, rows, PAGE_ROWS), tail: PAGE_ROWS }
+        : {
+            tail: PAGE_ROWS,
+            // The first page holds what came after the reader last looked,
+            // so the chat can open on the first unread line.
+            sinceTs: readMapRef.current[itemKey("agent", id)] ?? null,
+          },
+    );
+    if (!page) return;
+    // Merged with the rows held now: a page above may have come in meanwhile.
+    const merged = mergeTail(windows.current.get(id), shownRows.current.get(id) ?? [], page);
+    keep(id, merged.rows, merged.win);
+    show(id);
   }, []);
+
+  /**
+   * Rows above the loaded ones: the page before them, or down to the row
+   * `need` (a search hit, a quote, the archive). Only that slice comes, not
+   * the rows already held.
+   */
+  const fetchAbove = useCallback(async (need: string | null) => {
+    const { id } = selectedRef.current;
+    if (!id || loadingOlder.current) return;
+    const win = windows.current.get(id);
+    if (!win || win.start === 0) return;
+    loadingOlder.current = true;
+    try {
+      const page = await api.getMessagesPage(id, {
+        start: need ? win.start : Math.max(0, win.start - PAGE_ROWS),
+        end: win.start,
+        tail: PAGE_ROWS,
+        need,
+      });
+      const now = windows.current.get(id);
+      if (!now || now.start !== win.start) return;
+      const merged = mergeAbove(now, shownRows.current.get(id) ?? [], page);
+      keep(id, merged.rows, merged.win);
+      show(id);
+    } catch {
+      // The next scroll or jump asks again.
+    } finally {
+      loadingOlder.current = false;
+    }
+  }, []);
+
+  /** The reader reached the top: the page before this one. */
+  const loadOlder = useCallback(() => void fetchAbove(null), [fetchAbove]);
+
+  // A chat opened before shows its rows at once; the poll brings it up to date.
+  useLayoutEffect(() => {
+    if (!selected) return;
+    if (!shownRows.current.has(selected) || messagesFor === selected) return;
+    show(selected);
+  }, [selected]);
+
+  // A row to show that is not loaded yet: fetch down to it.
+  useEffect(() => {
+    if (!highlightId || !selected || messagesFor !== selected) return;
+    if (messages.some((m) => m.id === highlightId)) return;
+    void fetchAbove(highlightId);
+  }, [highlightId, selected, messagesFor]);
 
   async function onSend(raw: string, steer = false): Promise<boolean> {
     const { id: sel } = selectedRef.current;
@@ -1891,6 +1991,8 @@ export function useCrew() {
     selectedKind,
     messages,
     messagesFor,
+    olderRows,
+    loadOlder,
     openedRead,
     query,
     setQuery,

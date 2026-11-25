@@ -17,6 +17,7 @@ fn main() {
             "tell_message",
             "get_snapshot",
             "get_messages",
+            "get_messages_page",
             "daemon_ping",
             "reset_agent",
             "set_agent",

@@ -48,6 +48,22 @@ pub enum Request {
     Messages {
         agent: String,
     },
+    /// The end of a chat, not all of it: rows from `start` (or the last
+    /// `tail`), widened to hold `need`, the rows after `since_ts`, and any
+    /// card still waiting on the user. `end` stops short of the rows the
+    /// window already holds, for a page of older ones.
+    MessagesPage {
+        agent: String,
+        #[serde(default)]
+        start: Option<usize>,
+        #[serde(default)]
+        end: Option<usize>,
+        tail: usize,
+        #[serde(default)]
+        need: Option<String>,
+        #[serde(default)]
+        since_ts: Option<u64>,
+    },
     AddAgent {
         id: String,
         name: String,
@@ -355,6 +371,13 @@ pub enum Event {
     Messages {
         agent: String,
         messages: Vec<ChatMessage>,
+    },
+    /// `messages` are the chat's rows from index `start` of `total`.
+    MessagesPage {
+        agent: String,
+        messages: Vec<ChatMessage>,
+        start: usize,
+        total: usize,
     },
     Message {
         agent: String,

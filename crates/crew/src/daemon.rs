@@ -4327,6 +4327,34 @@ fn dispatch(req: Request, shutdown: &tokio::sync::watch::Sender<bool>) -> Vec<Ev
                 message: err.to_string(),
             }],
         },
+        Request::MessagesPage {
+            agent,
+            start,
+            end,
+            tail,
+            need,
+            since_ts,
+        } => match known_chat(&agent) {
+            Ok(()) => {
+                let (messages, start, total) = crate::transcript::messages_page(
+                    &agent,
+                    start,
+                    end,
+                    tail,
+                    need.as_deref(),
+                    since_ts,
+                );
+                vec![Event::MessagesPage {
+                    agent,
+                    messages,
+                    start,
+                    total,
+                }]
+            }
+            Err(err) => vec![Event::Error {
+                message: err.to_string(),
+            }],
+        },
         Request::AddAgent {
             id,
             name,
@@ -4614,13 +4642,16 @@ fn snapshot_agent(id: &str) -> anyhow::Result<Event> {
     Ok(session.snapshot_event())
 }
 
-fn messages_agent(id: &str) -> anyhow::Result<Event> {
-    {
-        let map = agents().lock().expect("agents mutex");
-        if !map.contains_key(id) && !crate::remote::is_remote(id) {
-            anyhow::bail!("unknown agent {id}");
-        }
+fn known_chat(id: &str) -> anyhow::Result<()> {
+    let map = agents().lock().expect("agents mutex");
+    if !map.contains_key(id) && !crate::remote::is_remote(id) {
+        anyhow::bail!("unknown agent {id}");
     }
+    Ok(())
+}
+
+fn messages_agent(id: &str) -> anyhow::Result<Event> {
+    known_chat(id)?;
     Ok(Event::Messages {
         agent: id.to_string(),
         messages: crate::transcript::messages(id),

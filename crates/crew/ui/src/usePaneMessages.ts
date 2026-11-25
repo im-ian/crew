@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { keepSame } from "./stableList";
+import { PAGE_ROWS } from "./useCrew";
 import type { ChatMessage } from "./types";
 
 /**
@@ -31,7 +32,11 @@ export function usePaneMessages(
     const tick = async () => {
       if (busy) return;
       busy = true;
-      const rows = await api.getMessages(id).catch(() => null);
+      // The end of that chat, as the open one loads it.
+      const rows = await api
+        .getMessagesPage(id, { tail: PAGE_ROWS })
+        .then((page) => page.messages)
+        .catch(() => null);
       busy = false;
       if (cancelled || !rows) return;
       setHeld((cur) => ({ id, rows: cur.id === id ? keepSame(cur.rows, rows) : rows }));

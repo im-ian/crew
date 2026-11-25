@@ -203,6 +203,70 @@ pub fn copy_chat(src: &str, dst: &str) {
     persist(dst, chat);
 }
 
+/// Most rows a page reaches back for unread lines. Past it the chat opens on
+/// the last of them rather than sending thousands of rows.
+pub const UNREAD_REACH: usize = 3000;
+/// Rows kept above a row asked for by id, so it does not open at the top edge.
+const NEED_MARGIN: usize = 20;
+
+/// Where a page of `rows` starts: from `start` when the window already has
+/// one (an earlier start it loaded older rows into), else the last `tail`;
+/// moved up to hold the row `need`, the rows newer than `since_ts`, and any
+/// card that still waits on the user.
+pub fn page_start(
+    rows: &[ChatMessage],
+    start: Option<usize>,
+    tail: usize,
+    need: Option<&str>,
+    since_ts: Option<u64>,
+) -> usize {
+    let total = rows.len();
+    let tail_start = total.saturating_sub(tail.max(1));
+    let mut from = match start {
+        Some(s) if s <= total => s.min(tail_start),
+        _ => tail_start,
+    };
+    if let Some(i) = need.and_then(|id| rows.iter().position(|m| m.id == id)) {
+        from = from.min(i.saturating_sub(NEED_MARGIN));
+    }
+    if let Some(ts) = since_ts.filter(|t| *t > 0) {
+        if let Some(i) = rows.iter().position(|m| m.ts > ts) {
+            from = from.min(i.saturating_sub(1).max(total.saturating_sub(UNREAD_REACH)));
+        }
+    }
+    let waiting = rows.iter().position(|m| {
+        m.choice.as_ref().is_some_and(|c| c.state == crate::protocol::ChoiceState::Pending)
+            || m.approval == Some(crate::protocol::ApprovalState::Pending)
+    });
+    if let Some(i) = waiting {
+        from = from.min(i);
+    }
+    from
+}
+
+/// A page of a chat (see [`page_start`]), up to `end` when given, its start,
+/// and how many rows the chat has.
+/// Only the page is copied out of the lock.
+pub fn messages_page(
+    agent: &str,
+    start: Option<usize>,
+    end: Option<usize>,
+    tail: usize,
+    need: Option<&str>,
+    since_ts: Option<u64>,
+) -> (Vec<ChatMessage>, usize, usize) {
+    let Ok(map) = chats().lock() else {
+        return (Vec::new(), 0, 0);
+    };
+    let Some(chat) = map.get(agent) else {
+        return (Vec::new(), 0, 0);
+    };
+    let rows = &chat.messages;
+    let to = end.map_or(rows.len(), |e| e.min(rows.len()));
+    let from = page_start(rows, start, tail, need, since_ts).min(to);
+    (rows[from..to].to_vec(), from, rows.len())
+}
+
 pub fn messages(agent: &str) -> Vec<ChatMessage> {
     chats()
         .lock()
@@ -2248,6 +2312,49 @@ fn consume_echo(pending: &mut String, incoming: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    fn rows(n: usize) -> Vec<ChatMessage> {
+        (0..n)
+            .map(|i| {
+                serde_json::from_value(serde_json::json!({
+                    "id": format!("m{i}"), "role": "assistant", "from": "a", "text": "", "ts": 1000 + i as u64,
+                }))
+                .unwrap()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_page_is_the_end_of_the_chat() {
+        let all = rows(1000);
+        assert_eq!(page_start(&all, None, 200, None, None), 800);
+        // Short chats come whole.
+        assert_eq!(page_start(&rows(50), None, 200, None, None), 0);
+        // A window that loaded older rows keeps them; one past the end falls back.
+        assert_eq!(page_start(&all, Some(600), 200, None, None), 600);
+        assert_eq!(page_start(&all, Some(5000), 200, None, None), 800);
+        // A later start never cuts the last `tail` rows.
+        assert_eq!(page_start(&all, Some(950), 200, None, None), 800);
+    }
+
+    #[test]
+    fn a_page_reaches_back_for_what_it_must_show() {
+        let mut all = rows(1000);
+        // A row asked for by id, with some rows above it.
+        assert_eq!(page_start(&all, None, 200, Some("m100"), None), 80);
+        assert_eq!(page_start(&all, None, 200, Some("gone"), None), 800);
+        // The rows after the reader last looked, and the one before them.
+        assert_eq!(page_start(&all, None, 200, None, Some(1000 + 500)), 500);
+        assert_eq!(page_start(&all, None, 200, None, Some(0)), 800);
+        // Unread rows past the reach: the last `UNREAD_REACH` of them.
+        let long = rows(UNREAD_REACH + 2000);
+        assert_eq!(page_start(&long, None, 200, None, Some(1)), 2000);
+        // A card still waiting on the user, however old.
+        all[30].choice = Some(serde_json::from_value(serde_json::json!({"id": "c", "questions": [], "state": "pending"})).unwrap());
+        assert_eq!(page_start(&all, None, 200, None, None), 30);
+        all[30].choice = Some(serde_json::from_value(serde_json::json!({"id": "c", "questions": [], "state": "answered"})).unwrap());
+        assert_eq!(page_start(&all, None, 200, None, None), 800);
+    }
+
     use super::*;
 
     fn unique(prefix: &str) -> String {

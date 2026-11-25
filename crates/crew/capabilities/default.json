@@ -25,6 +25,7 @@
     "allow-tell-message",
     "allow-get-snapshot",
     "allow-get-messages",
+    "allow-get-messages-page",
     "allow-daemon-ping",
     "allow-reset-agent",
     "allow-set-agent",

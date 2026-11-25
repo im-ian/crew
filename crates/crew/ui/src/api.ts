@@ -8,6 +8,7 @@ import type {
   AgentInfo,
   ArchivedGroup,
   ChatMessage,
+  MessagesPage,
   Group,
   ModelList,
   FocusTarget,
@@ -134,6 +135,29 @@ export const api = {
   tellMessage: (to: string, text: string, from = "user") =>
     invoke<void>("tell_message", { from, to, text }),
   getMessages: (agent: string) => invoke<ChatMessage[]>("get_messages", { agent }),
+  /**
+   * The end of a chat: from `start` (or the last `tail` rows), widened to hold
+   * `need`, the rows after `sinceTs`, and any card still waiting. `end`
+   * stops short of the rows already loaded.
+   */
+  getMessagesPage: (
+    agent: string,
+    page: {
+      start?: number | null;
+      end?: number | null;
+      tail: number;
+      need?: string | null;
+      sinceTs?: number | null;
+    },
+  ) =>
+    invoke<MessagesPage>("get_messages_page", {
+      agent,
+      start: page.start ?? null,
+      end: page.end ?? null,
+      tail: page.tail,
+      need: page.need ?? null,
+      sinceTs: page.sinceTs ?? null,
+    }),
   /**
    * How far each chat has been read, on any device (the window or a paired
    * phone), by chat key. A device keeps its own copy too; the later wins.

@@ -79,6 +79,15 @@ pub fn dispatch(name: &str, args: Value) -> Option<Result<Value, String>> {
             let agent: String = arg(&args, "agent")?;
             ok(crate::desktop::get_messages(agent)?)
         }
+        "get_messages_page" => {
+            let agent: String = arg(&args, "agent")?;
+            let start: Option<usize> = arg(&args, "start")?;
+            let end: Option<usize> = arg(&args, "end")?;
+            let tail: usize = arg(&args, "tail")?;
+            let need: Option<String> = arg(&args, "need")?;
+            let since_ts: Option<u64> = arg(&args, "sinceTs")?;
+            ok(crate::desktop::get_messages_page(agent, start, end, tail, need, since_ts)?)
+        }
         "daemon_ping" => {
             ok(crate::desktop::daemon_ping()?)
         }
@@ -409,6 +418,7 @@ pub const NAMES: &[&str] = &[
     "tell_message",
     "get_snapshot",
     "get_messages",
+    "get_messages_page",
     "daemon_ping",
     "reset_agent",
     "set_agent",
