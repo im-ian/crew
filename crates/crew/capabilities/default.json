@@ -80,6 +80,7 @@
     "allow-set-locale",
     "allow-set-notifications",
     "allow-set-lead-only-notify",
+    "allow-get-notify-prefs",
     "allow-set-user-name",
     "allow-set-display-prefs",
     "allow-get-display-prefs",

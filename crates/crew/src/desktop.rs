@@ -1030,6 +1030,24 @@ pub(crate) fn set_lead_only_notify(enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// What the daemon's alerts are set to. The daemon's files are the one value:
+/// a window and a paired phone both read it here and change it with the two
+/// commands above, so neither shows what the other overwrote.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NotifyPrefs {
+    pub enabled: bool,
+    pub lead_only: bool,
+}
+
+#[tauri::command]
+pub(crate) fn get_notify_prefs() -> NotifyPrefs {
+    NotifyPrefs {
+        enabled: crate::paths::notifications_enabled(),
+        lead_only: crate::paths::lead_only_notify(),
+    }
+}
+
 /// Installed Nerd Fonts for private-use icons, preferred names first.
 /// Each entry is the `local()` names of one family (full, PostScript, family).
 #[tauri::command]
@@ -1417,6 +1435,7 @@ pub fn run() -> anyhow::Result<()> {
             set_locale,
             set_notifications,
             set_lead_only_notify,
+            get_notify_prefs,
             set_user_name,
             set_display_prefs,
             get_display_prefs,
@@ -1473,6 +1492,27 @@ mod tests {
                 "{name} is missing from capabilities ({allow})"
             );
         }
+    }
+
+    /// A window and a phone read the alert switches from the daemon's files, and
+    /// the two setters write them: one value, whoever changed it last.
+    #[test]
+    fn the_alert_switches_are_the_daemons_files() {
+        crate::paths::testing::with_home("notify-prefs", || {
+            let now = |p: NotifyPrefs| (p.enabled, p.lead_only);
+            assert_eq!(now(get_notify_prefs()), (true, false), "a first launch");
+            set_lead_only_notify(true).unwrap();
+            assert_eq!(now(get_notify_prefs()), (true, true));
+            set_notifications(false).unwrap();
+            assert_eq!(now(get_notify_prefs()), (false, true));
+            set_lead_only_notify(false).unwrap();
+            set_notifications(true).unwrap();
+            assert_eq!(now(get_notify_prefs()), (true, false));
+            // As the window reads it.
+            set_lead_only_notify(true).unwrap();
+            let json = serde_json::to_string(&get_notify_prefs()).unwrap();
+            assert_eq!(json, r#"{"enabled":true,"leadOnly":true}"#);
+        });
     }
 
     /// The archive asks the window's own rule for each file, and a path the
