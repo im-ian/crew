@@ -3,6 +3,7 @@ import { api } from "../api";
 import type { FileTarget } from "../fileRef";
 import type { Token } from "../highlight";
 import { ExternalLink, FileText, ImageIcon, X } from "../icons";
+import { CloseButton } from "./CloseButton";
 import { useT } from "../LocaleContext";
 import type { MessageKey } from "../locales";
 import { isPictureHref, mediaKind, missingReason } from "../markdown";
@@ -177,15 +178,7 @@ export function FileView({
         >
           <ExternalLink />
         </button>
-        <button
-          type="button"
-          className="head-action"
-          title={t("file.close")}
-          aria-label={t("file.close")}
-          onClick={onClose}
-        >
-          <X />
-        </button>
+        <CloseButton label={t("file.close")} onClick={onClose} />
       </header>
       {files.length > 1 ? (
         <div className="file-tabs" role="tablist" aria-label={t("file.tabs")}>

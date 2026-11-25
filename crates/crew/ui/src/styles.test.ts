@@ -51,8 +51,35 @@ describe("styles.css", () => {
     const phone = source.slice(source.indexOf("---------- Phone ----------"));
     expect(phone).toMatch(/\.img-preview\s*\{[^}]*height:\s*var\(--phone-h\)/);
     expect(phone).toMatch(/\.img-preview-close\s*\{[^}]*top:\s*calc\(8px \+ var\(--safe-top\)\)/);
-    expect(phone).toMatch(/\.img-preview-close\s*\{[^}]*width:\s*44px/);
-    expect(phone).toMatch(/\.img-preview-close\s*\{[^}]*height:\s*44px/);
+    // The close is the shared one: 36px drawn, 44px pressed (see the close test below).
+    expect(phone).not.toMatch(/\.img-preview-close\s*\{[^}]*width:/);
+  });
+
+  it("draws every close control the same, 36px with a 44px press, on a phone", () => {
+    const phone = source.slice(source.indexOf("@media (max-width: 640px), (hover: none) and (max-height: 500px) {\n  :root {"));
+    expect(phone).toMatch(/\.close-btn\s*\{[^}]*--close-size:\s*36px/);
+    expect(phone).toMatch(/\.close-btn::after\s*\{[^}]*inset:\s*-4px/);
+    // One rule sizes the button; the sheets and the picture overlay add none of their own.
+    expect(source).toMatch(/\.close-btn\s*\{[^}]*width:\s*var\(--close-size\)/);
+    expect(source).not.toMatch(/\.sheet-close\b/);
+    // A dialog's title bar shows it on a phone only.
+    expect(source).toMatch(/\n\.dialog-close\s*\{[^}]*display:\s*none/);
+    expect(phone).toMatch(/\.dialog-close\s*\{[^}]*display:\s*grid/);
+  });
+
+  it("keeps every phone overlay's title bar clear of the notch and the side edges", () => {
+    const phone = source.slice(source.indexOf("@media (max-width: 640px), (hover: none) and (max-height: 500px) {\n  :root {"));
+    // A sheet: the top edge's inset plus the same gap, and the side insets.
+    expect(phone).toMatch(
+      /\.sheet,\s*\.agent-sheet\s*\{[^}]*padding:\s*calc\(var\(--space-12\) \+ var\(--safe-top\)\)\s*calc\(var\(--space-16\) \+ var\(--safe-right\)\)\s*calc\(var\(--space-16\) \+ var\(--safe-bottom\)\)\s*calc\(var\(--space-16\) \+ var\(--safe-left\)\)/,
+    );
+    // A panel's bar (the room already holds the insets): the same gap on top.
+    expect(phone).toMatch(/\.peek-head\s*\{[^}]*padding-top:\s*var\(--space-12\)/);
+    // A dialog: below the top inset (its height), the same gap, and the side insets, settings too.
+    expect(phone).toMatch(/\.modal \.dialog,[^{]*\{[^}]*padding-top:\s*var\(--space-12\)/);
+    expect(phone).toMatch(/\.modal \.dialog\.settings-dialog\s*\{[^}]*padding-left:\s*var\(--safe-left\)/);
+    expect(phone).toMatch(/\.modal \.dialog\.settings-dialog\s*\{[^}]*padding-right:\s*var\(--safe-right\)/);
+    expect(phone).toMatch(/\.modal \.dialog\.settings-dialog\s*\{[^}]*height:\s*calc\(var\(--phone-h\) - var\(--safe-top\)/);
   });
   it("plays the success dance a few times, never as a loop, then stops for the calm smile", () => {
     const dance = source.match(/\.avatar-face\.is-success\s*\{[^}]*animation:\s*avatar-cheer\s+([\d.]+)s[^}]*\}/);

@@ -82,7 +82,7 @@ export function ConfirmDialog({
   }
 
   return (
-    <Modal open={open} title={title} onClose={onCancel}>
+    <Modal open={open} title={title} onClose={onCancel} closeButton={false}>
       <p>{body}</p>
       {kind === "archive-group" && archiving && archiving.working > 0 ? (
         <p role="alert" className="confirm-working">

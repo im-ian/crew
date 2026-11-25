@@ -4,7 +4,7 @@ import type { AgentInfo, ChatMessage, CliKind, Group, PaneTab, Routine } from ".
 import { ArchivePane } from "./ArchivePane";
 import { InfoPane } from "./InfoPane";
 import { RoutinesModal } from "./RoutinesModal";
-import { X } from "../icons";
+import { CloseButton } from "./CloseButton";
 
 const TABS: { id: PaneTab; labelKey: "pane.tab.info" | "pane.tab.routines" | "pane.tab.archive" }[] = [
   { id: "info", labelKey: "pane.tab.info" },
@@ -65,15 +65,7 @@ export function AgentPane({
       <div className="sheet agent-sheet">
         <div className="sheet-head">
           <h3>{agent?.name || agent?.id || t("common.bot")}</h3>
-          <button
-            type="button"
-            className="sheet-close"
-            title={t("common.close")}
-            aria-label={t("common.close")}
-            onClick={onClose}
-          >
-            <X />
-          </button>
+          <CloseButton label={t("common.close")} onClick={onClose} />
         </div>
         <div className="pane-tabs" role="tablist">
           {TABS.map((tabDef) => (

@@ -50,7 +50,7 @@ export function AskHoldDialog({
   }, [open]);
 
   return (
-    <Modal open={open} title={t("askHold.title")} onClose={() => onPick("cancel")}>
+    <Modal open={open} title={t("askHold.title")} onClose={() => onPick("cancel")} closeButton={false}>
       <p>{t("askHold.body")}</p>
       <div className="actions ask-hold-actions">
         <button type="button" className="ghost" disabled={busy} onClick={() => onPick("send")}>

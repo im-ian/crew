@@ -2186,8 +2186,44 @@ header .who-name {
   background: var(--active);
   color: var(--ink);
 }
-.app:has(.overlay.open) header .head-action {
+.app:has(.overlay.open) header .head-action,
+.app:has(.overlay.open) header .close-btn {
   visibility: hidden;
+}
+/* The close control of every panel, sheet, dialog and picture overlay
+   (CloseButton): one icon, one size, one press area. */
+.close-btn {
+  --close-size: var(--chrome-h);
+  position: relative;
+  width: var(--close-size);
+  height: var(--close-size);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.close-btn:hover {
+  background: var(--active);
+  color: var(--ink);
+}
+.close-btn:active {
+  transform: scale(0.94);
+}
+.close-btn svg {
+  display: block;
+}
+/* A sheet's title is taller than a panel's bar, and its button with it. */
+.sheet-head .close-btn {
+  --close-size: var(--control-h);
+}
+/* A dialog's own buttons close it on a desktop; the title bar's X is for a phone. */
+.dialog-close {
+  display: none;
 }
 .thread-wrap {
   position: relative;
@@ -5719,26 +5755,6 @@ button.mention-chip:active {
 }
 .sheet-head h3 { margin: 0; }
 .sheet-head p { margin: var(--space-6) 0 0; }
-.sheet-close {
-  width: var(--control-h);
-  height: var(--control-h);
-  border: 0;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  padding: 0;
-}
-.sheet-close:hover {
-  background: var(--active);
-  color: var(--ink);
-}
-.sheet-close:active {
-  transform: scale(0.94);
-}
 .pane-tabs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -6225,7 +6241,7 @@ button.mention-chip:active {
   padding: 0;
   overflow: hidden;
 }
-.settings-dialog > h3 {
+.settings-dialog > .dialog-head {
   padding: var(--space-20) var(--space-24) var(--space-16);
   border-bottom: 1px solid var(--line);
 }
@@ -7354,7 +7370,7 @@ html[data-theme="light"] .island-ghost-2 {
   }
   .icon-btn:active,
   .head-action:active,
-  .sheet-close:active,
+  .close-btn:active,
   .group-toggle:active,
   .group-more:active,
   .composer-box button[type="submit"]:not(:disabled):hover,
@@ -8285,8 +8301,32 @@ html.kb-open {
   .agent-sheet {
     width: 100%;
     border-left: 0;
-    padding-top: calc(var(--space-16) + var(--safe-top));
-    padding-bottom: calc(var(--space-16) + var(--safe-bottom));
+    padding:
+      calc(var(--space-12) + var(--safe-top))
+      calc(var(--space-16) + var(--safe-right))
+      calc(var(--space-16) + var(--safe-bottom))
+      calc(var(--space-16) + var(--safe-left));
+  }
+  /* Every overlay's title bar starts the same distance under the top edge
+     (below a notch or status bar when there is one) and keeps the same side
+     margin: a panel's bar, a sheet's head and a dialog's head. */
+  .peek-head {
+    padding-top: var(--space-12);
+  }
+  .close-btn {
+    --close-size: 36px;
+  }
+  /* A clear edge around the 36px button takes the press out to 44. */
+  .close-btn::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+  }
+  .dialog-close {
+    display: grid;
+  }
+  .dialog-head {
+    min-height: 36px;
   }
 
   /* The picture overlay fills the visible screen. The close control sits
@@ -8304,8 +8344,6 @@ html.kb-open {
   .img-preview-close {
     top: calc(8px + var(--safe-top));
     right: calc(8px + var(--safe-right));
-    width: 44px;
-    height: 44px;
   }
   .img-preview img,
   .img-preview video {
@@ -8342,15 +8380,21 @@ html.kb-open {
     max-height: calc(var(--phone-h) - var(--safe-top) - var(--space-8));
     border-radius: 18px 18px 0 0;
     border-bottom: 0;
+    padding-top: var(--space-12);
     padding-left: calc(var(--space-16) + var(--safe-left));
     padding-right: calc(var(--space-16) + var(--safe-right));
     padding-bottom: calc(var(--space-16) + var(--safe-bottom));
   }
+  /* Settings pages run to the dialog's edges but keep clear of a notch. */
   .modal .dialog.settings-dialog {
     height: calc(var(--phone-h) - var(--safe-top) - var(--space-8));
-    padding-left: 0;
-    padding-right: 0;
+    padding-top: 0;
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
     padding-bottom: var(--safe-bottom);
+  }
+  .settings-dialog > .dialog-head {
+    padding: var(--space-12) var(--space-16) var(--space-8);
   }
   @keyframes dialog-in {
     from { transform: translateY(24px); opacity: 0.6; }
