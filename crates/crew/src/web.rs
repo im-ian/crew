@@ -100,16 +100,67 @@ fn save_settings(s: &Settings) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The paired devices as a file holds them: none yet, a list, or a file that
+/// cannot be read or parsed (which is not the same as an empty list).
+enum Stored {
+    Missing,
+    List(Vec<Device>),
+    Broken,
+}
+
+fn read_devices_file(path: &Path) -> Stored {
+    match fs::read(path) {
+        Ok(bytes) => match serde_json::from_slice::<Vec<Device>>(&bytes) {
+            Ok(list) => Stored::List(list),
+            Err(_) => Stored::Broken,
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Stored::Missing,
+        Err(_) => Stored::Broken,
+    }
+}
+
+/// The copy kept of the last list written, for when the file cannot be read.
+fn devices_backup_path() -> PathBuf {
+    crate::paths::home_dir().join("mobile-devices.json.bak")
+}
+
+/// The paired devices. A file that cannot be read once is read again, then the
+/// copy of the last good list stands in: a phone must not be turned away as
+/// unknown because the list could not be read this time.
 fn load_devices() -> Vec<Device> {
-    fs::read(devices_path())
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+    for attempt in 0..3 {
+        match read_devices_file(&devices_path()) {
+            Stored::List(list) => return list,
+            Stored::Missing => return Vec::new(),
+            Stored::Broken if attempt < 2 => std::thread::sleep(Duration::from_millis(30)),
+            Stored::Broken => {}
+        }
+    }
+    match read_devices_file(&devices_backup_path()) {
+        Stored::List(list) => list,
+        _ => Vec::new(),
+    }
+}
+
+/// The list to change and write back, or None when neither it nor its copy can
+/// be read: writing then would drop every paired device but the one added.
+fn devices_to_change() -> Option<Vec<Device>> {
+    match read_devices_file(&devices_path()) {
+        Stored::List(list) => Some(list),
+        Stored::Missing => Some(Vec::new()),
+        Stored::Broken => match read_devices_file(&devices_backup_path()) {
+            Stored::List(list) => Some(list),
+            _ => None,
+        },
+    }
 }
 
 fn save_devices(list: &[Device]) -> anyhow::Result<()> {
     crate::paths::ensure_home()?;
-    crate::paths::write_atomic(&devices_path(), &serde_json::to_vec_pretty(list)?)?;
+    let bytes = serde_json::to_vec_pretty(list)?;
+    crate::paths::write_atomic(&devices_path(), &bytes)?;
+    // The copy follows each write, so it is the latest good list.
+    let _ = crate::paths::write_atomic(&devices_backup_path(), &bytes);
     Ok(())
 }
 
@@ -166,6 +217,12 @@ struct State {
     fails: Vec<Instant>,
     whois: HashMap<IpAddr, (bool, Instant)>,
     tailnet: Option<(Tailnet, Instant)>,
+    /// Tailscale did not answer at this time: not asked again at once.
+    tailnet_missed: Option<Instant>,
+    /// What was last known of this Mac on its tailnet (`mobile-net.json`).
+    kept: Option<Option<KeptNet>>,
+    /// When a rejected phone was last written to the log, by who and why.
+    unauthorized: HashMap<String, Instant>,
     error: Option<String>,
 }
 
@@ -233,7 +290,63 @@ fn parse_status(v: &Value) -> Tailnet {
     Tailnet { ips, dns, owner }
 }
 
-/// This Mac's tailnet, read at most every half minute. None without
+/// What was last seen of this Mac on its tailnet. Tailscale can be slow to
+/// answer for a while after an update restarts Crew, and the address the phone
+/// was paired on (and the Tailscale user that owns this Mac) must not change
+/// with it: a browser keeps its device cookie per host name, so a pairing link
+/// that says `100.x.y.z` one time and the MagicDNS name the next is two
+/// sites, and the phone is asked to connect again.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+struct KeptNet {
+    #[serde(default)]
+    dns: Option<String>,
+    #[serde(default)]
+    owner: Option<String>,
+    #[serde(default)]
+    ips: Vec<IpAddr>,
+}
+
+fn kept_path() -> PathBuf {
+    crate::paths::home_dir().join("mobile-net.json")
+}
+
+fn kept_net() -> Option<KeptNet> {
+    if let Ok(st) = state().lock() {
+        if let Some(cached) = &st.kept {
+            return cached.clone();
+        }
+    }
+    let read = fs::read(kept_path())
+        .ok()
+        .and_then(|b| serde_json::from_slice::<KeptNet>(&b).ok());
+    if let Ok(mut st) = state().lock() {
+        st.kept = Some(read.clone());
+    }
+    read
+}
+
+/// Remember `t` when it says something different from what is kept. A part
+/// Tailscale did not give this time keeps its earlier value.
+fn keep_net(t: &Tailnet) {
+    let old = kept_net().unwrap_or_default();
+    let next = KeptNet {
+        dns: t.dns.clone().or(old.dns.clone()),
+        owner: t.owner.clone().or(old.owner.clone()),
+        ips: if t.ips.is_empty() { old.ips.clone() } else { t.ips.clone() },
+    };
+    if next == old {
+        return;
+    }
+    if let Ok(mut st) = state().lock() {
+        st.kept = Some(Some(next.clone()));
+    }
+    if let (Ok(bytes), Ok(_)) = (serde_json::to_vec_pretty(&next), crate::paths::ensure_home()) {
+        let _ = crate::paths::write_atomic(&kept_path(), &bytes);
+    }
+}
+
+/// This Mac's tailnet as Tailscale says now: read at most every half minute,
+/// and not asked again for five seconds after it did not answer. None without
 /// Tailscale, or while it is not connected.
 fn tailnet() -> Option<Tailnet> {
     // Tests listen on loopback only, never on this Mac's tailnet.
@@ -246,15 +359,36 @@ fn tailnet() -> Option<Tailnet> {
                 return Some(t.clone());
             }
         }
+        if st.tailnet_missed.is_some_and(|at| at.elapsed() < Duration::from_secs(5)) {
+            return None;
+        }
     }
-    let t = tailscale_json(&["status", "--json"]).map(|v| parse_status(&v))?;
-    if t.ips.is_empty() {
+    let t = tailscale_json(&["status", "--json"])
+        .map(|v| parse_status(&v))
+        .filter(|t| !t.ips.is_empty());
+    let Some(t) = t else {
+        if let Ok(mut st) = state().lock() {
+            st.tailnet_missed = Some(Instant::now());
+        }
         return None;
-    }
+    };
+    keep_net(&t);
     if let Ok(mut st) = state().lock() {
         st.tailnet = Some((t.clone(), Instant::now()));
+        st.tailnet_missed = None;
     }
     Some(t)
+}
+
+/// The tailnet as now, or as last seen when Tailscale does not answer.
+fn known_tailnet() -> Option<Tailnet> {
+    tailnet().or_else(|| {
+        kept_net().map(|k| Tailnet {
+            ips: k.ips,
+            dns: k.dns,
+            owner: k.owner,
+        })
+    })
 }
 
 fn is_tailnet_ip(ip: &IpAddr) -> bool {
@@ -272,26 +406,62 @@ fn is_tailnet_ip(ip: &IpAddr) -> bool {
     }
 }
 
+/// Whether a peer is this Mac's own Tailscale user: yes, no, or not known
+/// because Tailscale did not answer the question this time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PeerCheck {
+    Yes,
+    No,
+    Unknown,
+}
+
+/// What `owner` (the Tailscale login of this Mac) and `login` (the peer's, as
+/// `whois` says) come to. A login that cannot be read is no answer, not a
+/// stranger.
+fn owner_verdict(owner: Option<&str>, login: Option<&str>) -> PeerCheck {
+    match (owner, login) {
+        (Some(owner), Some(login)) if owner == login => PeerCheck::Yes,
+        (Some(_), Some(_)) => PeerCheck::No,
+        _ => PeerCheck::Unknown,
+    }
+}
+
+/// Whether a request may be answered at all, given the peer check. A peer
+/// known not to be this Mac's user gets nothing. One Tailscale could not
+/// vouch for this time (it was slow after an update, say) gets the app's own
+/// files and, with a paired device's cookie, the API; it never gets to pair.
+/// The device token is what guards the API either way.
+fn admitted(check: PeerCheck, is_api: bool, is_pair: bool, paired: bool) -> bool {
+    match check {
+        PeerCheck::Yes => true,
+        PeerCheck::No => false,
+        PeerCheck::Unknown => !is_pair && (!is_api || paired),
+    }
+}
+
 /// A tailnet peer may come in when it is this Mac's own Tailscale user. With
-/// no way to ask (no CLI, no owner), the device token alone decides.
-fn tailnet_peer_allowed(ip: IpAddr) -> bool {
+/// no CLI to ask, the device token alone decides.
+fn tailnet_peer_check(ip: IpAddr) -> PeerCheck {
     if let Ok(st) = state().lock() {
         if let Some((ok, at)) = st.whois.get(&ip) {
             if at.elapsed() < Duration::from_secs(5 * 60) {
-                return *ok;
+                return if *ok { PeerCheck::Yes } else { PeerCheck::No };
             }
         }
     }
-    let Some(owner) = tailnet().and_then(|t| t.owner) else {
-        return tailscale_cli().is_none();
+    let Some(owner) = known_tailnet().and_then(|t| t.owner) else {
+        return if tailscale_cli().is_none() { PeerCheck::Yes } else { PeerCheck::Unknown };
     };
     let login = tailscale_json(&["whois", "--json", &ip.to_string()])
         .and_then(|v| v["UserProfile"]["LoginName"].as_str().map(str::to_string));
-    let ok = login.as_deref() == Some(owner.as_str());
-    if let Ok(mut st) = state().lock() {
-        st.whois.insert(ip, (ok, Instant::now()));
+    let verdict = owner_verdict(Some(&owner), login.as_deref());
+    // Only an answer is kept; a question that failed is asked again.
+    if verdict != PeerCheck::Unknown {
+        if let Ok(mut st) = state().lock() {
+            st.whois.insert(ip, (verdict == PeerCheck::Yes, Instant::now()));
+        }
     }
-    ok
+    verdict
 }
 
 // ------------------------------------------------------------ start and stop
@@ -303,6 +473,23 @@ pub fn start_if_enabled() {
             eprintln!("[crew] mobile: {err:#}");
         }
     }
+    retry_binding();
+}
+
+/// Tailscale can connect after Crew starts, as it does after an update restarts
+/// the app. The Tailscale address is listened on as soon as it is there,
+/// without waiting for Settings to be opened on the Mac.
+fn retry_binding() {
+    static STARTED: OnceLock<()> = OnceLock::new();
+    if STARTED.set(()).is_err() {
+        return;
+    }
+    std::thread::spawn(|| loop {
+        std::thread::sleep(Duration::from_secs(30));
+        if load_settings().enabled {
+            let _ = bind_all();
+        }
+    });
 }
 
 /// Turn mobile access on or off, and say where it stands.
@@ -345,7 +532,7 @@ fn wanted(s: &Settings) -> Vec<SocketAddr> {
     let tailnet_ips = if s.loopback {
         Vec::new()
     } else {
-        tailnet().map(|t| t.ips).unwrap_or_default()
+        known_tailnet().map(|t| t.ips).unwrap_or_default()
     };
     listen_addrs(s.port(), &tailnet_ips)
 }
@@ -427,7 +614,7 @@ fn urls(port: u16) -> Vec<String> {
         .map(|st| st.bound.clone())
         .unwrap_or_default();
     let mut out = Vec::new();
-    if let Some(dns) = tailnet().and_then(|t| t.dns) {
+    if let Some(dns) = known_tailnet().and_then(|t| t.dns) {
         if bound.iter().any(|a| is_tailnet_ip(&a.ip())) {
             out.push(format!("http://{dns}:{port}"));
         }
@@ -499,7 +686,9 @@ pub fn new_pair_code() -> anyhow::Result<Value> {
 }
 
 pub fn revoke(id: &str) -> anyhow::Result<Value> {
-    let mut list = load_devices();
+    let Some(mut list) = devices_to_change() else {
+        anyhow::bail!("the list of connected devices could not be read; nothing was changed");
+    };
     list.retain(|d| d.id != id);
     save_devices(&list)?;
     Ok(status())
@@ -509,10 +698,20 @@ pub fn revoke(id: &str) -> anyhow::Result<Value> {
 enum PairError {
     Locked,
     Wrong,
+    /// The list of devices cannot be read. Adding one would write it over.
+    Unreadable,
 }
 
 /// Trade a code for a device token. A code is used once.
 fn pair(code: &str, name: &str) -> Result<String, PairError> {
+    pair_replacing(code, name, None)
+}
+
+/// `pair`, for a browser that still holds a device's token and connects again
+/// (a new address, an expired pairing): that device's entry gets the new token
+/// instead of a second one beside it, so Settings does not fill up with the
+/// same phone.
+fn pair_replacing(code: &str, name: &str, old_token: Option<&str>) -> Result<String, PairError> {
     let mut st = state().lock().map_err(|_| PairError::Locked)?;
     st.fails.retain(|t| t.elapsed() < FAIL_WINDOW);
     if st.fails.len() as u32 >= FAIL_LIMIT {
@@ -535,15 +734,25 @@ fn pair(code: &str, name: &str) -> Result<String, PairError> {
     st.code = None;
     drop(st);
     let token = hex(&random_bytes(32));
-    let mut list = load_devices();
+    let Some(mut list) = devices_to_change() else {
+        return Err(PairError::Unreadable);
+    };
     let now = now_secs();
-    list.push(Device {
-        id: hex(&random_bytes(6)),
-        name: name.to_string(),
-        hash: hash_token(&token),
-        created: now,
-        last_seen: now,
-    });
+    let old = old_token.map(hash_token);
+    match old.and_then(|h| list.iter_mut().find(|d| d.hash == h)) {
+        Some(device) => {
+            device.hash = hash_token(&token);
+            device.name = name.to_string();
+            device.last_seen = now;
+        }
+        None => list.push(Device {
+            id: hex(&random_bytes(6)),
+            name: name.to_string(),
+            hash: hash_token(&token),
+            created: now,
+            last_seen: now,
+        }),
+    }
     save_devices(&list).map_err(|_| PairError::Locked)?;
     Ok(token)
 }
@@ -878,14 +1087,14 @@ fn host_allowed(host: Option<&str>) -> bool {
             .map(|st| st.bound.iter().any(|a| a.ip() == ip))
             .unwrap_or(false);
     }
-    tailnet()
+    known_tailnet()
         .and_then(|t| t.dns)
         .is_some_and(|dns| dns.eq_ignore_ascii_case(name))
 }
 
-fn peer_allowed(addr: Option<&SocketAddr>) -> bool {
+fn peer_check(addr: Option<&SocketAddr>) -> PeerCheck {
     let Some(addr) = addr else {
-        return false;
+        return PeerCheck::No;
     };
     let ip = match addr.ip() {
         IpAddr::V6(v6) => v6
@@ -895,36 +1104,102 @@ fn peer_allowed(addr: Option<&SocketAddr>) -> bool {
         ip => ip,
     };
     if ip.is_loopback() {
-        return true;
+        return PeerCheck::Yes;
     }
-    is_tailnet_ip(&ip) && tailnet_peer_allowed(ip)
+    if is_tailnet_ip(&ip) {
+        tailnet_peer_check(ip)
+    } else {
+        PeerCheck::No
+    }
+}
+
+/// The device cookie as the server sets it. Sent again when a paired phone
+/// opens the app, so a year runs from the last visit, not from pairing.
+fn device_cookie(token: &str) -> String {
+    format!("{COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000")
+}
+
+/// Whether a rejected request is worth a line in the log now: once in ten
+/// minutes for each peer and reason, so a phone that retries does not fill it.
+fn should_log_unauthorized(
+    seen: &mut HashMap<String, Instant>,
+    key: &str,
+    now: Instant,
+) -> bool {
+    seen.retain(|_, at| now.duration_since(*at) < Duration::from_secs(600));
+    if seen.contains_key(key) {
+        return false;
+    }
+    seen.insert(key.to_string(), now);
+    true
+}
+
+/// Why a phone was told to connect again, for the log: it sent no device
+/// cookie (a new browser or home screen app, or another address, which keeps
+/// its own cookies), or one this Mac does not know.
+fn note_unauthorized(req: &Request, token: Option<&str>) {
+    let reason = if token.is_none() { "no device cookie" } else { "unknown device token" };
+    let from = req
+        .remote_addr()
+        .map(|a| a.ip().to_string())
+        .unwrap_or_else(|| "?".into());
+    let host = request_header(req, "Host").unwrap_or("?").to_string();
+    let key = format!("{from}|{reason}|{host}");
+    let log = state()
+        .lock()
+        .map(|mut st| should_log_unauthorized(&mut st.unauthorized, &key, Instant::now()))
+        .unwrap_or(false);
+    if log {
+        eprintln!(
+            "[crew] mobile: asked {from} to connect again ({reason}; host {host}; {} devices known)",
+            load_devices().len()
+        );
+    }
 }
 
 fn handle(mut req: Request) {
-    if !peer_allowed(req.remote_addr()) {
+    let url = req.url().to_string();
+    let path = url.split('?').next().unwrap_or("/").to_string();
+    let method = req.method().clone();
+    let check = peer_check(req.remote_addr());
+    if check == PeerCheck::No {
         let _ = req.respond(error(403, "not this Mac's Tailscale user"));
         return;
+    }
+    if check == PeerCheck::Unknown {
+        let is_pair = path == "/api/pair";
+        let is_api = path.starts_with("/api/");
+        let paired = is_api
+            && !is_pair
+            && cookie_token(&req).and_then(|t| device_for(&t)).is_some();
+        if !admitted(check, is_api, is_pair, paired) {
+            let _ = req.respond(error(403, "Tailscale did not say whose device this is; try again in a moment"));
+            return;
+        }
     }
     if !host_allowed(request_header(&req, "Host")) {
         let _ = req.respond(error(421, "unknown host"));
         return;
     }
-    let url = req.url().to_string();
-    let path = url.split('?').next().unwrap_or("/").to_string();
-    let method = req.method().clone();
     if path == "/api/pair" && method == Method::Post {
         let reply = pair_request(&mut req);
         let _ = req.respond(reply);
         return;
     }
     if path.starts_with("/api/") {
-        let device = cookie_token(&req).and_then(|t| device_for(&t));
+        let token = cookie_token(&req);
+        let device = token.as_deref().and_then(device_for);
         let Some(device) = device else {
+            note_unauthorized(&req, token.as_deref());
             let _ = req.respond(error(401, "connect this device first"));
             return;
         };
         if path == "/api/session" {
-            let _ = req.respond(json_reply(200, &json!({ "device": device.name })));
+            let mut reply = json_reply(200, &json!({ "device": device.name }));
+            if let Some(token) = token.as_deref() {
+                reply = reply.with_header(header("Set-Cookie", &device_cookie(token)));
+            }
+            let _ = req.respond(reply);
             return;
         }
         if let Some(cmd) = path.strip_prefix("/api/invoke/") {
@@ -1010,13 +1285,16 @@ fn pair_request(req: &mut Request) -> Reply {
         .filter(|s| !s.is_empty())
         .map(|s| s.chars().take(40).collect())
         .unwrap_or_else(|| device_name(ua));
-    match pair(code, &name) {
-        Ok(token) => json_reply(200, &json!({ "device": name })).with_header(header(
-            "Set-Cookie",
-            &format!("{COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000"),
-        )),
+    let old = cookie_token(req);
+    match pair_replacing(code, &name, old.as_deref()) {
+        Ok(token) => json_reply(200, &json!({ "device": name }))
+            .with_header(header("Set-Cookie", &device_cookie(&token))),
         Err(PairError::Wrong) => error(403, "wrong or expired code"),
         Err(PairError::Locked) => error(429, "too many wrong codes; make a new one on the Mac"),
+        Err(PairError::Unreadable) => error(
+            500,
+            "the list of connected devices could not be read; nothing was changed",
+        ),
     }
 }
 
@@ -1578,5 +1856,211 @@ mod tests {
                 "{name}: run scripts/gen_web_dispatch.py"
             );
         }
+    }
+
+    // --------------------------------------------- a phone stays connected
+
+    /// Pair once and return the device cookie value, on the server at `addr`.
+    fn pair_over_http(addr: SocketAddr) -> String {
+        let pin = new_pair_code().unwrap()["code"].as_str().unwrap().to_string();
+        let (code, head, _) = post(
+            addr,
+            "/api/pair",
+            "User-Agent: Mozilla (iPhone)\r\n",
+            format!(r#"{{"code":"{pin}"}}"#).as_bytes(),
+        );
+        assert_eq!(code, 200);
+        let line = head
+            .lines()
+            .find(|l| l.to_ascii_lowercase().starts_with("set-cookie"))
+            .unwrap();
+        line.split("crew_device=").nth(1).unwrap().split(';').next().unwrap().to_string()
+    }
+
+    fn only_server_addr() -> SocketAddr {
+        state().lock().unwrap().servers[0].server.server_addr().to_ip().unwrap()
+    }
+
+    fn forget_kept() {
+        if let Ok(mut st) = state().lock() {
+            st.kept = None;
+        }
+    }
+
+    /// The Crew update that restarts the daemon, and a daemon that comes back on
+    /// the same files: the device cookie from before is still this phone.
+    #[test]
+    fn a_connected_phone_is_known_after_the_server_restarts() {
+        paths::testing::with_home("web-restart", || {
+            save_settings(&Settings { enabled: true, port: Some(0), loopback: true }).unwrap();
+            bind_all().unwrap();
+            let token = pair_over_http(only_server_addr());
+            stop_all();
+            // A new daemon: nothing in memory, the same home.
+            if let Ok(mut st) = state().lock() {
+                *st = State::default();
+            }
+            bind_all().unwrap();
+            let addr = only_server_addr();
+            let (code, head, body) = get(addr, "/api/session", &format!("Cookie: crew_device={token}\r\n"));
+            assert_eq!(code, 200, "{}", String::from_utf8_lossy(&body));
+            // And it is asked to keep the cookie another year from this visit.
+            let renewed = head
+                .lines()
+                .find(|l| l.to_ascii_lowercase().starts_with("set-cookie"))
+                .expect("the session answer renews the cookie");
+            assert!(renewed.contains(&format!("crew_device={token}")) && renewed.contains("Max-Age=31536000"), "{renewed}");
+            assert_eq!(get(addr, "/api/session", "").0, 401, "no cookie is no device");
+            assert_eq!(
+                get(addr, "/api/session", "Cookie: crew_device=0000\r\n").0,
+                401,
+                "a token this Mac does not know"
+            );
+            stop_all();
+        });
+    }
+
+    /// The pairing link and the address Settings shows are the MagicDNS name,
+    /// the same one every time. When Tailscale does not answer (slow after an
+    /// update) the name last seen stands in, instead of a bare IP: a browser
+    /// keeps its cookie per host, so an IP link is another site and the phone
+    /// would be asked to connect again.
+    #[test]
+    fn the_address_stays_the_dns_name_when_tailscale_does_not_answer() {
+        paths::testing::with_home("web-dns", || {
+            forget_kept();
+            let ip: IpAddr = "100.111.145.71".parse().unwrap();
+            let bound = |addr: SocketAddr| {
+                state().lock().unwrap().bound = vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 47823), addr];
+            };
+            bound(SocketAddr::new(ip, 47823));
+            // Never seen: only the IP can be offered.
+            assert_eq!(urls(47823)[0], "http://127.0.0.1:47823");
+            assert!(!urls(47823).iter().any(|u| u.contains("ts.net")));
+            // Tailscale answered once.
+            keep_net(&Tailnet {
+                ips: vec![ip],
+                dns: Some("mac.tail55bae5.ts.net".into()),
+                owner: Some("me@example.com".into()),
+            });
+            assert_eq!(urls(47823)[0], "http://mac.tail55bae5.ts.net:47823");
+            // It does not answer now (a test's `tailnet()` never does).
+            assert!(tailnet().is_none());
+            assert_eq!(urls(47823)[0], "http://mac.tail55bae5.ts.net:47823");
+            assert!(host_allowed(Some("mac.tail55bae5.ts.net:47823")));
+            assert!(host_allowed(Some("MAC.tail55bae5.ts.net")), "names are not case sensitive");
+            assert!(!host_allowed(Some("evil.example:47823")), "no other name");
+            // Kept across a restart, and a later answer that lacks a part keeps it.
+            forget_kept();
+            assert_eq!(known_tailnet().unwrap().dns.as_deref(), Some("mac.tail55bae5.ts.net"));
+            keep_net(&Tailnet { ips: vec![], dns: None, owner: None });
+            let kept = known_tailnet().unwrap();
+            assert_eq!(
+                (kept.dns.as_deref(), kept.owner.as_deref(), kept.ips),
+                (Some("mac.tail55bae5.ts.net"), Some("me@example.com"), vec![ip])
+            );
+            // A new name replaces the old one.
+            keep_net(&Tailnet { ips: vec![ip], dns: Some("renamed.tail55bae5.ts.net".into()), owner: None });
+            assert_eq!(urls(47823)[0], "http://renamed.tail55bae5.ts.net:47823");
+            state().lock().unwrap().bound.clear();
+            forget_kept();
+        });
+    }
+
+    #[test]
+    fn a_peer_tailscale_could_not_vouch_for_gets_the_app_and_its_own_session_but_never_pairing() {
+        // Who whois names against whose Mac this is.
+        assert_eq!(owner_verdict(Some("a@x"), Some("a@x")), PeerCheck::Yes);
+        assert_eq!(owner_verdict(Some("a@x"), Some("b@x")), PeerCheck::No);
+        // No answer is not a stranger.
+        assert_eq!(owner_verdict(Some("a@x"), None), PeerCheck::Unknown);
+        assert_eq!(owner_verdict(None, Some("a@x")), PeerCheck::Unknown);
+        assert_eq!(owner_verdict(None, None), PeerCheck::Unknown);
+        for (is_api, is_pair, paired) in [(false, false, false), (true, false, true), (true, true, true)] {
+            assert!(admitted(PeerCheck::Yes, is_api, is_pair, paired));
+            assert!(!admitted(PeerCheck::No, is_api, is_pair, paired));
+        }
+        let unknown = |is_api, is_pair, paired| admitted(PeerCheck::Unknown, is_api, is_pair, paired);
+        assert!(unknown(false, false, false), "the app's files");
+        assert!(unknown(true, false, true), "the API with a paired device's cookie");
+        assert!(!unknown(true, false, false), "the API without one");
+        assert!(!unknown(true, true, true), "pairing, even from a paired device");
+    }
+
+    /// A phone is not turned away as unknown because the device list could not
+    /// be read once, and no new device is written over a list that cannot be.
+    #[test]
+    fn the_device_list_is_not_lost_to_a_file_that_cannot_be_read() {
+        paths::testing::with_home("web-devices", || {
+            save_settings(&Settings { enabled: true, port: Some(0), loopback: true }).unwrap();
+            let make = |name: &str| {
+                let code = new_pair_code().unwrap()["code"].as_str().unwrap().to_string();
+                pair(&code, name).unwrap()
+            };
+            let first = make("iPhone");
+            let second = make("iPad");
+            assert_eq!(load_devices().len(), 2);
+            assert!(devices_backup_path().exists(), "the list is copied with each change");
+
+            // The file is damaged: the copy of the last good list stands in.
+            fs::write(devices_path(), b"{ not json").unwrap();
+            assert_eq!(device_for(&first).map(|d| d.name), Some("iPhone".into()));
+            assert!(device_for("nope").is_none());
+            // Adding a device restores from the copy instead of dropping the others.
+            let third = make("Android");
+            assert_eq!(load_devices().len(), 3);
+            assert!(device_for(&second).is_some() && device_for(&third).is_some());
+
+            // Neither readable: a pairing is refused and nothing is written over it.
+            fs::write(devices_path(), b"{ not json").unwrap();
+            fs::write(devices_backup_path(), b"[ also not").unwrap();
+            let code = new_pair_code().unwrap()["code"].as_str().unwrap().to_string();
+            assert_eq!(pair(&code, "Browser"), Err(PairError::Unreadable));
+            assert_eq!(fs::read(devices_path()).unwrap(), b"{ not json");
+            assert!(revoke("x").is_err());
+
+            // A missing file is simply no devices yet.
+            fs::remove_file(devices_path()).unwrap();
+            fs::remove_file(devices_backup_path()).unwrap();
+            assert!(load_devices().is_empty());
+            let code = new_pair_code().unwrap()["code"].as_str().unwrap().to_string();
+            assert!(pair(&code, "Browser").is_ok());
+            stop_all();
+        });
+    }
+
+    /// Connecting again from a browser that still holds a device's token keeps
+    /// one entry for the phone, with the new token; a browser that holds none
+    /// (or one this Mac lost) adds one.
+    #[test]
+    fn connecting_again_from_the_same_browser_keeps_one_entry() {
+        paths::testing::with_home("web-repair", || {
+            save_settings(&Settings { enabled: true, port: Some(0), loopback: true }).unwrap();
+            let code = || new_pair_code().unwrap()["code"].as_str().unwrap().to_string();
+            let first = pair_replacing(&code(), "iPhone", None).unwrap();
+            let other = pair_replacing(&code(), "iPad", None).unwrap();
+            assert_eq!(load_devices().len(), 2);
+            let id = device_for(&first).unwrap().id;
+            let again = pair_replacing(&code(), "iPhone", Some(&first)).unwrap();
+            assert_eq!(load_devices().len(), 2, "the phone's own entry was given the new token");
+            assert!(device_for(&first).is_none(), "the old token is out");
+            assert_eq!(device_for(&again).unwrap().id, id);
+            assert!(device_for(&other).is_some(), "the other device is untouched");
+            // A token this Mac does not know replaces nothing.
+            pair_replacing(&code(), "iPhone", Some("not-a-token")).unwrap();
+            assert_eq!(load_devices().len(), 3);
+            stop_all();
+        });
+    }
+
+    #[test]
+    fn a_rejected_phone_is_logged_once_in_ten_minutes_for_each_peer_and_reason() {
+        let mut seen = HashMap::new();
+        let t0 = Instant::now();
+        assert!(should_log_unauthorized(&mut seen, "1.2.3.4|no device cookie|h", t0));
+        assert!(!should_log_unauthorized(&mut seen, "1.2.3.4|no device cookie|h", t0 + Duration::from_secs(60)));
+        assert!(should_log_unauthorized(&mut seen, "1.2.3.4|unknown device token|h", t0));
+        assert!(should_log_unauthorized(&mut seen, "5.6.7.8|no device cookie|h", t0));
+        assert!(should_log_unauthorized(&mut seen, "1.2.3.4|no device cookie|h", t0 + Duration::from_secs(601)));
     }
 }

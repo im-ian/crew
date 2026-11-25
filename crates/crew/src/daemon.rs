@@ -8933,9 +8933,9 @@ printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s2"}}' '{{"type"
                 session.inner.lock().unwrap().session_id = None;
             }
             send_agent(&bot, "HANG 하나").unwrap();
-            eventually(Duration::from_secs(10), "the turn never started", || {
-                tried(&log, "fresh:", "HANG")
-            });
+            // The flag is touched by the CLI that is about to hang: ringing the
+            // watch earlier could kill it before, and the next one would hang too.
+            eventually(Duration::from_secs(10), "the turn never hung", || flag.exists());
             ring_output_watch(&bot);
             eventually(Duration::from_secs(5), "the stall was not reported", || {
                 system_said(&bot, "CLI가 응답하지 않습니다")
@@ -8977,9 +8977,7 @@ printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s2"}}' '{{"type"
             wait_idle(&bot);
             hold_output_watch(&bot);
             tell_with(&peer, &bot, "FIRST 일을 시작해 주세요", false).unwrap();
-            eventually(Duration::from_secs(10), "the first tell never started", || {
-                fs::read_to_string(&log).is_ok_and(|s| s.contains("FIRST"))
-            });
+            eventually(Duration::from_secs(10), "the first tell never hung", || flag.exists());
             ring_output_watch(&bot);
             eventually(Duration::from_secs(5), "the stall was not reported", || {
                 system_said(&bot, "CLI가 응답하지 않습니다")
