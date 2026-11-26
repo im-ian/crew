@@ -79,5 +79,5 @@ gh secret list --repo "$repo"                             # 여섯 개 이름이
 
 - macOS는 서명이 바뀐 앱을 다른 앱처럼 볼 수 있어요. 서명된 첫 버전으로 업데이트하면 알림 같은 권한을 한 번 다시 물을 수 있어요.
 - 앱 안 업데이터는 Tauri 업데이터 서명으로 확인해서, ad-hoc 버전에서 서명된 버전으로도 그대로 업데이트돼요.
-- 서명된 릴리스가 나가면 README 설치 절의 `xattr` 안내와 `scripts/install-macos.sh`의 quarantine 제거는 더 필요 없어요. 그때 정리해요.
+- 0.15.1부터 서명·공증된 릴리스가 나가서 README 설치 절의 `xattr` 안내와 `scripts/install-macos.sh`의 quarantine 제거는 정리했어요. README는 0.15.0 이하를 직접 받는 경우에만 `xattr`을 한 줄로 남겨요. 설치 스크립트는 `releases/latest`만 받으니 지금은 늘 서명본이고, 받은 앱이 Gatekeeper(`spctl --assess --type execute`)에서 `source=Notarized Developer ID`로 통과하는지 기존 앱을 바꾸기 전과 설치한 뒤에 확인해요. 통과하지 못하면(서명 없이 나간 릴리스가 `latest`가 된 경우) 이유를 말하고 멈춰요.
 - 서명을 끄려면 여섯 Secrets를 모두 지워요. 다음 릴리스부터 ad-hoc으로 돌아가요.
