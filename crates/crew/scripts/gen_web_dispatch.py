@@ -13,7 +13,7 @@ names = [n.strip().rstrip(",") for n in desktop[start:desktop.index("])", start)
 
 # Commands the phone does not run as the window does: they need the window
 # itself, or they open something on the Mac. Their answers are in web.rs.
-SPECIAL = {"set_dock_badge", "set_locale", "pick_folder", "open_path", "open_url", "set_escape_layer"}
+SPECIAL = {"set_dock_badge", "set_locale", "pick_folder", "open_path", "open_url", "set_escape_layer", "relaunch_app"}
 # The phone does not manage its own access.
 SKIP_PREFIX = ("mobile_",)
 

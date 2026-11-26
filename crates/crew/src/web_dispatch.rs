@@ -488,6 +488,7 @@ pub const SPECIAL: &[&str] = &[
     "open_path",
     "open_url",
     "pick_folder",
+    "relaunch_app",
     "set_dock_badge",
     "set_escape_layer",
     "set_locale",

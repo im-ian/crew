@@ -70,6 +70,7 @@ fn main() {
             "get_read_marks",
             "mark_read",
             "set_dock_badge",
+            "relaunch_app",
             "set_locale",
             "set_notifications",
             "set_lead_only_notify",

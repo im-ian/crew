@@ -1,11 +1,11 @@
 import { useCallback, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { relaunch } from "@tauri-apps/plugin-process";
 import {
   check,
   type DownloadEvent,
   type Update,
 } from "@tauri-apps/plugin-updater";
+import { invoke } from "./transport";
 import { isWeb } from "./web";
 
 export type { DownloadEvent, Update };
@@ -30,7 +30,10 @@ export async function getCurrentVersion(): Promise<string> {
 
 /**
  * Download and install an update, then relaunch. macOS Tauri builds do
- * not restart on their own after `downloadAndInstall`.
+ * not restart on their own after `downloadAndInstall`. The relaunch goes
+ * through LaunchServices (`relaunch_app`), as opening the app does: the
+ * process plugin ran the new binary as a child of the old one, which macOS
+ * did not count as Crew until its window came up.
  */
 export async function installUpdate(
   update: Update,
@@ -39,7 +42,7 @@ export async function installUpdate(
   await update.downloadAndInstall((event) => {
     onProgress?.(event);
   });
-  await relaunch();
+  await invoke<void>("relaunch_app");
 }
 
 export function loadDismissedVersion(): string | null {
