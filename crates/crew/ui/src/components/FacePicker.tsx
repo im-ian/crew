@@ -23,9 +23,11 @@ import { BotFace } from "./BotFace";
 
 const GROUP_LABEL: Record<ShapeGroupKey, MessageKey> = {
   shapes: "face.group.shapes",
+  jobs: "face.group.jobs",
   things: "face.group.things",
-  pixel: "face.group.pixel",
+  bubbles: "face.group.bubbles",
   nature: "face.group.nature",
+  pixel: "face.group.pixel",
 };
 
 type Props = {

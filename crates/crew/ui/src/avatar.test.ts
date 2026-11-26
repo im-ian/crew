@@ -1,4 +1,4 @@
-import { SHAPES, SWATCHES } from "crew-avatar";
+import { SHAPES, SHAPE_NAMES, SWATCHES } from "crew-avatar";
 import { describe, expect, it } from "vitest";
 import {
   AVATAR_SHAPES,
@@ -22,6 +22,22 @@ describe("avatar shapes", () => {
       expect(Object.keys(SHAPES), shape).toContain(shape);
       expect(SHAPES[shape].markup, shape).toContain("<");
     }
+  });
+
+  it("offers every shape crew-avatar draws, and keeps the older ones valid", () => {
+    expect([...AVATAR_SHAPES, ...LEGACY_SHAPES].sort()).toEqual([...SHAPE_NAMES].sort());
+    for (const shape of SHAPE_NAMES) expect(isAvatarShape(shape), shape).toBe(true);
+  });
+
+  it("lists the picker's groups in order", () => {
+    expect(AVATAR_SHAPE_GROUPS.map((g) => g.key)).toEqual([
+      "shapes", "jobs", "things", "bubbles", "nature", "pixel",
+    ]);
+  });
+
+  it("gives a shape that has its own color that color when none is chosen", () => {
+    expect(resolveFace("bot", "parchment", null).color).toBe(SHAPES.parchment.color);
+    expect(resolveFace("bot", "parchment", "#4da3ff").color).toBe("#4da3ff");
   });
 
   it("keeps the swatches the picker offers", () => {
@@ -81,12 +97,14 @@ describe("avatar shapes", () => {
   it("paints through currentColor, with only black or white tints besides", () => {
     // A mark may darken or lighten the body (craters, the ghost half) but never
     // bring a color of its own, so a bot's color still decides the whole face.
+    // The compass needle is the one fixed accent.
+    const ACCENTS: Record<string, string[]> = { compass: ["#ff5a5a"] };
     for (const shape of AVATAR_SHAPES) {
       const { markup } = SHAPES[shape];
       expect(markup, shape).toContain("currentColor");
       const fixed = markup.match(/#[0-9a-f]{3,8}\b|\b(?:rgb|hsl)a?\(/gi) ?? [];
       for (const color of fixed) {
-        expect(["#000", "#fff"], `${shape} ${color}`).toContain(color.toLowerCase());
+        expect(["#000", "#fff", ...(ACCENTS[shape] ?? [])], `${shape} ${color}`).toContain(color.toLowerCase());
       }
     }
   });

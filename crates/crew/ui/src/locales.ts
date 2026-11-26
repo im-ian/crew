@@ -631,7 +631,9 @@ export const KO = {
   "groupSettings.worktree.hint": "이 그룹의 봇만 적용합니다. 다음 턴부터 바뀌고, 꺼도 이미 만든 작업 폴더는 그대로 둡니다.",
 
   "face.group.shapes": "도형",
+  "face.group.jobs": "직업",
   "face.group.things": "사물",
+  "face.group.bubbles": "말풍선",
   "face.group.pixel": "픽셀",
   "face.group.nature": "자연",
   "face.random": "랜덤",
@@ -1340,7 +1342,9 @@ export const EN: { [K in MessageKey]: string } = {
   "groupSettings.worktree.hint": "Applies only to bots in this group, starting on the next turn. Turning it off leaves a folder that was already made.",
 
   "face.group.shapes": "Shapes",
+  "face.group.jobs": "Jobs",
   "face.group.things": "Things",
+  "face.group.bubbles": "Bubbles",
   "face.group.pixel": "Pixel",
   "face.group.nature": "Nature",
   "face.random": "Random",
