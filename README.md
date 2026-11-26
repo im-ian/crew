@@ -28,13 +28,9 @@ macOS 전용이에요. 아래 한 줄이 최신 릴리스를 `/Applications/Crew
 curl -fsSL https://raw.githubusercontent.com/im-ian/crew/main/scripts/install-macos.sh | bash
 ```
 
-직접 받으려면 [Releases](https://github.com/im-ian/crew/releases/latest)에서 `Crew_*_aarch64.dmg`(Apple Silicon) 또는 `Crew_*_x64.dmg`(Intel)를 받아 `Applications`로 복사한 뒤 아래를 실행해요.
+직접 받으려면 [Releases](https://github.com/im-ian/crew/releases/latest)에서 `Crew_*_aarch64.dmg`(Apple Silicon) 또는 `Crew_*_x64.dmg`(Intel)를 받아 열고 Crew를 `Applications`로 옮기면 돼요.
 
-```bash
-xattr -dr com.apple.quarantine /Applications/Crew.app
-```
-
-> Crew는 Apple Developer ID로 서명·공증되지 않은 빌드예요. 위 명령은 Gatekeeper의 quarantine 플래그만 떼요.
+> 0.15.1부터 Crew는 Apple Developer ID로 서명되고 Apple 공증을 받아요. 처음 열 때 macOS가 "인터넷에서 받은 앱" 확인을 한 번 물을 수 있는 게 전부예요. 서명되지 않은 0.15.0 이하를 직접 받았다면 `xattr -dr com.apple.quarantine /Applications/Crew.app`이 필요해요.
 
 설치한 앱은 새 버전이 나오면 알려 주고, 설치를 고르면 업데이트해요. 앱 번들 ID가 `dev.jthefloor.crew`에서 `com.imian.crew`로 바뀌는 버전으로 업데이트하면 macOS가 알림 허용 같은 권한을 한 번 다시 물을 수 있어요. 창 설정은 그대로 옮겨 오고, 봇과 대화는 영향이 없어요. 소스에서 빌드하려면 [docs/development.md](docs/development.md)를 보세요.
 

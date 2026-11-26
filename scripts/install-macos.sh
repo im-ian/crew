@@ -43,7 +43,7 @@ case "$(uname -m)" in
     ;;
 esac
 
-for tool in codesign curl hdiutil ditto mktemp dirname osascript lipo shasum xattr; do
+for tool in codesign curl hdiutil ditto mktemp dirname osascript lipo shasum spctl; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "error: required tool not found: $tool" >&2
     exit 1
@@ -53,6 +53,21 @@ if [[ ! -x /usr/libexec/PlistBuddy ]]; then
   echo "error: required tool not found: /usr/libexec/PlistBuddy" >&2
   exit 1
 fi
+
+# Whether macOS's Gatekeeper takes the app at $1: signed with an Apple Developer
+# ID and notarized, as every release from 0.15.1 on is. Earlier releases were
+# ad-hoc builds that carried no such signature, and it is no use installing one
+# this way: a person who really wants one removes its quarantine flag by hand.
+require_gatekeeper() {
+  local verdict
+  if ! verdict="$(spctl --assess --type execute --verbose=2 "$1" 2>&1)" \
+    || [[ "$verdict" != *"source=Notarized Developer ID"* ]]; then
+    echo "error: macOS Gatekeeper does not accept ${app_name} from this release (${1##*/}):" >&2
+    echo "       ${verdict//$'\n'/ }" >&2
+    echo "       Only releases signed with an Apple Developer ID and notarized (0.15.1 and later) install this way." >&2
+    return 1
+  fi
+}
 
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/crew-install.XXXXXX")"
 tmp_dir="$(cd "$tmp_dir" && pwd -P)"
@@ -134,6 +149,8 @@ if [[ ! -d "$contents_dir" || -L "$contents_dir" \
   exit 1
 fi
 codesign --verify --deep --strict --verbose=2 "$source_app"
+# Before anything on this Mac is replaced.
+require_gatekeeper "$source_app"
 bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$info_plist" 2>/dev/null || true)"
 if [[ "$bundle_id" != "$expected_bundle_id" && "$bundle_id" != "$legacy_bundle_id" ]]; then
   echo "error: unexpected app bundle identifier: ${bundle_id:-missing}" >&2
@@ -184,8 +201,8 @@ if [[ -e "$target_app" ]]; then
   run_install_cmd rm -rf "$target_app"
 fi
 run_install_cmd ditto "$source_app" "$target_app"
-run_install_cmd xattr -dr com.apple.quarantine "$target_app" || true
 codesign --verify --deep --strict --verbose=2 "$target_app"
+require_gatekeeper "$target_app"
 
 cli_link="${HOME}/.local/bin/crew"
 if mkdir -p "$(dirname "$cli_link")" 2>/dev/null; then
