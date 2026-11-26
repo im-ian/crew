@@ -6192,6 +6192,18 @@ button.mention-chip:active {
   justify-content: space-between;
   gap: var(--space-8);
 }
+/* What sits at the right of a dialog's title: a control of the dialog's, then
+   the phone's close button, as one group. */
+.dialog-head-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.dialog-head-end:empty {
+  display: none;
+}
 .dialog-help {
   width: 28px;
   height: 28px;
