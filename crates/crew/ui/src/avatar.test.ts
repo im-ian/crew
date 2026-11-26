@@ -1,28 +1,14 @@
+import { SHAPES, SWATCHES } from "crew-avatar";
 import { describe, expect, it } from "vitest";
 import {
   AVATAR_SHAPES,
   AVATAR_SHAPE_GROUPS,
   LEGACY_SHAPES,
+  AVATAR_SWATCHES,
   hashedFace,
   isAvatarShape,
   resolveFace,
 } from "./avatar";
-import { artFace } from "./faceArt";
-import { extraFace } from "./faceGeometry";
-
-// Shapes BotFace draws with its own markup rather than a stored outline.
-const CORE = [
-  "circle",
-  "teardrop",
-  "rounded-square",
-  "hexagon",
-  "triangle",
-  "cloud",
-  "pill",
-  "diamond",
-  "pentagon",
-  "heart",
-];
 
 describe("avatar shapes", () => {
   it("puts every shape the picker offers in exactly one group", () => {
@@ -31,11 +17,26 @@ describe("avatar shapes", () => {
     expect([...grouped].sort()).toEqual([...AVATAR_SHAPES].sort());
   });
 
-  it("has a drawing for every shape, including the ones the picker dropped", () => {
+  it("has a drawing in crew-avatar for every shape, including the ones the picker dropped", () => {
     for (const shape of [...AVATAR_SHAPES, ...LEGACY_SHAPES]) {
-      const drawn = CORE.includes(shape) || !!artFace(shape) || !!extraFace(shape);
-      expect(drawn, shape).toBe(true);
+      expect(Object.keys(SHAPES), shape).toContain(shape);
+      expect(SHAPES[shape].markup, shape).toContain("<");
     }
+  });
+
+  it("keeps the swatches the picker offers", () => {
+    expect(AVATAR_SWATCHES).toEqual([...SWATCHES]);
+    expect(AVATAR_SWATCHES.slice(0, 10)).toEqual([
+      "#ff8a3d", "#4da3ff", "#2ec4b6", "#8e8e93", "#ff5a5a",
+      "#7dcc5e", "#ff7aad", "#9b7dff", "#ffb347", "#3a3a3c",
+    ]);
+  });
+
+  it("keeps a bot's face from drifting when it is saved without a color", () => {
+    expect(resolveFace("bot", "star", "#ABC")).toEqual({ shape: "star", color: "#aabbcc" });
+    expect(resolveFace("bot", "banana", "red")).toEqual(hashedFace("bot"));
+    expect(resolveFace(undefined, null, null)).toEqual(hashedFace("agent"));
+    expect(resolveFace("bot", "puffy", " #ff8a3d ")).toEqual({ shape: "puffy", color: "#ff8a3d" });
   });
 
   it("keeps a saved face on a shape the picker no longer offers", () => {
@@ -69,14 +70,11 @@ describe("avatar shapes", () => {
 
   it("keeps the eyes inside the shape's box", () => {
     for (const shape of AVATAR_SHAPES) {
-      const art = artFace(shape);
-      if (!art) continue;
-      const { x, y, w, h } = art.box;
-      const { eyes } = art;
-      expect(eyes.x, shape).toBeGreaterThan(x);
-      expect(eyes.x, shape).toBeLessThan(x + w);
-      expect(eyes.y, shape).toBeGreaterThan(y);
-      expect(eyes.y, shape).toBeLessThan(y + h);
+      const { box, eyes } = SHAPES[shape];
+      expect(eyes.x, shape).toBeGreaterThan(box.x);
+      expect(eyes.x, shape).toBeLessThan(box.x + box.w);
+      expect(eyes.y, shape).toBeGreaterThan(box.y);
+      expect(eyes.y, shape).toBeLessThan(box.y + box.h);
     }
   });
 
@@ -84,10 +82,9 @@ describe("avatar shapes", () => {
     // A mark may darken or lighten the body (craters, the ghost half) but never
     // bring a color of its own, so a bot's color still decides the whole face.
     for (const shape of AVATAR_SHAPES) {
-      const art = artFace(shape);
-      if (!art) continue;
-      expect(art.markup, shape).toContain("currentColor");
-      const fixed = art.markup.match(/#[0-9a-f]{3,8}\b|\b(?:rgb|hsl)a?\(/gi) ?? [];
+      const { markup } = SHAPES[shape];
+      expect(markup, shape).toContain("currentColor");
+      const fixed = markup.match(/#[0-9a-f]{3,8}\b|\b(?:rgb|hsl)a?\(/gi) ?? [];
       for (const color of fixed) {
         expect(["#000", "#fff"], `${shape} ${color}`).toContain(color.toLowerCase());
       }

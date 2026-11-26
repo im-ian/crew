@@ -1,3 +1,5 @@
+import { SWATCHES, normalizeHex, phaseOf, seededFace } from "crew-avatar";
+
 export const AVATAR_SHAPES = [
   "circle",
   "teardrop",
@@ -140,29 +142,11 @@ export const AVATAR_SHAPE_GROUPS: {
   },
 ];
 
-export const AVATAR_SWATCHES = [
-  "#ff8a3d",
-  "#4da3ff",
-  "#2ec4b6",
-  "#8e8e93",
-  "#ff5a5a",
-  "#7dcc5e",
-  "#ff7aad",
-  "#9b7dff",
-  "#ffb347",
-  "#3a3a3c",
-  "#ffcc37",
-  "#64d2ff",
-  "#5e5ce6",
-  "#ff375f",
-  "#bf5af2",
-  "#a2845e",
-];
+// The palette, the hashing, the color rule and the animation phase all come from
+// crew-avatar, so a face is drawn and picked the same way wherever it is used.
+export const AVATAR_SWATCHES: string[] = [...SWATCHES];
 
-// Agents with no saved face keep hashing into the original set. Adding a shape
-// or a swatch must not reshuffle bots that were never customized.
-const HASH_SHAPES = AVATAR_SHAPES.slice(0, 11);
-const HASH_SWATCHES = AVATAR_SWATCHES.slice(0, 10);
+export { normalizeHex };
 
 const PALETTE = [
   "#5b7c99",
@@ -175,6 +159,7 @@ const PALETTE = [
   "#8a8f5b",
 ];
 
+/** FNV-1a, as in crew-avatar. Only the letter avatar's color needs it here. */
 function hashId(id: string): number {
   let h = 2166136261;
   for (let i = 0; i < id.length; i++) {
@@ -189,9 +174,7 @@ export function avatarColor(id: string | undefined | null): string {
   return PALETTE[h % PALETTE.length];
 }
 
-export function avatarPhase(id: string | undefined | null): number {
-  return (hashId(String(id || "")) % 83) / 10;
-}
+export const avatarPhase = phaseOf;
 
 export function initialOf(name: string | undefined | null): string {
   const s = String(name || "?").trim();
@@ -206,25 +189,12 @@ export function isAvatarShape(s: string | null | undefined): s is AvatarShape {
   );
 }
 
-export function normalizeHex(input: string | null | undefined): string | null {
-  if (!input) return null;
-  const hex = input.trim().replace(/^#/, "");
-  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
-    const [a, b, c] = hex.split("");
-    return `#${a}${a}${b}${b}${c}${c}`.toLowerCase();
-  }
-  if (/^[0-9a-fA-F]{6}$/.test(hex)) {
-    return `#${hex}`.toLowerCase();
-  }
-  return null;
-}
-
+// Agents with no saved face hash into the first 11 shapes and 10 swatches, so
+// adding shapes or swatches never reshuffles bots that were never customized.
+// seededFace keeps that rule; avatar.test.ts pins the faces it gives.
 export function hashedFace(id: string): { shape: AvatarShape; color: string } {
-  const h = hashId(id);
-  return {
-    shape: HASH_SHAPES[h % HASH_SHAPES.length],
-    color: HASH_SWATCHES[Math.floor(h / HASH_SHAPES.length) % HASH_SWATCHES.length],
-  };
+  // The first 11 shapes are all in AvatarShape; the package types the pick more widely.
+  return seededFace(id) as { shape: AvatarShape; color: string };
 }
 
 export function randomFace(exclude?: {
