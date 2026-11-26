@@ -30,10 +30,14 @@ export function Modal({ open, title, onClose, children, className, aside, closeB
       <div className={"dialog" + (className ? " " + className : "")}>
         <div className="dialog-head">
           <h3>{title}</h3>
-          {aside}
-          {closeButton ? (
-            <CloseButton className="dialog-close" label={t("common.close")} onClick={onClose} />
-          ) : null}
+          {/* One group at the right, so a control beside the title sits against
+              the close button, not between the title and it. */}
+          <div className="dialog-head-end">
+            {aside}
+            {closeButton ? (
+              <CloseButton className="dialog-close" label={t("common.close")} onClick={onClose} />
+            ) : null}
+          </div>
         </div>
         {children}
       </div>

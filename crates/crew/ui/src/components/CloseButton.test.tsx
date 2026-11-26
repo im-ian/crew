@@ -73,6 +73,41 @@ describe("the close control", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("sits against a control beside the title, both at the right: title, then [control][X]", () => {
+    mount(
+      <Modal
+        open
+        title="템플릿"
+        onClose={() => {}}
+        aside={
+          <button type="button" className="primary sm">
+            새 템플릿
+          </button>
+        }
+      >
+        <p>내용</p>
+      </Modal>,
+    );
+    const head = document.querySelector(".dialog-head");
+    // The bar holds the title and one group, so the group is what goes to the right edge.
+    expect([...(head?.children ?? [])].map((c) => c.tagName + "." + c.className)).toEqual([
+      "H3.",
+      "DIV.dialog-head-end",
+    ]);
+    const end = head?.querySelector(".dialog-head-end");
+    expect([...(end?.children ?? [])].map((c) => c.className)).toEqual([
+      "primary sm",
+      "close-btn dialog-close",
+    ]);
+  });
+
+  it("keeps the right-hand group at the right and out of the way when empty", () => {
+    const css = readFileSync("src/styles.css", "utf8");
+    expect(css).toMatch(/\.dialog-head-end\s*\{[^}]*margin-left:\s*auto/);
+    expect(css).toMatch(/\.dialog-head-end\s*\{[^}]*display:\s*flex/);
+    expect(css).toMatch(/\.dialog-head-end:empty\s*\{[^}]*display:\s*none/);
+  });
+
   it("is left out of a dialog whose own buttons are the choice", () => {
     mount(
       <ConfirmDialog open kind="remove" onCancel={() => {}} onConfirm={() => {}} />,
