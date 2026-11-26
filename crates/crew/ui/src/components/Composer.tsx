@@ -15,6 +15,7 @@ import { ReplyQuote, quoteFrom } from "./ReplyQuote";
 import { isWeb, uploadFailure, webUpload } from "../web";
 import type { AskPick } from "./AskHoldDialog";
 import { enterAction } from "../composerEnter";
+import { fitInput } from "../composerFit";
 import { GroupChip, MentionChip } from "./MentionChip";
 import { MentionMenu } from "./MentionMenu";
 import {
@@ -245,9 +246,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({
 
   function fit() {
     const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 120) + "px";
+    if (el) fitInput(el);
   }
 
   function refreshEmpty() {
