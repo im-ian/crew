@@ -408,6 +408,36 @@ pub fn daemon_coming_up() -> bool {
     daemon_lock_held() || read_pid().is_some_and(pid_alive)
 }
 
+/// What a wait on a starting daemon found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Waited {
+    /// The socket accepts connections.
+    Live,
+    /// Nobody holds the lock or a live pid any more, and no socket came up:
+    /// the holder was a daemon on its way out.
+    Gone,
+    TimedOut,
+}
+
+/// Poll until the socket is up, or the daemon that seemed to be starting has
+/// gone without opening one, or `timeout` runs out.
+pub fn wait_for_socket_or_exit(timeout: Duration) -> Waited {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if is_socket_live() {
+            return Waited::Live;
+        }
+        if !daemon_coming_up() {
+            // One more look: it may have bound just as it let go of nothing.
+            return if is_socket_live() { Waited::Live } else { Waited::Gone };
+        }
+        if Instant::now() >= deadline {
+            return if is_socket_live() { Waited::Live } else { Waited::TimedOut };
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
 /// Poll until the socket accepts a connection, or `timeout` runs out.
 pub fn wait_for_socket(timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;

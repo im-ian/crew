@@ -1356,7 +1356,79 @@ fn mobile_revoke(id: String) -> Result<serde_json::Value, String> {
     mobile("revoke", Some(id))
 }
 
+/// The `.app` a binary at `Contents/MacOS/<name>` sits in.
+fn app_bundle(exe: &std::path::Path) -> Option<std::path::PathBuf> {
+    let macos = exe.parent()?;
+    let contents = macos.parent()?;
+    let bundle = contents.parent()?;
+    let named = |p: &std::path::Path, n: &str| p.file_name().is_some_and(|f| f == n);
+    (named(macos, "MacOS")
+        && named(contents, "Contents")
+        && bundle.extension().is_some_and(|e| e == "app"))
+    .then(|| bundle.to_path_buf())
+}
+
+/// Start the app again after an update installed it, the way opening it
+/// does: through LaunchServices, without this process's environment. Tauri
+/// 2.11's restart ran the new binary as a child of this one. That child was
+/// no app to macOS until its window came up, so a click on the Dock icon
+/// meanwhile started a second Crew, and it inherited CREW_AGENT_ID from a
+/// window opened in a bot's shell.
+#[tauri::command(async)]
+pub(crate) fn relaunch_app(app: tauri::AppHandle) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    if let Some(bundle) = app_bundle(&exe) {
+        match std::process::Command::new("/usr/bin/open")
+            .arg("-n")
+            .arg(&bundle)
+            .env_remove("CREW_AGENT_ID")
+            .stdin(std::process::Stdio::null())
+            .output()
+        {
+            Ok(out) if out.status.success() => {
+                app.exit(0);
+                return Ok(());
+            }
+            Ok(out) => crate::log::append(&format!(
+                "relaunch: open {} failed ({}): {}",
+                bundle.display(),
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            )),
+            Err(err) => crate::log::append(&format!("relaunch: open {}: {err}", bundle.display())),
+        }
+    }
+    // Not in a bundle (a dev build), or LaunchServices refused it.
+    app.restart()
+}
+
+/// Drop what marks a process as a bot's. Called first, before any thread.
+fn forget_agent_env() {
+    std::env::remove_var("CREW_AGENT_ID");
+}
+
+/// Keep why the daemon would not start, for the window and the log.
+fn note_start(start: Result<(), String>) {
+    set_start_error(match start {
+        Ok(()) => None,
+        Err(err) => {
+            // A bundled .app discards stderr, so the log is where this stays
+            // readable after the fact. The error includes the log tail for the
+            // window; writing that tail back into the log duplicated every line.
+            eprintln!("crew: {err}");
+            let summary = err.lines().next().unwrap_or(err.as_str());
+            crate::log::append(&format!("crew: {summary}"));
+            Some(err)
+        }
+    });
+}
+
 pub fn run() -> anyhow::Result<()> {
+    // The window is the user's, never a bot's. Opened from a bot's shell it
+    // inherited CREW_AGENT_ID, took an older daemon as good enough (a bot
+    // must not restart it), and passed the id on to every relaunch after an
+    // update, so the new version kept talking to the old daemon.
+    forget_agent_env();
     // Before anything that makes the window: WebKit finds its page data by the
     // app's bundle identifier, so what the old identifier left is copied first.
     crate::webview_data::carry_over_at_start();
@@ -1370,23 +1442,21 @@ pub fn run() -> anyhow::Result<()> {
     // `ui.pid` into that directory and swallows the failure — on a first launch
     // the pid would go unwritten and the window would notify as if it were
     // closed.
-    let start = crate::paths::ensure_home()
+    //
+    // The daemon starts beside the window, not before it. Replacing an older
+    // daemon after an update waits for it to stop, and a window that waited
+    // too looked like an app that never came back; the window shows its
+    // connecting state meanwhile, and its ping waits on this same start.
+    match crate::paths::ensure_home()
         // `File exists (os error 17)` alone does not say which path, and this
         // is the text the window will be showing.
         .map_err(|err| format!("create {}: {err:#}", crate::paths::home_dir().display()))
-        .and_then(|_| client::ensure_daemon().map_err(|err| format!("{err:#}")));
-    set_start_error(match start {
-        Ok(_) => None,
-        Err(err) => {
-            // A bundled .app discards stderr, so the log is where this stays
-            // readable after the fact. The error includes the log tail for the
-            // window; writing that tail back into the log duplicated every line.
-            eprintln!("crew: {err}");
-            let summary = err.lines().next().unwrap_or(err.as_str());
-            crate::log::append(&format!("crew: {summary}"));
-            Some(err)
+    {
+        Err(err) => note_start(Err(err)),
+        Ok(_) => {
+            std::thread::spawn(|| note_start(client::ensure_daemon().map_err(|err| format!("{err:#}"))));
         }
-    });
+    }
     #[cfg(debug_assertions)]
     crate::ui_dev::ensure_vite()?;
     #[cfg(target_os = "macos")]
@@ -1479,6 +1549,7 @@ pub fn run() -> anyhow::Result<()> {
             get_read_marks,
             mark_read,
             set_dock_badge,
+            relaunch_app,
             set_locale,
             set_notifications,
             set_lead_only_notify,
@@ -1508,6 +1579,19 @@ pub fn run() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_relaunch_opens_the_bundle_the_binary_is_in() {
+        use std::path::{Path, PathBuf};
+        assert_eq!(
+            app_bundle(Path::new("/Applications/Crew.app/Contents/MacOS/crew")),
+            Some(PathBuf::from("/Applications/Crew.app"))
+        );
+        // A dev build or a bare binary is no bundle: the plain restart runs it.
+        assert_eq!(app_bundle(Path::new("/repo/target/debug/crew")), None);
+        assert_eq!(app_bundle(Path::new("/x/Crew/Contents/MacOS/crew")), None);
+        assert_eq!(app_bundle(Path::new("/x/Crew.app/Contents/Resources/crew")), None);
+    }
+
     use super::*;
 
     /// Serialised: `START_ERROR` is process-wide.

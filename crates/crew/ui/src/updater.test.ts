@@ -4,12 +4,12 @@ import type { Update } from "@tauri-apps/plugin-updater";
 const mocks = vi.hoisted(() => ({
   check: vi.fn(),
   getVersion: vi.fn(),
-  relaunch: vi.fn(),
+  invoke: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/plugin-updater", () => ({ check: mocks.check }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: mocks.getVersion }));
-vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: mocks.relaunch }));
+vi.mock("./transport", () => ({ invoke: mocks.invoke }));
 
 import {
   canonicalReleaseUrl,
@@ -31,8 +31,8 @@ function fakeUpdate(overrides: Partial<Update> = {}): Update {
 beforeEach(() => {
   mocks.check.mockReset();
   mocks.getVersion.mockReset();
-  mocks.relaunch.mockReset();
-  mocks.relaunch.mockResolvedValue(undefined);
+  mocks.invoke.mockReset();
+  mocks.invoke.mockResolvedValue(undefined);
 });
 
 describe("in-app updater", () => {
@@ -51,7 +51,7 @@ describe("in-app updater", () => {
     await expect(checkForUpdate()).resolves.toBeNull();
   });
 
-  it("downloads, installs, then relaunches", async () => {
+  it("downloads, installs, then relaunches through LaunchServices", async () => {
     const update = fakeUpdate();
     const onProgress = vi.fn();
     await installUpdate(update, onProgress);
@@ -64,7 +64,10 @@ describe("in-app updater", () => {
       event: "Started",
       data: { contentLength: 10 },
     });
-    expect(mocks.relaunch).toHaveBeenCalledTimes(1);
+    // The window's own command, not the process plugin's restart, which ran
+    // the new binary as a child macOS did not count as Crew yet.
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.invoke).toHaveBeenCalledWith("relaunch_app");
   });
 
   it("does not relaunch when downloadAndInstall fails", async () => {
@@ -72,7 +75,7 @@ describe("in-app updater", () => {
       downloadAndInstall: vi.fn().mockRejectedValue(new Error("signature failed")),
     });
     await expect(installUpdate(update)).rejects.toThrow(/signature failed/);
-    expect(mocks.relaunch).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
   it("hides the banner after Later, then shows it again for a newer version", () => {

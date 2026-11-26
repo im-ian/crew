@@ -1329,7 +1329,7 @@ pub fn run_command(cmd: &str, args: Value) -> Option<Result<Value, String>> {
             crate::paths::write_locale(locale);
             Some(Ok(Value::Null))
         }
-        "pick_folder" | "open_path" | "open_url" => Some(Err(format!(
+        "pick_folder" | "open_path" | "open_url" | "relaunch_app" => Some(Err(format!(
             "{cmd} opens something on the Mac and is not available from the phone"
         ))),
         _ => crate::web_dispatch::dispatch(cmd, args),

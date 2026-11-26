@@ -447,6 +447,12 @@
           "markdownDescription": "Enables the read_text_file command without any pre-configured scope."
         },
         {
+          "description": "Enables the relaunch_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-relaunch-app",
+          "markdownDescription": "Enables the relaunch_app command without any pre-configured scope."
+        },
+        {
           "description": "Enables the remote_join command without any pre-configured scope.",
           "type": "string",
           "const": "allow-remote-join",
@@ -955,6 +961,12 @@
           "type": "string",
           "const": "deny-read-text-file",
           "markdownDescription": "Denies the read_text_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the relaunch_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-relaunch-app",
+          "markdownDescription": "Denies the relaunch_app command without any pre-configured scope."
         },
         {
           "description": "Denies the remote_join command without any pre-configured scope.",

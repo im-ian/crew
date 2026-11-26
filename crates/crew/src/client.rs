@@ -537,12 +537,18 @@ pub fn ensure_daemon() -> anyhow::Result<()> {
 fn start_daemon() -> anyhow::Result<()> {
     paths::ensure_home()?;
     // Someone already holds the lock or a live pid. Wait for their socket.
-    // Unlinking here used to delete the socket they had just bound.
+    // Unlinking here used to delete the socket they had just bound. A daemon
+    // on its way out holds the lock too: when it lets go with no socket up,
+    // nobody is coming, so this start goes on instead of failing at the end
+    // of the wait (an update's restart sat thirty seconds with no window).
     if paths::daemon_coming_up() {
-        if paths::wait_for_socket(DAEMON_WAIT) {
-            return Ok(());
+        match paths::wait_for_socket_or_exit(DAEMON_WAIT) {
+            paths::Waited::Live => return Ok(()),
+            paths::Waited::Gone => {}
+            paths::Waited::TimedOut => {
+                bail!("daemon did not start. log tail:\n{}", log_tail())
+            }
         }
-        bail!("daemon did not start. log tail:\n{}", log_tail());
     }
     if paths::socket_path().exists() && !paths::is_socket_live() {
         paths::remove_stale_socket();
@@ -604,30 +610,48 @@ fn log_tail() -> String {
         .join("\n")
 }
 
+/// How long a daemon asked to stop may take to exit. It stops every bot's
+/// turn and saves first; with dozens of bots that took longer than the two
+/// seconds this used to allow.
+pub const STOP_WAIT: Duration = Duration::from_secs(15);
+
 pub fn stop_daemon() -> anyhow::Result<()> {
-    if paths::is_socket_live() {
-        match rpc(Request::Shutdown) {
-            Ok(_) => {
-                wait_dead(Duration::from_secs(2));
-                cleanup();
-                return Ok(());
-            }
-            Err(_) => {}
+    stop_daemon_within(STOP_WAIT)
+}
+
+fn stop_daemon_within(wait: Duration) -> anyhow::Result<()> {
+    // Read before anything is cleaned up: it is how an old daemon that will
+    // not go is found again.
+    let pid = paths::read_pid();
+    let asked = paths::is_socket_live() && rpc(Request::Shutdown).is_ok();
+    if !asked {
+        if let Some(pid) = pid {
+            let _ = Command::new("kill").arg(pid.to_string()).status();
         }
     }
-    if let Some(pid) = paths::read_pid() {
-        let _ = Command::new("kill").arg(pid.to_string()).status();
-        wait_dead(Duration::from_secs(2));
+    // Gone means gone: the socket closed and the lock let go. Closing the
+    // socket is not the end of a shutdown, and files removed while the old
+    // daemon still held its lock made the next start wait on it for nothing.
+    if !wait_exited(wait) {
+        if let Some(pid) = pid.filter(|p| paths::pid_alive(*p)) {
+            crate::log::append(&format!("stop: daemon {pid} still running after {wait:?}; killing it"));
+            let _ = Command::new("kill").arg("-9").arg(pid.to_string()).status();
+            wait_exited(Duration::from_secs(2));
+        }
     }
     cleanup();
     Ok(())
 }
 
-fn wait_dead(timeout: Duration) {
+/// The daemon has closed its socket and released its lock.
+fn wait_exited(timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        if !paths::is_socket_live() {
-            return;
+    loop {
+        if !paths::is_socket_live() && !paths::daemon_lock_held() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
         }
         thread::sleep(Duration::from_millis(40));
     }
@@ -807,6 +831,75 @@ pub fn print_routines_from_config(
 
 #[cfg(test)]
 mod tests {
+    /// A stand-in daemon: holds crew.lock, writes its pid, and exits after
+    /// `secs`, or never lets SIGTERM stop it with `stubborn`.
+    fn lock_holder(secs: f32, stubborn: bool) -> std::process::Child {
+        let script = format!(
+            "import fcntl, os, signal, time\n\
+             {ignore}\n\
+             f = open({lock:?}, 'w'); fcntl.lockf(f, fcntl.LOCK_EX)\n\
+             open({pid:?}, 'w').write(str(os.getpid()))\n\
+             time.sleep({secs})\n",
+            ignore = if stubborn { "signal.signal(signal.SIGTERM, signal.SIG_IGN)" } else { "" },
+            lock = paths::lock_path().display().to_string(),
+            pid = paths::home_dir().join("crew.pid").display().to_string(),
+        );
+        let child = Command::new("python3").arg("-c").arg(script).spawn().expect("python3");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !paths::daemon_lock_held() {
+            assert!(Instant::now() < deadline, "the stand-in never took the lock");
+            thread::sleep(Duration::from_millis(20));
+        }
+        child
+    }
+
+    /// An update's restart found the old daemon still stopping: its socket
+    /// was closed but it held the lock. The start waited for a socket nobody
+    /// would open and failed after thirty seconds, with no window meanwhile.
+    #[test]
+    fn a_start_goes_on_when_the_daemon_it_waits_for_exits() {
+        crate::paths::testing::with_home("wait-exit", || {
+            let mut old = lock_holder(0.4, false);
+            // Reaped as it exits, as a daemon this process did not start is:
+            // an unreaped child would still answer to its pid.
+            let reaper = thread::spawn(move || old.wait());
+            let t = Instant::now();
+            assert_eq!(paths::wait_for_socket_or_exit(Duration::from_secs(10)), paths::Waited::Gone);
+            assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
+            let _ = reaper.join();
+        });
+    }
+
+    #[test]
+    fn a_start_takes_a_socket_that_comes_up() {
+        crate::paths::testing::with_home("wait-live", || {
+            let mut holder = lock_holder(5.0, false);
+            let _listener = std::os::unix::net::UnixListener::bind(paths::socket_path()).unwrap();
+            assert_eq!(paths::wait_for_socket_or_exit(Duration::from_secs(5)), paths::Waited::Live);
+            let _ = holder.kill();
+            let _ = holder.wait();
+        });
+    }
+
+    /// Stopping waits until the old daemon has let go of its lock, not only
+    /// its socket, and one that will not stop is killed.
+    #[test]
+    fn a_stop_waits_for_the_daemon_to_let_go() {
+        crate::paths::testing::with_home("stop-wait", || {
+            let mut old = lock_holder(30.0, false);
+            stop_daemon_within(Duration::from_secs(10)).unwrap();
+            assert!(!paths::daemon_lock_held());
+            let _ = old.wait();
+
+            let mut stubborn = lock_holder(30.0, true);
+            let t = Instant::now();
+            stop_daemon_within(Duration::from_secs(1)).unwrap();
+            assert!(!paths::daemon_lock_held(), "a daemon that ignored SIGTERM is killed");
+            assert!(t.elapsed() < Duration::from_secs(6), "{:?}", t.elapsed());
+            let _ = stubborn.wait();
+        });
+    }
+
     use std::io::{BufRead, BufReader, Write};
 
     use super::*;
