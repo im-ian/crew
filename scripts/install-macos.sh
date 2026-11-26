@@ -7,7 +7,10 @@ export PATH
 repo="${CREW_REPO:-im-ian/crew}"
 app_name="Crew"
 install_dir="${CREW_INSTALL_DIR:-/Applications}"
-expected_bundle_id="dev.jthefloor.crew"
+expected_bundle_id="com.imian.crew"
+# Releases up to 0.15.1 carry the old identifier. The latest release is one of
+# them until the first with the new one, and either is Crew.
+legacy_bundle_id="dev.jthefloor.crew"
 
 repo_owner="${repo%%/*}"
 repo_name="${repo#*/}"
@@ -132,7 +135,7 @@ if [[ ! -d "$contents_dir" || -L "$contents_dir" \
 fi
 codesign --verify --deep --strict --verbose=2 "$source_app"
 bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$info_plist" 2>/dev/null || true)"
-if [[ "$bundle_id" != "$expected_bundle_id" ]]; then
+if [[ "$bundle_id" != "$expected_bundle_id" && "$bundle_id" != "$legacy_bundle_id" ]]; then
   echo "error: unexpected app bundle identifier: ${bundle_id:-missing}" >&2
   exit 1
 fi
@@ -170,6 +173,13 @@ fi
 echo "Installing to $target_app"
 osascript -e "tell application \"${app_name}\" to quit" >/dev/null 2>&1 || true
 
+# The identifier of the Crew being replaced, if there is one: macOS keeps
+# permissions and notification settings by identifier.
+installed_bundle_id=""
+if [[ -f "$target_app/Contents/Info.plist" && ! -L "$target_app/Contents/Info.plist" ]]; then
+  installed_bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$target_app/Contents/Info.plist" 2>/dev/null || true)"
+fi
+
 if [[ -e "$target_app" ]]; then
   run_install_cmd rm -rf "$target_app"
 fi
@@ -184,3 +194,9 @@ if mkdir -p "$(dirname "$cli_link")" 2>/dev/null; then
 fi
 
 echo "Installed ${app_name} to $target_app"
+if [[ -n "$installed_bundle_id" && "$installed_bundle_id" != "$bundle_id" ]]; then
+  echo "note: the app identifier changed from $installed_bundle_id to $bundle_id."
+  echo "      macOS may ask once more for permissions and notifications. The window's"
+  echo "      settings are copied over the first time the new app opens; bots and chats"
+  echo "      are in ~/Library/Application Support/crew and are not touched."
+fi

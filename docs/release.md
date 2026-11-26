@@ -65,6 +65,16 @@ gh secret list --repo "$repo"                             # 여섯 개 이름이
 - 공증은 키를 넣은 뒤 첫 릴리스에서 처음 실제로 돌아요. 그 실행에서 "Notarize disk image + verify signatures" 단계가 통과하는지 봐요.
 - 받은 DMG에서 확인하려면 `spctl -a -vv -t open --context context:primary-signature Crew_*.dmg`와 `spctl -a -vv /Applications/Crew.app`이 `accepted`, `source=Notarized Developer ID`를 보여요.
 
+### 앱 번들 ID
+
+앱 번들 ID(`tauri.conf.json`의 `identifier`)는 `com.imian.crew`예요. 0.15.1까지는 `dev.jthefloor.crew`였어요. macOS는 권한(TCC)·알림 설정을 번들 ID와 팀(3Q67WDU8Z3)으로 묶어서, 이 값은 사용자가 적은 지금 한 번 바꾸고 다시 바꾸지 않아요. 문자열로 쓰이는 곳은 `tauri.conf.json`과 `scripts/install-macos.sh`(`expected_bundle_id`와 옛 ID를 받아 주는 `legacy_bundle_id`)뿐이고, 알림은 `osascript`로 보내서 Crew의 번들 ID와 무관해요.
+
+- **0.15.1 → 다음 버전으로 업데이트할 때** macOS가 새 앱으로 보고 알림 허용·파일 접근 같은 권한을 한 번 다시 물을 수 있어요. 앞의 허용은 옛 ID에 남아 있어서 옮겨지지 않아요(시스템 설정 › 알림·개인정보 보호 및 보안에 옛 항목이 남을 수 있고, 지워도 돼요).
+- **화면 설정은 옮겨요.** 테마·글꼴·마지막 대화 같은 창 설정(`localStorage`)은 WebKit이 번들 ID별 폴더(`~/Library/WebKit/<ID>/WebsiteData/…`)에 두어서, 새 ID로 처음 뜰 때 창이 만들어지기 전에 옛 폴더를 새 폴더로 **복사**해요(`webview_data.rs`). 옮기지 않고 복사하니 옛 폴더는 그대로 남고, 새 폴더가 비어 있을 때만, 한 번만(`~/Library/Application Support/crew/webkit-carried-dev.jthefloor.crew`) 해요. 실패해도 앱은 떠요(다음 실행에 다시 해 봐요). macOS 27에서 이 경로(`WebsiteData/Default/<해시>/<해시>/LocalStorage/localstorage.sqlite3`)를 직접 확인했고, 옛 macOS의 `WebsiteData/LocalStorage/…`도 폴더째 복사해서 같이 따라와요.
+- **그대로인 것**: 봇·대화·루틴·메모리는 `~/Library/Application Support/crew`에 있어서 번들 ID와 무관해요.
+- **옮겨지지 않는 것**: macOS 권한·알림 허용(위), `~/Library/Preferences/<옛 ID>.plist`(창 위치 같은 네이티브 상태), 캐시, 옛 앱을 로그인 항목에 넣어 두었다면 그 항목.
+- 앱 안 업데이터는 같은 경로의 `Crew.app`을 바꾸는 방식이고 번들 ID를 확인하지 않아서, 0.15.1(옛 ID)에서 새 ID 앱으로도 그대로 넘어가요. `install-macos.sh`는 옛 ID와 새 ID 둘 다 받고, 옛 ID 앱을 덮어쓰면 권한을 다시 물을 수 있다고 알려 줘요.
+
 ### 서명으로 바뀐 뒤
 
 - macOS는 서명이 바뀐 앱을 다른 앱처럼 볼 수 있어요. 서명된 첫 버전으로 업데이트하면 알림 같은 권한을 한 번 다시 물을 수 있어요.
