@@ -5,9 +5,8 @@ import {
   useState,
   type PointerEvent,
 } from "react";
+import { SHAPES, type ShapeDef } from "crew-avatar";
 import { avatarPhase, type AvatarShape } from "../avatar";
-import { EXTRA_BOXES, EXTRA_INKS, extraFace } from "../faceGeometry";
-import { ART_BOXES, ART_INKS, artFace } from "../faceArt";
 import { afterglowAt, type BotSignal } from "../botSignals";
 import type { AgentStatus } from "../types";
 import type { WorkLook } from "../workLook";
@@ -34,97 +33,18 @@ type Props = {
   waiting?: boolean;
 };
 
+// The outline, size and eyes of every shape come from crew-avatar.
+function defOf(shape: AvatarShape): ShapeDef {
+  return SHAPES[shape];
+}
+
 function eyesAt(shape: AvatarShape): { x: number; y: number; dx?: number } {
-  const art = artFace(shape);
-  if (art) return art.eyes;
-  const extra = extraFace(shape);
-  if (extra) return extra.eyes;
-  switch (shape) {
-    case "teardrop":
-      return { x: 32, y: 28 };
-    case "triangle":
-      return { x: 32, y: 36 };
-    case "cloud":
-      return { x: 32, y: 34 };
-    case "pill":
-      return { x: 32, y: 32 };
-    case "heart":
-      return { x: 32, y: 30 };
-    case "pentagon":
-      return { x: 32, y: 34 };
-    default:
-      return { x: 32, y: 31 };
-  }
+  return defOf(shape).eyes;
 }
 
 function Shape({ shape, color }: { shape: AvatarShape; color: string }) {
-  const art = artFace(shape);
-  // Static markup from faceArt.ts, painted through `currentColor`.
-  if (art) return <g color={color} dangerouslySetInnerHTML={{ __html: art.markup }} />;
-  const extra = extraFace(shape);
-  if (extra) return <path fill={color} d={extra.d} />;
-  switch (shape) {
-    case "circle":
-      return <circle cx="32" cy="32" r="30" fill={color} />;
-    case "teardrop":
-      return (
-        <path
-          fill={color}
-          d="M32 6C46 6 56 18 56 31C56 42 44 51 32 57C20 51 8 42 8 31C8 18 18 6 32 6Z"
-        />
-      );
-    case "rounded-square":
-      return <rect x="3" y="3" width="58" height="58" rx="21" fill={color} />;
-    case "hexagon":
-      return (
-        <path
-          fill={color}
-          d="M26.89 4.48Q32 1.52 37.11 4.48L53.28 13.81Q58.39 16.76 58.39 22.67L58.39 41.33Q58.39 47.24 53.28 50.19L37.11 59.52Q32 62.48 26.89 59.52L10.72 50.19Q5.61 47.24 5.61 41.33L5.61 22.67Q5.61 16.76 10.72 13.81Z"
-        />
-      );
-    case "triangle":
-      return (
-        <path
-          fill={color}
-          d="M26.93 8.02Q32 -1.76 37.07 8.02L59.41 51.09Q64.48 60.87 53.46 60.87L10.54 60.87Q-0.48 60.87 4.59 51.09Z"
-        />
-      );
-    case "cloud":
-      return (
-        <g fill={color}>
-          <circle cx="18" cy="39" r="18" />
-          <circle cx="46" cy="39" r="18" />
-          <circle cx="32" cy="41" r="17" />
-          <circle cx="24" cy="23" r="15" />
-          <circle cx="42" cy="21" r="16" />
-        </g>
-      );
-    case "pill":
-      return <rect x="2" y="9" width="60" height="46" rx="23" fill={color} />;
-    case "diamond":
-      return (
-        <path
-          fill={color}
-          d="M25.42 6.77Q32 0.19 38.58 6.77L57.23 25.42Q63.81 32 57.23 38.58L38.58 57.23Q32 63.81 25.42 57.23L6.77 38.58Q0.19 32 6.77 25.42Z"
-        />
-      );
-    case "pentagon":
-      return (
-        <path
-          fill={color}
-          d="M25.37 6.71Q32 1.89 38.63 6.71L55.94 19.28Q62.57 24.1 60.04 31.9L53.43 52.24Q50.9 60.04 42.7 60.04L21.3 60.04Q13.1 60.04 10.57 52.24L3.96 31.9Q1.43 24.1 8.06 19.28Z"
-        />
-      );
-    case "heart":
-      return (
-        <path
-          fill={color}
-          d="M32 16C32 8.5 26.2 3.2 19.2 3.2C10.4 3.2 3.2 10.4 3.2 19.4C3.2 29.2 9.6 39.6 20.2 50.2C25.6 55.6 29.6 58.8 32 58.8C34.4 58.8 38.4 55.6 43.8 50.2C54.4 39.6 60.8 29.2 60.8 19.4C60.8 10.4 53.6 3.2 44.8 3.2C37.8 3.2 32 8.5 32 16Z"
-        />
-      );
-    default:
-      return null;
-  }
+  // Static markup painted through `currentColor`.
+  return <g color={color} dangerouslySetInnerHTML={{ __html: defOf(shape).markup }} />;
 }
 
 function Eye({ x, y, dir }: { x: number; y: number; dir: number }) {
@@ -248,53 +168,13 @@ const GAZE_X = 4.6;
 const GAZE_Y = 3.2;
 const FACE_SPAN = 60;
 
-type ShapeBox = {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  optical?: number;
-  opticalX?: number;
-  opticalY?: number;
-};
-
-const SHAPE_BOX: Record<AvatarShape, ShapeBox> = {
-  circle: { x: 2, y: 2, w: 60, h: 60 },
-  teardrop: { x: 8, y: 6, w: 48, h: 51 },
-  "rounded-square": { x: 3, y: 3, w: 58, h: 58 },
-  hexagon: { x: 5.61, y: 3, w: 52.78, h: 58 },
-  triangle: { x: 2.99, y: 3.13, w: 58.02, h: 57.74, optical: 1.04, opticalY: 3.4 },
-  cloud: { x: 0, y: 5, w: 64, h: 53, opticalY: 1.6 },
-  pill: { x: 2, y: 9, w: 60, h: 46 },
-  diamond: { x: 3, y: 3, w: 58, h: 58 },
-  pentagon: { x: 3, y: 3.96, w: 58, h: 56.08, opticalY: 2 },
-  heart: { x: 3.2, y: 3.2, w: 57.6, h: 55.6, optical: 1.12, opticalY: 1.4 },
-  ...EXTRA_BOXES,
-  ...ART_BOXES,
-};
-
-// Measured ink coverage of each shape's rendered alpha mask, not a hand fudge.
-// min(area, width, height) match, so spiky shapes shrink toward the mean rather
-// than inflating the way plain area matching would. Multiplies on top of SHAPE_BOX.
-const SHAPE_INK: Record<AvatarShape, number> = {
-  circle: 0.938,
-  teardrop: 0.976,
-  "rounded-square": 0.881,
-  hexagon: 0.972,
-  triangle: 0.942,
-  cloud: 1.006,
-  pill: 1.006,
-  diamond: 0.993,
-  pentagon: 0.983,
-  heart: 0.895,
-  ...EXTRA_INKS,
-  ...ART_INKS,
-};
-
 // ponytail: scaling about the face centre is just a bigger `s`, since shapeFit
 // already maps the shape's centre to (32,32) — no wrapper transform needed.
+// `ink` is the measured ink coverage of the shape's rendered alpha mask. It
+// shrinks spiky shapes toward the mean instead of inflating them the way plain
+// area matching would, and multiplies on top of the box fit.
 function shapeFit(shape: AvatarShape, ink = 1): string {
-  const b = SHAPE_BOX[shape];
+  const b = defOf(shape).box;
   const s = (FACE_SPAN / Math.max(b.w, b.h)) * (b.optical ?? 1) * ink;
   const cx = b.x + b.w / 2 + (b.opticalX ?? 0);
   const cy = b.y + b.h / 2 + (b.opticalY ?? 0);
@@ -607,7 +487,7 @@ export function BotFace({
       onPointerLeave={onPointerLeave}
     >
       {title ? <title>{title}</title> : null}
-      <g transform={shapeFit(shape, SHAPE_INK[shape])}>
+      <g transform={shapeFit(shape, defOf(shape).ink)}>
         <Shape shape={shape} color={color} />
       </g>
       <g transform={shapeFit(shape)}>
