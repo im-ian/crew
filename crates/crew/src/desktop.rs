@@ -1357,6 +1357,9 @@ fn mobile_revoke(id: String) -> Result<serde_json::Value, String> {
 }
 
 pub fn run() -> anyhow::Result<()> {
+    // Before anything that makes the window: WebKit finds its page data by the
+    // app's bundle identifier, so what the old identifier left is copied first.
+    crate::webview_data::carry_over_at_start();
     // A daemon that will not start is a window that opens disconnected, not an
     // app that fails to launch. Returning either of these built nothing at all,
     // so a config this binary cannot parse — or a home directory that cannot be

@@ -38,6 +38,7 @@ mod skills;
 mod targeting;
 mod templates;
 mod web;
+mod webview_data;
 mod web_dispatch;
 mod tool_card;
 mod transcript;
