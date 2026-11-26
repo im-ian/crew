@@ -1,4 +1,4 @@
-import { SWATCHES, normalizeHex, phaseOf, seededFace } from "crew-avatar";
+import { SHAPES, SWATCHES, normalizeHex, type ShapeDef, phaseOf, seededFace } from "crew-avatar";
 
 export const AVATAR_SHAPES = [
   "circle",
@@ -52,6 +52,44 @@ export const AVATAR_SHAPES = [
   "snowflake",
   "mushroom",
   "palette",
+  "brilliant",
+  "emerald",
+  "drop",
+  "flame",
+  "parchment",
+  "pencil",
+  "ballpoint-pen",
+  "camera",
+  "easel",
+  "phone",
+  "speech-bubble",
+  "thought-bubble",
+  "shout-bubble",
+  "square-bubble",
+  "whisper-bubble",
+  "laptop",
+  "terminal",
+  "bug",
+  "magnifier",
+  "gear",
+  "rocket",
+  "clipboard",
+  "book",
+  "clapperboard",
+  "hourglass",
+  "envelope",
+  "calendar",
+  "key",
+  "lock",
+  "database",
+  "headphones",
+  "puzzle",
+  "flask",
+  "planet",
+  "compass",
+  "paper-plane",
+  "leaf",
+  "game-controller",
 ] as const;
 
 // Faces a bot may already carry, but the picker no longer offers. They still
@@ -62,7 +100,7 @@ export type AvatarShape =
   | (typeof AVATAR_SHAPES)[number]
   | (typeof LEGACY_SHAPES)[number];
 
-export type ShapeGroupKey = "shapes" | "things" | "pixel" | "nature";
+export type ShapeGroupKey = "shapes" | "jobs" | "things" | "bubbles" | "nature" | "pixel";
 
 /** How the picker lays the shapes out. Every shape in AVATAR_SHAPES sits in one group. */
 export const AVATAR_SHAPE_GROUPS: {
@@ -89,8 +127,35 @@ export const AVATAR_SHAPE_GROUPS: {
       "slanted",
       "arrow",
       "gem",
+      "brilliant",
+      "emerald",
       "fan",
       "clam-shell",
+    ],
+  },
+  {
+    key: "jobs",
+    shapes: [
+      "laptop",
+      "terminal",
+      "bug",
+      "magnifier",
+      "gear",
+      "rocket",
+      "clipboard",
+      "book",
+      "clapperboard",
+      "pencil",
+      "ballpoint-pen",
+      "parchment",
+      "camera",
+      "easel",
+      "phone",
+      "headphones",
+      "database",
+      "flask",
+      "calendar",
+      "palette",
     ],
   },
   {
@@ -109,18 +174,24 @@ export const AVATAR_SHAPE_GROUPS: {
       "bulb",
       "umbrella",
       "bell",
-      "palette",
+      "hourglass",
+      "envelope",
+      "key",
+      "lock",
+      "puzzle",
+      "compass",
+      "paper-plane",
+      "game-controller",
     ],
   },
   {
-    key: "pixel",
+    key: "bubbles",
     shapes: [
-      "pixel-circle",
-      "pixel-triangle",
-      "pixel-heart",
-      "pixel-star",
-      "pixel-diamond",
-      "pixel-ghost",
+      "speech-bubble",
+      "thought-bubble",
+      "shout-bubble",
+      "square-bubble",
+      "whisper-bubble",
     ],
   },
   {
@@ -138,6 +209,21 @@ export const AVATAR_SHAPE_GROUPS: {
       "clover",
       "snowflake",
       "mushroom",
+      "drop",
+      "flame",
+      "leaf",
+      "planet",
+    ],
+  },
+  {
+    key: "pixel",
+    shapes: [
+      "pixel-circle",
+      "pixel-triangle",
+      "pixel-heart",
+      "pixel-star",
+      "pixel-diamond",
+      "pixel-ghost",
     ],
   },
 ];
@@ -219,8 +305,11 @@ export function resolveFace(
   color?: string | null,
 ): { shape: AvatarShape; color: string } {
   const hashed = hashedFace(String(id || "agent"));
+  const picked = isAvatarShape(shape) ? shape : hashed.shape;
+  // A shape whose look depends on its color (parchment) has its own.
+  const own: string | undefined = isAvatarShape(shape) ? (SHAPES[shape] as ShapeDef).color : undefined;
   return {
-    shape: isAvatarShape(shape) ? shape : hashed.shape,
-    color: normalizeHex(color) || hashed.color,
+    shape: picked,
+    color: normalizeHex(color) || own || hashed.color,
   };
 }
